@@ -84,8 +84,10 @@ struct BottleView: View {
                 Text("D3DMetal (needed for DirectX 12) requires accepting Apple’s Game Porting Toolkit license.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Review license…") {
-                    state.loadGPTKLicense()
-                    state.showGPTKLicense = true
+                    Task { @MainActor in
+                        state.loadGPTKLicense()
+                        state.showGPTKLicense = true
+                    }
                 }.controlSize(.small)
             }
         }
@@ -107,7 +109,7 @@ struct BottleView: View {
             set: { newValue in
                 var copy = bottle
                 copy.settings[keyPath: keyPath] = newValue
-                state.update(copy)
+                Task { @MainActor in state.update(copy) }
             })
     }
 }
@@ -148,8 +150,10 @@ struct OnboardingView: View {
                     HStack(spacing: 4) {
                         Text("Requires accepting").font(.caption).foregroundStyle(.secondary)
                         Button("Apple’s Game Porting Toolkit license") {
-                            state.loadGPTKLicense()
-                            state.showGPTKLicense = true
+                            Task { @MainActor in
+                                state.loadGPTKLicense()
+                                state.showGPTKLicense = true
+                            }
                         }.buttonStyle(.link).font(.caption)
                     }
                 }
