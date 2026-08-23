@@ -1,0 +1,113 @@
+{
+  "$schema": "https://gin.app/schemas/engine-manifest/v0",
+  "id": "x64-sikarugir10.0_6-r0",
+  "displayName": "Wine 10.0 (Sikarugir) + DXMT 0.80 + D3DMetal 3.0",
+  "arch": "x86_64",
+  "minMacOS": "14.0",
+  "requires": [
+    "rosetta2"
+  ],
+  "notes": [
+    "Engine is Gcenx's Sikarugir build of upstream Wine 10.0: exports macdrv_functions from winemac.so (required by both DXMT and D3DMetal bridges) and supports WINEDLLPATH_PREPEND for per-bottle renderer overlays.",
+    "Vanilla Gcenx wine-devel 11.15 lacks the macdrv_functions export -> DXMT and D3DMetal do NOT work on it. Verified 2026-08-23 with nm.",
+    "Runtime dylibs (GStreamer, MoltenVK, gnutls, freetype, SDL2, icu...) are NOT inside the engine; they come from the Sikarugir Wrapper Template's Frameworks/ and are found via DYLD_FALLBACK_LIBRARY_PATH.",
+    "Wine 10 still ships a wine64 binary but the loader is `wine`; use `wine` so Wine 11 engines work unchanged.",
+    "D3DMetal is NOT downloaded separately: the Template's frameworks/renderer/d3dmetal overlay is used, but only exposed once the user has accepted the Apple GPTK license (recorded in manifest.json as acceptedLicenses)."
+  ],
+  "components": {
+    "wine": {
+      "kind": "engine",
+      "url": "https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS12WineSikarugir10.0_6.tar.xz",
+      "sha256": "9da7ee0cbf386522f3a9906943726d9c3c125dbbd9ab120e3cde80e88d6091b2",
+      "size": 166304096,
+      "license": "LGPL-2.1+",
+      "extract": {
+        "strip": "wswine.bundle",
+        "into": "engine"
+      },
+      "version": "wine-10.0 (Sikarugir) revision 6"
+    },
+    "runtime": {
+      "kind": "frameworks",
+      "url": "https://github.com/Sikarugir-App/Wrapper/releases/download/v1.0/Template-1.0.11.tar.xz",
+      "sha256": "9fa15479e7ff6abd99c1d07be285fb95f41fc6991586502427152b1f7d6ccb8a",
+      "size": 84533420,
+      "license": "mixed (LGPL-2.1 GStreamer, Apache-2.0 MoltenVK, LGPL gnutls, ...)",
+      "extract": {
+        "subpath": "Template-1.0.11.app/Contents/Frameworks",
+        "into": "frameworks"
+      },
+      "provides": [
+        "GStreamer.framework 1.0",
+        "libMoltenVK.dylib",
+        "renderer/dxmt v0.74",
+        "renderer/d3dmetal 3.0",
+        "renderer/dxvk 1.10.3-async",
+        "renderer/d9vk 1.10.4-async",
+        "renderer/cnc-ddraw 7.1.0.0"
+      ]
+    },
+    "dxmt": {
+      "kind": "renderer",
+      "url": "https://github.com/3Shain/dxmt/releases/download/v0.80/dxmt-v0.80-builtin.tar.gz",
+      "sha256": "8f260e36b5739e68f3bad613381441385c4dc7b85b78ba8de653d5a6a264529d",
+      "size": 18681669,
+      "license": "MIT",
+      "extract": {
+        "subpath": "v0.80",
+        "into": "renderers/dxmt/wine"
+      },
+      "layout": [
+        "x86_64-unix/winemetal.so",
+        "x86_64-windows/{d3d11,dxgi,d3d10core,winemetal,nvapi64,nvngx}.dll",
+        "i386-windows/{d3d11,dxgi,d3d10core,winemetal}.dll"
+      ],
+      "env": {
+        "WINEDLLPATH_PREPEND": "${renderers}/dxmt/wine"
+      },
+      "replacesTemplateRenderer": "dxmt v0.74"
+    },
+    "winetricks": {
+      "kind": "tool",
+      "url": "https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks",
+      "sha256": "f35c29737ca08a583569e6a3752d52fbe23333c5acfad5f16c4177d25eaf3f4b",
+      "license": "LGPL-2.1",
+      "note": "Unpinned upstream master at fetch time; Gin should pin a tagged release."
+    }
+  },
+  "alternatives": {
+    "wine-devel-11.15": {
+      "url": "https://github.com/Gcenx/macOS_Wine_builds/releases/download/11.15/wine-devel-11.15-osx64.tar.xz",
+      "sha256": "3f8e89a4874953a69e7be3dcdcc262d0346e462a9374bd116770fffb9e2a99d2",
+      "status": "usable for WineD3D/DXVK only; no macdrv_functions export; needs external GStreamer.framework (pkg install, sudo)"
+    },
+    "gptk-3.0-3": {
+      "url": "https://github.com/Gcenx/game-porting-toolkit/releases/download/Game-Porting-Toolkit-3.0-3/game-porting-toolkit-3.0-3.tar.xz",
+      "sha256": "d377683937340f914823dbb2e1252b329cbf834ff58907d0293db8cebf0e392e",
+      "size": 239200808,
+      "status": "canonical source of D3DMetal 3.0; not needed because the Template's renderer/d3dmetal carries the same framework with bridges built for this engine"
+    }
+  },
+  "baseEnv": {
+    "WINEDEBUG": "fixme-all",
+    "DYLD_FALLBACK_LIBRARY_PATH": "${frameworks}:${frameworks}/GStreamer.framework/Versions/1.0/lib",
+    "DYLD_FALLBACK_FRAMEWORK_PATH": "${frameworks}",
+    "GST_PLUGIN_PATH": "${frameworks}/GStreamer.framework/Versions/1.0/lib/gstreamer-1.0"
+  },
+  "verified": {
+    "date": "2026-08-23",
+    "macos": "14.6",
+    "chip": "Apple M1 Pro",
+    "wineboot": "ok (88s)",
+    "steam-install": "ok (13s)"
+  },
+  "licenses": {
+    "apple-gptk-license-2023-08-17": {
+      "applies": [
+        "renderers/d3dmetal (bundled in the Sikarugir Template: D3DMetal.framework sha1 1405e5c6… identical to GPTK 3.0-3)"
+      ],
+      "text": "spike/d3dmetal-license.txt",
+      "summary": "Apple Game Porting Toolkit license: non-commercial use/distribution only; no modification; use scoped to developing, testing or evaluating games on Apple hardware."
+    }
+  }
+}

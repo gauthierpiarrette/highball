@@ -1,0 +1,232 @@
+import CryptoKit
+import Foundation
+
+public enum HighballError: Error, CustomStringConvertible {
+    case checksumMismatch(file: String, expected: String, actual: String)
+    case processFailed(command: String, status: Int32, output: String)
+    case missing(String)
+    case invalid(String)
+
+    public var description: String {
+        switch self {
+        case let .checksumMismatch(file, expected, actual):
+            return "checksum mismatch for \(file): expected \(expected), got \(actual)"
+        case let .processFailed(command, status, output):
+            return "\(command) exited with \(status)\n\(output)"
+        case let .missing(what): return "missing: \(what)"
+        case let .invalid(what): return "invalid: \(what)"
+        }
+    }
+}
+
+/// Progress callback: (component name, bytes received, total bytes or nil).
+public typealias DownloadProgress = @Sendable (String, Int64, Int64?) -> Void
+
+/// Downloads, verifies and lays out engines from manifests.
+///
+/// Installed layout: `engines/<id>/{engine, frameworks, renderers/<name>/..., manifest.json}`
+public struct EngineStore: Sendable {
+    public let paths: HighballPaths
+
+    public init(paths: HighballPaths = HighballPaths()) { self.paths = paths }
+
+    // MARK: Query
+
+    public func installedEngines() throws -> [InstalledEngine] {
+        guard FileManager.default.fileExists(atPath: paths.engines.path) else { return [] }
+        let dirs = try FileManager.default.contentsOfDirectory(at: paths.engines, includingPropertiesForKeys: nil)
+        return dirs.compactMap { dir in
+            let manifest = dir.appending(path: "manifest.json")
+            guard let m = try? EngineManifest.load(from: manifest) else { return nil }
+            return InstalledEngine(manifest: m, root: dir)
+        }.sorted { $0.manifest.id < $1.manifest.id }
+    }
+
+    public func engine(_ id: String) throws -> InstalledEngine {
+        let root = paths.engine(id)
+        let m = try EngineManifest.load(from: root.appending(path: "manifest.json"))
+        return InstalledEngine(manifest: m, root: root)
+    }
+
+    // MARK: Install
+
+    /// Installs every component of `manifest`. Optional components are skipped unless their
+    /// `acceptance` id is in `accepted` (or they have no acceptance requirement and `includeOptional`).
+    public func install(
+        _ manifest: EngineManifest,
+        accepted: Set<String> = [],
+        includeOptional: Bool = true,
+        progress: DownloadProgress? = nil
+    ) async throws -> InstalledEngine {
+        try paths.ensure()
+        let root = paths.engine(manifest.id)
+        let staging = paths.engines.appending(path: ".\(manifest.id).partial", directoryHint: .isDirectory)
+        try? FileManager.default.removeItem(at: staging)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        for (name, component) in manifest.orderedComponents {
+            if component.isOptional {
+                if let acceptance = component.acceptance, !accepted.contains(acceptance) { continue }
+                if component.acceptance == nil, !includeOptional { continue }
+            }
+            let archive = try await download(component, name: name, progress: progress)
+            try extract(archive, component: component, name: name, into: staging)
+        }
+
+        var saved = manifest
+        saved.acceptedLicenses = Array(accepted).sorted()
+        try saved.save(to: staging.appending(path: "manifest.json"))
+        try linkRuntime(staging)
+        try? FileManager.default.removeItem(at: root)
+        try FileManager.default.moveItem(at: staging, to: root)
+        try stripQuarantine(root)
+        return InstalledEngine(manifest: saved, root: root)
+    }
+
+    /// Records acceptance of a license for an already-installed engine.
+    public func accept(license id: String, engine: InstalledEngine) throws -> InstalledEngine {
+        var m = engine.manifest
+        var set = Set(m.acceptedLicenses ?? []); set.insert(id)
+        m.acceptedLicenses = set.sorted()
+        try m.save(to: engine.root.appending(path: "manifest.json"))
+        return InstalledEngine(manifest: m, root: engine.root)
+    }
+
+    /// Downloads to `downloads/<basename>` and verifies SHA-256. Reuses a cached file if it verifies.
+    public func download(_ component: EngineManifest.Component, name: String, progress: DownloadProgress? = nil) async throws -> URL {
+        try paths.ensure()
+        let dest = paths.downloads.appending(path: component.url.lastPathComponent)
+        if FileManager.default.fileExists(atPath: dest.path), try sha256(of: dest) == component.sha256.lowercased() {
+            return dest
+        }
+        let (tmp, response) = try await URLSession.shared.download(from: component.url, delegate: nil)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw HighballError.invalid("HTTP \(http.statusCode) for \(component.url)")
+        }
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.moveItem(at: tmp, to: dest)
+        let actual = try sha256(of: dest)
+        guard actual == component.sha256.lowercased() else {
+            try? FileManager.default.removeItem(at: dest)
+            throw HighballError.checksumMismatch(file: dest.lastPathComponent, expected: component.sha256, actual: actual)
+        }
+        progress?(name, Int64(component.size ?? 0), Int64(component.size ?? 0))
+        return dest
+    }
+
+    func extract(_ archive: URL, component: EngineManifest.Component, name: String, into root: URL) throws {
+        guard let ex = component.extract else {
+            // Plain file (e.g. winetricks script): copy into tools/.
+            let tools = root.appending(path: "tools", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
+            let dest = tools.appending(path: archive.lastPathComponent)
+            try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.copyItem(at: archive, to: dest)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dest.path)
+            return
+        }
+        let scratch = root.appending(path: ".extract-\(name)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        try Shell.run("/usr/bin/tar", ["-xf", archive.path, "-C", scratch.path])
+
+        let source: URL
+        if let sub = ex.subpath ?? ex.strip {
+            source = scratch.appending(path: sub)
+        } else {
+            source = scratch
+        }
+        guard FileManager.default.fileExists(atPath: source.path) else {
+            throw HighballError.missing("\(ex.subpath ?? ex.strip ?? "") inside \(archive.lastPathComponent)")
+        }
+        let dest = root.appending(path: ex.into, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.moveItem(at: source, to: dest)
+        try? FileManager.default.removeItem(at: scratch)
+    }
+
+    /// Symlinks the Template's runtime dylibs into engine/lib so Wine binaries resolve
+    /// @loader_path/../lib/… and @rpath names without any DYLD_* environment (which SIP
+    /// strips when a restricted binary like /bin/sh sits in the exec chain — winetricks does).
+    func linkRuntime(_ root: URL) throws {
+        let fm = FileManager.default
+        let engineLib = root.appending(path: "engine/lib", directoryHint: .isDirectory)
+        guard fm.fileExists(atPath: engineLib.path) else { return }
+        var sources = [root.appending(path: "frameworks", directoryHint: .isDirectory)]
+        sources.append(root.appending(path: "frameworks/GStreamer.framework/Versions/1.0/lib", directoryHint: .isDirectory))
+        for dir in sources {
+            guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
+            for entry in entries where entry.pathExtension == "dylib" {
+                let dest = engineLib.appending(path: entry.lastPathComponent)
+                if !fm.fileExists(atPath: dest.path) {
+                    try? fm.createSymbolicLink(at: dest, withDestinationURL: entry)
+                }
+            }
+        }
+        // GStreamer.framework itself, for modules that reference it by framework path.
+        let fw = engineLib.appending(path: "GStreamer.framework")
+        if !fm.fileExists(atPath: fw.path) {
+            try? fm.createSymbolicLink(at: fw, withDestinationURL: root.appending(path: "frameworks/GStreamer.framework"))
+        }
+    }
+
+    func stripQuarantine(_ url: URL) throws {
+        try? Shell.run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", url.path])
+    }
+
+    public func sha256(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while let chunk = try handle.read(upToCount: 4 << 20), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// An engine that has been laid out on disk.
+public struct InstalledEngine: Sendable {
+    public let manifest: EngineManifest
+    public let root: URL
+
+    public var id: String { manifest.id }
+    public var engineDir: URL { root.appending(path: "engine", directoryHint: .isDirectory) }
+    public var frameworksDir: URL { root.appending(path: "frameworks", directoryHint: .isDirectory) }
+    public var renderersDir: URL { root.appending(path: "renderers", directoryHint: .isDirectory) }
+    public var wineBinary: URL { engineDir.appending(path: "bin/wine") }
+    public var wineserverBinary: URL { engineDir.appending(path: "bin/wineserver") }
+    public var winetricks: URL? {
+        let t = root.appending(path: "tools/winetricks")
+        return FileManager.default.fileExists(atPath: t.path) ? t : nil
+    }
+
+    /// Renderer overlay directory: Gin's own `renderers/<name>` wins over the Template's `frameworks/renderer/<name>`.
+    public func rendererDir(_ name: String) -> URL? {
+        if let gate = EngineManifest.gatedRenderers[name], !(manifest.acceptedLicenses ?? []).contains(gate) { return nil }
+        let own = renderersDir.appending(path: name, directoryHint: .isDirectory)
+        if FileManager.default.fileExists(atPath: own.appending(path: "wine").path) { return own }
+        let template = frameworksDir.appending(path: "renderer/\(name)", directoryHint: .isDirectory)
+        if FileManager.default.fileExists(atPath: template.appending(path: "wine").path) { return template }
+        return nil
+    }
+
+    public func wineVersion() throws -> String {
+        try Shell.capture(wineBinary.path, ["--version"], env: baseEnvironment()).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Environment every Wine process needs for this engine, before bottle/renderer settings.
+    public func baseEnvironment() -> [String: String] {
+        let fw = frameworksDir.path
+        var env: [String: String] = [
+            "DYLD_FALLBACK_LIBRARY_PATH": "\(fw):\(fw)/GStreamer.framework/Versions/1.0/lib",
+            "DYLD_FALLBACK_FRAMEWORK_PATH": fw,
+            "GST_PLUGIN_PATH": "\(fw)/GStreamer.framework/Versions/1.0/lib/gstreamer-1.0",
+        ]
+        for (k, v) in manifest.baseEnv ?? [:] {
+            env[k] = v.replacingOccurrences(of: "${frameworks}", with: fw)
+                       .replacingOccurrences(of: "${renderers}", with: renderersDir.path)
+        }
+        return env
+    }
+}

@@ -1,0 +1,19 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  build-test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build
+      - name: Unit tests
+        run: swift test
+      - name: Validate recipes against the CLI (from highball-db)
+        run: |
+          git clone --depth 1 https://github.com/gauthierpiarrette/highball-db.git ../highball-db
+          for f in ../highball-db/recipes/launchers/*.json ../highball-db/recipes/games/*.json; do
+            .build/debug/highball recipe show "$f" > /dev/null || exit 1
+          done
