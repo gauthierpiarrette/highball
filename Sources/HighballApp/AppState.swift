@@ -7,10 +7,13 @@ final class AppState {
     var engines: [InstalledEngine] = []
     var bottles: [Bottle] = []
     var selectedBottle: String?
+    var gamesByBottle: [String: [SteamGame]] = [:]
+    var gameDB = GameDB(directories: [])
 
     // Long-running work
     var busy = false
     var busyTitle = ""
+    var stage = ""
     var logLines: [String] = []
     var showLog = false
 
@@ -41,6 +44,15 @@ final class AppState {
         needsOnboarding = engines.isEmpty
         rosettaInstalled = FileManager.default.fileExists(atPath: "/Library/Apple/usr/share/rosetta/rosetta")
         if selectedBottle == nil { selectedBottle = bottles.first?.name }
+        gamesByBottle = Dictionary(uniqueKeysWithValues: bottles.map { ($0.name, SteamLibrary.games(in: $0)) })
+        if gameDB.byAppID.isEmpty {
+            var dirs: [URL] = []
+            if let res = Bundle.main.resourceURL { dirs.append(res.appending(path: "db-games")) }
+            if let root = Self.repoRoot {
+                dirs.append(root.deletingLastPathComponent().appending(path: "highball-db/db/games"))
+            }
+            gameDB = GameDB(directories: dirs)
+        }
     }
 
     func engine(for bottle: Bottle) -> InstalledEngine? {
@@ -50,10 +62,30 @@ final class AppState {
     private func appendLog(_ line: String) {
         logLines.append(line)
         if logLines.count > 400 { logLines.removeFirst(logLines.count - 400) }
+        if let s = Self.stage(for: line) { stage = s }
+    }
+
+    /// Turns raw Wine/recipe output into a human stage line.
+    static func stage(for line: String) -> String? {
+        if let m = line.firstMatch(of: #/\[(?<r>[a-z0-9-]+)\] step (?<a>\d+)/(?<b>\d+)/#) {
+            return "Step \(m.a) of \(m.b)"
+        }
+        if line.contains("Downloading update (") {
+            if let m = line.firstMatch(of: #/\((?<x>[\d,]+) of (?<y>[\d,]+) KB\)/#) {
+                return "Steam is updating itself — \(m.x) of \(m.y) KB"
+            }
+            return "Steam is updating itself"
+        }
+        if line.contains("Extracting package") { return "Extracting the Steam client — this takes a few minutes" }
+        if line.contains("Installing update") { return "Installing the Steam client update" }
+        if line.contains("Update complete") { return "Steam update complete — launching" }
+        if line.hasPrefix("downloaded ") { return "Downloaded \(line.dropFirst(11))" }
+        if line.contains("wineboot") && line.contains("start") { return "Preparing the Windows environment" }
+        return nil
     }
 
     private func runBusy(_ title: String, showLogSheet: Bool = true, _ work: @escaping () async throws -> Void) {
-        busy = true; busyTitle = title; logLines = []; showLog = showLogSheet
+        busy = true; busyTitle = title; stage = ""; logLines = []; showLog = showLogSheet
         Task {
             do { try await work() } catch { errorMessage = "\(error)" }
             busy = false
@@ -123,6 +155,70 @@ final class AppState {
 
     func update(_ bottle: Bottle) {
         do { try bottleStore.update(bottle); refresh() } catch { errorMessage = "\(error)" }
+    }
+
+    func deleteBottle(_ name: String) {
+        killBottleNamed(name)
+        do { try bottleStore.delete(name); if selectedBottle == name { selectedBottle = nil }; refresh() }
+        catch { errorMessage = "\(error)" }
+    }
+
+    private func killBottleNamed(_ name: String) {
+        if let bottle = bottles.first(where: { $0.name == name }) { killBottle(bottle) }
+    }
+
+    func removePin(_ pin: Pin, from bottle: Bottle) {
+        var copy = bottle
+        copy.settings.pins.removeAll { $0.id == pin.id }
+        update(copy)
+    }
+
+    func setPinRenderer(_ renderer: Renderer?, pin: Pin, in bottle: Bottle) {
+        var copy = bottle
+        if let i = copy.settings.pins.firstIndex(where: { $0.id == pin.id }) {
+            copy.settings.pins[i].renderer = renderer
+            update(copy)
+        }
+    }
+
+    /// Launch a Steam game by appid through the bottle's Steam client.
+    func launchGame(_ game: SteamGame, in bottle: Bottle) {
+        guard let engine = engine(for: bottle) else { return }
+        let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
+        let renderer = gameDB[game.appid]?.renderer
+        runBusy("Running \(game.name)", showLogSheet: false) { [self] in
+            let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
+            let result = try await runner.start(steam, arguments: ["-silent", "-applaunch", String(game.appid)], renderer: renderer) { line in
+                Task { @MainActor in self.appendLog(line) }
+            }
+            if result.crashedEarly {
+                let current = renderer ?? bottle.settings.renderer
+                let next: Renderer = current == .dxmt ? .d3dmetal : (current == .d3dmetal ? .dxvk : .dxmt)
+                await MainActor.run {
+                    self.crashSuggestion = CrashSuggestion(program: game.name, renderer: next, logPath: result.log.path)
+                }
+            }
+        }
+    }
+
+    /// Handle an .exe/.msi dropped on a bottle: run it (installer) inside the bottle.
+    func runDropped(_ url: URL, in bottle: Bottle, andPin: Bool) {
+        guard let engine = engine(for: bottle) else { return }
+        runBusy("Running \(url.lastPathComponent)") { [self] in
+            let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
+            let isMSI = url.pathExtension.lowercased() == "msi"
+            let args = isMSI ? ["msiexec", "/i", url.path] : [url.path]
+            _ = try await runner.run(args, renderer: .wined3d, label: url.lastPathComponent) { line in
+                Task { @MainActor in self.appendLog(line) }
+            }
+            if andPin {
+                await MainActor.run {
+                    var copy = bottle
+                    copy.settings.pins.append(Pin(name: url.deletingPathExtension().lastPathComponent, path: url.lastPathComponent))
+                    self.update(copy)
+                }
+            }
+        }
     }
 
     func killBottle(_ bottle: Bottle) {

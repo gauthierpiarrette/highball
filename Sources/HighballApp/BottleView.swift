@@ -12,14 +12,17 @@ struct BottleView: View {
         return FileManager.default.fileExists(atPath: engine.frameworksDir.appending(path: "renderer/d3dmetal/wine").path)
     }
 
+    @State private var droppedURL: URL?
+
     var body: some View {
         Form {
             Section {
                 header
             }
-            Section("Programs") {
+            gamesSection
+            Section(L("Programs")) {
                 if bottle.settings.pins.isEmpty {
-                    Text("Nothing installed yet — add a launcher below.").foregroundStyle(.secondary)
+                    Text(L("Nothing installed yet — add a launcher below.")).foregroundStyle(.secondary)
                 }
                 ForEach(bottle.settings.pins) { pin in
                     HStack {
@@ -29,12 +32,22 @@ struct BottleView: View {
                         }
                         Spacer()
                         if let r = pin.renderer { RendererBadge(renderer: r) }
-                        Button("Run") { state.launch(pin: pin, in: bottle) }
+                        Button(L("Run")) { state.launch(pin: pin, in: bottle) }
                             .disabled(state.busy)
+                    }
+                    .contextMenu {
+                        Menu("Renderer override") {
+                            Button(L("Bottle default")) { state.setPinRenderer(nil, pin: pin, in: bottle) }
+                            ForEach(Renderer.allCases, id: \.self) { r in
+                                Button(r.rawValue.uppercased()) { state.setPinRenderer(r, pin: pin, in: bottle) }
+                            }
+                        }
+                        Divider()
+                        Button(L("Remove from list"), role: .destructive) { state.removePin(pin, from: bottle) }
                     }
                 }
             }
-            Section("Install a launcher") {
+            Section(L("Install a launcher")) {
                 HStack(spacing: 8) {
                     ForEach(AppState.launcherRecipes.filter { id in !bottle.settings.recipes.contains(id) }, id: \.self) { id in
                         if let recipe = AppState.recipe(id) {
@@ -43,18 +56,50 @@ struct BottleView: View {
                         }
                     }
                 }
-                Text("Kernel anti-cheat titles (Valorant, Fortnite, Destiny 2…) can’t work through Wine — check the compatibility database before big downloads.")
+                Text(L("Kernel anti-cheat titles (Valorant, Fortnite, Destiny 2…) can’t work through Wine — check the compatibility database before big downloads."))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Graphics & compatibility") {
+            Section(L("Graphics & compatibility")) {
                 settings
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(bottle.name)
+        .navigationTitle("Highball")
+        .navigationSubtitle(bottle.name)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            guard let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url, ["exe", "msi", "bat"].contains(url.pathExtension.lowercased()) else { return }
+                Task { @MainActor in droppedURL = url }
+            }
+            return true
+        }
+        .confirmationDialog("Run \(droppedURL?.lastPathComponent ?? "") in this bottle?",
+                            isPresented: .init(get: { droppedURL != nil }, set: { if !$0 { droppedURL = nil } }),
+                            titleVisibility: .visible) {
+            Button(L("Run")) { if let u = droppedURL { state.runDropped(u, in: bottle, andPin: false) }; droppedURL = nil }
+            Button(L("Run and add to Programs")) { if let u = droppedURL { state.runDropped(u, in: bottle, andPin: true) }; droppedURL = nil }
+            Button(L("Cancel"), role: .cancel) { droppedURL = nil }
+        }
         .toolbar {
-            Button { state.killBottle(bottle) } label: { Label("Stop all", systemImage: "stop.circle") }
+            Button { state.killBottle(bottle) } label: { Label(L("Stop all"), systemImage: "stop.circle") }
                 .help("Kill every Windows process in this bottle (wineserver -k)")
+        }
+    }
+
+    @ViewBuilder private var gamesSection: some View {
+        let games = state.gamesByBottle[bottle.name] ?? []
+        if !games.isEmpty {
+            Section(L("Games")) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 12)], spacing: 12) {
+                    ForEach(games) { game in
+                        GameCard(game: game, entry: state.gameDB[game.appid], busy: state.busy) {
+                            state.launchGame(game, in: bottle)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
         }
     }
 
@@ -66,24 +111,24 @@ struct BottleView: View {
                 Text("engine \(bottle.settings.engineID)").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Open C: drive") { NSWorkspace.shared.open(bottle.driveC) }
+            Button(L("Open C: drive")) { NSWorkspace.shared.open(bottle.driveC) }
         }
     }
 
     @ViewBuilder private var settings: some View {
-        Picker("Renderer", selection: binding(\.renderer)) {
-            Text("DXMT — D3D10/11 → Metal (default)").tag(Renderer.dxmt)
+        Picker(L("Renderer"), selection: binding(\.renderer)) {
+            Text(L("DXMT — D3D10/11 → Metal (default)")).tag(Renderer.dxmt)
             if d3dmetalAvailable {
-                Text("D3DMetal — D3D11/12, Apple").tag(Renderer.d3dmetal)
+                Text(L("D3DMetal — D3D11/12, Apple")).tag(Renderer.d3dmetal)
             }
-            Text("DXVK — D3D9/10/11 → Vulkan").tag(Renderer.dxvk)
-            Text("WineD3D — slow fallback").tag(Renderer.wined3d)
+            Text(L("DXVK — D3D9/10/11 → Vulkan")).tag(Renderer.dxvk)
+            Text(L("WineD3D — slow fallback")).tag(Renderer.wined3d)
         }
         if !d3dmetalAvailable && d3dmetalPossible {
             HStack {
-                Text("D3DMetal (needed for DirectX 12) requires accepting Apple’s Game Porting Toolkit license.")
+                Text(L("D3DMetal (needed for DirectX 12) requires accepting Apple’s Game Porting Toolkit license."))
                     .font(.caption).foregroundStyle(.secondary)
-                Button("Review license…") {
+                Button(L("Review license…")) {
                     Task { @MainActor in
                         state.loadGPTKLicense()
                         state.showGPTKLicense = true
@@ -91,16 +136,16 @@ struct BottleView: View {
                 }.controlSize(.small)
             }
         }
-        Picker("Synchronization", selection: binding(\.sync)) {
-            Text("None — required for Steam/CEF launchers").tag(SyncMode.none)
-            Text("msync — fastest for most games").tag(SyncMode.msync)
+        Picker(L("Synchronization"), selection: binding(\.sync)) {
+            Text(L("None — required for Steam/CEF launchers")).tag(SyncMode.none)
+            Text(L("msync — fastest for most games")).tag(SyncMode.msync)
             Text("esync").tag(SyncMode.esync)
         }
-        Picker("Windows version", selection: binding(\.windowsVersion)) {
+        Picker(L("Windows version"), selection: binding(\.windowsVersion)) {
             ForEach(WindowsVersion.allCases, id: \.self) { Text($0.rawValue).tag($0) }
         }
-        Toggle("Metal performance HUD", isOn: binding(\.metalHUD))
-        Toggle("Advertise AVX to games (Rosetta)", isOn: binding(\.advertiseAVX))
+        Toggle(L("Metal performance HUD"), isOn: binding(\.metalHUD))
+        Toggle(L("Advertise AVX to games (Rosetta)"), isOn: binding(\.advertiseAVX))
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<BottleSettings, T>) -> Binding<T> {
@@ -111,6 +156,65 @@ struct BottleView: View {
                 copy.settings[keyPath: keyPath] = newValue
                 Task { @MainActor in state.update(copy) }
             })
+    }
+}
+
+struct GameCard: View {
+    let game: SteamGame
+    let entry: GameDBEntry?
+    let busy: Bool
+    let play: () -> Void
+
+    private var statusLabel: (String, Color)? {
+        switch entry?.status {
+        case "verified-local": return ("Verified", .green)
+        case "reported-upstream": return ("Reported", .blue)
+        case "community": return ("Community", .orange)
+        case "blocked-anticheat": return ("Blocked — anti-cheat", .red)
+        default: return nil
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            AsyncImage(url: game.headerImage) { phase in
+                switch phase {
+                case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
+                default:
+                    ZStack {
+                        Rectangle().fill(.quaternary)
+                        Image(systemName: "gamecontroller").font(.title).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(height: 96)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            Text(game.name).font(.callout.weight(.semibold)).lineLimit(1)
+            HStack {
+                if let (label, color) = statusLabel {
+                    Text(label)
+                        .font(.caption2.monospaced())
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .foregroundStyle(color)
+                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(color.opacity(0.6)))
+                }
+                if let r = entry?.renderer {
+                    Text(r.rawValue.uppercased()).font(.caption2.monospaced()).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(L("Play")) { play() }
+                    .controlSize(.small)
+                    .disabled(busy || !game.isReady || entry?.isBlocked == true)
+            }
+            if entry?.isBlocked == true {
+                Text(entry?.notes ?? "Kernel anti-cheat — cannot work under Wine.")
+                    .font(.caption2).foregroundStyle(.red).lineLimit(2)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(.background.secondary))
+        .help(entry?.notes ?? game.name)
     }
 }
 
@@ -132,13 +236,13 @@ struct OnboardingView: View {
         VStack(spacing: 18) {
             Image(systemName: "wineglass.fill").font(.system(size: 52)).foregroundStyle(.tint)
             Text("Highball").font(.system(size: 34, weight: .heavy, design: .rounded))
-            Text("Run Windows games on your Mac. Highball downloads a verified Wine engine (~500 MB) from public upstream releases — nothing is hosted by Highball itself.")
+            Text(L("Run Windows games on your Mac. Highball downloads a verified Wine engine (~500 MB) from public upstream releases — nothing is hosted by Highball itself."))
                 .multilineTextAlignment(.center).frame(maxWidth: 440).foregroundStyle(.secondary)
 
             if !state.rosettaInstalled {
                 GroupBox {
                     VStack(alignment: .leading, spacing: 6) {
-                        Label("Rosetta 2 is required", systemImage: "exclamationmark.triangle")
+                        Label(L("Rosetta 2 is required"), systemImage: "exclamationmark.triangle")
                         Text("Run in Terminal:  softwareupdate --install-rosetta --agree-to-license").font(.caption.monospaced())
                     }
                 }.frame(maxWidth: 440)
@@ -146,10 +250,10 @@ struct OnboardingView: View {
 
             Toggle(isOn: $acceptGPTK) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Enable D3DMetal (DirectX 12 support)")
+                    Text(L("Enable D3DMetal (DirectX 12 support)"))
                     HStack(spacing: 4) {
-                        Text("Requires accepting").font(.caption).foregroundStyle(.secondary)
-                        Button("Apple’s Game Porting Toolkit license") {
+                        Text(L("Requires accepting")).font(.caption).foregroundStyle(.secondary)
+                        Button(L("Apple’s Game Porting Toolkit license")) {
                             Task { @MainActor in
                                 state.loadGPTKLicense()
                                 state.showGPTKLicense = true
@@ -164,7 +268,7 @@ struct OnboardingView: View {
             Button {
                 state.installDefaultEngine(acceptGPTK: acceptGPTK)
             } label: {
-                Text(state.busy ? "Installing…" : "Install engine")
+                Text(state.busy ? L("Installing…") : L("Install engine"))
                     .frame(minWidth: 180)
             }
             .buttonStyle(.borderedProminent)
@@ -194,12 +298,12 @@ struct GPTKLicenseSheet: View {
             .frame(width: 640, height: 380)
             .background(.quaternary.opacity(0.4))
             HStack {
-                Text("Non-commercial use only · no modification · Apple hardware only")
+                Text(L("Non-commercial use only · no modification · Apple hardware only"))
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("Close") { dismiss() }
+                Button(L("Close")) { dismiss() }
                 if let engine = state.engines.first, engine.rendererDir("d3dmetal") == nil {
-                    Button("Accept & enable D3DMetal") {
+                    Button(L("Accept & enable D3DMetal")) {
                         state.acceptGPTK(engine: engine)
                         dismiss()
                     }.buttonStyle(.borderedProminent)

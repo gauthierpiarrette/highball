@@ -17,6 +17,19 @@ if [ ! -d "$RECIPES" ]; then
   [ -d "$RECIPES" ] || git clone --depth 1 https://github.com/gauthierpiarrette/highball-db.git .build/highball-db
 fi
 for f in "$RECIPES"/launchers/*.json "$RECIPES"/games/*.json; do cp "$f" "$APP/Contents/Resources/"; done
+# Compatibility DB entries (for in-app status pills on the games grid).
+DBDIR="$(dirname "$RECIPES")/db/games"
+if [ -d "$DBDIR" ]; then mkdir -p "$APP/Contents/Resources/db-games"; cp "$DBDIR"/*.json "$APP/Contents/Resources/db-games/"; fi
+# App icon: rendered from source, packed to icns.
+ICONWORK=.build/icon
+mkdir -p "$ICONWORK/AppIcon.iconset"
+swift Scripts/make-icon.swift "$ICONWORK/AppIcon-1024.png" >/dev/null
+for sz in 16 32 128 256 512; do
+  sips -z $sz $sz "$ICONWORK/AppIcon-1024.png" --out "$ICONWORK/AppIcon.iconset/icon_${sz}x${sz}.png" >/dev/null
+  d=$((sz*2)); sips -z $d $d "$ICONWORK/AppIcon-1024.png" --out "$ICONWORK/AppIcon.iconset/icon_${sz}x${sz}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONWORK/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
+sips -z 512 512 "$ICONWORK/AppIcon-1024.png" --out "$APP/Contents/Resources/AppIcon.png" >/dev/null
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -29,6 +42,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>GPL-3.0 — no paid tier, ever.</string>
 </dict></plist>

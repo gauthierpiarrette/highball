@@ -11,7 +11,8 @@ struct HighballApp: App {
         WindowGroup("Highball") {
             ContentView()
                 .environment(state)
-                .frame(minWidth: 780, minHeight: 520)
+                .tint(Color(red: 0.78, green: 0.55, blue: 0.20))
+                .frame(minWidth: 820, minHeight: 560)
                 .onAppear { state.refresh() }
         }
         .windowResizability(.contentSize)
@@ -23,6 +24,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Works as a bare SwiftPM executable during development: give it a real UI presence.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "png"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApp.applicationIconImage = icon
+        }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
@@ -30,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct ContentView: View {
     @Environment(AppState.self) private var state
     @State private var showCreate = false
+    @State private var pendingDelete: String?
 
     var body: some View {
         @Bindable var state = state
@@ -39,14 +45,19 @@ struct ContentView: View {
             } else {
                 NavigationSplitView {
                     List(selection: $state.selectedBottle) {
-                        Section("Bottles") {
+                        Section(L("Bottles")) {
                             ForEach(state.bottles, id: \.name) { bottle in
                                 Label(bottle.name, systemImage: "wineglass")
                                     .tag(bottle.name)
+                                    .contextMenu {
+                                        Button(L("Stop all processes")) { state.killBottle(bottle) }
+                                        Divider()
+                                        Button(L("Delete bottle…"), role: .destructive) { pendingDelete = bottle.name }
+                                    }
                             }
                         }
                         if let engine = state.engines.first {
-                            Section("Engine") {
+                            Section(L("Engine")) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(engine.id).font(.caption).lineLimit(1)
                                     Text((try? engine.wineVersion()) ?? "")
@@ -57,23 +68,29 @@ struct ContentView: View {
                     }
                     .navigationSplitViewColumnWidth(min: 200, ideal: 230)
                     .toolbar {
-                        Button { showCreate = true } label: { Label("New Bottle", systemImage: "plus") }
+                        Button { showCreate = true } label: { Label(L("New Bottle"), systemImage: "plus") }
                     }
                 } detail: {
                     if let name = state.selectedBottle,
                        let bottle = state.bottles.first(where: { $0.name == name }) {
                         BottleView(bottle: bottle)
                     } else {
-                        ContentUnavailableView("No bottle selected", systemImage: "wineglass",
-                                               description: Text("Create a bottle to install Steam and play."))
+                        ContentUnavailableView(L("No bottle selected"), systemImage: "wineglass",
+                                               description: Text(L("Create a bottle to install Steam and play.")))
                     }
                 }
             }
         }
         .sheet(isPresented: $showCreate) { CreateBottleSheet() }
+        .confirmationDialog("Delete bottle \"\(pendingDelete ?? "")\"? This removes its Windows drive and everything installed in it.",
+                            isPresented: .init(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            titleVisibility: .visible) {
+            Button(L("Delete"), role: .destructive) { if let n = pendingDelete { state.deleteBottle(n) }; pendingDelete = nil }
+            Button(L("Cancel"), role: .cancel) { pendingDelete = nil }
+        }
         .sheet(isPresented: $state.showLog) { LogSheet() }
         .sheet(isPresented: $state.showGPTKLicense) { GPTKLicenseSheet() }
-        .alert("Something went wrong", isPresented: .init(
+        .alert(L("Something went wrong"), isPresented: .init(
             get: { state.errorMessage != nil },
             set: { if !$0 { state.errorMessage = nil } })) {
             Button("OK") { state.errorMessage = nil }
@@ -87,7 +104,7 @@ struct ContentView: View {
                           state.update(bottle)
                       }
                   },
-                  secondaryButton: .cancel(Text("Keep current")))
+                  secondaryButton: .cancel(Text(L("Keep current"))))
         }
     }
 }
@@ -100,15 +117,15 @@ struct CreateBottleSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("New bottle").font(.title2.bold())
-            TextField("Name", text: $name).textFieldStyle(.roundedBorder).frame(width: 260)
-            Toggle("Install Steam in it (recommended)", isOn: $installSteam)
-            Text("A bottle is an isolated Windows environment. First boot takes about 90 seconds; the Steam install adds a download and a slow one-time client update.")
+            Text(L("New bottle")).font(.title2.bold())
+            TextField(L("Name"), text: $name).textFieldStyle(.roundedBorder).frame(width: 260)
+            Toggle(L("Install Steam in it (recommended)"), isOn: $installSteam)
+            Text(L("A bottle is an isolated Windows environment. First boot takes about 90 seconds; the Steam install adds a download and a slow one-time client update."))
                 .font(.callout).foregroundStyle(.secondary).frame(maxWidth: 380, alignment: .leading)
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Create") {
+                Button(L("Cancel")) { dismiss() }
+                Button(L("Create")) {
                     dismiss()
                     state.createBottle(name: name, recipeID: installSteam ? "steam" : nil)
                 }
@@ -128,24 +145,32 @@ struct LogSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 if state.busy { ProgressView().controlSize(.small) }
-                Text(state.busy ? state.busyTitle : "Done").font(.headline)
+                Text(state.busy ? state.busyTitle : L("Done")).font(.headline)
                 Spacer()
                 Button(state.busy ? "Hide" : "Close") { dismiss() }
             }
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(state.logLines.enumerated()), id: \.offset) { i, line in
-                            Text(line).font(.system(size: 11, design: .monospaced))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .id(i)
+            if !state.stage.isEmpty {
+                Label(state.stage, systemImage: "clock")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            DisclosureGroup(L("Details")) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 1) {
+                            ForEach(Array(state.logLines.enumerated()), id: \.offset) { i, line in
+                                Text(line).font(.system(size: 11, design: .monospaced))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .id(i)
+                            }
                         }
                     }
+                    .onChange(of: state.logLines.count) { _, n in proxy.scrollTo(max(0, n - 1)) }
+                    .frame(height: 240)
+                    .background(.quaternary.opacity(0.4))
                 }
-                .onChange(of: state.logLines.count) { _, n in proxy.scrollTo(max(0, n - 1)) }
             }
-            .frame(width: 620, height: 320)
-            .background(.quaternary.opacity(0.4))
+            .frame(width: 620)
         }
         .padding(16)
     }

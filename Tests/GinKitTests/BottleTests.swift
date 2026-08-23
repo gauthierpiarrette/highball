@@ -40,3 +40,25 @@ final class BottleTests: XCTestCase {
         XCTAssertEqual(m.orderedComponents.first?.name, "dxmt")
     }
 }
+
+final class SteamLibraryTests: XCTestCase {
+    func testACFParse() throws {
+        let acf = """
+        "AppState"
+        {
+        \t"appid"\t\t"1902490"
+        \t"name"\t\t"Aperture Desk Job"
+        \t"StateFlags"\t\t"4"
+        \t"installdir"\t\t"Aperture Desk Job"
+        \t"SizeOnDisk"\t\t"3406000000"
+        }
+        """
+        let tmp = FileManager.default.temporaryDirectory.appending(path: "appmanifest_1902490.acf")
+        try acf.write(to: tmp, atomically: true, encoding: .utf8)
+        let game = SteamLibrary.parseManifest(tmp)
+        XCTAssertEqual(game?.appid, 1902490)
+        XCTAssertEqual(game?.name, "Aperture Desk Job")
+        XCTAssertTrue(game?.isReady == true)
+        XCTAssertEqual(game?.sizeOnDisk, 3_406_000_000)
+    }
+}
