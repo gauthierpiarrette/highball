@@ -33,5 +33,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHumanReadableCopyright</key><string>GPL-3.0 — no paid tier, ever.</string>
 </dict></plist>
 PLIST
-codesign --force --deep -s - "$APP"
+# Prefer a Developer ID certificate when one is in the keychain (hardened runtime, timestamp);
+# fall back to ad-hoc. Notarization additionally needs: xcrun notarytool submit dist/Highball.zip
+# --keychain-profile <profile> --wait && xcrun stapler staple dist/Highball.app
+IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/{print $2; exit}')
+if [ -n "$IDENTITY" ]; then
+  codesign --force --deep --options runtime --timestamp -s "$IDENTITY" "$APP"
+else
+  codesign --force --deep -s - "$APP"
+fi
+codesign -dv "$APP" 2>&1 | grep -E "Authority|Signature|flags" | head -3 || true
 echo "built $APP"
