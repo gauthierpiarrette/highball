@@ -20,6 +20,13 @@ enum L10n {
         "Delete": "Supprimer",
         "Cancel": "Annuler",
         "Something went wrong": "Un problème est survenu",
+        #"A bottle name can't contain \ / : * ? " < > | — Windows paths forbid them, which would break the bottle."#:
+            #"Un nom de bouteille ne peut pas contenir \ / : * ? " < > | — Windows les interdit dans les chemins, ce qui casserait la bouteille."#,
+        "The bottle name is empty.": "Le nom de la bouteille est vide.",
+        "The bottle name contains control characters.": "Le nom de la bouteille contient des caractères de contrôle.",
+        "A bottle name can't start with a dot.": "Un nom de bouteille ne peut pas commencer par un point.",
+        "A bottle name can't end with a dot.": "Un nom de bouteille ne peut pas se terminer par un point.",
+        "The bottle name is too long (64 characters max).": "Le nom de la bouteille est trop long (64 caractères max).",
 
         // Bottle view
         "Programs": "Programmes",

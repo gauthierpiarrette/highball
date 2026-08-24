@@ -185,6 +185,9 @@ struct CreateBottleSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(L("New bottle")).font(.title2.bold())
             TextField(L("Name"), text: $name).textFieldStyle(.roundedBorder).frame(width: 260)
+            if let problem = nameProblem, !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                Text(L(problem)).font(.caption).foregroundStyle(.orange).frame(maxWidth: 380, alignment: .leading)
+            }
             Toggle(L("Install Steam in it (recommended)"), isOn: $installSteam)
             Text(L("A bottle is an isolated Windows environment. First boot takes about 90 seconds; the Steam install adds a download and a slow one-time client update."))
                 .font(.callout).foregroundStyle(.secondary).frame(maxWidth: 380, alignment: .leading)
@@ -196,11 +199,13 @@ struct CreateBottleSheet: View {
                     state.createBottle(name: name, recipeID: installSteam ? "steam" : nil)
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(nameProblem != nil)
             }
         }
         .padding(24)
     }
+
+    private var nameProblem: String? { BottleStore.nameProblem(name) }
 }
 
 struct LogSheet: View {
