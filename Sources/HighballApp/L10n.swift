@@ -89,6 +89,22 @@ enum L10n {
         "Your Steam library will appear here — install games inside Steam and they show up with compatibility verdicts.":
             "Votre bibliothèque Steam apparaîtra ici — installez des jeux dans Steam et ils s’afficheront avec leur verdict de compatibilité.",
 
+        "Bottle settings": "Réglages de la bouteille",
+        "Renderer, synchronization, Windows version…": "Rendu, synchronisation, version de Windows…",
+        "More": "Plus",
+        "Launchers": "Launchers",
+        "Open": "Ouvrir",
+        "Install": "Installer",
+        "Graphics": "Graphismes",
+        "Compatibility": "Compatibilité",
+        "Your games will appear here": "Vos jeux apparaîtront ici",
+        "Pour your first game": "Servez votre premier jeu",
+        "Install games inside Steam — they show up with artwork and a compatibility verdict.": "Installez des jeux dans Steam — ils apparaissent avec leur visuel et leur verdict de compatibilité.",
+        "Install Steam in this bottle to start playing your Windows library.": "Installez Steam dans cette bouteille pour jouer à votre bibliothèque Windows.",
+        "Open Steam": "Ouvrir Steam",
+        "Install Steam": "Installer Steam",
+        "Delete this bottle? Its Windows drive and everything installed in it are removed.": "Supprimer cette bouteille ? Son disque Windows et tout ce qui y est installé seront effacés.",
+
         // Status pills
         "Verified": "Vérifié",
         "Reported": "Signalé",

@@ -12,7 +12,8 @@ struct HighballApp: App {
         WindowGroup("Highball") {
             ContentView()
                 .environment(state)
-                .tint(Color(red: 0.78, green: 0.55, blue: 0.20))
+                .tint(HB.amber)
+                .preferredColorScheme(.dark)
                 .frame(minWidth: 820, minHeight: 560)
                 .onAppear { state.refresh() }
         }
@@ -76,7 +77,7 @@ struct ContentView: View {
                 OnboardingView()
             } else {
                 NavigationSplitView {
-                    List(selection: $state.selectedBottle) {
+                    List {
                         Section {
                             HStack(spacing: 9) {
                                 if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "png"), let img = NSImage(contentsOf: url) {
@@ -92,13 +93,32 @@ struct ContentView: View {
                         }
                         Section(L("Bottles")) {
                             ForEach(state.bottles, id: \.name) { bottle in
-                                Label(bottle.name, systemImage: "wineglass")
-                                    .tag(bottle.name)
-                                    .contextMenu {
-                                        Button(L("Stop all processes")) { state.killBottle(bottle) }
-                                        Divider()
-                                        Button(L("Delete bottle…"), role: .destructive) { pendingDelete = bottle.name }
+                                let selected = state.selectedBottle == bottle.name
+                                Button {
+                                    state.selectedBottle = bottle.name
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "wineglass\(selected ? ".fill" : "")")
+                                            .foregroundStyle(selected ? HB.amber : Color.secondary)
+                                            .frame(width: 18)
+                                        Text(bottle.name)
+                                            .fontWeight(selected ? .semibold : .regular)
+                                        Spacer()
                                     }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.vertical, 5).padding(.horizontal, 7)
+                                .background(RoundedRectangle(cornerRadius: 7)
+                                    .fill(selected ? HB.amber.opacity(0.16) : .clear))
+                                .overlay(RoundedRectangle(cornerRadius: 7)
+                                    .stroke(selected ? HB.amber.opacity(0.35) : .clear))
+                                .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
+                                .contextMenu {
+                                    Button(L("Stop all processes")) { state.killBottle(bottle) }
+                                    Divider()
+                                    Button(L("Delete bottle…"), role: .destructive) { pendingDelete = bottle.name }
+                                }
                             }
                         }
                         if let engine = state.engines.first {
