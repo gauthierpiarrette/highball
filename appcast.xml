@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.5.0</title>
+      <description><![CDATA[The design release. Highball now looks like what it is — a game launcher: full-bleed artwork cards with verdicts on the art and play-on-hover, one launcher row where installed means Open and missing means Install, Highball's amber through the whole shell instead of system blue, and settings tucked into a toolbar sheet where they belong. Same engine, same database, entirely different feel.]]></description>
+      <pubDate>Mon, 24 Aug 2026 05:12:19 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.5.0/Highball-0.5.0.zip" sparkle:version="0.5.0" sparkle:shortVersionString="0.5.0" sparkle:edSignature="ekAzn6wO+1ErdHG7x7oK1MDgkfBPqc60Z35haQAYeXUAzrze2eLDCgYJc05v7OBUfDE70K/YBeX9lNIle+EEBA==" length="2280875" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.4.1</title>
       <description><![CDATA[Design pass: branded sidebar, amber bottle header, launcher tiles with icons, humanized engine names, game-card hover states, empty states, and the redesigned compatibility database site with 12,491 predictions. Plus the automated verification harness from 0.4.0, now with display-wake fixed.]]></description>
       <pubDate>Mon, 24 Aug 2026 04:58:41 -0700</pubDate>
