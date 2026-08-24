@@ -1,26 +1,37 @@
 #!/bin/zsh
-# Assemble dist/Highball.app from the SwiftPM build (ad-hoc signed; notarization needs an Apple Developer account).
+# Assemble dist/Highball.app from the SwiftPM build.
+# Usage: Scripts/make-app.sh [debug|release] [version]
+# Signs with Developer ID when available (hardened runtime); notarizes + staples when a
+# notarytool keychain profile named "highball" exists.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CONFIG="${1:-release}"
+VERSION="${2:-0.0.0-dev}"
+FEED_URL="https://raw.githubusercontent.com/gauthierpiarrette/highball/main/appcast.xml"
+ED_PUBLIC_KEY="lntI8A+HC5Wo6xb4dZNQ6IYteI771cNybU8XNXmvMd8="
+
 swift build -c "$CONFIG" --product HighballApp
 APP=dist/Highball.app
-rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp ".build/$CONFIG/HighballApp" "$APP/Contents/MacOS/Highball"
-# Ship the manifest, recipes and the GPTK license text inside the bundle.
+
+# Sparkle framework (SwiftPM artifact) — embedded, rpath is baked into the binary.
+SPARKLE_FW=$(ls -d .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-*/Sparkle.framework | head -1)
+cp -R "$SPARKLE_FW" "$APP/Contents/Frameworks/"
+
+# Resources: engine manifest, GPTK license, recipes and DB entries (from highball-db).
 cp spike/engine-manifest.json "$APP/Contents/Resources/engine-manifest.json"
 cp spike/d3dmetal-license.txt "$APP/Contents/Resources/d3dmetal-license.txt"
-# Recipes come from the highball-db repo (sibling checkout, or a shallow clone into .build).
 RECIPES="../highball-db/recipes"
 if [ ! -d "$RECIPES" ]; then
   RECIPES=".build/highball-db/recipes"
   [ -d "$RECIPES" ] || git clone --depth 1 https://github.com/gauthierpiarrette/highball-db.git .build/highball-db
 fi
 for f in "$RECIPES"/launchers/*.json "$RECIPES"/games/*.json; do cp "$f" "$APP/Contents/Resources/"; done
-# Compatibility DB entries (for in-app status pills on the games grid).
 DBDIR="$(dirname "$RECIPES")/db/games"
 if [ -d "$DBDIR" ]; then mkdir -p "$APP/Contents/Resources/db-games"; cp "$DBDIR"/*.json "$APP/Contents/Resources/db-games/"; fi
-# App icon: rendered from source, packed to icns.
+
+# App icon.
 ICONWORK=.build/icon
 mkdir -p "$ICONWORK/AppIcon.iconset"
 swift Scripts/make-icon.swift "$ICONWORK/AppIcon-1024.png" >/dev/null
@@ -30,6 +41,7 @@ for sz in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONWORK/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
 sips -z 512 512 "$ICONWORK/AppIcon-1024.png" --out "$APP/Contents/Resources/AppIcon.png" >/dev/null
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -39,22 +51,40 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>Highball</string>
   <key>CFBundleDisplayName</key><string>Highball</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+  <key>CFBundleVersion</key><string>${VERSION}</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>SUFeedURL</key><string>${FEED_URL}</string>
+  <key>SUPublicEDKey</key><string>${ED_PUBLIC_KEY}</string>
+  <key>SUEnableInstallerLauncherService</key><false/>
   <key>NSHumanReadableCopyright</key><string>GPL-3.0 — no paid tier, ever.</string>
 </dict></plist>
 PLIST
-# Prefer a Developer ID certificate when one is in the keychain (hardened runtime, timestamp);
-# fall back to ad-hoc. Notarization additionally needs: xcrun notarytool submit dist/Highball.zip
-# --keychain-profile <profile> --wait && xcrun stapler staple dist/Highball.app
+
 IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/{print $2; exit}')
 if [ -n "$IDENTITY" ]; then
-  codesign --force --deep --options runtime --timestamp -s "$IDENTITY" "$APP"
+  codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc" 2>/dev/null || true
+  codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc" 2>/dev/null || true
+  codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
+  codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app"
+  codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework"
+  codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP"
 else
   codesign --force --deep -s - "$APP"
 fi
-codesign -dv "$APP" 2>&1 | grep -E "Authority|Signature|flags" | head -3 || true
-echo "built $APP"
+codesign -dv "$APP" 2>&1 | grep -E "Authority=Developer|flags" | head -2 || true
+
+# Notarize + staple when credentials are stored (xcrun notarytool store-credentials highball ...).
+if xcrun notarytool history --keychain-profile highball >/dev/null 2>&1; then
+  echo "notarizing…"
+  ditto -c -k --keepParent "$APP" dist/Highball-notarize.zip
+  xcrun notarytool submit dist/Highball-notarize.zip --keychain-profile highball --wait
+  xcrun stapler staple "$APP"
+  rm dist/Highball-notarize.zip
+  echo "notarized and stapled"
+else
+  echo "note: no notarytool profile 'highball' — skipping notarization"
+fi
+echo "built $APP ($VERSION)"

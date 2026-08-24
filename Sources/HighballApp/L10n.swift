@@ -84,6 +84,8 @@ enum L10n {
         "Games run with the bottle’s sync (msync is fastest). Opening the Steam window restarts Windows processes with sync off — its interface needs it.":
             "Les jeux utilisent la synchronisation de la bouteille (msync est la plus rapide). Ouvrir la fenêtre Steam redémarre les processus Windows sans synchronisation — son interface l’exige.",
 
+        "Check for Updates…": "Rechercher les mises à jour…",
+
         // Status pills
         "Verified": "Vérifié",
         "Reported": "Signalé",

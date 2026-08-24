@@ -1,5 +1,6 @@
 import AppKit
 import HighballKit
+import Sparkle
 import SwiftUI
 
 @main
@@ -16,10 +17,41 @@ struct HighballApp: App {
                 .onAppear { state.refresh() }
         }
         .windowResizability(.contentSize)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesView(updater: delegate.updaterController.updater)
+            }
+        }
+    }
+}
+
+/// "Check for Updates…" menu item, enabled/disabled by Sparkle's own state.
+struct CheckForUpdatesView: View {
+    @ObservedObject private var model: CheckForUpdatesViewModel
+    private let updater: SPUUpdater
+
+    init(updater: SPUUpdater) {
+        self.updater = updater
+        self.model = CheckForUpdatesViewModel(updater: updater)
+    }
+
+    var body: some View {
+        Button(L("Check for Updates…")) { updater.checkForUpdates() }
+            .disabled(!model.canCheckForUpdates)
+    }
+}
+
+final class CheckForUpdatesViewModel: ObservableObject {
+    @Published var canCheckForUpdates = false
+    init(updater: SPUUpdater) {
+        updater.publisher(for: \.canCheckForUpdates).assign(to: &$canCheckForUpdates)
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Sparkle: reads SUFeedURL and SUPublicEDKey from Info.plist; no-ops in bare dev builds without them.
+    let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Works as a bare SwiftPM executable during development: give it a real UI presence.
         NSApp.setActivationPolicy(.regular)
