@@ -45,7 +45,9 @@ swift build -c release
 Everything lives in `~/Library/Application Support/Highball/`. Nothing touches `/usr` or
 `/Library`; deleting that folder is a full uninstall.
 
-## What works (verified 2026-08-23, M1 Pro, macOS 14.6)
+## What works
+
+*Reference test machine: Apple M1 Pro · macOS 14.6 — results on other chips welcome via `highball report`.*
 
 | | |
 |---|---|
