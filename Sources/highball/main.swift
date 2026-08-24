@@ -7,7 +7,7 @@ struct Highball: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "highball",
         abstract: "Highball — run Windows games on Apple Silicon. Free, open, engine-agnostic.",
-        subcommands: [Engine.self, Bottle.self, Run.self, Recipe.self, Tricks.self, Env.self, Report.self],
+        subcommands: [Engine.self, Bottle.self, Run.self, Recipe.self, Tricks.self, Env.self, Report.self, Verify.self],
         defaultSubcommand: nil
     )
 }
@@ -235,6 +235,52 @@ struct Tricks: AsyncParsableCommand {
         env["PATH"] = "\(eng.engineDir.appending(path: "bin").path):/usr/bin:/bin:/usr/sbin:/sbin"
         let out = try Shell.capture("/bin/sh", [wt.path, "--unattended"] + verbs, env: env)
         print(out.split(separator: "\n").suffix(12).joined(separator: "\n"))
+    }
+}
+
+// MARK: - highball verify
+
+struct Verify: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(abstract: "Automated compatibility runs: launch installed Steam games under one or more renderers, detect crashes and black screens, and record provenance-complete verdicts. Keep the display awake.")
+    @Argument var bottle: String
+    @Option(parsing: .upToNextOption, help: "Steam appids to test (default: every installed, ready game).") var games: [Int] = []
+    @Option(parsing: .upToNextOption, help: "Renderers to test (default: dxvk dxmt d3dmetal if available).") var renderers: [HighballKit.Renderer] = []
+    @Option(help: "Observation seconds per run.") var seconds: Int = 90
+    @Flag(help: "Also test titles with known anti-cheat (skipped by default: automated runs of AC games are needless account risk).") var includeAnticheat = false
+
+    func run() async throws {
+        let b = try BottleStore().get(bottle)
+        let eng = try EngineStore().engine(b.settings.engineID)
+        var library = SteamLibrary.games(in: b).filter(\.isReady)
+        if !games.isEmpty { library = library.filter { games.contains($0.appid) } }
+        if !includeAnticheat {
+            // Compliance guard: never auto-run titles with anti-cheat. Verifying those is a
+            // deliberate human decision (--include-anticheat), not something a batch does.
+            let db = GameDB(directories: GameDB.defaultDirectories())
+            let skipped = library.filter { db[$0.appid]?.anticheat != nil || db[$0.appid]?.isBlocked == true }
+            if !skipped.isEmpty { print("skipping (anti-cheat): " + skipped.map(\.name).joined(separator: ", ")) }
+            library.removeAll { db[$0.appid]?.anticheat != nil || db[$0.appid]?.isBlocked == true }
+        }
+        if library.isEmpty { fail("no installed games matched") }
+        var rs = renderers
+        if rs.isEmpty {
+            rs = [.dxvk, .dxmt]
+            if eng.rendererDir("d3dmetal") != nil { rs.append(.d3dmetal) }
+        }
+        print("verifying \(library.count) game(s) × \(rs.map(\.rawValue).joined(separator: ",")) — \(seconds)s each; display must stay awake")
+        let verifier = Verifier(engine: eng, bottle: b)
+        var results: [VerifyOutcome] = []
+        for game in library {
+            for r in rs {
+                do {
+                    let o = try await verifier.run(game: game, renderer: r, runSeconds: seconds) { print($0) }
+                    results.append(o)
+                } catch { print("[\(game.name)] \(r.rawValue): error \(error)") }
+            }
+        }
+        print("\n=== results (also in logs/verify-results.jsonl) ===")
+        for o in results { print([o.title, o.renderer.rawValue, o.verdict.rawValue, "\(o.secondsAlive)s"].joined(separator: "  ")) }
+        print("\nSubmit interesting rows with: highball report \(bottle) \"<title>\" --rating N --notes \"…\"")
     }
 }
 

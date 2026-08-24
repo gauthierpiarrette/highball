@@ -60,6 +60,11 @@ public enum SteamLibrary {
 
 /// One entry of the open compatibility database, as published in highball-db `db/games/*.json`.
 public struct GameDBEntry: Codable, Sendable {
+    public struct AnticheatInfo: Codable, Sendable {
+        public var names: [String]
+        public var macVerdict: String?
+        public var note: String?
+    }
     public var id: String
     public var title: String
     public var steam_appid: Int?
@@ -67,12 +72,18 @@ public struct GameDBEntry: Codable, Sendable {
     public var renderer: Renderer?
     public var provenance: String?
     public var notes: String?
+    public var anticheat: AnticheatInfo?
 
     public var isBlocked: Bool { status == "blocked-anticheat" }
 }
 
 public struct GameDB: Sendable {
     public let byAppID: [Int: GameDBEntry]
+
+    /// Default lookup locations for a CLI/dev context: a sibling highball-db checkout, or ./db/games.
+    public static func defaultDirectories() -> [URL] {
+        ["../highball-db/db/games", "db/games"].map { URL(fileURLWithPath: $0) }
+    }
 
     public init(directories: [URL]) {
         var index: [Int: GameDBEntry] = [:]

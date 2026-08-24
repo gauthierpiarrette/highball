@@ -11,5 +11,10 @@ Every recipe carries `lastVerified` so stale data is visible rather than silentl
 bundle. Match the style around you. By contributing you license your work under GPL-3.0 (code) or
 CC0 (data).
 
+**Automated verification** (`highball verify`): tests only games *you already installed*, one at a
+time, exactly as a player launching them would — via Steam's own documented `-applaunch` flag. It
+never touches the store, never installs anything, and skips anti-cheat titles by default. Keep it
+that way: batch auto-installing or store automation is out of scope by policy, not oversight.
+
 **Engines**: manifest PRs bumping pinned SHA-256s, with a note on what you verified. Highball never
 hosts binaries and never carries Wine patches — that's a design rule, not a preference.
