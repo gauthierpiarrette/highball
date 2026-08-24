@@ -90,11 +90,12 @@ struct ContentView: View {
                         }
                         if let engine = state.engines.first {
                             Section(L("Engine")) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(engine.id).font(.caption).lineLimit(1)
-                                    Text((try? engine.wineVersion()) ?? "")
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                }
+                                Label {
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(engine.displayName).font(.caption)
+                                        Text(engine.id).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                                    }
+                                } icon: { Image(systemName: "gearshape.2").foregroundStyle(.secondary) }
                             }
                         }
                     }
