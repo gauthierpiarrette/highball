@@ -5,6 +5,12 @@ struct BottleView: View {
     @Environment(AppState.self) private var state
     let bottle: Bottle
 
+    static let launcherSymbols: [String: String] = [
+        "steam": "gamecontroller.fill", "epic-games": "e.circle.fill", "battle-net": "shield.fill",
+        "gog-galaxy": "g.circle.fill", "ea-app": "e.square.fill", "ubisoft-connect": "u.circle.fill",
+        "rockstar": "r.circle.fill",
+    ]
+
     private var engine: InstalledEngine? { state.engine(for: bottle) }
     private var d3dmetalAvailable: Bool { engine?.rendererDir("d3dmetal") != nil }
     private var d3dmetalPossible: Bool {
@@ -48,14 +54,27 @@ struct BottleView: View {
                 }
             }
             Section(L("Install a launcher")) {
-                HStack(spacing: 8) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 10)], spacing: 10) {
                     ForEach(AppState.launcherRecipes.filter { id in !bottle.settings.recipes.contains(id) }, id: \.self) { id in
                         if let recipe = AppState.recipe(id) {
-                            Button(recipe.title) { state.applyRecipe(id, to: bottle) }
-                                .disabled(state.busy)
+                            Button {
+                                state.applyRecipe(id, to: bottle)
+                            } label: {
+                                VStack(spacing: 6) {
+                                    Image(systemName: Self.launcherSymbols[id] ?? "shippingbox.fill")
+                                        .font(.title2).foregroundStyle(.tint)
+                                    Text(recipe.title).font(.caption).lineLimit(1)
+                                }
+                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                            }
+                            .buttonStyle(.plain)
+                            .background(RoundedRectangle(cornerRadius: 9).fill(.background.secondary))
+                            .overlay(RoundedRectangle(cornerRadius: 9).stroke(.separator.opacity(0.5)))
+                            .disabled(state.busy)
                         }
                     }
                 }
+                .padding(.vertical, 4)
                 Text(L("Kernel anti-cheat titles (Valorant, Fortnite, Destiny 2…) can’t work through Wine — check the compatibility database before big downloads."))
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -111,15 +130,27 @@ struct BottleView: View {
 
     private var header: some View {
         HStack(spacing: 14) {
-            Image(systemName: "wineglass.fill").font(.largeTitle).foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(bottle.name).font(.title2.bold())
-                Text(engine?.displayName ?? bottle.settings.engineID)
-                    .font(.caption).foregroundStyle(.secondary)
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(LinearGradient(colors: [Color(red: 0.85, green: 0.60, blue: 0.27), Color(red: 0.65, green: 0.41, blue: 0.11)],
+                                         startPoint: .top, endPoint: .bottom))
+                    .frame(width: 52, height: 52)
+                    .shadow(color: Color(red: 0.85, green: 0.60, blue: 0.27).opacity(0.35), radius: 8, y: 3)
+                Image(systemName: "wineglass.fill").font(.title2).foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(bottle.name).font(.system(.title2, design: .rounded).bold())
+                HStack(spacing: 6) {
+                    Text(engine?.displayName ?? bottle.settings.engineID)
+                    Text("·")
+                    Text(bottle.settings.renderer.rawValue.uppercased()).font(.caption.monospaced())
+                }
+                .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             Button(L("Open C: drive")) { NSWorkspace.shared.open(bottle.driveC) }
         }
+        .padding(.vertical, 4)
     }
 
     @ViewBuilder private var settings: some View {

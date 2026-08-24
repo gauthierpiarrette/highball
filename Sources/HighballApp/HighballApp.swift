@@ -77,6 +77,19 @@ struct ContentView: View {
             } else {
                 NavigationSplitView {
                     List(selection: $state.selectedBottle) {
+                        Section {
+                            HStack(spacing: 9) {
+                                if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "png"), let img = NSImage(contentsOf: url) {
+                                    Image(nsImage: img).resizable().frame(width: 34, height: 34)
+                                }
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text("Highball").font(.system(size: 16, weight: .heavy, design: .rounded))
+                                    Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")")
+                                        .font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
                         Section(L("Bottles")) {
                             ForEach(state.bottles, id: \.name) { bottle in
                                 Label(bottle.name, systemImage: "wineglass")
