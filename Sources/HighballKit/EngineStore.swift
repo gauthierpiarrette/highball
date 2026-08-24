@@ -191,6 +191,10 @@ public struct InstalledEngine: Sendable {
     public let root: URL
 
     public var id: String { manifest.id }
+    /// Short human name for UI ("Wine 10.0 (Sikarugir)" beats a manifest id).
+    public var displayName: String {
+        manifest.components["wine"]?.version ?? manifest.displayName
+    }
     public var engineDir: URL { root.appending(path: "engine", directoryHint: .isDirectory) }
     public var frameworksDir: URL { root.appending(path: "frameworks", directoryHint: .isDirectory) }
     public var renderersDir: URL { root.appending(path: "renderers", directoryHint: .isDirectory) }

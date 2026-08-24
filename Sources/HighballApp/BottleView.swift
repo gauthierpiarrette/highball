@@ -89,6 +89,12 @@ struct BottleView: View {
 
     @ViewBuilder private var gamesSection: some View {
         let games = state.gamesByBottle[bottle.name] ?? []
+        if games.isEmpty, SteamLibrary.steamRoot(of: bottle) != nil {
+            Section(L("Games")) {
+                Label(L("Your Steam library will appear here — install games inside Steam and they show up with compatibility verdicts."), systemImage: "square.grid.2x2")
+                    .foregroundStyle(.secondary).font(.callout)
+            }
+        }
         if !games.isEmpty {
             Section(L("Games")) {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 12)], spacing: 12) {
@@ -108,7 +114,8 @@ struct BottleView: View {
             Image(systemName: "wineglass.fill").font(.largeTitle).foregroundStyle(.tint)
             VStack(alignment: .leading, spacing: 2) {
                 Text(bottle.name).font(.title2.bold())
-                Text("engine \(bottle.settings.engineID)").font(.caption).foregroundStyle(.secondary)
+                Text(engine?.displayName ?? bottle.settings.engineID)
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             Button(L("Open C: drive")) { NSWorkspace.shared.open(bottle.driveC) }
@@ -173,6 +180,7 @@ struct GameCard: View {
     let entry: GameDBEntry?
     let busy: Bool
     let play: () -> Void
+    @State private var hovering = false
 
     private var statusLabel: (String, Color)? {
         switch entry?.status {
@@ -196,8 +204,8 @@ struct GameCard: View {
                     }
                 }
             }
-            .frame(height: 96)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .frame(height: 100)
+            .clipShape(RoundedRectangle(cornerRadius: 7))
 
             Text(game.name).font(.callout.weight(.semibold)).lineLimit(1)
             HStack {
@@ -221,8 +229,13 @@ struct GameCard: View {
                     .font(.caption2).foregroundStyle(.red).lineLimit(2)
             }
         }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(.background.secondary))
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.background.secondary))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.separator.opacity(0.5)))
+        .scaleEffect(hovering ? 1.015 : 1)
+        .shadow(color: .black.opacity(hovering ? 0.18 : 0.06), radius: hovering ? 8 : 3, y: 2)
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .onHover { hovering = $0 }
         .help(entry?.notes ?? game.name)
     }
 }
@@ -243,7 +256,11 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            Image(systemName: "wineglass.fill").font(.system(size: 52)).foregroundStyle(.tint)
+            if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "png"), let img = NSImage(contentsOf: url) {
+                Image(nsImage: img).resizable().frame(width: 96, height: 96)
+            } else {
+                Image(systemName: "wineglass.fill").font(.system(size: 52)).foregroundStyle(.tint)
+            }
             Text("Highball").font(.system(size: 34, weight: .heavy, design: .rounded))
             Text(L("Run Windows games on your Mac. Highball downloads a verified Wine engine (~500 MB) from public upstream releases — nothing is hosted by Highball itself."))
                 .multilineTextAlignment(.center).frame(maxWidth: 440).foregroundStyle(.secondary)

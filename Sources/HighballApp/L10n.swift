@@ -86,6 +86,9 @@ enum L10n {
 
         "Check for Updates…": "Rechercher les mises à jour…",
 
+        "Your Steam library will appear here — install games inside Steam and they show up with compatibility verdicts.":
+            "Votre bibliothèque Steam apparaîtra ici — installez des jeux dans Steam et ils s’afficheront avec leur verdict de compatibilité.",
+
         // Status pills
         "Verified": "Vérifié",
         "Reported": "Signalé",
