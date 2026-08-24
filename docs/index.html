@@ -18,10 +18,10 @@
   * { box-sizing:border-box }
   body { margin:0; background:var(--ground); color:var(--ink); font:17px/1.6 "IBM Plex Sans",-apple-system,sans-serif; }
   a { color:var(--amber) }
-  .wrap { max-width:1000px; margin:0 auto; padding:0 clamp(1rem,4vw,2rem); }
+  .wrap { max-width:1000px; margin:0 auto; padding-inline:clamp(1rem,4vw,2rem); }
   .mono { font-family:"IBM Plex Mono",monospace }
 
-  header { padding:5rem 0 3rem; text-align:center; }
+  header { padding-block:5rem 3rem; text-align:center; }
   header img.logo { width:120px; height:120px; }
   h1 { font-family:"Bricolage Grotesque",sans-serif; font-weight:800; font-size:clamp(2.6rem,7vw,4.2rem); margin:1rem 0 .5rem; letter-spacing:-.02em; }
   .tag { font-size:clamp(1.05rem,2.5vw,1.3rem); color:var(--ink2); max-width:34em; margin:0 auto; }
@@ -34,7 +34,7 @@
   .shot { margin:3rem auto 0; max-width:880px; }
   .shot img { width:100%; height:auto; display:block; border-radius:10px; border:1px solid var(--line); }
 
-  section { padding:3.5rem 0; }
+  section { padding-block:3.75rem; }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1rem; }
   .card { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:1.4rem 1.5rem; }
   .card h3 { font-family:"Bricolage Grotesque",sans-serif; font-weight:700; margin:0 0 .5rem; font-size:1.15rem; }
@@ -45,7 +45,7 @@
   .honest b { color:var(--bad) }
   h2 { font-family:"Bricolage Grotesque",sans-serif; font-weight:700; font-size:1.6rem; text-align:center; margin:0 0 1.5rem; }
 
-  footer { border-top:1px solid var(--line); padding:2.5rem 0 3.5rem; color:var(--muted); font-size:.85rem; text-align:center; }
+  footer { border-top:1px solid var(--line); padding-block:2.5rem 3.5rem; padding-inline:1rem; color:var(--muted); font-size:.85rem; text-align:center; }
   footer a { color:var(--ink2) }
   .foot-links { display:flex; gap:1.5rem; justify-content:center; flex-wrap:wrap; margin-bottom:1rem; }
 </style>
