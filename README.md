@@ -2,6 +2,8 @@
 <h1 align="center">Highball</h1>
 <p align="center"><b>Run Windows games on Apple Silicon. Free, open, engine-agnostic.</b></p>
 
+<p align="center"><img src=".github/assets/app.png" width="760" alt="Highball showing a bottle with a verified game, renderer verdict from the open database, and one-click launcher installs"></p>
+
 Highball is the successor to the idea behind [Whisky](https://github.com/Whisky-App/Whisky):
 a native macOS app (and CLI) that sets up Wine, DXMT, D3DMetal and DXVK for you, installs
 Steam and other launchers with one click, and tells you honestly what runs, what doesn't,

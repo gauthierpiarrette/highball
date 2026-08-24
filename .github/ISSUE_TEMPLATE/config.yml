@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Game or launcher compatibility report
+    url: https://github.com/gauthierpiarrette/highball-db/issues/new/choose
+    about: "How did a game run? That data belongs in the open database."

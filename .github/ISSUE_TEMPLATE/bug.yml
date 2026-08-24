@@ -1,0 +1,19 @@
+name: Bug report
+description: Something in Highball itself broke (for game results, use the report form on highball-db)
+labels: [bug]
+body:
+  - type: input
+    id: what
+    attributes: { label: What happened }
+    validations: { required: true }
+  - type: input
+    id: chip
+    attributes: { label: Chip and macOS, placeholder: "M1 Pro, macOS 14.6" }
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes: { label: Highball version, placeholder: "0.3.1" }
+    validations: { required: true }
+  - type: textarea
+    id: log
+    attributes: { label: Log, description: "Attach the newest file from ~/Library/Application Support/Highball/logs/" }
