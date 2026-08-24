@@ -42,7 +42,8 @@ public struct WineRunner: Sendable {
         process.executableURL = engine.wineBinary
         process.arguments = args
         process.environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
-        process.currentDirectoryURL = bottle.driveC
+        // drive_c only exists after the first wineboot — fall back to the bottle root on fresh prefixes.
+        process.currentDirectoryURL = FileManager.default.fileExists(atPath: bottle.driveC.path) ? bottle.driveC : bottle.url
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
