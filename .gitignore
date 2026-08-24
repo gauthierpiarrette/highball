@@ -5,3 +5,4 @@ DerivedData/
 .DS_Store
 dist/
 site/
+private/

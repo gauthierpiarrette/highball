@@ -1,6 +1,6 @@
-# Highball
-
-**Run Windows games on Apple Silicon. Free, open, engine-agnostic.**
+<p align="center"><img src=".github/assets/logo.png" width="140" alt="Highball — a highball glass with ice"></p>
+<h1 align="center">Highball</h1>
+<p align="center"><b>Run Windows games on Apple Silicon. Free, open, engine-agnostic.</b></p>
 
 Highball is the successor to the idea behind [Whisky](https://github.com/Whisky-App/Whisky):
 a native macOS app (and CLI) that sets up Wine, DXMT, D3DMetal and DXVK for you, installs
@@ -9,8 +9,9 @@ and which renderer to use — backed by an open, CC0 compatibility database.
 
 A highball is whisky made easy-drinking. Same idea.
 
-> Status: **pre-release**. The CLI works end to end (engine install → bottle → Steam →
-> game, with per-bottle renderer switching). The SwiftUI app is in progress.
+> Status: **pre-release**. App and CLI work end to end: engine install → bottle → Steam
+> login → game, with per-bottle renderer switching and msync-accelerated launches.
+> Download the app from [Releases](https://github.com/gauthierpiarrette/highball/releases).
 
 ## Why Highball exists when Whisky died
 
