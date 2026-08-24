@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Highball</title>
+    <link>https://github.com/gauthierpiarrette/highball</link>
+    <description>Run Windows games on Apple Silicon.</description>
+    <item>
+      <title>Highball 0.3.1</title>
+      <description><![CDATA[Notarized build with automatic updates. macOS opens it without any right-click ritual, and this is the last version you'll ever download by hand — updates arrive in-app via Sparkle. Includes everything from 0.3.0: +42% game frame rate via msync, DXVK async, frame-rate caps, game library with compatibility verdicts, French UI.]]></description>
+      <pubDate>Mon, 24 Aug 2026 03:37:31 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.3.1/Highball-0.3.1.zip" sparkle:version="0.3.1" sparkle:shortVersionString="0.3.1" sparkle:edSignature="Y+T0H0SbtPnLfw/eR/RntcHRGgxq821BleLX7kKYgLzjn39wSYPfy0T7lemKQjTJb1+Gxn2f+AKxo0wma42bAg==" length="2135020" type="application/octet-stream"/>
+    </item>
+  </channel>
+</rss>
