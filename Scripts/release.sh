@@ -45,9 +45,9 @@ plutil -lint /dev/null >/dev/null 2>&1 || true
 python3 -c "import xml.dom.minidom,sys; xml.dom.minidom.parse('appcast.xml')" && echo "appcast.xml valid"
 
 if [ -n "$NOTES_FILE" ]; then
-  gh release create "v$VERSION" "$ZIP" --prerelease --title "Highball $VERSION" --notes-file "$NOTES_FILE"
+  gh release create "v$VERSION" "$ZIP" --latest --title "Highball $VERSION" --notes-file "$NOTES_FILE"
 else
-  gh release create "v$VERSION" "$ZIP" --prerelease --title "Highball $VERSION" --notes "$SUMMARY"
+  gh release create "v$VERSION" "$ZIP" --latest --title "Highball $VERSION" --notes "$SUMMARY"
 fi
 
 git add appcast.xml && git commit -m "release: v$VERSION appcast" && git push
