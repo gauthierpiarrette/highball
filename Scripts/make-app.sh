@@ -85,6 +85,13 @@ if xcrun notarytool history --keychain-profile highball >/dev/null 2>&1; then
   rm dist/Highball-notarize.zip
   echo "notarized and stapled"
 else
-  echo "note: no notarytool profile 'highball' — skipping notarization"
+  if [ "$CONFIG" = "release" ]; then
+    # Never ship unnotarized again: 0.1–0.3 went out this way and macOS 15+ showed users
+    # the "could not verify it's free of malware" dialog (retro-notarized 2026-08-24).
+    echo "error: release build but no notarytool profile 'highball' — refusing to ship unnotarized." >&2
+    echo "fix: xcrun notarytool store-credentials highball --apple-id <id> --team-id B95M7DARU4" >&2
+    exit 1
+  fi
+  echo "note: no notarytool profile 'highball' — skipping notarization (debug build)"
 fi
 echo "built $APP ($VERSION)"
