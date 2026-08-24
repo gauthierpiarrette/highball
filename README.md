@@ -4,21 +4,20 @@
 
 <p align="center"><img src=".github/assets/app.png" width="760" alt="Highball showing a bottle with a verified game, renderer verdict from the open database, and one-click launcher installs"></p>
 
-Highball is the successor to the idea behind [Whisky](https://github.com/Whisky-App/Whisky):
-a native macOS app (and CLI) that sets up Wine, DXMT, D3DMetal and DXVK for you, installs
-Steam and other launchers with one click, and tells you honestly what runs, what doesn't,
-and which renderer to use — backed by an open, CC0 compatibility database.
-
-A highball is whisky made easy-drinking. Same idea.
+Highball is a native macOS app (and CLI) that sets up Wine, DXMT, D3DMetal and DXVK for
+you, installs Steam and other launchers with one click, and tells you honestly what runs,
+what doesn't, and which renderer to use — backed by an open, CC0 compatibility database
+where every claim carries its provenance.
 
 > Status: **beta**. Notarized, auto-updating, working end to end: engine install → bottle →
 > Steam login → game, with per-bottle renderer switching and msync-accelerated launches.
 > **[Download Highball](https://github.com/gauthierpiarrette/highball/releases/latest)** — Apple Silicon, macOS 14+.
 
-## Why Highball exists when Whisky died
+## Design principles (learned the hard way)
 
-Whisky's developer archived it in 2025 after concluding it repackaged CodeWeavers' work
-while giving "practically zero" back to Wine. Highball is designed around that lesson:
+This niche has a cautionary tale: [Whisky](https://github.com/Whisky-App/Whisky) was archived
+in 2025 after its developer concluded it gave too little back to the Wine ecosystem it sat on.
+Highball is built around that lesson:
 
 - **Zero Wine patches, zero hosted binaries.** Engines are assembled from *pinned,
   SHA-256-verified* upstream releases ([Gcenx](https://github.com/Gcenx)'s builds,
