@@ -32,17 +32,25 @@ if [ ! -f appcast.xml ]; then
 </rss>
 XML
 fi
-ITEM="    <item>\\
-      <title>Highball $VERSION</title>\\
-      <description><![CDATA[$SUMMARY]]></description>\\
-      <pubDate>$DATE</pubDate>\\
-      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>\\
-      <enclosure url=\"$DOWNLOAD_URL\" sparkle:version=\"$VERSION\" sparkle:shortVersionString=\"$VERSION\" $ED_ATTRS type=\"application/octet-stream\"/>\\
-    </item>"
-sed -i '' "s|<description>Run Windows games on Apple Silicon.</description>|<description>Run Windows games on Apple Silicon.</description>\\
-$ITEM|" appcast.xml
-plutil -lint /dev/null >/dev/null 2>&1 || true
-python3 -c "import xml.dom.minidom,sys; xml.dom.minidom.parse('appcast.xml')" && echo "appcast.xml valid"
+# Insert via python, not sed: the summary is arbitrary text (a '|' or '&' must not break the release).
+HB_VERSION="$VERSION" HB_SUMMARY="$SUMMARY" HB_DATE="$DATE" HB_URL="$DOWNLOAD_URL" HB_ED="$ED_ATTRS" python3 - <<'PY'
+import os, xml.dom.minidom
+v = os.environ['HB_VERSION']
+item = f"""    <item>
+      <title>Highball {v}</title>
+      <description><![CDATA[{os.environ['HB_SUMMARY']}]]></description>
+      <pubDate>{os.environ['HB_DATE']}</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="{os.environ['HB_URL']}" sparkle:version="{v}" sparkle:shortVersionString="{v}" {os.environ['HB_ED']} type="application/octet-stream"/>
+    </item>"""
+s = open('appcast.xml').read()
+anchor = '<description>Run Windows games on Apple Silicon.</description>'
+assert anchor in s, 'appcast anchor missing'
+assert f'v{v}/' not in s, f'version {v} already in appcast'
+open('appcast.xml', 'w').write(s.replace(anchor, anchor + '\n' + item, 1))
+xml.dom.minidom.parse('appcast.xml')
+print('appcast.xml valid')
+PY
 
 if [ -n "$NOTES_FILE" ]; then
   gh release create "v$VERSION" "$ZIP" --latest --title "Highball $VERSION" --notes-file "$NOTES_FILE"
