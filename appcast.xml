@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.5.3</title>
+      <description><![CDATA[Quitting Highball now offers to stop all Windows processes (or deliberately leave a game running) instead of silently stranding them — and the app menu gains Stop All Windows Processes for cleanup after a crash.]]></description>
+      <pubDate>Mon, 24 Aug 2026 14:39:41 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.5.3/Highball-0.5.3.zip" sparkle:version="0.5.3" sparkle:shortVersionString="0.5.3" sparkle:edSignature="m4P6e5xzeVglb3yMPsXFGuZPHuil5dORXzjNP8hmYnoMUS5gNvj9bPoXkvUjPvN6Yo4qKEhjznXwRj6SzPJ/Dg==" length="2289233" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.5.2</title>
       <description><![CDATA[Bottle names are now validated before creation: names with characters Windows forbids in paths (\ / : * ? " < > |) silently broke the Wine prefix (wineboot exit 53). The New Bottle sheet now explains the problem inline. Fixes #12.]]></description>
       <pubDate>Mon, 24 Aug 2026 12:39:46 -0700</pubDate>
