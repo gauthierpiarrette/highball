@@ -27,6 +27,12 @@ enum L10n {
         "A bottle name can't start with a dot.": "Un nom de bouteille ne peut pas commencer par un point.",
         "A bottle name can't end with a dot.": "Un nom de bouteille ne peut pas se terminer par un point.",
         "The bottle name is too long (64 characters max).": "Le nom de la bouteille est trop long (64 caractères max).",
+        "Windows programs are still running": "Des programmes Windows sont encore en cours d'exécution",
+        "Stop them and quit, or leave them running? A game left running keeps playing without Highball — quit it from inside the game when you're done.":
+            "Les arrêter et quitter, ou les laisser tourner ? Un jeu laissé ouvert continue sans Highball — quittez-le depuis le jeu quand vous avez terminé.",
+        "Stop Everything & Quit": "Tout arrêter et quitter",
+        "Leave Running & Quit": "Laisser tourner et quitter",
+        "Stop All Windows Processes": "Arrêter tous les processus Windows",
 
         // Bottle view
         "Programs": "Programmes",

@@ -239,6 +239,18 @@ final class AppState {
         try? WineRunner(paths: paths, engine: engine, bottle: bottle).kill()
     }
 
+    /// True while any Wine process from any bottle is alive. Every Wine process (wineserver,
+    /// preloaders, services) runs from the engines directory, so its path in `ps` is the marker.
+    func wineProcessesRunning() -> Bool {
+        guard let ps = try? Shell.capture("/bin/ps", ["axww"]) else { return false }
+        return ps.contains(paths.engines.path)
+    }
+
+    /// Stop every bottle's wineserver (and with it all Windows processes).
+    func killAllBottles() {
+        for bottle in bottles { killBottle(bottle) }
+    }
+
     func loadGPTKLicense() {
         for candidate in [Self.repoRoot?.appending(path: "spike/d3dmetal-license.txt"),
                           Bundle.main.url(forResource: "d3dmetal-license", withExtension: "txt")].compactMap({ $0 }) {

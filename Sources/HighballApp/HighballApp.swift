@@ -15,12 +15,14 @@ struct HighballApp: App {
                 .tint(HB.amber)
                 .preferredColorScheme(.dark)
                 .frame(minWidth: 820, minHeight: 560)
-                .onAppear { state.refresh() }
+                .onAppear { state.refresh(); delegate.appState = state }
         }
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: delegate.updaterController.updater)
+                // Cleanup after a crash or a "leave running" quit — no Activity Monitor needed.
+                Button(L("Stop All Windows Processes")) { state.killAllBottles() }
             }
         }
     }
@@ -52,6 +54,29 @@ final class CheckForUpdatesViewModel: ObservableObject {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Sparkle: reads SUFeedURL and SUPublicEDKey from Info.plist; no-ops in bare dev builds without them.
     let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    /// Set from the App's onAppear so quit-time can reach the bottles.
+    weak var appState: AppState?
+
+    /// Wine processes survive the app (they're not children of its lifetime), so quitting while a
+    /// game or Steam runs would strand them with no UI attached. Ask instead of leaking.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let state = appState, state.wineProcessesRunning() else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = L("Windows programs are still running")
+        alert.informativeText = L("Stop them and quit, or leave them running? A game left running keeps playing without Highball — quit it from inside the game when you're done.")
+        alert.addButton(withTitle: L("Stop Everything & Quit"))
+        alert.addButton(withTitle: L("Leave Running & Quit"))
+        alert.addButton(withTitle: L("Cancel"))
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            state.killAllBottles()
+            return .terminateNow
+        case .alertSecondButtonReturn:
+            return .terminateNow
+        default:
+            return .terminateCancel
+        }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Works as a bare SwiftPM executable during development: give it a real UI presence.
