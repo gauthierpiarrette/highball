@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.5.1</title>
+      <description><![CDATA[Hotfix: creating your first bottle failed on fresh installs (the app pointed Wine's working directory at a folder that only exists after first boot). If 0.5.0 wouldn't make a bottle for you — this is the fix, and it'll arrive via Check for Updates too.]]></description>
+      <pubDate>Mon, 24 Aug 2026 06:25:36 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.5.1/Highball-0.5.1.zip" sparkle:version="0.5.1" sparkle:shortVersionString="0.5.1" sparkle:edSignature="toS3cMuMxj/YYE8vQEo7f6VpIsX8VUDQLA8RSQtjvkHcxrp/xLEBcNcWff2aIAtv92wqTVFQblrPl/P9dd9XAQ==" length="2280922" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.5.0</title>
       <description><![CDATA[The design release. Highball now looks like what it is — a game launcher: full-bleed artwork cards with verdicts on the art and play-on-hover, one launcher row where installed means Open and missing means Install, Highball's amber through the whole shell instead of system blue, and settings tucked into a toolbar sheet where they belong. Same engine, same database, entirely different feel.]]></description>
       <pubDate>Mon, 24 Aug 2026 05:12:19 -0700</pubDate>
