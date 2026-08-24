@@ -31,9 +31,13 @@ Highball is built around that lesson:
   DXMT, and if you want commercial-grade support you should buy
   [CrossOver](https://www.codeweavers.com/crossover) — it funds most of Wine's Mac work.
 
-## Install (CLI, today)
+## Install
 
-Requires Apple Silicon, macOS 14+, Rosetta 2 (`softwareupdate --install-rosetta`).
+**[Download Highball](https://github.com/gauthierpiarrette/highball/releases/latest)**, drag it
+to Applications, open it. The app walks you through the rest — engine download, your first
+bottle, Steam. Requires Apple Silicon and macOS 14+ (it prompts for Rosetta 2 if needed).
+
+<details><summary>Prefer the terminal? The CLI does everything the app does.</summary>
 
 ```sh
 swift build -c release
@@ -42,6 +46,7 @@ swift build -c release
 .build/release/highball bottle create play --recipe steam
 .build/release/highball run play steam
 ```
+</details>
 
 Everything lives in `~/Library/Application Support/Highball/`. Nothing touches `/usr` or
 `/Library`; deleting that folder is a full uninstall.
