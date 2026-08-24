@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.4.1</title>
+      <description><![CDATA[Design pass: branded sidebar, amber bottle header, launcher tiles with icons, humanized engine names, game-card hover states, empty states, and the redesigned compatibility database site with 12,491 predictions. Plus the automated verification harness from 0.4.0, now with display-wake fixed.]]></description>
+      <pubDate>Mon, 24 Aug 2026 04:58:41 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.4.1/Highball-0.4.1.zip" sparkle:version="0.4.1" sparkle:shortVersionString="0.4.1" sparkle:edSignature="WWw3VzNevq6ZoFNvRiMXv0wIxYgsKPUuBwaz6T4rqJT2Ov6+hdm2ICNf3Xmxm2a3CCRkb/Chi088cxub257RCA==" length="2226394" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.4.0</title>
       <description><![CDATA[The database learns to feed itself: automated verification harness (highball verify — tests your installed games under every renderer, detects crashes and black screens, records provenance-complete verdicts; anti-cheat titles skipped by design), 12,491 machine-derived Mac predictions on the database site, Mac-aware anti-cheat map for 1,166 titles, UI polish (game-card hover, humanized engine names, empty states), and a landing page at gauthierpiarrette.github.io/highball.]]></description>
       <pubDate>Mon, 24 Aug 2026 04:41:04 -0700</pubDate>
