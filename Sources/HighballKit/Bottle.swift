@@ -69,6 +69,10 @@ public struct BottleSettings: Codable, Sendable {
     public var sync: SyncMode = .msync
     public var metalHUD: Bool = false
     public var advertiseAVX: Bool = false
+    /// DXVK async pipeline compilation — big shader-stutter relief, minor risk of artifacts.
+    public var dxvkAsync: Bool = true
+    /// Cap the frame rate (0 = uncapped). Applied per renderer (DXVK_FRAME_RATE / DXMT_CONFIG).
+    public var fpsCap: Int = 0
     public var environment: [String: String] = [:]
     public var pins: [Pin] = []
     public var recipes: [String] = []
@@ -77,6 +81,24 @@ public struct BottleSettings: Codable, Sendable {
     public init(name: String, engineID: String) {
         self.name = name
         self.engineID = engineID
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        formatVersion = try c.decodeIfPresent(Int.self, forKey: .formatVersion) ?? 1
+        name = try c.decode(String.self, forKey: .name)
+        engineID = try c.decode(String.self, forKey: .engineID)
+        renderer = try c.decodeIfPresent(Renderer.self, forKey: .renderer) ?? .dxmt
+        windowsVersion = try c.decodeIfPresent(WindowsVersion.self, forKey: .windowsVersion) ?? .win10
+        sync = try c.decodeIfPresent(SyncMode.self, forKey: .sync) ?? .msync
+        metalHUD = try c.decodeIfPresent(Bool.self, forKey: .metalHUD) ?? false
+        advertiseAVX = try c.decodeIfPresent(Bool.self, forKey: .advertiseAVX) ?? false
+        dxvkAsync = try c.decodeIfPresent(Bool.self, forKey: .dxvkAsync) ?? true
+        fpsCap = try c.decodeIfPresent(Int.self, forKey: .fpsCap) ?? 0
+        environment = try c.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
+        pins = try c.decodeIfPresent([Pin].self, forKey: .pins) ?? []
+        recipes = try c.decodeIfPresent([String].self, forKey: .recipes) ?? []
+        created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()
     }
 }
 
@@ -120,6 +142,15 @@ public struct Bottle: Sendable {
         }
         if settings.metalHUD { env["MTL_HUD_ENABLED"] = "1" }
         if settings.advertiseAVX { env["ROSETTA_ADVERTISE_AVX"] = "1" }
+        let r = renderer ?? settings.renderer
+        if r == .dxvk, settings.dxvkAsync { env["DXVK_ASYNC"] = "1" }
+        if settings.fpsCap > 0 {
+            switch r {
+            case .dxvk: env["DXVK_FRAME_RATE"] = String(settings.fpsCap)
+            case .dxmt: env["DXMT_CONFIG"] = "d3d11.preferredMaxFrameRate=\(settings.fpsCap);"
+            default: break
+            }
+        }
         merge(&env, settings.environment)
         merge(&env, try (renderer ?? settings.renderer).environment(engine: engine))
         merge(&env, extra)

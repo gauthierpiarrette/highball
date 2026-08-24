@@ -78,6 +78,12 @@ enum L10n {
         "Install engine": "Installer le moteur",
         "Installing…": "Installation…",
 
+        "DXVK async shader compilation (less stutter)": "Compilation asynchrone des shaders DXVK (moins de saccades)",
+        "Frame rate cap": "Limite d’images par seconde",
+        "Uncapped": "Illimité",
+        "Games run with the bottle’s sync (msync is fastest). Opening the Steam window restarts Windows processes with sync off — its interface needs it.":
+            "Les jeux utilisent la synchronisation de la bouteille (msync est la plus rapide). Ouvrir la fenêtre Steam redémarre les processus Windows sans synchronisation — son interface l’exige.",
+
         // Status pills
         "Verified": "Vérifié",
         "Reported": "Signalé",

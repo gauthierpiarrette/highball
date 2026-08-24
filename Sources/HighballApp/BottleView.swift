@@ -146,6 +146,15 @@ struct BottleView: View {
         }
         Toggle(L("Metal performance HUD"), isOn: binding(\.metalHUD))
         Toggle(L("Advertise AVX to games (Rosetta)"), isOn: binding(\.advertiseAVX))
+        Toggle(L("DXVK async shader compilation (less stutter)"), isOn: binding(\.dxvkAsync))
+        Picker(L("Frame rate cap"), selection: binding(\.fpsCap)) {
+            Text(L("Uncapped")).tag(0)
+            Text("30 fps").tag(30)
+            Text("60 fps").tag(60)
+            Text("120 fps").tag(120)
+        }
+        Text(L("Games run with the bottle’s sync (msync is fastest). Opening the Steam window restarts Windows processes with sync off — its interface needs it."))
+            .font(.caption).foregroundStyle(.secondary)
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<BottleSettings, T>) -> Binding<T> {

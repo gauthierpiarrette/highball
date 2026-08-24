@@ -83,9 +83,10 @@ public struct WineRunner: Sendable {
 
     /// Runs the pinned program, honouring its own renderer/env/args.
     @discardableResult
-    public func start(pin: Pin, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
+    public func start(pin: Pin, extraEnvironment: [String: String] = [:], onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
         let exe = bottle.driveC.appending(path: pin.path)
-        return try await start(exe, arguments: pin.arguments, renderer: pin.renderer, extraEnvironment: pin.environment, onOutput: onOutput)
+        let env = pin.environment.merging(extraEnvironment) { $1 }
+        return try await start(exe, arguments: pin.arguments, renderer: pin.renderer, extraEnvironment: env, onOutput: onOutput)
     }
 
     public func wineboot() async throws -> LaunchResult {

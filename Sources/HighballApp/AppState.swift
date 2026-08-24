@@ -138,11 +138,24 @@ final class AppState {
         }
     }
 
+    /// Steam's own UI (CEF) hangs under msync/esync, and Wine's sync mode is fixed when the
+    /// prefix's wineserver starts. So the Steam window gets a cold start with sync forced off,
+    /// while games keep the bottle's (faster) sync. See recipes/launchers/steam.json.
+    private func isSteamUI(_ pin: Pin) -> Bool {
+        pin.path.lowercased().hasSuffix("steam/steam.exe")
+    }
+
     func launch(pin: Pin, in bottle: Bottle) {
         guard let engine = engine(for: bottle) else { return }
         runBusy("Running \(pin.name)", showLogSheet: false) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
-            let result = try await runner.start(pin: pin) { line in Task { @MainActor in self.appendLog(line) } }
+            var extra = [String: String]()
+            if isSteamUI(pin), bottle.settings.sync != SyncMode.none {
+                try? runner.kill()                      // restart the wineserver so sync=none takes effect
+                try? await Task.sleep(for: .seconds(2))
+                extra = ["WINEMSYNC": "0", "WINEESYNC": "0"]
+            }
+            let result = try await runner.start(pin: pin, extraEnvironment: extra) { line in Task { @MainActor in self.appendLog(line) } }
             if result.crashedEarly {
                 let current = pin.renderer ?? bottle.settings.renderer
                 let next: Renderer = current == .dxmt ? .d3dmetal : (current == .d3dmetal ? .dxvk : .dxmt)
