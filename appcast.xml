@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.5.2</title>
+      <description><![CDATA[Bottle names are now validated before creation: names with characters Windows forbids in paths (\ / : * ? " < > |) silently broke the Wine prefix (wineboot exit 53). The New Bottle sheet now explains the problem inline. Fixes #12.]]></description>
+      <pubDate>Mon, 24 Aug 2026 12:39:46 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.5.2/Highball-0.5.2.zip" sparkle:version="0.5.2" sparkle:shortVersionString="0.5.2" sparkle:edSignature="R/p3kwYcHhsTXhBwC1HyKsCNRhFMZzd8XjATTIe7ELXW8XimXty2DOatrj1Km2SPeHgLvRPPLTbaEbxON5FxBw==" length="2283383" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.5.1</title>
       <description><![CDATA[Hotfix: creating your first bottle failed on fresh installs (the app pointed Wine's working directory at a folder that only exists after first boot). If 0.5.0 wouldn't make a bottle for you — this is the fix, and it'll arrive via Check for Updates too.]]></description>
       <pubDate>Mon, 24 Aug 2026 06:25:36 -0700</pubDate>
