@@ -9,9 +9,9 @@ and which renderer to use — backed by an open, CC0 compatibility database.
 
 A highball is whisky made easy-drinking. Same idea.
 
-> Status: **pre-release**. App and CLI work end to end: engine install → bottle → Steam
-> login → game, with per-bottle renderer switching and msync-accelerated launches.
-> Download the app from [Releases](https://github.com/gauthierpiarrette/highball/releases).
+> Status: **beta**. Notarized, auto-updating, working end to end: engine install → bottle →
+> Steam login → game, with per-bottle renderer switching and msync-accelerated launches.
+> **[Download Highball](https://github.com/gauthierpiarrette/highball/releases/latest)** — Apple Silicon, macOS 14+.
 
 ## Why Highball exists when Whisky died
 
