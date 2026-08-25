@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.6.4</title>
+      <description><![CDATA[The Dependencies section gains .NET Framework 4.8, one click per bottle and verified end to end. This unblocks games whose launchers need .NET, like Assetto Corsa (32-bit .NET apps work; 64-bit ones can still hit a known Wine limitation). Also fixes the underlying winetricks support on the engine and lets the file picker select .bat scripts.]]></description>
+      <pubDate>Tue, 25 Aug 2026 11:59:21 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.6.4/Highball-0.6.4.zip" sparkle:version="0.6.4" sparkle:shortVersionString="0.6.4" sparkle:edSignature="Tfwry1Zmikh5lnvdzMPporSFjwNdfcwAG6QjqXZVEpjND++7V2TTrDjbhX1OMrHYRdWl06q6uuY7FZe/RSE1Cg==" length="2373028" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.6.3</title>
       <description><![CDATA[Fixes the crash some of you hit right after a launcher or game closed (the 'Highball quit unexpectedly' dialog, most common on M4 and M5 Macs) — root-caused from a reader's crash report. Also: dropping an unsupported file on a bottle now tells you which file types work instead of doing nothing.]]></description>
       <pubDate>Tue, 25 Aug 2026 09:21:25 -0700</pubDate>
