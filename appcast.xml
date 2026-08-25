@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.0</title>
+      <description><![CDATA[Epic Games support, in the app. Connect your Epic account (your password never touches Highball), see your library in any bottle, and install and play with one click, through the same open source path the Heroic launcher uses, so the Epic launcher's broken install flow is never involved. Games default to the renderer that works. Also in this release: .bat files in the run picker, clearer rejected-drop messages, and protection against double-launching a starting program.]]></description>
+      <pubDate>Tue, 25 Aug 2026 13:10:14 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.0/Highball-0.7.0.zip" sparkle:version="0.7.0" sparkle:shortVersionString="0.7.0" sparkle:edSignature="w+Z06jaLFzdEvmrvjKLN+C/VeiYyKWvCSfmIdJTMiN3teXx025SXXxa8ZI7gX4pA+3KY/vUTKbFTNnnZGu1ICQ==" length="2415359" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.6.4</title>
       <description><![CDATA[The Dependencies section gains .NET Framework 4.8, one click per bottle and verified end to end. This unblocks games whose launchers need .NET, like Assetto Corsa (32-bit .NET apps work; 64-bit ones can still hit a known Wine limitation). Also fixes the underlying winetricks support on the engine and lets the file picker select .bat scripts.]]></description>
       <pubDate>Tue, 25 Aug 2026 11:59:21 -0700</pubDate>
