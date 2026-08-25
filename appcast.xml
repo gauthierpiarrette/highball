@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.2</title>
+      <description><![CDATA[New Advanced section in bottle settings: add your own Wine DLL overrides (mods like Cyber Engine Tweaks need version=n,b) and environment variables, no terminal required. Overrides combine correctly with what each renderer already sets.]]></description>
+      <pubDate>Tue, 25 Aug 2026 13:58:19 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.2/Highball-0.7.2.zip" sparkle:version="0.7.2" sparkle:shortVersionString="0.7.2" sparkle:edSignature="tgTvAkBR+zBZ8hEkNUCFRkaKtcudRygWKcXxXhBEtb4EoYkv7mLY2Ta/rRiGZy99OyrV+HqKyuuxkZwHKWkVCg==" length="2429981" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.1</title>
       <description><![CDATA[Fixes games that refused to start with an NVIDIA driver error (NVAPI, seen with CS:GO among others). Wine was telling games they were on an NVIDIA card; bottles now identify as AMD, which those games handle fine. New bottles get this automatically; for existing bottles right-click the bottle and choose Repair.]]></description>
       <pubDate>Tue, 25 Aug 2026 13:47:18 -0700</pubDate>
