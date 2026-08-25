@@ -335,6 +335,21 @@ final class AppState {
             ?? repoRoot?.appending(path: "spike/engine-manifest.json")
     }
 
+    /// All bundled dependency ("tweak") recipes, for the Dependencies section in bottle settings.
+    static func tweakRecipes() -> [HighballKit.Recipe] {
+        var dirs: [URL] = []
+        if let res = Bundle.main.resourceURL { dirs.append(res) }
+        if let root = repoRoot { dirs.append(root.deletingLastPathComponent().appending(path: "highball-db/recipes/tweaks")) }
+        var out: [String: HighballKit.Recipe] = [:]
+        for dir in dirs {
+            for url in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+            where url.pathExtension == "json" {
+                if let r = try? HighballKit.Recipe.load(from: url), r.kind == .tweak, out[r.id] == nil { out[r.id] = r }
+            }
+        }
+        return out.values.sorted { $0.title < $1.title }
+    }
+
     static func recipe(_ id: String) -> HighballKit.Recipe? {
         if let url = Bundle.main.url(forResource: id, withExtension: "json"),
            let r = try? HighballKit.Recipe.load(from: url) { return r }

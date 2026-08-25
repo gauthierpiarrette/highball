@@ -27,7 +27,7 @@ if [ ! -d "$RECIPES" ]; then
   RECIPES=".build/highball-db/recipes"
   [ -d "$RECIPES" ] || git clone --depth 1 https://github.com/gauthierpiarrette/highball-db.git .build/highball-db
 fi
-for f in "$RECIPES"/launchers/*.json "$RECIPES"/games/*.json; do cp "$f" "$APP/Contents/Resources/"; done
+for f in "$RECIPES"/launchers/*.json "$RECIPES"/games/*.json "$RECIPES"/tweaks/*.json; do cp "$f" "$APP/Contents/Resources/"; done
 DBDIR="$(dirname "$RECIPES")/db/games"
 if [ -d "$DBDIR" ]; then mkdir -p "$APP/Contents/Resources/db-games"; cp "$DBDIR"/*.json "$APP/Contents/Resources/db-games/"; fi
 

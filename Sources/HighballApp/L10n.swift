@@ -42,6 +42,10 @@ enum L10n {
         "Report this problem…": "Signaler ce problème…",
         "Duplicate bottle": "Dupliquer la bouteille",
         "Repair bottle (re-run first boot)": "Réparer la bouteille (relancer le premier démarrage)",
+        "Dependencies": "Dépendances",
+        "Installed": "Installée",
+        "Windows runtimes some games need. Install them when a game complains about a missing runtime or refuses to start.":
+            "Des composants Windows dont certains jeux ont besoin. Installez-les quand un jeu se plaint d'un composant manquant ou refuse de démarrer.",
         "Steam crashed at a known spot — relaunching to resume the update":
             "Steam a planté à un endroit connu — relance pour reprendre la mise à jour",
 

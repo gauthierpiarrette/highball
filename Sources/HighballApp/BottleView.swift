@@ -482,6 +482,26 @@ struct BottleSettingsSheet: View {
                     Text(L("Games run with the bottle’s sync (msync is fastest). Opening the Steam window restarts Windows processes with sync off — its interface needs it."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                let tweaks = AppState.tweakRecipes()
+                if !tweaks.isEmpty {
+                    Section(L("Dependencies")) {
+                        ForEach(tweaks, id: \.id) { r in
+                            HStack {
+                                Text(r.title)
+                                Spacer()
+                                if (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.recipes.contains(r.id) {
+                                    Label(L("Installed"), systemImage: "checkmark.circle.fill").foregroundStyle(.green).labelStyle(.titleAndIcon)
+                                } else {
+                                    Button(L("Install")) {
+                                        state.applyRecipe(r.id, to: state.bottles.first { $0.name == bottle.name } ?? bottle)
+                                    }.controlSize(.small)
+                                }
+                            }
+                        }
+                        Text(L("Windows runtimes some games need. Install them when a game complains about a missing runtime or refuses to start."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Section {
                     Button(L("Delete bottle…"), role: .destructive) { confirmDelete = true }
                 }
