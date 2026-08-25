@@ -97,10 +97,11 @@ final class AppState {
         return nil
     }
 
-    private func runBusy(_ title: String, showLogSheet: Bool = true, _ work: @escaping () async throws -> Void) {
+    private func runBusy(_ title: String, showLogSheet: Bool = true, cleanup: (() -> Void)? = nil, _ work: @escaping () async throws -> Void) {
         busy = true; busyTitle = title; stage = ""; logLines = []; showLog = showLogSheet
         Task {
             do { try await work() } catch { errorMessage = "\(error)" }
+            cleanup?()
             busy = false
             refresh()
         }
@@ -166,9 +167,18 @@ final class AppState {
         pin.path.lowercased().hasSuffix("steam/steam.exe")
     }
 
+    /// Pins whose launch session is still active — a second click would kill and restart the
+    /// wineserver under the live session (issue #13's crash sequence), so it's refused instead.
+    private var launchingPins: Set<UUID> = []
+
     func launch(pin: Pin, in bottle: Bottle) {
         guard let engine = engine(for: bottle) else { return }
-        runBusy("Running \(pin.name)", showLogSheet: false) { [self] in
+        guard !launchingPins.contains(pin.id) else {
+            errorMessage = "\(pin.name) is already starting or running. If its window never appeared, use Stop all processes on the bottle, then try again."
+            return
+        }
+        launchingPins.insert(pin.id)
+        runBusy("Running \(pin.name)", showLogSheet: false, cleanup: { [weak self] in self?.launchingPins.remove(pin.id) }) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             var extra = [String: String]()
             if isSteamUI(pin), bottle.settings.sync != SyncMode.none {
