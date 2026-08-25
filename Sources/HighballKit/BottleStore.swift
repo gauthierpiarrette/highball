@@ -7,7 +7,17 @@ public struct BottleStore: Sendable {
     public func list() throws -> [Bottle] {
         guard FileManager.default.fileExists(atPath: paths.bottles.path) else { return [] }
         return try FileManager.default.contentsOfDirectory(at: paths.bottles, includingPropertiesForKeys: nil)
-            .compactMap { try? Bottle.load($0) }
+            .compactMap { url -> Bottle? in
+                guard var b = try? Bottle.load(url) else { return nil }
+                // The folder is the bottle's identity (get/delete resolve by folder). A copied
+                // folder keeps the old internal name, which crashed the app and confused lookups
+                // (issue #13) — reconcile so "play copy" is simply a bottle called "play copy".
+                if b.settings.name != url.lastPathComponent {
+                    b.settings.name = url.lastPathComponent
+                    try? b.save()
+                }
+                return b
+            }
             .sorted { $0.name < $1.name }
     }
 

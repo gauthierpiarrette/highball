@@ -44,7 +44,8 @@ final class AppState {
         needsOnboarding = engines.isEmpty
         rosettaInstalled = FileManager.default.fileExists(atPath: "/Library/Apple/usr/share/rosetta/rosetta")
         if selectedBottle == nil { selectedBottle = bottles.first?.name }
-        gamesByBottle = Dictionary(uniqueKeysWithValues: bottles.map { ($0.name, SteamLibrary.games(in: $0)) })
+        // Never trap on duplicate names (a Finder-duplicated bottle crashed the app at launch — issue #13).
+        gamesByBottle = Dictionary(bottles.map { ($0.name, SteamLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
         if gameDB.byAppID.isEmpty {
             var dirs: [URL] = []
             if let res = Bundle.main.resourceURL { dirs.append(res.appending(path: "db-games")) }
