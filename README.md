@@ -5,8 +5,9 @@
 <p align="center"><img src=".github/assets/app.png" width="760" alt="Highball showing a bottle with a verified game, renderer verdict from the open database, and one-click launcher installs"></p>
 
 Highball is a native macOS app (and CLI) that sets up Wine, DXMT, D3DMetal and DXVK for
-you, installs Steam and other launchers with one click, and tells you honestly what runs,
-what doesn't, and which renderer to use — backed by an open, CC0 compatibility database
+you, installs Steam with one click, connects your Epic Games library (installs and plays
+through the open source Legendary client, no Epic launcher involved), and tells you
+honestly what runs, what doesn't, and which renderer to use — backed by an open, CC0 compatibility database
 ([highball-db](https://github.com/gauthierpiarrette/highball-db), browsable at
 [gauthierpiarrette.github.io/highball-db](https://gauthierpiarrette.github.io/highball-db/))
 where every claim carries its provenance.
@@ -65,8 +66,10 @@ Everything lives in `~/Library/Application Support/Highball/`. Nothing touches `
 | Renderer switching | ✅ per bottle and per pinned program, no reinstall |
 | 32-bit programs | ✅ via Wine WoW64 (Steam's own 32-bit bootstrapper ran) |
 | Cyberpunk 2077 | ✅ community-verified on M5 / macOS 15 (D3DMetal + AVX + `--launcher-skip`, ~17 fps Steam Deck preset) |
-| Windows runtimes (VC++ 2015-2022) | ✅ one-click per bottle (Settings → Dependencies) |
-| .NET Framework games (e.g. Assetto Corsa) | ❌ not yet — .NET can't install on the current engine ([#16](https://github.com/gauthierpiarrette/highball/issues/16)) |
+| Epic Games | ✅ connect your account, install and play (via Legendary — the Epic launcher's install flow is broken under Wine and never used) |
+| Windows runtimes (VC++ 2015-2022, .NET Framework 4.8) | ✅ one-click per bottle (Settings → Dependencies) |
+| ReShade | ✅ verified under DXVK (dll next to the exe + a DLL override, now settable in Settings → Advanced) |
+| DLL overrides & env vars | ✅ per bottle (Settings → Advanced) — Cyber Engine Tweaks class mods work |
 | Kernel anti-cheat (Valorant, Fortnite, Destiny 2…) | ❌ structurally impossible — flagged in the DB before you download 80 GB |
 
 ## Architecture in one paragraph
