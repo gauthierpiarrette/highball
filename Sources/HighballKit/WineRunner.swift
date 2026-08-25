@@ -143,12 +143,14 @@ public struct WineRunner: Sendable {
         try await regAdd(key: #"HKCU\Control Panel\Desktop"#, name: "LogPixels", type: "REG_DWORD", data: on ? "192" : "96")
     }
 
-    /// Wine's fallback D3D reports a fake NVIDIA GPU from its card table, which makes some
-    /// games (CS:GO and friends) demand NVAPI and die. Pin an AMD identity instead, matching
-    /// what DXMT already advertises. Applied at bottle creation and by Repair.
+    /// Wine's fallback D3D reports a fake NVIDIA GPU (GeForce 8800 GTX class) when it can't
+    /// recognize the Apple driver, which makes some games demand NVAPI and die. Pin an AMD
+    /// identity instead. The pair MUST exist in Wine's GPU table or the override is silently
+    /// discarded ("Invalid GPU override" in winediag): 0x1002:0x73bf is Radeon RX 6800/6900 XT,
+    /// present in Wine 10's table. Applied at bottle creation and by Repair.
     public func setGpuIdentity() async throws {
         try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciVendorID", type: "REG_DWORD", data: String(0x1002))
-        try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciDeviceID", type: "REG_DWORD", data: String(0x73df))
+        try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciDeviceID", type: "REG_DWORD", data: String(0x73bf))
     }
 
     public func setWindowsVersion(_ v: WindowsVersion) async throws {
