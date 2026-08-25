@@ -41,7 +41,7 @@ final class AppState {
     func chooseProgramToRun() {
         let panel = NSOpenPanel()
         panel.title = L("Choose a Windows program")
-        panel.allowedContentTypes = [.exe, .msi].compactMap { $0 }
+        panel.allowedContentTypes = [.exe, .msi, .bat].compactMap { $0 }
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url { pendingRun = url }
     }
@@ -393,4 +393,5 @@ import UniformTypeIdentifiers
 extension UTType {
     static let exe = UTType(filenameExtension: "exe")
     static let msi = UTType(filenameExtension: "msi")
+    static let bat = UTType(filenameExtension: "bat")
 }
