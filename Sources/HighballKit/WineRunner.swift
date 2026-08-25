@@ -27,6 +27,7 @@ public struct WineRunner: Sendable {
         renderer: Renderer? = nil,
         extraEnvironment: [String: String] = [:],
         label: String? = nil,
+        workingDirectory: URL? = nil,
         onOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> LaunchResult {
         try paths.ensure()
@@ -43,7 +44,8 @@ public struct WineRunner: Sendable {
         process.arguments = args
         process.environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
         // drive_c only exists after the first wineboot — fall back to the bottle root on fresh prefixes.
-        process.currentDirectoryURL = FileManager.default.fileExists(atPath: bottle.driveC.path) ? bottle.driveC : bottle.url
+        process.currentDirectoryURL = workingDirectory
+            ?? (FileManager.default.fileExists(atPath: bottle.driveC.path) ? bottle.driveC : bottle.url)
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -82,8 +84,8 @@ public struct WineRunner: Sendable {
     /// Runs the executable directly under `wine` (not `start /unix`) so the process stays attached and
     /// everything it and its children print lands in the log. The call returns when the program exits.
     @discardableResult
-    public func start(_ executable: URL, arguments: [String] = [], renderer: Renderer? = nil, extraEnvironment: [String: String] = [:], onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
-        try await run([executable.path] + arguments, renderer: renderer, extraEnvironment: extraEnvironment, label: executable.lastPathComponent, onOutput: onOutput)
+    public func start(_ executable: URL, arguments: [String] = [], renderer: Renderer? = nil, extraEnvironment: [String: String] = [:], workingDirectory: URL? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
+        try await run([executable.path] + arguments, renderer: renderer, extraEnvironment: extraEnvironment, label: executable.lastPathComponent, workingDirectory: workingDirectory, onOutput: onOutput)
     }
 
     /// Runs the pinned program, honouring its own renderer/env/args.

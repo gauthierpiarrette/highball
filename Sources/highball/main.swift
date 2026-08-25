@@ -7,7 +7,7 @@ struct Highball: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "highball",
         abstract: "Highball — run Windows games on Apple Silicon. Free, open, engine-agnostic.",
-        subcommands: [Engine.self, Bottle.self, Run.self, Recipe.self, Tricks.self, Env.self, Report.self, BugReportCommand.self, Verify.self],
+        subcommands: [Engine.self, Bottle.self, Run.self, Recipe.self, Tricks.self, Env.self, Epic.self, Report.self, BugReportCommand.self, Verify.self],
         defaultSubcommand: nil
     )
 }
@@ -392,6 +392,82 @@ func loadRecipe(_ idOrPath: String) throws -> HighballKit.Recipe {
         and re-run from this directory, or pass a path to a recipe .json directly.
         (The Highball app bundles the recipes — this only affects CLI builds from source.)
         """)
+}
+
+struct Epic: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Install and launch Epic games through Legendary (bypasses the Epic launcher's broken install flow).",
+        subcommands: [Login.self, Auth.self, List.self, Install.self, Launch.self])
+
+    struct Login: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Print the Epic sign-in URL; paste the code it gives you into 'highball epic auth <code>'.")
+        func run() async throws {
+            let store = EpicStore()
+            _ = try await store.ensureInstalled()
+            print("1. Open: \(EpicStore.loginURL.absoluteString)")
+            print("2. Sign in with your Epic account; the page shows an authorizationCode.")
+            print("3. Run: highball epic auth <that code>")
+        }
+    }
+
+    struct Auth: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Finish sign-in with the code from the login page.")
+        @Argument var code: String
+        func run() async throws {
+            let store = EpicStore()
+            _ = try await store.ensureInstalled()
+            try store.authenticate(code: code)
+            print(store.isAuthenticated ? "signed in" : "sign-in did not complete — try 'highball epic login' again")
+        }
+    }
+
+    struct List: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "List the account's games (Windows builds).")
+        func run() async throws {
+            let store = EpicStore()
+            _ = try await store.ensureInstalled()
+            guard store.isAuthenticated else { fail("not signed in — run 'highball epic login' first") }
+            let installed = Set((try? store.installedGames())?.map(\.app_name) ?? [])
+            for g in try store.ownedGames().sorted(by: { $0.app_title < $1.app_title }) {
+                print("\(installed.contains(g.app_name) ? "[installed] " : "")\(g.app_name)\t\(g.app_title)")
+            }
+        }
+    }
+
+    struct Install: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Install a game's Windows build into a bottle (drive_c/Games).")
+        @Argument var bottle: String
+        @Argument(help: "App name from 'highball epic list'.") var app: String
+        func run() async throws {
+            let store = EpicStore()
+            _ = try await store.ensureInstalled()
+            guard store.isAuthenticated else { fail("not signed in — run 'highball epic login' first") }
+            let b = try BottleStore().get(bottle)
+            let status = try store.install(app, into: b) { print($0) }
+            guard status == 0 else { fail("legendary install exited with \(status)") }
+            print("installed \(app) into \(b.name)")
+        }
+    }
+
+    struct Launch: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Launch an installed Epic game in a bottle through Wine.")
+        @Argument var bottle: String
+        @Argument var app: String
+        @Option var renderer: HighballKit.Renderer?
+        @Flag(help: "Skip Epic online auth (for games that allow offline play).") var offline = false
+        func run() async throws {
+            let store = EpicStore()
+            _ = try await store.ensureInstalled()
+            let b = try BottleStore().get(bottle)
+            let eng = try EngineStore().engine(b.settings.engineID)
+            let info = try store.launchInfo(app, offline: offline)
+            let runner = WineRunner(engine: eng, bottle: b)
+            let result = try await runner.start(info.executable, arguments: info.arguments,
+                                                renderer: renderer, extraEnvironment: info.environment,
+                                                workingDirectory: info.workingDirectory)
+            print("exit=\(result.exitStatus) — log: \(result.log.path)")
+        }
+    }
 }
 
 struct BugReportCommand: AsyncParsableCommand {
