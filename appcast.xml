@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.5.6</title>
+      <description><![CDATA[Fixes a crash at launch when a bottle folder had been copied or duplicated in Finder — the copy now just appears as its own working bottle. If Highball was crashing on open for you, this is the fix.]]></description>
+      <pubDate>Tue, 25 Aug 2026 04:38:05 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.5.6/Highball-0.5.6.zip" sparkle:version="0.5.6" sparkle:shortVersionString="0.5.6" sparkle:edSignature="w52f8XXTFeIKCVpgcsX59uxCrNfNqTFVWbri0GS4IME6VTB3JlAW/MtWswd+gSRHcJtrLyCr3IyoL+1BkjciCg==" length="2296692" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.5.5</title>
       <description><![CDATA[Games can now use your microphone: macOS will show the standard permission prompt the first time a game or app in a bottle asks for it. Previously the app was missing the required declarations, so voice chat got silently denied with no prompt.]]></description>
       <pubDate>Tue, 25 Aug 2026 03:47:24 -0700</pubDate>
