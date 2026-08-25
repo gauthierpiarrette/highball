@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.6.3</title>
+      <description><![CDATA[Fixes the crash some of you hit right after a launcher or game closed (the 'Highball quit unexpectedly' dialog, most common on M4 and M5 Macs) — root-caused from a reader's crash report. Also: dropping an unsupported file on a bottle now tells you which file types work instead of doing nothing.]]></description>
+      <pubDate>Tue, 25 Aug 2026 09:21:25 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.6.3/Highball-0.6.3.zip" sparkle:version="0.6.3" sparkle:shortVersionString="0.6.3" sparkle:edSignature="EWkHM8ivOQoGepEsPqlvkWBHhzsHtvaa9jEJz2d8dbuOHjyMgOkWreC6LSeOcHS3PyWnzY4n9QXVb+YIc2TRCg==" length="2348903" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.6.2</title>
       <description><![CDATA[You can now run any Windows .exe or .msi from the GUI without knowing the secret: a 'Run a Windows program…' button lives under the launchers (also File menu, ⌘O), opening the same run-or-pin flow as drag-and-drop — which still works, and is now labeled so you can actually find it.]]></description>
       <pubDate>Tue, 25 Aug 2026 06:57:37 -0700</pubDate>
