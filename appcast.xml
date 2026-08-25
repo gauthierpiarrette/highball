@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.5.5</title>
+      <description><![CDATA[Games can now use your microphone: macOS will show the standard permission prompt the first time a game or app in a bottle asks for it. Previously the app was missing the required declarations, so voice chat got silently denied with no prompt.]]></description>
+      <pubDate>Tue, 25 Aug 2026 03:47:24 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.5.5/Highball-0.5.5.zip" sparkle:version="0.5.5" sparkle:shortVersionString="0.5.5" sparkle:edSignature="sx4Vvg41PXF57c/jy/BIjYJkGUo1LqsZtgsBQnzpNEJ/MYNsNg5dKo53iGYYjWWS5uFE5Y6rO0hrNYkTRH8YDQ==" length="2296486" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.5.4</title>
       <description><![CDATA[Engine installs now show live download progress (per-component MB counts) instead of a blank sheet, and a stalled connection fails with a clear error after 60 seconds instead of hanging forever. Also: CLI quickstart fixes for source builds (recipe lookup guidance, bare program names route through Wine).]]></description>
       <pubDate>Tue, 25 Aug 2026 02:41:09 -0700</pubDate>
