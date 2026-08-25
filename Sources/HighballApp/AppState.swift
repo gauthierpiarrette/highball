@@ -103,8 +103,16 @@ final class AppState {
             let manifest = try EngineManifest.load(from: manifestURL)
             var accepted: Set<String> = []
             if acceptGPTK { accepted.insert("apple-gptk-license-2023-08-17") }
-            _ = try await engineStore.install(manifest, accepted: accepted) { name, _, _ in
-                Task { @MainActor in self.appendLog("downloaded \(name)") }
+            _ = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
+                Task { @MainActor in
+                    let mb = { (b: Int64) in String(format: "%.0f", Double(b) / 1_048_576) }
+                    if let total, total > 0 {
+                        self.stage = "Downloading \(name) — \(mb(received)) / \(mb(total)) MB"
+                        if received >= total { self.appendLog("downloaded \(name) — verifying and unpacking…") }
+                    } else {
+                        self.stage = "Downloading \(name) — \(mb(received)) MB"
+                    }
+                }
             }
             await MainActor.run { self.appendLog("engine installed") }
         }

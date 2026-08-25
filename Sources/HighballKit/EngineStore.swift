@@ -99,18 +99,28 @@ public struct EngineStore: Sendable {
         if FileManager.default.fileExists(atPath: dest.path), try sha256(of: dest) == component.sha256.lowercased() {
             return dest
         }
-        let (tmp, response) = try await URLSession.shared.download(from: component.url, delegate: nil)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw HighballError.invalid("HTTP \(http.statusCode) for \(component.url)")
+        // Delegate-based download: real progress every ~2 MB (the app was showing a blank sheet
+        // for the whole 270 MB), and a 60 s no-data timeout so a stalled connection fails loudly
+        // instead of hanging forever (URLSession.shared's resource timeout is 7 days).
+        let expected = Int64(component.size ?? 0)
+        let delegate = ProgressingDownload(dest: dest) { received, total in
+            progress?(name, received, total > 0 ? total : expected)
         }
-        try? FileManager.default.removeItem(at: dest)
-        try FileManager.default.moveItem(at: tmp, to: dest)
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 60
+        cfg.timeoutIntervalForResource = 3600
+        let session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            delegate.continuation = cont
+            session.downloadTask(with: component.url).resume()
+        }
         let actual = try sha256(of: dest)
         guard actual == component.sha256.lowercased() else {
             try? FileManager.default.removeItem(at: dest)
             throw HighballError.checksumMismatch(file: dest.lastPathComponent, expected: component.sha256, actual: actual)
         }
-        progress?(name, Int64(component.size ?? 0), Int64(component.size ?? 0))
+        progress?(name, expected > 0 ? expected : 1, expected > 0 ? expected : 1)
         return dest
     }
 
@@ -232,5 +242,48 @@ public struct InstalledEngine: Sendable {
                        .replacingOccurrences(of: "${renderers}", with: renderersDir.path)
         }
         return env
+    }
+}
+
+/// URLSessionDownloadDelegate that streams byte progress (~every 2 MB) and moves the finished
+/// file into place before resuming its continuation. State is confined to the session's own
+/// serial delegate queue, hence @unchecked Sendable.
+final class ProgressingDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let dest: URL
+    private let onProgress: @Sendable (Int64, Int64) -> Void
+    private var lastReported: Int64 = 0
+    private var moveError: Error?
+    var continuation: CheckedContinuation<Void, Error>?
+
+    init(dest: URL, onProgress: @escaping @Sendable (Int64, Int64) -> Void) {
+        self.dest = dest
+        self.onProgress = onProgress
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                    didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        if totalBytesWritten - lastReported >= 2_000_000 || totalBytesWritten == totalBytesExpectedToWrite {
+            lastReported = totalBytesWritten
+            onProgress(totalBytesWritten, totalBytesExpectedToWrite)
+        }
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        if let http = downloadTask.response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            moveError = HighballError.invalid("HTTP \(http.statusCode) for \(downloadTask.originalRequest?.url?.absoluteString ?? "download")")
+            return
+        }
+        do {
+            try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.moveItem(at: location, to: dest)
+        } catch { moveError = error }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let cont = continuation
+        continuation = nil
+        if let error { cont?.resume(throwing: error) }
+        else if let moveError { cont?.resume(throwing: moveError) }
+        else { cont?.resume() }
     }
 }

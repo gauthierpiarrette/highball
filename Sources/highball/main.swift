@@ -55,7 +55,11 @@ struct Engine: AsyncParsableCommand {
             var accepted: Set<String> = []
             if acceptD3DMetal { accepted.insert("apple-gptk-license-2023-08-17") }
             let engine = try await EngineStore().install(m, accepted: accepted) { name, got, total in
-                print("  \(name): \(got)/\(total ?? 0) bytes")
+                let t = total ?? 0
+                let mb = { (b: Int64) in String(format: "%.0f", Double(b) / 1_048_576) }
+                // \r keeps one live-updating line per component; newline when it completes.
+                print("\r  \(name): \(mb(got))\(t > 0 ? " / \(mb(t))" : "") MB", terminator: t > 0 && got >= t ? "\n" : "")
+                fflush(stdout)
             }
             print("installed \(engine.id) at \(engine.root.path)")
             print("wine: \(try engine.wineVersion())")
