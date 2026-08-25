@@ -49,18 +49,22 @@ public struct WineRunner: Sendable {
         process.standardError = pipe
 
         let start = Date()
-        try process.run()
+        do { try process.run() } catch { try? logHandle.close(); throw error }
 
         let reader = pipe.fileHandleForReading
         let status: Int32 = await withCheckedContinuation { cont in
             process.terminationHandler = { p in cont.resume(returning: p.terminationStatus) }
-            // Drain synchronously on a background thread; `readDataToEndOfFile` returns at EOF.
+            // Drain on a background thread. The drain is the log handle's SOLE owner: it closes it
+            // only after EOF. Closing from the main flow raced the last writes — FileHandle's
+            // legacy write raises an ObjC exception on a closed handle, uncaught on this thread,
+            // and aborted the whole app (issues #13/#15, crash report confirmed). The throwing
+            // write(contentsOf:) can't raise; a failed log write is dropped, never fatal.
             DispatchQueue.global(qos: .utility).async {
                 var buffer = Data()
                 while true {
                     let chunk = reader.availableData
                     if chunk.isEmpty { break }
-                    logHandle.write(chunk)
+                    try? logHandle.write(contentsOf: chunk)
                     buffer.append(chunk)
                     while let nl = buffer.firstIndex(of: 0x0A) {
                         let line = String(decoding: buffer[..<nl], as: UTF8.self)
@@ -69,9 +73,9 @@ public struct WineRunner: Sendable {
                     }
                 }
                 if !buffer.isEmpty { onOutput?(String(decoding: buffer, as: UTF8.self)) }
+                try? logHandle.close()
             }
         }
-        try? logHandle.close()
         return LaunchResult(exitStatus: status, duration: Date().timeIntervalSince(start), log: logURL)
     }
 
