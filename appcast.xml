@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.6.1</title>
+      <description><![CDATA[New Dependencies section in bottle settings: one-click install of the Visual C++ 2015-2022 runtimes (the 'Microsoft Visual C++ runtime error' fix many games need), with install-state tracking. More runtimes will follow as they're verified on the engine.]]></description>
+      <pubDate>Tue, 25 Aug 2026 06:39:38 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.6.1/Highball-0.6.1.zip" sparkle:version="0.6.1" sparkle:shortVersionString="0.6.1" sparkle:edSignature="8NHgEMHM1rcb7xQGyE1N6LlPQLm1ZsR4slBSLAnsMqI28y7pib5iRgKOqBM8x6TvzsHBks7utl3MD7+6dpJiAQ==" length="2335531" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.6.0</title>
       <description><![CDATA[Three additions from your launch-week feedback: a Report a Problem button that opens a pre-filled GitHub issue with your system info and latest log; Steam's slow first update now shows its progress inline and auto-recovers from its known mid-update crash; and bottles can be duplicated (safe backups) and repaired from the sidebar's right-click menu.]]></description>
       <pubDate>Tue, 25 Aug 2026 06:21:54 -0700</pubDate>
