@@ -37,9 +37,27 @@ public struct EpicStore: Sendable {
 
     var environment: [String: String] { ["LEGENDARY_CONFIG_PATH": configDir.path] }
 
+    /// Captures stdout only. Legendary writes its log lines to stderr and JSON to stdout;
+    /// merging them (Shell.capture) breaks JSON parsing.
     @discardableResult
     func capture(_ args: [String]) throws -> String {
-        try Shell.capture(binary.path, args, env: environment)
+        let p = Process()
+        p.executableURL = binary
+        p.arguments = args
+        p.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
+        let out = Pipe(), err = Pipe()
+        p.standardOutput = out
+        p.standardError = err
+        try p.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        let errData = err.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else {
+            throw HighballError.processFailed(command: "legendary " + args.joined(separator: " "),
+                                              status: p.terminationStatus,
+                                              output: String(decoding: errData.suffix(2000), as: UTF8.self))
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// Runs legendary streaming each output line (installs are long and progress matters).
@@ -114,7 +132,9 @@ public struct EpicStore: Sendable {
     /// Fresh launch parameters. The auth token inside is single use and expires within minutes,
     /// so call this immediately before each launch and never persist the result.
     public func launchInfo(_ appName: String, offline: Bool = false) throws -> LaunchInfo {
-        var args = ["launch", appName, "--json", "--skip-version-check"]
+        // --no-wine: we spawn Wine ourselves; without it legendary tries to locate a wine
+        // binary on macOS and crashes with IndexError when none is configured.
+        var args = ["launch", appName, "--json", "--skip-version-check", "--no-wine"]
         if offline { args.append("--offline") }
         let out = try capture(args)
         guard let start = out.firstIndex(of: "{"),
