@@ -69,6 +69,12 @@ enum L10n {
         "Connect": "Connecter",
         "Connecting your Epic account": "Connexion de votre compte Epic",
         "Loading your Epic library…": "Chargement de votre bibliothèque Epic…",
+        "Advanced": "Avancé",
+        "DLL overrides": "Surcharges de DLL",
+        "Extra Wine DLL overrides for this bottle, semicolon separated. Mods like Cyber Engine Tweaks need version=n,b.":
+            "Surcharges de DLL Wine supplémentaires pour cette bouteille, séparées par des points-virgules. Des mods comme Cyber Engine Tweaks demandent version=n,b.",
+        "Environment variables, one KEY=VALUE per line. Applied to everything launched in this bottle.":
+            "Variables d'environnement, une paire CLE=VALEUR par ligne. Appliquées à tout ce qui se lance dans cette bouteille.",
         "Windows runtimes some games need. Install them when a game complains about a missing runtime or refuses to start.":
             "Des composants Windows dont certains jeux ont besoin. Installez-les quand un jeu se plaint d'un composant manquant ou refuse de démarrer.",
         "Steam crashed at a known spot — relaunching to resume the update":

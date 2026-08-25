@@ -553,6 +553,15 @@ struct BottleSettingsSheet: View {
                     Text(L("Games run with the bottle’s sync (msync is fastest). Opening the Steam window restarts Windows processes with sync off — its interface needs it."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Section(L("Advanced")) {
+                    TextField(L("DLL overrides"), text: binding(\.dllOverrides), prompt: Text(verbatim: "version=n,b;winmm=n,b"))
+                        .font(.body.monospaced())
+                    Text(L("Extra Wine DLL overrides for this bottle, semicolon separated. Mods like Cyber Engine Tweaks need version=n,b."))
+                        .font(.caption).foregroundStyle(.secondary)
+                    EnvEditor(bottle: bottle)
+                    Text(L("Environment variables, one KEY=VALUE per line. Applied to everything launched in this bottle."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 let tweaks = AppState.tweakRecipes()
                 if !tweaks.isEmpty {
                     Section(L("Dependencies")) {
@@ -726,5 +735,39 @@ struct EpicSignInSheet: View {
             }
         }
         .padding(24)
+    }
+}
+
+
+/// Bottle environment editor: one KEY=VALUE per line, saved on every keystroke batch.
+struct EnvEditor: View {
+    @Environment(AppState.self) private var state
+    let bottle: Bottle
+    @State private var text: String = ""
+    @State private var loaded = false
+
+    var body: some View {
+        TextEditor(text: $text)
+            .font(.body.monospaced())
+            .frame(height: 72)
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+            .onAppear {
+                guard !loaded else { return }
+                loaded = true
+                let env = (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.environment
+                text = env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n")
+            }
+            .onChange(of: text) { _, newValue in
+                var env: [String: String] = [:]
+                for line in newValue.split(separator: "\n") {
+                    let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
+                    if parts.count == 2, !parts[0].trimmingCharacters(in: .whitespaces).isEmpty {
+                        env[parts[0].trimmingCharacters(in: .whitespaces)] = parts[1]
+                    }
+                }
+                var copy = state.bottles.first { $0.name == bottle.name } ?? bottle
+                copy.settings.environment = env
+                state.update(copy)
+            }
     }
 }

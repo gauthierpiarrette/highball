@@ -75,6 +75,9 @@ public struct BottleSettings: Codable, Sendable {
     public var fpsCap: Int = 0
     /// Wine Mac driver Retina mode: expose native pixels + 192 DPI (applied via registry on toggle).
     public var retinaMode: Bool = false
+    /// Extra WINEDLLOVERRIDES entries, e.g. "version=n,b" for Cyber Engine Tweaks. Appended to
+    /// whatever the renderer sets, semicolon separated.
+    public var dllOverrides: String = ""
     public var environment: [String: String] = [:]
     public var pins: [Pin] = []
     public var recipes: [String] = []
@@ -98,6 +101,7 @@ public struct BottleSettings: Codable, Sendable {
         dxvkAsync = try c.decodeIfPresent(Bool.self, forKey: .dxvkAsync) ?? true
         fpsCap = try c.decodeIfPresent(Int.self, forKey: .fpsCap) ?? 0
         retinaMode = try c.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? false
+        dllOverrides = try c.decodeIfPresent(String.self, forKey: .dllOverrides) ?? ""
         environment = try c.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
         pins = try c.decodeIfPresent([Pin].self, forKey: .pins) ?? []
         recipes = try c.decodeIfPresent([String].self, forKey: .recipes) ?? []
@@ -154,6 +158,7 @@ public struct Bottle: Sendable {
             default: break
             }
         }
+        if !settings.dllOverrides.isEmpty { merge(&env, ["WINEDLLOVERRIDES+": settings.dllOverrides]) }
         merge(&env, settings.environment)
         merge(&env, try (renderer ?? settings.renderer).environment(engine: engine))
         merge(&env, extra)
