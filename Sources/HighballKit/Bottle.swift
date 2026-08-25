@@ -73,6 +73,8 @@ public struct BottleSettings: Codable, Sendable {
     public var dxvkAsync: Bool = true
     /// Cap the frame rate (0 = uncapped). Applied per renderer (DXVK_FRAME_RATE / DXMT_CONFIG).
     public var fpsCap: Int = 0
+    /// Wine Mac driver Retina mode: expose native pixels + 192 DPI (applied via registry on toggle).
+    public var retinaMode: Bool = false
     public var environment: [String: String] = [:]
     public var pins: [Pin] = []
     public var recipes: [String] = []
@@ -95,6 +97,7 @@ public struct BottleSettings: Codable, Sendable {
         advertiseAVX = try c.decodeIfPresent(Bool.self, forKey: .advertiseAVX) ?? false
         dxvkAsync = try c.decodeIfPresent(Bool.self, forKey: .dxvkAsync) ?? true
         fpsCap = try c.decodeIfPresent(Int.self, forKey: .fpsCap) ?? 0
+        retinaMode = try c.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? false
         environment = try c.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
         pins = try c.decodeIfPresent([Pin].self, forKey: .pins) ?? []
         recipes = try c.decodeIfPresent([String].self, forKey: .recipes) ?? []

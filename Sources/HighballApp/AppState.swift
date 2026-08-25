@@ -243,6 +243,16 @@ final class AppState {
         }
     }
 
+    func setRetina(_ on: Bool, in bottle: Bottle) {
+        guard let engine = engine(for: bottle) else { return }
+        var copy = bottle
+        copy.settings.retinaMode = on
+        update(copy)
+        runBusy(on ? "Enabling Retina mode" : "Disabling Retina mode", showLogSheet: false) { [self] in
+            try await WineRunner(paths: paths, engine: engine, bottle: copy).setRetinaMode(on)
+        }
+    }
+
     func killBottle(_ bottle: Bottle) {
         guard let engine = engine(for: bottle) else { return }
         try? WineRunner(paths: paths, engine: engine, bottle: bottle).kill()

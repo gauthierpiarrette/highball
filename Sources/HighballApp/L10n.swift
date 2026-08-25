@@ -33,6 +33,11 @@ enum L10n {
         "Stop Everything & Quit": "Tout arrêter et quitter",
         "Leave Running & Quit": "Laisser tourner et quitter",
         "Stop All Windows Processes": "Arrêter tous les processus Windows",
+        "Retina mode (native resolution)": "Mode Retina (résolution native)",
+        "Crisper text and UI at your display's full resolution. Heavy games may run slower — pair with the frame rate cap.":
+            "Texte et interface plus nets à la pleine résolution de votre écran. Les jeux exigeants peuvent ralentir — combinez avec la limite d'images par seconde.",
+        "Enabling Retina mode": "Activation du mode Retina",
+        "Disabling Retina mode": "Désactivation du mode Retina",
 
         // Bottle view
         "Programs": "Programmes",

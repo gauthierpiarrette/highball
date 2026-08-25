@@ -114,6 +114,13 @@ public struct WineRunner: Sendable {
         return line.split(whereSeparator: \.isWhitespace).last.map(String.init)
     }
 
+    /// Wine's Mac driver renders at 1x by default. Retina mode exposes native pixels (crisper,
+    /// ~4x GPU work at native res) with a 192 DPI bump so Windows UI stays readable.
+    public func setRetinaMode(_ on: Bool) async throws {
+        try await regAdd(key: #"HKCU\Software\Wine\Mac Driver"#, name: "RetinaMode", type: "REG_SZ", data: on ? "y" : "n")
+        try await regAdd(key: #"HKCU\Control Panel\Desktop"#, name: "LogPixels", type: "REG_DWORD", data: on ? "192" : "96")
+    }
+
     public func setWindowsVersion(_ v: WindowsVersion) async throws {
         _ = try await run(["winecfg", "-v", v.rawValue], renderer: .wined3d, label: "winecfg")
     }

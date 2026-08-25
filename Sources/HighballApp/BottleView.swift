@@ -454,6 +454,9 @@ struct BottleSettingsSheet: View {
                         Text("60 fps").tag(60)
                         Text("120 fps").tag(120)
                     }
+                    Toggle(L("Retina mode (native resolution)"), isOn: retinaBinding)
+                    Text(L("Crisper text and UI at your display's full resolution. Heavy games may run slower — pair with the frame rate cap."))
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Section(L("Compatibility")) {
                     Picker(L("Synchronization"), selection: binding(\.sync)) {
@@ -480,6 +483,12 @@ struct BottleSettingsSheet: View {
             Button(L("Delete"), role: .destructive) { dismiss(); state.deleteBottle(bottle.name) }
             Button(L("Cancel"), role: .cancel) {}
         }
+    }
+
+    private var retinaBinding: Binding<Bool> {
+        Binding(
+            get: { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.retinaMode },
+            set: { on in state.setRetina(on, in: state.bottles.first { $0.name == bottle.name } ?? bottle) })
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<BottleSettings, T>) -> Binding<T> {
