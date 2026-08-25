@@ -160,7 +160,17 @@ public struct RecipeRunner: Sendable {
     private func downloadUnverified(_ url: URL) async throws -> URL {
         try paths.ensure()
         let dest = paths.downloads.appending(path: url.lastPathComponent)
-        let (tmp, _) = try await URLSession.shared.download(from: url)
+        // Same stall protection as engine downloads: URLSession.shared's 7-day resource timeout
+        // let a dead CDN connection hang a recipe forever (GOG installer, 2026-08-25).
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 60
+        cfg.timeoutIntervalForResource = 3600
+        let session = URLSession(configuration: cfg)
+        defer { session.finishTasksAndInvalidate() }
+        let (tmp, response) = try await session.download(from: url)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw HighballError.invalid("HTTP \(http.statusCode) for \(url)")
+        }
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: tmp, to: dest)
         return dest
