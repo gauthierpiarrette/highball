@@ -164,7 +164,21 @@ final class AppState {
                 try? await Task.sleep(for: .seconds(2))
                 extra = ["WINEMSYNC": "0", "WINEESYNC": "0"]
             }
-            let result = try await runner.start(pin: pin, extraEnvironment: extra) { line in Task { @MainActor in self.appendLog(line) } }
+            let result: LaunchResult
+            if isSteamUI(pin) {
+                let (r, resumed) = try await runner.startResumingKnownSteamCrash(pin: pin, extraEnvironment: extra) { line in
+                    Task { @MainActor in
+                        self.appendLog(line)
+                        if line.contains("relaunching so it resumes") {
+                            self.stage = L("Steam crashed at a known spot — relaunching to resume the update")
+                        }
+                    }
+                }
+                result = r
+                if resumed { await MainActor.run { self.appendLog("resumed after the known crash") } }
+            } else {
+                result = try await runner.start(pin: pin, extraEnvironment: extra) { line in Task { @MainActor in self.appendLog(line) } }
+            }
             if result.crashedEarly {
                 let current = pin.renderer ?? bottle.settings.renderer
                 let next: Renderer = current == .dxmt ? .d3dmetal : (current == .d3dmetal ? .dxvk : .dxmt)
@@ -240,6 +254,31 @@ final class AppState {
                     self.update(copy)
                 }
             }
+        }
+    }
+
+    func duplicateBottle(_ bottle: Bottle) {
+        runBusy("Duplicating '\(bottle.name)'", showLogSheet: false) { [self] in
+            killBottle(bottle)   // flush registry files before copying
+            try? await Task.sleep(for: .seconds(1))
+            let store = bottleStore, name = bottle.name
+            // The copy can be many GB — keep it off the main thread.
+            let copy = try await Task.detached { try store.duplicate(name) }.value
+            await MainActor.run { self.selectedBottle = copy.name }
+        }
+    }
+
+    func repairBottle(_ bottle: Bottle) {
+        guard let engine = engine(for: bottle) else { return }
+        runBusy("Repairing '\(bottle.name)' — re-running the Windows first boot") { [self] in
+            let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
+            try? runner.kill()
+            try? await Task.sleep(for: .seconds(2))
+            let r = try await runner.wineboot()
+            guard r.exitStatus == 0 else {
+                throw HighballError.processFailed(command: "wineboot -u", status: r.exitStatus, output: "see \(r.log.path)")
+            }
+            await MainActor.run { self.appendLog("bottle repaired — Windows environment refreshed") }
         }
     }
 

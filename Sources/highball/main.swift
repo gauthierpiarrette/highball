@@ -7,7 +7,7 @@ struct Highball: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "highball",
         abstract: "Highball — run Windows games on Apple Silicon. Free, open, engine-agnostic.",
-        subcommands: [Engine.self, Bottle.self, Run.self, Recipe.self, Tricks.self, Env.self, Report.self, Verify.self],
+        subcommands: [Engine.self, Bottle.self, Run.self, Recipe.self, Tricks.self, Env.self, Report.self, BugReportCommand.self, Verify.self],
         defaultSubcommand: nil
     )
 }
@@ -70,7 +70,7 @@ struct Engine: AsyncParsableCommand {
 // MARK: - gin bottle
 
 struct Bottle: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Manage bottles (Wine prefixes).", subcommands: [List.self, Create.self, Delete.self, Set.self, Kill.self])
+    static let configuration = CommandConfiguration(abstract: "Manage bottles (Wine prefixes).", subcommands: [List.self, Create.self, Delete.self, Set.self, Kill.self, Duplicate.self, Repair.self])
 
     struct List: AsyncParsableCommand {
         func run() async throws {
@@ -143,6 +143,35 @@ struct Bottle: AsyncParsableCommand {
         }
     }
 
+    struct Duplicate: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Copy a bottle (stops it first so the copy is consistent).")
+        @Argument var name: String
+        @Argument(help: "Name for the copy (default: '<name> copy').") var newName: String?
+        func run() async throws {
+            let bs = BottleStore()
+            let b = try bs.get(name)
+            let eng = try EngineStore().engine(b.settings.engineID)
+            try? WineRunner(engine: eng, bottle: b).kill()
+            try? await Task.sleep(for: .seconds(1))
+            let copy = try bs.duplicate(name, as: newName)
+            print("duplicated '\(name)' → '\(copy.name)'")
+        }
+    }
+
+    struct Repair: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Re-run the Windows first boot (wineboot -u) to refresh a bottle.")
+        @Argument var name: String
+        func run() async throws {
+            let b = try BottleStore().get(name)
+            let eng = try EngineStore().engine(b.settings.engineID)
+            let runner = WineRunner(engine: eng, bottle: b)
+            try? runner.kill()
+            try? await Task.sleep(for: .seconds(2))
+            let r = try await runner.wineboot()
+            print(r.exitStatus == 0 ? "repaired \(name)" : "wineboot exited with \(r.exitStatus) — see \(r.log.path)")
+        }
+    }
+
     struct Kill: AsyncParsableCommand {
         @Argument var name: String
         func run() async throws {
@@ -175,7 +204,11 @@ struct Run: AsyncParsableCommand {
             var p = pin
             if let renderer { p.renderer = renderer }
             p.arguments += arguments
-            result = try await runner.start(pin: p, onOutput: out)
+            if p.path.lowercased().hasSuffix("steam/steam.exe") {
+                result = try await runner.startResumingKnownSteamCrash(pin: p, onOutput: out ?? { _ in }).result
+            } else {
+                result = try await runner.start(pin: p, onOutput: out)
+            }
         } else if program.contains(":") || program.contains("\\") {
             result = try await runner.start(b.resolve(windowsPath: program), arguments: arguments, renderer: renderer, onOutput: out)
         } else if FileManager.default.fileExists(atPath: program) {
@@ -359,6 +392,13 @@ func loadRecipe(_ idOrPath: String) throws -> HighballKit.Recipe {
         and re-run from this directory, or pass a path to a recipe .json directly.
         (The Highball app bundles the recipes — this only affects CLI builds from source.)
         """)
+}
+
+struct BugReportCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "bugreport", abstract: "Print a pre-filled GitHub bug-report URL (system info + newest log tail).")
+    func run() async throws {
+        print(BugReport.url(version: "CLI").absoluteString)
+    }
 }
 
 extension HighballKit.Renderer: ExpressibleByArgument {}

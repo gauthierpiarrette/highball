@@ -23,6 +23,10 @@ struct HighballApp: App {
                 CheckForUpdatesView(updater: delegate.updaterController.updater)
                 // Cleanup after a crash or a "leave running" quit — no Activity Monitor needed.
                 Button(L("Stop All Windows Processes")) { state.killAllBottles() }
+                // Pre-filled GitHub issue: version, chip/macOS, newest log tail (issue #7).
+                Button(L("Report a Problem…")) {
+                    NSWorkspace.shared.open(BugReport.url(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"))
+                }
             }
         }
     }
@@ -141,6 +145,8 @@ struct ContentView: View {
                                 .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
                                 .contextMenu {
                                     Button(L("Stop all processes")) { state.killBottle(bottle) }
+                                    Button(L("Duplicate bottle")) { state.duplicateBottle(bottle) }
+                                    Button(L("Repair bottle (re-run first boot)")) { state.repairBottle(bottle) }
                                     Divider()
                                     Button(L("Delete bottle…"), role: .destructive) { pendingDelete = bottle.name }
                                 }
@@ -185,6 +191,10 @@ struct ContentView: View {
             get: { state.errorMessage != nil },
             set: { if !$0 { state.errorMessage = nil } })) {
             Button("OK") { state.errorMessage = nil }
+            Button(L("Report this problem…")) {
+                state.errorMessage = nil
+                NSWorkspace.shared.open(BugReport.url(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"))
+            }
         } message: { Text(state.errorMessage ?? "") }
         .alert(item: $state.crashSuggestion) { s in
             Alert(title: Text("\(s.program) exited right away"),

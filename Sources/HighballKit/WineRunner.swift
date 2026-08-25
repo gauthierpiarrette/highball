@@ -90,6 +90,22 @@ public struct WineRunner: Sendable {
         return try await start(exe, arguments: pin.arguments, renderer: pin.renderer, extraEnvironment: env, onOutput: onOutput)
     }
 
+    /// Steam's first self-update sometimes dies at a known Wine WoW64 spot and resumes cleanly
+    /// on relaunch (see recipes/launchers/steam.json knownIssues). Launches the pin and, if that
+    /// crash marker appears in the output, relaunches once so the update continues by itself.
+    public func startResumingKnownSteamCrash(pin: Pin, extraEnvironment: [String: String] = [:], onOutput: (@Sendable (String) -> Void)? = nil) async throws -> (result: LaunchResult, resumed: Bool) {
+        let collector = Collector()
+        let tap: @Sendable (String) -> Void = { line in collector.append(line); onOutput?(line) }
+        var result = try await start(pin: pin, extraEnvironment: extraEnvironment, onOutput: tap)
+        guard collector.lines.contains(where: { $0.contains("nested exception on signal stack") }) else {
+            return (result, false)
+        }
+        onOutput?("Steam's updater hit a known Wine crash — relaunching so it resumes…")
+        try? await Task.sleep(for: .seconds(3))
+        result = try await start(pin: pin, extraEnvironment: extraEnvironment, onOutput: onOutput)
+        return (result, true)
+    }
+
     public func wineboot() async throws -> LaunchResult {
         try await run(["wineboot", "-u"], renderer: .wined3d, label: "wineboot")
     }

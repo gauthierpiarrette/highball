@@ -55,6 +55,17 @@ struct BottleView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 34) {
+                // Long operations used to be invisible unless the log sheet was open — the
+                // Steam first-update looked frozen for 15-25 min. Surface the stage inline.
+                if state.busy && !state.stage.isEmpty && !state.showLog {
+                    HStack(spacing: 9) {
+                        ProgressView().controlSize(.small)
+                        Text(state.stage).font(.callout).foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(RoundedRectangle(cornerRadius: 9).fill(HB.card.opacity(0.8)))
+                }
                 gamesSection
                 launchersSection
                 if !customPins.isEmpty { programsSection }

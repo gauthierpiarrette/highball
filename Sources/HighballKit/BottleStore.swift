@@ -66,6 +66,25 @@ public struct BottleStore: Sendable {
         return bottle
     }
 
+    /// Copies a bottle under a new name (default "<name> copy", uniquified). Callers should stop
+    /// the bottle's wineserver first so the registry files on disk are flushed and consistent.
+    public func duplicate(_ name: String, as newName: String? = nil) throws -> Bottle {
+        let source = try get(name)
+        var target = newName ?? "\(name) copy"
+        if newName == nil {
+            var i = 2
+            while FileManager.default.fileExists(atPath: paths.bottle(target).path) { target = "\(name) copy \(i)"; i += 1 }
+        }
+        if let problem = Self.nameProblem(target) { throw HighballError.invalid(problem) }
+        let dest = paths.bottle(target)
+        guard !FileManager.default.fileExists(atPath: dest.path) else { throw HighballError.invalid("bottle '\(target)' already exists") }
+        try FileManager.default.copyItem(at: source.url, to: dest)
+        var copy = try Bottle.load(dest)
+        copy.settings.name = target
+        try copy.save()
+        return copy
+    }
+
     public func delete(_ name: String) throws {
         let url = paths.bottle(name)
         guard FileManager.default.fileExists(atPath: url.appending(path: "bottle.json").path) else {

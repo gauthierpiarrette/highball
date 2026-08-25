@@ -33,3 +33,37 @@ public struct HighballPaths: Sendable {
         }
     }
 }
+
+/// Builds a pre-filled GitHub bug-report URL: system info and the newest log's tail land in
+/// the issue form (field ids: what/chip/version/log in .github/ISSUE_TEMPLATE/bug.yml), so
+/// every report arrives with the context that triage always needs.
+public enum BugReport {
+    public static func url(version: String, paths: HighballPaths = HighballPaths()) -> URL {
+        let chip = (try? Shell.capture("/usr/sbin/sysctl", ["-n", "machdep.cpu.brand_string"]))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "unknown chip"
+        let macos = (try? Shell.capture("/usr/bin/sw_vers", ["-productVersion"]))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "?"
+        var logTail = ""
+        if let files = try? FileManager.default.contentsOfDirectory(at: paths.logs, includingPropertiesForKeys: [.contentModificationDateKey]) {
+            let logs = files.filter { $0.pathExtension == "log" }
+            let newest = logs.max { a, b in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return da < db
+            }
+            if let newest, let text = try? String(contentsOf: newest, encoding: .utf8) {
+                var tail = text.split(separator: "\n").suffix(30).joined(separator: "\n")
+                if tail.count > 3000 { tail = String(tail.suffix(3000)) }
+                logTail = "\(newest.lastPathComponent):\n\(tail)"
+            }
+        }
+        var comps = URLComponents(string: "https://github.com/gauthierpiarrette/highball/issues/new")!
+        comps.queryItems = [
+            URLQueryItem(name: "template", value: "bug.yml"),
+            URLQueryItem(name: "chip", value: "\(chip), macOS \(macos)"),
+            URLQueryItem(name: "version", value: version),
+            URLQueryItem(name: "log", value: logTail),
+        ]
+        return comps.url!
+    }
+}

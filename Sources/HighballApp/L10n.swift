@@ -38,6 +38,12 @@ enum L10n {
             "Texte et interface plus nets à la pleine résolution de votre écran. Les jeux exigeants peuvent ralentir — combinez avec la limite d'images par seconde.",
         "Enabling Retina mode": "Activation du mode Retina",
         "Disabling Retina mode": "Désactivation du mode Retina",
+        "Report a Problem…": "Signaler un problème…",
+        "Report this problem…": "Signaler ce problème…",
+        "Duplicate bottle": "Dupliquer la bouteille",
+        "Repair bottle (re-run first boot)": "Réparer la bouteille (relancer le premier démarrage)",
+        "Steam crashed at a known spot — relaunching to resume the update":
+            "Steam a planté à un endroit connu — relance pour reprendre la mise à jour",
 
         // Bottle view
         "Programs": "Programmes",
