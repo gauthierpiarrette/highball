@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.6.2</title>
+      <description><![CDATA[You can now run any Windows .exe or .msi from the GUI without knowing the secret: a 'Run a Windows program…' button lives under the launchers (also File menu, ⌘O), opening the same run-or-pin flow as drag-and-drop — which still works, and is now labeled so you can actually find it.]]></description>
+      <pubDate>Tue, 25 Aug 2026 06:57:37 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.6.2/Highball-0.6.2.zip" sparkle:version="0.6.2" sparkle:shortVersionString="0.6.2" sparkle:edSignature="5GAR99n+VIZxwU1MvcpUopRvca4sAiPQeo7uW3ltRKotSandSmXuPHAM/4xN0JKBBRSkHYOobJa4ZFulrgFFDg==" length="2342880" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.6.1</title>
       <description><![CDATA[New Dependencies section in bottle settings: one-click install of the Visual C++ 2015-2022 runtimes (the 'Microsoft Visual C++ runtime error' fix many games need), with install-state tracking. More runtimes will follow as they're verified on the engine.]]></description>
       <pubDate>Tue, 25 Aug 2026 06:39:38 -0700</pubDate>
