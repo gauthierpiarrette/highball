@@ -11,7 +11,7 @@ where every claim carries its provenance.
 
 > Status: **beta**. Notarized, auto-updating, working end to end: engine install → bottle →
 > Steam login → game, with per-bottle renderer switching and msync-accelerated launches.
-> **[Download Highball](https://github.com/gauthierpiarrette/highball/releases/latest)** — Apple Silicon, macOS 14+.
+> **[Download Highball](https://github.com/gauthierpiarrette/highball/releases/latest/download/Highball.dmg)** — Apple Silicon, macOS 14+.
 
 ## Design principles (learned the hard way)
 
@@ -33,7 +33,7 @@ Highball is built around that lesson:
 
 ## Install
 
-**[Download Highball](https://github.com/gauthierpiarrette/highball/releases/latest)**, drag it
+**[Download Highball](https://github.com/gauthierpiarrette/highball/releases/latest/download/Highball.dmg)**, drag it
 to Applications, open it. The app walks you through the rest — engine download, your first
 bottle, Steam. Requires Apple Silicon and macOS 14+ (it prompts for Rosetta 2 if needed).
 

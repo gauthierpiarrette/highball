@@ -52,11 +52,38 @@ xml.dom.minidom.parse('appcast.xml')
 print('appcast.xml valid')
 PY
 
+# DMG is THE user-facing download: unzip and many third-party unarchivers destroy the zip's
+# Sparkle symlinks, which breaks the signature and triggers Gatekeeper's malware warning
+# (proven 2026-08-25, repeated Reddit reports). A DMG has no extraction step to mangle.
+# The zip stays as the Sparkle update enclosure. Landing/README link
+# .../releases/latest/download/Highball.dmg, so the DMG asset name must stay unversioned.
+DMG="dist/Highball.dmg"
+rm -rf dist/dmg-stage "$DMG"; mkdir dist/dmg-stage
+ditto dist/Highball.app dist/dmg-stage/Highball.app
+ln -s /Applications dist/dmg-stage/Applications
+hdiutil create -volname "Highball" -srcfolder dist/dmg-stage -ov -format UDZO "$DMG" -quiet
+codesign --sign "Developer ID Application: Gauthier PIARRETTE (B95M7DARU4)" --timestamp "$DMG"
+xcrun notarytool submit "$DMG" --keychain-profile highball --wait
+xcrun stapler staple "$DMG"
+
 if [ -n "$NOTES_FILE" ]; then
-  gh release create "v$VERSION" "$ZIP" --latest --title "Highball $VERSION" --notes-file "$NOTES_FILE"
+  gh release create "v$VERSION" "$ZIP" "$DMG" --latest --title "Highball $VERSION" --notes-file "$NOTES_FILE"
 else
-  gh release create "v$VERSION" "$ZIP" --latest --title "Highball $VERSION" --notes "$SUMMARY"
+  gh release create "v$VERSION" "$ZIP" "$DMG" --latest --title "Highball $VERSION" --notes "$SUMMARY"
 fi
 
 git add appcast.xml && git commit -m "release: v$VERSION appcast" && git push
+
+# Post-publish gate: download the published assets back and verify them exactly as users do.
+# Any failure aborts loudly (set -e) — a release is not done until this passes.
+GATE=$(mktemp -d)
+curl -sL -o "$GATE/app.dmg" "https://github.com/gauthierpiarrette/highball/releases/download/v$VERSION/Highball.dmg"
+xcrun stapler validate "$GATE/app.dmg"
+spctl --assess --type open --context context:primary-signature "$GATE/app.dmg"
+curl -sL -o "$GATE/app.zip" "$DOWNLOAD_URL"
+ditto -x -k "$GATE/app.zip" "$GATE/x"
+xcrun stapler validate "$GATE/x/Highball.app"
+spctl --assess --type execute "$GATE/x/Highball.app"
+rm -rf "$GATE"
+echo "post-publish verification passed: dmg + zip notarized as downloaded"
 echo "released v$VERSION — appcast live once the push lands"
