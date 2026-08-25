@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.3</title>
+      <description><![CDATA[Completes the NVIDIA-driver-error fix from 0.7.1: the GPU identity it wrote was silently rejected by Wine (the device id wasn't in Wine's table). Bottles now use an identity Wine accepts, verified against Wine's own diagnostics. New bottles get it automatically; existing bottles: right-click the bottle and choose Repair.]]></description>
+      <pubDate>Tue, 25 Aug 2026 15:38:06 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.3/Highball-0.7.3.zip" sparkle:version="0.7.3" sparkle:shortVersionString="0.7.3" sparkle:edSignature="tBbcadJRrfwX8yZXTvh/b9X6AorWbMcCcJef91fbNR7mWc24nX6pdrzDKB0jGgTuYXbTqqfQe3VrftrFPjsBBw==" length="2430006" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.2</title>
       <description><![CDATA[New Advanced section in bottle settings: add your own Wine DLL overrides (mods like Cyber Engine Tweaks need version=n,b) and environment variables, no terminal required. Overrides combine correctly with what each renderer already sets.]]></description>
       <pubDate>Tue, 25 Aug 2026 13:58:19 -0700</pubDate>
