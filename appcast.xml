@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.6.0</title>
+      <description><![CDATA[Three additions from your launch-week feedback: a Report a Problem button that opens a pre-filled GitHub issue with your system info and latest log; Steam's slow first update now shows its progress inline and auto-recovers from its known mid-update crash; and bottles can be duplicated (safe backups) and repaired from the sidebar's right-click menu.]]></description>
+      <pubDate>Tue, 25 Aug 2026 06:21:54 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.6.0/Highball-0.6.0.zip" sparkle:version="0.6.0" sparkle:shortVersionString="0.6.0" sparkle:edSignature="jd3i62cNzwkWi4zhxx/lDxWFifZIvqBoelZM6NH6k3/I2fGaMyannsG8DKpBLKZUrr4WdyFZ9pfteS2cPaYACA==" length="2321380" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.5.7</title>
       <description><![CDATA[New: Retina mode — a per-bottle toggle in Settings for crisp text and UI at your display's native resolution (with a DPI bump so nothing goes microscopic). Off by default: native rendering is heavier, so pair it with the frame rate cap for demanding games.]]></description>
       <pubDate>Tue, 25 Aug 2026 05:54:20 -0700</pubDate>
