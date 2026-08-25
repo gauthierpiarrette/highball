@@ -7,6 +7,8 @@
 Highball is a native macOS app (and CLI) that sets up Wine, DXMT, D3DMetal and DXVK for
 you, installs Steam and other launchers with one click, and tells you honestly what runs,
 what doesn't, and which renderer to use — backed by an open, CC0 compatibility database
+([highball-db](https://github.com/gauthierpiarrette/highball-db), browsable at
+[gauthierpiarrette.github.io/highball-db](https://gauthierpiarrette.github.io/highball-db/))
 where every claim carries its provenance.
 
 > Status: **beta**. Notarized, auto-updating, working end to end: engine install → bottle →
@@ -54,7 +56,7 @@ Everything lives in `~/Library/Application Support/Highball/`. Nothing touches `
 
 ## What works
 
-*Reference test machine: Apple M1 Pro · macOS 14.6 — results on other chips welcome via `highball report`.*
+*Reference test machine: Apple M1 Pro · macOS 14.6; community reports cover M5 and macOS 15/26. Send yours via Highball menu → Report a Problem, or `highball report`.*
 
 | | |
 |---|---|
@@ -62,6 +64,9 @@ Everything lives in `~/Library/Application Support/Highball/`. Nothing touches `
 | Aperture Desk Job | ✅ DXVK correct ~31 fps · ⚠️ D3DMetal fast but corrupted · ❌ DXMT black screen |
 | Renderer switching | ✅ per bottle and per pinned program, no reinstall |
 | 32-bit programs | ✅ via Wine WoW64 (Steam's own 32-bit bootstrapper ran) |
+| Cyberpunk 2077 | ✅ community-verified on M5 / macOS 15 (D3DMetal + AVX + `--launcher-skip`, ~17 fps Steam Deck preset) |
+| Windows runtimes (VC++ 2015-2022) | ✅ one-click per bottle (Settings → Dependencies) |
+| .NET Framework games (e.g. Assetto Corsa) | ❌ not yet — .NET can't install on the current engine ([#16](https://github.com/gauthierpiarrette/highball/issues/16)) |
 | Kernel anti-cheat (Valorant, Fortnite, Destiny 2…) | ❌ structurally impossible — flagged in the DB before you download 80 GB |
 
 ## Architecture in one paragraph
@@ -77,7 +82,8 @@ this repository.
 
 ## Contributing
 
-- **Reports**: run something, then `highball report <bottle> "<title>" --rating N` — it
+- **Reports**: in the app, Highball menu → **Report a Problem** (pre-filled with your system info
+  and log). From the CLI: `highball report <bottle> "<title>" --rating N` — it
   opens a pre-filled issue on [highball-db](https://github.com/gauthierpiarrette/highball-db). Accepted reports are folded into `db/reports/` by CI.
 - **Recipes**: PRs to [highball-db](https://github.com/gauthierpiarrette/highball-db) `recipes/` with the CLI output attached. Every recipe carries
   `lastVerified` (engine id, macOS, chip) so stale data is visible, not silently wrong.
