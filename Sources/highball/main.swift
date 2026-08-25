@@ -281,6 +281,9 @@ struct Tricks: AsyncParsableCommand {
         guard let wt = eng.winetricks else { fail("winetricks not installed in engine \(eng.id)") }
         var env = try b.environment(engine: eng, renderer: .wined3d)
         env["WINE"] = eng.wineBinary.path
+        env["WINE_BIN"] = eng.wineBinary.path
+        env["WINESERVER_BIN"] = eng.wineserverBinary.path
+        env["WINE_BINDIR"] = eng.wineBinary.deletingLastPathComponent().path
         env["WINESERVER"] = eng.wineserverBinary.path
         env["PATH"] = "\(eng.engineDir.appending(path: "bin").path):/usr/bin:/bin:/usr/sbin:/sbin"
         let out = try Shell.capture("/bin/sh", [wt.path, "--unattended"] + verbs, env: env)

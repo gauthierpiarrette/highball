@@ -134,8 +134,18 @@ public struct RecipeRunner: Sendable {
                 try await runner.regAdd(key: key, name: name, type: type, data: data)
             case let .winetricks(verbs):
                 guard let wt = engine.winetricks else { throw HighballError.missing("winetricks in engine \(engine.id)") }
-                let env = try bottle.environment(engine: engine, renderer: .wined3d, extra: ["WINE": engine.wineBinary.path, "WINESERVER": engine.wineserverBinary.path])
-                try Shell.run("/bin/sh", [wt.path, "--unattended"] + verbs, env: env)
+                // WINE_BIN/WINESERVER_BIN/WINE_BINDIR are winetricks' own overrides for setups where
+                // its binary detection fails; without them dotnet48 and friends abort on this engine
+                // (verified 2026-08-25, issue #16). bash rather than sh for the same reason winetricks
+                // documents on macOS.
+                let env = try bottle.environment(engine: engine, renderer: .wined3d, extra: [
+                    "WINE": engine.wineBinary.path,
+                    "WINESERVER": engine.wineserverBinary.path,
+                    "WINE_BIN": engine.wineBinary.path,
+                    "WINESERVER_BIN": engine.wineserverBinary.path,
+                    "WINE_BINDIR": engine.wineBinary.deletingLastPathComponent().path,
+                ])
+                try Shell.run("/bin/bash", [wt.path, "--unattended"] + verbs, env: env)
             case let .environment(name, value):
                 bottle.settings.environment[name] = value
             case let .renderer(r):
