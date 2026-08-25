@@ -108,9 +108,11 @@ public struct EpicStore: Sendable {
         return try JSONDecoder().decode([Game].self, from: Data(out.utf8))
     }
 
-    public func installedGames() throws -> [Game] {
+    struct InstalledGame: Codable { let app_name: String }
+    /// App names of installed games (this endpoint uses `title`, not `app_title`, so it gets its own type).
+    public func installedAppNames() throws -> Set<String> {
         let out = try capture(["list-installed", "--json"])
-        return try JSONDecoder().decode([Game].self, from: Data(out.utf8))
+        return Set(try JSONDecoder().decode([InstalledGame].self, from: Data(out.utf8)).map(\.app_name))
     }
 
     /// Installs a game's Windows build into the bottle at drive_c/Games/<folder>.

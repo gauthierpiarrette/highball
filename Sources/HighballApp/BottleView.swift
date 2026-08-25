@@ -68,6 +68,7 @@ struct BottleView: View {
                 gamesSection
                 launchersSection
                 if !customPins.isEmpty { programsSection }
+                epicSection
                 HStack(spacing: 6) {
                     Button { state.chooseProgramToRun() } label: {
                         Label(L("Run a Windows program…"), systemImage: "folder")
@@ -116,6 +117,64 @@ struct BottleView: View {
             Button(L("Run")) { if let u = state.pendingRun { state.runDropped(u, in: bottle, andPin: false) }; state.pendingRun = nil }
             Button(L("Run and add to Programs")) { if let u = state.pendingRun { state.runDropped(u, in: bottle, andPin: true) }; state.pendingRun = nil }
             Button(L("Cancel"), role: .cancel) { state.pendingRun = nil }
+        }
+    }
+
+    // MARK: Epic
+
+    @ViewBuilder private var epicSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HB.eyebrow(L("Epic Games"))
+                if state.epicSignedIn {
+                    Text("\(state.epicOwned.count)").font(.caption.monospaced()).foregroundStyle(.tertiary)
+                }
+            }
+            if !state.epicSignedIn {
+                HStack(spacing: 10) {
+                    Button(L("Connect Epic account…")) { state.showEpicSignIn = true }
+                    Text(L("Installs go through the open source Legendary client, so the Epic launcher's broken install flow is never involved."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else if state.epicLoading {
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text(L("Loading your Epic library…")).font(.callout).foregroundStyle(.secondary) }
+            } else if state.epicOwned.isEmpty {
+                Text(L("No games on this Epic account yet. Claimed games appear here."))
+                    .font(.callout).foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 210), spacing: 12)], spacing: 12) {
+                    ForEach(state.epicOwned, id: \.app_name) { g in
+                        let installed = state.epicInstalled.contains(g.app_name)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(g.app_title).font(.callout.weight(.semibold)).lineLimit(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            HStack {
+                                if installed {
+                                    Button(L("Play")) { state.epicPlay(g, in: bottle) }
+                                        .buttonStyle(.borderedProminent).controlSize(.small).disabled(state.busy)
+                                } else {
+                                    Button(L("Install")) { state.epicInstall(g, in: bottle) }
+                                        .controlSize(.small).disabled(state.busy)
+                                }
+                                Spacer()
+                            }
+                        }
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(HB.card))
+                        .contextMenu {
+                            if installed {
+                                Button(L("Play with D3DMetal")) { state.epicPlay(g, in: bottle, renderer: .d3dmetal) }
+                                Button(L("Play with DXMT")) { state.epicPlay(g, in: bottle, renderer: .dxmt) }
+                            }
+                        }
+                    }
+                }
+                Text(L("Epic games launch with DXVK, the renderer that works for most of them. Right-click a game to try another."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .sheet(isPresented: Binding(get: { state.showEpicSignIn }, set: { state.showEpicSignIn = $0 })) {
+            EpicSignInSheet()
         }
     }
 
@@ -637,5 +696,35 @@ struct GPTKLicenseSheet: View {
             }
         }
         .padding(16)
+    }
+}
+
+
+struct EpicSignInSheet: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.dismiss) private var dismiss
+    @State private var code = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L("Connect your Epic account")).font(.title2.bold())
+            Text(L("1. Open Epic's sign-in page and log in.\n2. The page ends by showing an authorizationCode.\n3. Paste that code here."))
+                .font(.callout).foregroundStyle(.secondary)
+            Button(L("Open Epic sign-in page")) { NSWorkspace.shared.open(EpicStore.loginURL) }
+            TextField(L("authorizationCode"), text: $code).textFieldStyle(.roundedBorder).frame(width: 340)
+            Text(L("Your password never touches Highball. The code is single use and connects through Legendary, the open source Epic client the Heroic launcher uses."))
+                .font(.caption).foregroundStyle(.secondary).frame(maxWidth: 360, alignment: .leading)
+            HStack {
+                Spacer()
+                Button(L("Cancel")) { dismiss() }
+                Button(L("Connect")) {
+                    dismiss()
+                    state.epicSignIn(code: code.trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(code.trimmingCharacters(in: .whitespaces).count < 8)
+            }
+        }
+        .padding(24)
     }
 }

@@ -50,6 +50,25 @@ enum L10n {
         "'%@' isn't a Windows program. You can drop .exe, .msi or .bat files here.":
             "« %@ » n'est pas un programme Windows. Vous pouvez déposer des fichiers .exe, .msi ou .bat ici.",
         "Installed": "Installée",
+        "Epic Games": "Epic Games",
+        "Connect Epic account…": "Connecter un compte Epic…",
+        "Installs go through the open source Legendary client, so the Epic launcher's broken install flow is never involved.":
+            "Les installations passent par le client libre Legendary, le mécanisme défaillant du launcher Epic n'est jamais utilisé.",
+        "No games on this Epic account yet. Claimed games appear here.":
+            "Aucun jeu sur ce compte Epic pour l'instant. Les jeux récupérés apparaîtront ici.",
+        "Play with D3DMetal": "Jouer avec D3DMetal",
+        "Play with DXMT": "Jouer avec DXMT",
+        "Epic games launch with DXVK, the renderer that works for most of them. Right-click a game to try another.":
+            "Les jeux Epic se lancent avec DXVK, le moteur qui fonctionne pour la plupart. Clic droit sur un jeu pour en essayer un autre.",
+        "Connect your Epic account": "Connecter votre compte Epic",
+        "1. Open Epic's sign-in page and log in.\n2. The page ends by showing an authorizationCode.\n3. Paste that code here.":
+            "1. Ouvrez la page de connexion Epic et identifiez-vous.\n2. La page affiche à la fin un authorizationCode.\n3. Collez ce code ici.",
+        "Open Epic sign-in page": "Ouvrir la page de connexion Epic",
+        "Your password never touches Highball. The code is single use and connects through Legendary, the open source Epic client the Heroic launcher uses.":
+            "Votre mot de passe ne passe jamais par Highball. Le code est à usage unique et la connexion utilise Legendary, le client Epic libre qu'utilise Heroic.",
+        "Connect": "Connecter",
+        "Connecting your Epic account": "Connexion de votre compte Epic",
+        "Loading your Epic library…": "Chargement de votre bibliothèque Epic…",
         "Windows runtimes some games need. Install them when a game complains about a missing runtime or refuses to start.":
             "Des composants Windows dont certains jeux ont besoin. Installez-les quand un jeu se plaint d'un composant manquant ou refuse de démarrer.",
         "Steam crashed at a known spot — relaunching to resume the update":

@@ -35,6 +35,14 @@ final class AppState {
 
     var errorMessage: String?
 
+    // Epic (via Legendary; see EpicStore)
+    var epicSignedIn = false
+    var epicOwned: [EpicStore.Game] = []
+    var epicInstalled: Set<String> = []
+    var epicLoading = false
+    private var epicFetchInFlight = false
+    var showEpicSignIn = false
+
     /// A Windows program awaiting the run/pin choice (from drag-drop, the File menu, or the button).
     var pendingRun: URL?
 
@@ -58,6 +66,7 @@ final class AppState {
         if selectedBottle == nil { selectedBottle = bottles.first?.name }
         // Never trap on duplicate names (a Finder-duplicated bottle crashed the app at launch — issue #13).
         gamesByBottle = Dictionary(bottles.map { ($0.name, SteamLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
+        epicRefresh()
         if gameDB.byAppID.isEmpty {
             var dirs: [URL] = []
             if let res = Bundle.main.resourceURL { dirs.append(res.appending(path: "db-games")) }
@@ -301,6 +310,74 @@ final class AppState {
                 throw HighballError.processFailed(command: "wineboot -u", status: r.exitStatus, output: "see \(r.log.path)")
             }
             await MainActor.run { self.appendLog("bottle repaired — Windows environment refreshed") }
+        }
+    }
+
+    // MARK: Epic
+
+    var epicStore: EpicStore { EpicStore(paths: paths) }
+
+    func epicRefresh() {
+        epicSignedIn = epicStore.isAuthenticated
+        guard epicSignedIn else { epicOwned = []; epicInstalled = []; return }
+        guard !epicFetchInFlight else { return }
+        epicFetchInFlight = true
+        epicLoading = epicOwned.isEmpty
+        Task.detached { [store = epicStore] in
+            let owned = (try? store.ownedGames()) ?? []
+            let installed = (try? store.installedAppNames()) ?? []
+            await MainActor.run { [weak self] in
+                self?.epicOwned = owned.sorted { $0.app_title < $1.app_title }
+                self?.epicInstalled = installed
+                self?.epicLoading = false
+                self?.epicFetchInFlight = false
+            }
+        }
+    }
+
+    func epicSignIn(code: String) {
+        runBusy("Connecting your Epic account", showLogSheet: false) { [self] in
+            let store = epicStore
+            _ = try await store.ensureInstalled()
+            try await Task.detached { try store.authenticate(code: code) }.value
+            await MainActor.run { self.epicRefresh() }
+        }
+    }
+
+    func epicInstall(_ game: EpicStore.Game, in bottle: Bottle) {
+        runBusy("Installing \(game.app_title)") { [self] in
+            let store = epicStore
+            let status = try await Task.detached {
+                try store.install(game.app_name, into: bottle) { line in
+                    Task { @MainActor in self.appendLog(line) }
+                }
+            }.value
+            guard status == 0 else {
+                throw HighballError.processFailed(command: "epic install", status: status, output: "see the log above")
+            }
+            await MainActor.run { self.epicRefresh() }
+        }
+    }
+
+    func epicPlay(_ game: EpicStore.Game, in bottle: Bottle, renderer: Renderer? = .dxvk) {
+        guard let engine = engine(for: bottle) else { return }
+        runBusy("Running \(game.app_title)", showLogSheet: false) { [self] in
+            let store = epicStore
+            // Fresh single-use token, fetched off the main thread right before launch.
+            let info = try await Task.detached { try store.launchInfo(game.app_name) }.value
+            let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
+            let result = try await runner.start(info.executable, arguments: info.arguments,
+                                                renderer: renderer, extraEnvironment: info.environment,
+                                                workingDirectory: info.workingDirectory) { line in
+                Task { @MainActor in self.appendLog(line) }
+            }
+            if result.crashedEarly {
+                await MainActor.run {
+                    self.crashSuggestion = CrashSuggestion(program: game.app_title,
+                                                          renderer: renderer == .dxvk ? .d3dmetal : .dxvk,
+                                                          logPath: result.log.path)
+                }
+            }
         }
     }
 

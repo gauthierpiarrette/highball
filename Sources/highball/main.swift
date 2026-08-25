@@ -430,7 +430,7 @@ struct Epic: AsyncParsableCommand {
             let store = EpicStore()
             _ = try await store.ensureInstalled()
             guard store.isAuthenticated else { fail("not signed in — run 'highball epic login' first") }
-            let installed = Set((try? store.installedGames())?.map(\.app_name) ?? [])
+            let installed = (try? store.installedAppNames()) ?? []
             for g in try store.ownedGames().sorted(by: { $0.app_title < $1.app_title }) {
                 print("\(installed.contains(g.app_name) ? "[installed] " : "")\(g.app_name)\t\(g.app_title)")
             }
