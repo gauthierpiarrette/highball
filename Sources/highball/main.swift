@@ -167,9 +167,17 @@ struct Run: AsyncParsableCommand {
             if let renderer { p.renderer = renderer }
             p.arguments += arguments
             result = try await runner.start(pin: p, onOutput: out)
+        } else if program.contains(":") || program.contains("\\") {
+            result = try await runner.start(b.resolve(windowsPath: program), arguments: arguments, renderer: renderer, onOutput: out)
+        } else if FileManager.default.fileExists(atPath: program) {
+            result = try await runner.start(URL(fileURLWithPath: program), arguments: arguments, renderer: renderer, onOutput: out)
         } else {
-            let exe = program.contains(":") || program.contains("\\") ? b.resolve(windowsPath: program) : URL(fileURLWithPath: program)
-            result = try await runner.start(exe, arguments: arguments, renderer: renderer, onOutput: out)
+            // Not a pin, not a Windows path, not a local file: let Wine resolve it (cmd, dxdiag,
+            // notepad, anything on the Windows PATH) instead of failing on a made-up unix path.
+            if !b.settings.pins.isEmpty {
+                print("note: '\(program)' is not a pin of this bottle (pins: \(b.settings.pins.map(\.name).joined(separator: ", "))) — passing it to Wine as a program name")
+            }
+            result = try await runner.run([program] + arguments, renderer: renderer, label: program, onOutput: out)
         }
         print("exit=\(result.exitStatus) after \(Int(result.duration))s — log: \(result.log.path)")
         if result.crashedEarly { print("hint: exited within 10 s; try another renderer (--renderer dxmt|d3dmetal|dxvk|wined3d)") }
@@ -336,7 +344,12 @@ func loadRecipe(_ idOrPath: String) throws -> HighballKit.Recipe {
         ["launchers", "games", "tweaks"].map { URL(fileURLWithPath: "\(root)/\($0)/\(idOrPath).json") }
     }
     for c in candidates where FileManager.default.fileExists(atPath: c.path) { return try HighballKit.Recipe.load(from: c) }
-    throw HighballError.missing("recipe \(idOrPath)")
+    throw HighballError.missing("""
+        recipe '\(idOrPath)'. Recipes live in the highball-db repo (CC0). Either:
+          git clone https://github.com/gauthierpiarrette/highball-db ../highball-db
+        and re-run from this directory, or pass a path to a recipe .json directly.
+        (The Highball app bundles the recipes — this only affects CLI builds from source.)
+        """)
 }
 
 extension HighballKit.Renderer: ExpressibleByArgument {}
