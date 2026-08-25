@@ -98,8 +98,15 @@ struct BottleView: View {
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let provider = providers.first else { return false }
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                guard let url, ["exe", "msi", "bat"].contains(url.pathExtension.lowercased()) else { return }
-                Task { @MainActor in state.pendingRun = url }
+                guard let url else { return }
+                if ["exe", "msi", "bat"].contains(url.pathExtension.lowercased()) {
+                    Task { @MainActor in state.pendingRun = url }
+                } else {
+                    // Silently ignoring a drop reads as "nothing happened" (Reddit report) — say why.
+                    Task { @MainActor in
+                        state.errorMessage = String(format: L("'%@' isn't a Windows program. You can drop .exe, .msi or .bat files here."), url.lastPathComponent)
+                    }
+                }
             }
             return true
         }

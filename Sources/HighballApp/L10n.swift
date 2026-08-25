@@ -47,6 +47,8 @@ enum L10n {
         "Run Windows Program…": "Lancer un programme Windows…",
         "— or drop any .exe or .msi on this window": "— ou déposez un .exe ou .msi sur cette fenêtre",
         "Choose a Windows program": "Choisir un programme Windows",
+        "'%@' isn't a Windows program. You can drop .exe, .msi or .bat files here.":
+            "« %@ » n'est pas un programme Windows. Vous pouvez déposer des fichiers .exe, .msi ou .bat ici.",
         "Installed": "Installée",
         "Windows runtimes some games need. Install them when a game complains about a missing runtime or refuses to start.":
             "Des composants Windows dont certains jeux ont besoin. Installez-les quand un jeu se plaint d'un composant manquant ou refuse de démarrer.",
