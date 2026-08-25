@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.5.4</title>
+      <description><![CDATA[Engine installs now show live download progress (per-component MB counts) instead of a blank sheet, and a stalled connection fails with a clear error after 60 seconds instead of hanging forever. Also: CLI quickstart fixes for source builds (recipe lookup guidance, bare program names route through Wine).]]></description>
+      <pubDate>Tue, 25 Aug 2026 02:41:09 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.5.4/Highball-0.5.4.zip" sparkle:version="0.5.4" sparkle:shortVersionString="0.5.4" sparkle:edSignature="+PWZTy6z8oOl0OxjGcEat4YvcR1WPXclPdYU9EBa7AideyM4UhrGiyANvzEVOk7jdwyW+lCLaXtAqcXludvxBw==" length="2296209" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.5.3</title>
       <description><![CDATA[Quitting Highball now offers to stop all Windows processes (or deliberately leave a game running) instead of silently stranding them — and the app menu gains Stop All Windows Processes for cleanup after a crash.]]></description>
       <pubDate>Mon, 24 Aug 2026 14:39:41 -0700</pubDate>
