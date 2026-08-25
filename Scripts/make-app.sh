@@ -60,8 +60,20 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>SUPublicEDKey</key><string>${ED_PUBLIC_KEY}</string>
   <key>SUEnableInstallerLauncherService</key><false/>
   <key>NSHumanReadableCopyright</key><string>GPL-3.0 — no paid tier, ever.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Windows games and apps running in a bottle need the microphone for voice chat and recording. macOS asks the first time one uses it.</string>
 </dict></plist>
 PLIST
+
+# Hardened-runtime entitlements: Wine processes are children of the app, so TCC attributes
+# their device access to Highball — without audio-input declared, macOS silently denies the
+# microphone to every game and never shows a prompt (user report, 2026-08-25).
+cat > dist/entitlements.plist <<'ENTITLEMENTS'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>com.apple.security.device.audio-input</key><true/>
+</dict></plist>
+ENTITLEMENTS
 
 IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/{print $2; exit}')
 if [ -n "$IDENTITY" ]; then
@@ -70,7 +82,7 @@ if [ -n "$IDENTITY" ]; then
   codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
   codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app"
   codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework"
-  codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP"
+  codesign --force --options runtime --timestamp --entitlements dist/entitlements.plist -s "$IDENTITY" "$APP"
 else
   codesign --force --deep -s - "$APP"
 fi
