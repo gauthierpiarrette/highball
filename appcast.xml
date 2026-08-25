@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.5.7</title>
+      <description><![CDATA[New: Retina mode — a per-bottle toggle in Settings for crisp text and UI at your display's native resolution (with a DPI bump so nothing goes microscopic). Off by default: native rendering is heavier, so pair it with the frame rate cap for demanding games.]]></description>
+      <pubDate>Tue, 25 Aug 2026 05:54:20 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.5.7/Highball-0.5.7.zip" sparkle:version="0.5.7" sparkle:shortVersionString="0.5.7" sparkle:edSignature="WAtPLcjs+un5u395DXitNrSs/cOaels8WH+hmPpdJjYJdVmn4QnUrmiL3az6E2FkSF/S/J0dRBjkUU0k6M77AA==" length="2300586" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.5.6</title>
       <description><![CDATA[Fixes a crash at launch when a bottle folder had been copied or duplicated in Finder — the copy now just appears as its own working bottle. If Highball was crashing on open for you, this is the fix.]]></description>
       <pubDate>Tue, 25 Aug 2026 04:38:05 -0700</pubDate>
