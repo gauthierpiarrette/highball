@@ -19,6 +19,11 @@ struct HighballApp: App {
         }
         .windowResizability(.contentSize)
         .commands {
+            CommandGroup(after: .newItem) {
+                Button(L("Run Windows Program…")) { state.chooseProgramToRun() }
+                    .keyboardShortcut("o")
+                    .disabled(state.selectedBottle == nil)
+            }
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: delegate.updaterController.updater)
                 // Cleanup after a crash or a "leave running" quit — no Activity Monitor needed.

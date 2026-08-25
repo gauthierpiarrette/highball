@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import HighballKit
 import Observation
@@ -33,6 +34,17 @@ final class AppState {
     }
 
     var errorMessage: String?
+
+    /// A Windows program awaiting the run/pin choice (from drag-drop, the File menu, or the button).
+    var pendingRun: URL?
+
+    func chooseProgramToRun() {
+        let panel = NSOpenPanel()
+        panel.title = L("Choose a Windows program")
+        panel.allowedContentTypes = [.exe, .msi].compactMap { $0 }
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url { pendingRun = url }
+    }
 
     let paths = HighballPaths()
     var engineStore: EngineStore { EngineStore(paths: paths) }
@@ -364,4 +376,11 @@ final class AppState {
     }
 
     static let launcherRecipes = ["steam", "epic-games", "battle-net", "gog-galaxy", "ea-app", "ubisoft-connect", "rockstar"]
+}
+
+import UniformTypeIdentifiers
+
+extension UTType {
+    static let exe = UTType(filenameExtension: "exe")
+    static let msi = UTType(filenameExtension: "msi")
 }

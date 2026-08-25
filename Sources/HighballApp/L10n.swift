@@ -43,6 +43,10 @@ enum L10n {
         "Duplicate bottle": "Dupliquer la bouteille",
         "Repair bottle (re-run first boot)": "Réparer la bouteille (relancer le premier démarrage)",
         "Dependencies": "Dépendances",
+        "Run a Windows program…": "Lancer un programme Windows…",
+        "Run Windows Program…": "Lancer un programme Windows…",
+        "— or drop any .exe or .msi on this window": "— ou déposez un .exe ou .msi sur cette fenêtre",
+        "Choose a Windows program": "Choisir un programme Windows",
         "Installed": "Installée",
         "Windows runtimes some games need. Install them when a game complains about a missing runtime or refuses to start.":
             "Des composants Windows dont certains jeux ont besoin. Installez-les quand un jeu se plaint d'un composant manquant ou refuse de démarrer.",

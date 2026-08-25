@@ -34,7 +34,6 @@ struct BottleView: View {
         ("rockstar", "r.circle.fill", "Rockstar"),
     ]
 
-    @State private var droppedURL: URL?
     @State private var showSettings = false
 
     private var engine: InstalledEngine? { state.engine(for: bottle) }
@@ -69,6 +68,12 @@ struct BottleView: View {
                 gamesSection
                 launchersSection
                 if !customPins.isEmpty { programsSection }
+                HStack(spacing: 6) {
+                    Button { state.chooseProgramToRun() } label: {
+                        Label(L("Run a Windows program…"), systemImage: "folder")
+                    }.buttonStyle(.link)
+                    Text(L("— or drop any .exe or .msi on this window")).font(.caption).foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 28)
             .padding(.top, 18)
@@ -94,16 +99,16 @@ struct BottleView: View {
             guard let provider = providers.first else { return false }
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 guard let url, ["exe", "msi", "bat"].contains(url.pathExtension.lowercased()) else { return }
-                Task { @MainActor in droppedURL = url }
+                Task { @MainActor in state.pendingRun = url }
             }
             return true
         }
-        .confirmationDialog("Run \(droppedURL?.lastPathComponent ?? "") in this bottle?",
-                            isPresented: .init(get: { droppedURL != nil }, set: { if !$0 { droppedURL = nil } }),
+        .confirmationDialog("Run \(state.pendingRun?.lastPathComponent ?? "") in this bottle?",
+                            isPresented: .init(get: { state.pendingRun != nil }, set: { if !$0 { state.pendingRun = nil } }),
                             titleVisibility: .visible) {
-            Button(L("Run")) { if let u = droppedURL { state.runDropped(u, in: bottle, andPin: false) }; droppedURL = nil }
-            Button(L("Run and add to Programs")) { if let u = droppedURL { state.runDropped(u, in: bottle, andPin: true) }; droppedURL = nil }
-            Button(L("Cancel"), role: .cancel) { droppedURL = nil }
+            Button(L("Run")) { if let u = state.pendingRun { state.runDropped(u, in: bottle, andPin: false) }; state.pendingRun = nil }
+            Button(L("Run and add to Programs")) { if let u = state.pendingRun { state.runDropped(u, in: bottle, andPin: true) }; state.pendingRun = nil }
+            Button(L("Cancel"), role: .cancel) { state.pendingRun = nil }
         }
     }
 
