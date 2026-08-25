@@ -309,6 +309,7 @@ final class AppState {
             guard r.exitStatus == 0 else {
                 throw HighballError.processFailed(command: "wineboot -u", status: r.exitStatus, output: "see \(r.log.path)")
             }
+            try? await runner.setGpuIdentity()
             await MainActor.run { self.appendLog("bottle repaired — Windows environment refreshed") }
         }
     }

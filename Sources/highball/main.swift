@@ -168,6 +168,7 @@ struct Bottle: AsyncParsableCommand {
             try? runner.kill()
             try? await Task.sleep(for: .seconds(2))
             let r = try await runner.wineboot()
+            try? await runner.setGpuIdentity()
             print(r.exitStatus == 0 ? "repaired \(name)" : "wineboot exited with \(r.exitStatus) — see \(r.log.path)")
         }
     }

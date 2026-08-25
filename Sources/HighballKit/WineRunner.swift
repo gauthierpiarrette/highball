@@ -143,6 +143,14 @@ public struct WineRunner: Sendable {
         try await regAdd(key: #"HKCU\Control Panel\Desktop"#, name: "LogPixels", type: "REG_DWORD", data: on ? "192" : "96")
     }
 
+    /// Wine's fallback D3D reports a fake NVIDIA GPU from its card table, which makes some
+    /// games (CS:GO and friends) demand NVAPI and die. Pin an AMD identity instead, matching
+    /// what DXMT already advertises. Applied at bottle creation and by Repair.
+    public func setGpuIdentity() async throws {
+        try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciVendorID", type: "REG_DWORD", data: String(0x1002))
+        try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciDeviceID", type: "REG_DWORD", data: String(0x73df))
+    }
+
     public func setWindowsVersion(_ v: WindowsVersion) async throws {
         _ = try await run(["winecfg", "-v", v.rawValue], renderer: .wined3d, label: "winecfg")
     }

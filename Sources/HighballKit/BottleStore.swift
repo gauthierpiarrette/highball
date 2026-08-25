@@ -63,6 +63,7 @@ public struct BottleStore: Sendable {
             throw HighballError.processFailed(command: "wineboot -u", status: result.exitStatus, output: "see \(result.log.path)")
         }
         if windowsVersion != .win10 { try await runner.setWindowsVersion(windowsVersion) }
+        try? await runner.setGpuIdentity()
         return bottle
     }
 
