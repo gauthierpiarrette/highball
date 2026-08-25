@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.1</title>
+      <description><![CDATA[Fixes games that refused to start with an NVIDIA driver error (NVAPI, seen with CS:GO among others). Wine was telling games they were on an NVIDIA card; bottles now identify as AMD, which those games handle fine. New bottles get this automatically; for existing bottles right-click the bottle and choose Repair.]]></description>
+      <pubDate>Tue, 25 Aug 2026 13:47:18 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.1/Highball-0.7.1.zip" sparkle:version="0.7.1" sparkle:shortVersionString="0.7.1" sparkle:edSignature="Ey7qzdunD8sErZ6Syrp9eLlvWZ/Iu2b7SeSHribXf/NGmk/EF8ZgZq/Hek3TlVaxbvcLIOEn2CcOLJ2R2J+0CA==" length="2416067" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.0</title>
       <description><![CDATA[Epic Games support, in the app. Connect your Epic account (your password never touches Highball), see your library in any bottle, and install and play with one click, through the same open source path the Heroic launcher uses, so the Epic launcher's broken install flow is never involved. Games default to the renderer that works. Also in this release: .bat files in the run picker, clearer rejected-drop messages, and protection against double-launching a starting program.]]></description>
       <pubDate>Tue, 25 Aug 2026 13:10:14 -0700</pubDate>
