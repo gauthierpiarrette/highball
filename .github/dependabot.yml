@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Keep the pinned GitHub Actions in .github/workflows current (security patches).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+  # Swift package dependencies (Sparkle, swift-argument-parser).
+  - package-ecosystem: swift
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps

@@ -2,6 +2,13 @@ name: CI
 on:
   push: { branches: [main] }
   pull_request:
+# Least privilege: CI only needs to read the checkout. No token write scope.
+permissions:
+  contents: read
+# One in-flight run per ref; a newer push/PR update cancels the older one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build-test:
     runs-on: macos-15
