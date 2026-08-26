@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.8</title>
+      <description><![CDATA[DirectX 9 games (like legacy CS:GO) now run on the full DXVK graphics path]]></description>
+      <pubDate>Wed, 26 Aug 2026 14:22:39 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.8/Highball-0.7.8.zip" sparkle:version="0.7.8" sparkle:shortVersionString="0.7.8" sparkle:edSignature="e8j7IuMkgQjAU9acWeLr8hkA3biUGza5L2eOzbbSe+iFIGtIRXUs+gc4NCBNNxCRunTVT3RBvpBCavlKzaDdCg==" length="2464182" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.7</title>
       <description><![CDATA[Clearer errors for stale entries, correct bug-report logs, more reliable launcher startup]]></description>
       <pubDate>Wed, 26 Aug 2026 10:37:15 -0700</pubDate>
