@@ -35,6 +35,7 @@ struct BottleView: View {
     ]
 
     @State private var showSettings = false
+    @State private var editingPin: Pin?
 
     private var engine: InstalledEngine? { state.engine(for: bottle) }
     private var games: [SteamGame] {
@@ -96,6 +97,7 @@ struct BottleView: View {
             }
         }
         .sheet(isPresented: $showSettings) { BottleSettingsSheet(bottle: bottle) }
+        .sheet(item: $editingPin) { p in PinSettingsSheet(pin: p, bottle: bottle) }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             guard let provider = providers.first else { return false }
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -227,6 +229,7 @@ struct BottleView: View {
                         .contextMenu {
                             if installed, let pin {
                                 Button(L("Open")) { state.launch(pin: pin, in: bottle) }
+                                Button(L("Program settings…")) { editingPin = pin }
                                 Button(L("Remove from list"), role: .destructive) { state.removePin(pin, from: bottle) }
                             }
                         }
@@ -259,6 +262,7 @@ struct BottleView: View {
                     .background(HB.card)
                     .help(pin.path)
                     .contextMenu {
+                        Button(L("Program settings…")) { editingPin = pin }
                         Menu(L("Renderer override")) {
                             Button(L("Bottle default")) { state.setPinRenderer(nil, pin: pin, in: bottle) }
                             ForEach(Renderer.allCases, id: \.self) { r in
@@ -738,6 +742,74 @@ struct EpicSignInSheet: View {
     }
 }
 
+
+/// Per-program settings: launch arguments, environment, renderer override in one place.
+struct PinSettingsSheet: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.dismiss) private var dismiss
+    let bottle: Bottle
+    @State private var pin: Pin
+    @State private var argsText: String
+    @State private var envText: String
+
+    init(pin: Pin, bottle: Bottle) {
+        self.bottle = bottle
+        _pin = State(initialValue: pin)
+        _argsText = State(initialValue: ArgumentLine.join(pin.arguments))
+        _envText = State(initialValue: pin.environment.sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }.joined(separator: "\n"))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(pin.name).font(.title2.bold())
+            Text(pin.path).font(.caption.monospaced()).foregroundStyle(.secondary)
+                .lineLimit(1).truncationMode(.middle)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L("Launch arguments")).font(.callout.weight(.medium))
+                TextField(L("-dx11 -skiplauncher \"an argument with spaces\""), text: $argsText)
+                    .textFieldStyle(.roundedBorder).font(.body.monospaced())
+                Text(L("Passed to the program on every launch. Quote arguments that contain spaces."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(L("Environment")).font(.callout.weight(.medium))
+                TextEditor(text: $envText)
+                    .font(.body.monospaced()).frame(height: 64)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+                Text(L("One KEY=VALUE per line, applied only to this program."))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Picker(L("Renderer"), selection: $pin.renderer) {
+                Text(L("Bottle default")).tag(Renderer?.none)
+                ForEach(Renderer.allCases, id: \.self) { r in
+                    Text(r.rawValue.uppercased()).tag(Renderer?.some(r))
+                }
+            }
+            .pickerStyle(.menu)
+            HStack {
+                Spacer()
+                Button(L("Cancel")) { dismiss() }
+                Button(L("Save")) {
+                    pin.arguments = ArgumentLine.split(argsText)
+                    var env: [String: String] = [:]
+                    for line in envText.split(separator: "\n") {
+                        let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
+                        if parts.count == 2, !parts[0].trimmingCharacters(in: .whitespaces).isEmpty {
+                            env[parts[0].trimmingCharacters(in: .whitespaces)] = parts[1]
+                        }
+                    }
+                    pin.environment = env
+                    state.updatePin(pin, in: bottle)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
+    }
+}
 
 /// Bottle environment editor: one KEY=VALUE per line, saved on every keystroke batch.
 struct EnvEditor: View {

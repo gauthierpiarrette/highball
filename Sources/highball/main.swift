@@ -7,7 +7,7 @@ struct Highball: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "highball",
         abstract: "Highball — run Windows games on Apple Silicon. Free, open, engine-agnostic.",
-        subcommands: [Engine.self, Bottle.self, Run.self, Recipe.self, Tricks.self, Env.self, Epic.self, Report.self, BugReportCommand.self, Verify.self],
+        subcommands: [Engine.self, Bottle.self, Run.self, PinCommand.self, Recipe.self, Tricks.self, Env.self, Epic.self, Report.self, BugReportCommand.self, Verify.self],
         defaultSubcommand: nil
     )
 }
@@ -187,6 +187,65 @@ struct Bottle: AsyncParsableCommand {
 }
 
 // MARK: - gin run
+
+// MARK: - gin pin
+
+struct PinCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "pin",
+        abstract: "Per-program settings: persistent launch arguments, environment, renderer.",
+        subcommands: [List.self, Set.self])
+
+    struct List: AsyncParsableCommand {
+        @Argument var bottle: String
+        func run() async throws {
+            let b = try BottleStore().get(bottle)
+            if b.settings.pins.isEmpty { print("no pins in \(b.name)"); return }
+            for p in b.settings.pins {
+                var extras: [String] = []
+                if !p.arguments.isEmpty { extras.append("args=\(ArgumentLine.join(p.arguments))") }
+                if !p.environment.isEmpty { extras.append("env=" + p.environment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ";")) }
+                if let r = p.renderer { extras.append("renderer=\(r.rawValue)") }
+                print("\(p.name)\t\(p.path)" + (extras.isEmpty ? "" : "\t" + extras.joined(separator: "\t")))
+            }
+        }
+    }
+
+    struct Set: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Change a pin setting: args (rest of line), renderer (name or default), env KEY=VALUE (VALUE empty removes).")
+        @Argument var bottle: String
+        @Argument var pin: String
+        @Argument var setting: String
+        @Argument(parsing: .remaining) var value: [String] = []
+
+        func run() async throws {
+            let bs = BottleStore()
+            var b = try bs.get(bottle)
+            guard let i = b.settings.pins.firstIndex(where: { $0.name.lowercased() == pin.lowercased() }) else {
+                fail("no pin '\(pin)' in \(b.name) (pins: \(b.settings.pins.map(\.name).joined(separator: ", ")))")
+            }
+            switch setting {
+            case "args":
+                b.settings.pins[i].arguments = value.count == 1 ? ArgumentLine.split(value[0]) : value
+            case "renderer":
+                guard let v = value.first else { fail("renderer expects a value or 'default'") }
+                if v == "default" || v == "none" { b.settings.pins[i].renderer = nil }
+                else if let r = HighballKit.Renderer(rawValue: v) { b.settings.pins[i].renderer = r }
+                else { fail("bad renderer \(v)") }
+            case "env":
+                guard let v = value.first else { fail("env expects KEY=VALUE") }
+                let parts = v.split(separator: "=", maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { fail("env expects KEY=VALUE") }
+                if parts[1].isEmpty { b.settings.pins[i].environment.removeValue(forKey: parts[0]) }
+                else { b.settings.pins[i].environment[parts[0]] = parts[1] }
+            default: fail("unknown setting \(setting) (args, renderer, env)")
+            }
+            try bs.update(b)
+            let p = b.settings.pins[i]
+            print("ok — \(p.name): args=[\(ArgumentLine.join(p.arguments))] renderer=\(p.renderer?.rawValue ?? "default") env=\(p.environment.count) vars")
+        }
+    }
+}
 
 struct Run: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Run a program in a bottle: a pin name, a Windows path, or a Unix path.")

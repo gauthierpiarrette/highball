@@ -240,6 +240,15 @@ final class AppState {
         update(copy)
     }
 
+    /// Replace a pin wholesale (program settings sheet: arguments, environment, renderer).
+    func updatePin(_ pin: Pin, in bottle: Bottle) {
+        var copy = bottle
+        if let i = copy.settings.pins.firstIndex(where: { $0.id == pin.id }) {
+            copy.settings.pins[i] = pin
+            update(copy)
+        }
+    }
+
     func setPinRenderer(_ renderer: Renderer?, pin: Pin, in bottle: Bottle) {
         var copy = bottle
         if let i = copy.settings.pins.firstIndex(where: { $0.id == pin.id }) {

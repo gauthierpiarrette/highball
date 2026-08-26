@@ -148,9 +148,13 @@ public struct WineRunner: Sendable {
     /// identity instead. The pair MUST exist in Wine's GPU table or the override is silently
     /// discarded ("Invalid GPU override" in winediag): 0x1002:0x73bf is Radeon RX 6800/6900 XT,
     /// present in Wine 10's table. Applied at bottle creation and by Repair.
+    /// AMD RX 6800/6900 XT. Regression-tested: changing this to a pair absent from Wine's
+    /// GPU table silently reverts bottles to the fake-NVIDIA identity (the 0.7.1 bug).
+    public static let gpuIdentity: (vendor: Int, device: Int) = (0x1002, 0x73bf)
+
     public func setGpuIdentity() async throws {
-        try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciVendorID", type: "REG_DWORD", data: String(0x1002))
-        try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciDeviceID", type: "REG_DWORD", data: String(0x73bf))
+        try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciVendorID", type: "REG_DWORD", data: String(Self.gpuIdentity.vendor))
+        try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciDeviceID", type: "REG_DWORD", data: String(Self.gpuIdentity.device))
     }
 
     public func setWindowsVersion(_ v: WindowsVersion) async throws {

@@ -57,6 +57,61 @@ public struct Pin: Codable, Sendable, Identifiable, Hashable {
     public init(name: String, path: String, arguments: [String] = [], environment: [String: String] = [:], renderer: Renderer? = nil) {
         self.name = name; self.path = path; self.arguments = arguments; self.environment = environment; self.renderer = renderer
     }
+
+    enum CodingKeys: String, CodingKey { case id, name, path, arguments, environment, renderer }
+
+    /// Lenient decode: hand-written recipe pins may omit id/arguments/environment.
+    /// (The synthesized decoder treats defaulted non-optionals as required keys.)
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        path = try c.decode(String.self, forKey: .path)
+        arguments = try c.decodeIfPresent([String].self, forKey: .arguments) ?? []
+        environment = try c.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
+        renderer = try c.decodeIfPresent(Renderer.self, forKey: .renderer)
+    }
+}
+
+/// One-line editing of a pin's argument list. Double quotes group words; backslash
+/// escapes only a following quote (so Windows paths like C:\Games pass through
+/// untouched); everything else is literal.
+public enum ArgumentLine {
+    public static func split(_ line: String) -> [String] {
+        var args: [String] = []
+        var cur = ""
+        var inQuotes = false
+        var started = false
+        var i = line.startIndex
+        while i < line.endIndex {
+            let ch = line[i]
+            let next = line.index(after: i)
+            if ch == "\\", next < line.endIndex, line[next] == "\"" {
+                cur.append("\""); started = true
+                i = line.index(after: next)
+                continue
+            }
+            if ch == "\"" {
+                inQuotes.toggle(); started = true
+            } else if (ch == " " || ch == "\t") && !inQuotes {
+                if started { args.append(cur); cur = ""; started = false }
+            } else {
+                cur.append(ch); started = true
+            }
+            i = next
+        }
+        if started { args.append(cur) }
+        return args
+    }
+
+    public static func join(_ args: [String]) -> String {
+        args.map { a in
+            if a.isEmpty { return "\"\"" }
+            let escaped = a.replacingOccurrences(of: "\"", with: "\\\"")
+            let needsQuotes = a.contains(" ") || a.contains("\t")
+            return needsQuotes ? "\"\(escaped)\"" : escaped
+        }.joined(separator: " ")
+    }
 }
 
 /// Persisted as `<bottle>/gin.json`.
