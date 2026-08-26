@@ -1,76 +1,112 @@
 <p align="center"><img src=".github/assets/logo.png" width="140" alt="Highball — a highball glass with ice"></p>
 <h1 align="center">Highball</h1>
-<p align="center"><b>Run Windows games on Apple Silicon. Free, open, engine-agnostic.</b></p>
+<p align="center"><b>Run Windows games on Apple Silicon. Free, open, and never locked to one Wine build.</b></p>
 
-<p align="center"><img src=".github/assets/app.png" width="760" alt="Highball showing a bottle with a verified game, renderer verdict from the open database, and one-click launcher installs"></p>
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License: GPL-3.0"></a>
+  <a href="https://github.com/gauthierpiarrette/highball/releases/latest"><img src="https://img.shields.io/github/v/release/gauthierpiarrette/highball" alt="Latest release"></a>
+  <a href="https://github.com/gauthierpiarrette/highball/actions/workflows/ci.yml"><img src="https://github.com/gauthierpiarrette/highball/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/gauthierpiarrette/highball/stargazers"><img src="https://img.shields.io/github/stars/gauthierpiarrette/highball?logo=github&label=stars" alt="GitHub stars"></a>
+  <img src="https://img.shields.io/badge/Apple%20Silicon-macOS%2014%2B-lightgrey" alt="Apple Silicon, macOS 14+">
+</p>
+
+<p align="center"><img src=".github/assets/app.png" width="760" alt="Highball showing a bottle with a verified game and its renderer verdict from the open database"></p>
 
 Highball is a native macOS app (and CLI) that sets up Wine, DXMT, D3DMetal and DXVK for
-you, installs Steam with one click, connects your Epic Games library (installs and plays
-through the open source Legendary client, no Epic launcher involved), and tells you
-honestly what runs, what doesn't, and which renderer to use — backed by an open, CC0 compatibility database
+you, installs Steam or connects your Epic library, and tells you honestly what runs, what
+doesn't, and which renderer to use.
+
+The difference is the data. Every verdict comes from an open, CC0 compatibility database:
+verified runs, per-game renderer verdicts, and the kernel-anti-cheat blocklist, with
+provenance on every claim. It's a standalone dataset any tool can build on
 ([highball-db](https://github.com/gauthierpiarrette/highball-db), browsable at
-[gauthierpiarrette.github.io/highball-db](https://gauthierpiarrette.github.io/highball-db/))
-where every claim carries its provenance.
+[gauthierpiarrette.github.io/highball-db](https://gauthierpiarrette.github.io/highball-db/)),
+so you can check whether your game runs before downloading a byte.
 
-> Status: **beta**. Notarized, auto-updating, working end to end: engine install → bottle →
-> Steam login → game, with per-bottle renderer switching and msync-accelerated launches.
-> **[Download Highball](https://github.com/gauthierpiarrette/highball/releases/latest/download/Highball.dmg)** — Apple Silicon, macOS 14+.
+## Download
 
-## Design principles (learned the hard way)
+### [Download Highball for Apple Silicon (.dmg)](https://github.com/gauthierpiarrette/highball/releases/latest/download/Highball.dmg)
 
-This niche has a cautionary tale: [Whisky](https://github.com/Whisky-App/Whisky) was archived
-in 2025 after its developer concluded it gave too little back to the Wine ecosystem it sat on.
-Highball is built around that lesson:
+macOS 14+, notarized. Drag it to Applications and open it. The app walks you through the
+rest: engine download, your first bottle, Steam.
 
-- **Zero Wine patches, zero hosted binaries.** Engines are assembled from *pinned,
-  SHA-256-verified* upstream releases ([Gcenx](https://github.com/Gcenx)'s builds,
-  [DXMT](https://github.com/3Shain/dxmt), the
-  [Sikarugir](https://github.com/Sikarugir-App/Sikarugir) runtime). An engine update is a
-  JSON pull request, not a build pipeline.
-- **The database is the product.** Recipes ("Steam needs `sync: none`; this game needs
-  DXVK") are versioned CC0 data anyone can use — including CrossOver users. Nothing like
-  it exists in the open today.
-- **Additive to the ecosystem.** Bugs go upstream, donations links point at Gcenx and
-  DXMT, and if you want commercial-grade support you should buy
-  [CrossOver](https://www.codeweavers.com/crossover) — it funds most of Wine's Mac work.
+Not sure it'll run your game? **[Check the compatibility database →](https://gauthierpiarrette.github.io/highball-db/)**
 
-## Install
+> **Beta, working end to end:** engine install → bottle → Steam login → game, with
+> per-bottle renderer switching and msync-accelerated launches. Auto-updating. Not a paid
+> tool and not a thin wrapper: engines are assembled from pinned, SHA-256-verified upstream
+> builds, and the compatibility data is public and free for anyone to reuse.
 
-**[Download Highball](https://github.com/gauthierpiarrette/highball/releases/latest/download/Highball.dmg)**, drag it
-to Applications, open it. The app walks you through the rest — engine download, your first
-bottle, Steam. Requires Apple Silicon and macOS 14+ (it prompts for Rosetta 2 if needed).
+## Will my game run?
+
+That's the whole point of the project, so the answer lives in an open, CC0 database: a
+verified renderer verdict, the frame rate people actually got, and provenance on every
+claim. It won't guess, and it flags kernel-anti-cheat titles as impossible before you
+download 80 GB.
+
+### [Search your game in the database →](https://gauthierpiarrette.github.io/highball-db/)
+
+Cyberpunk 2077, for one, runs 60–82 fps on an M5 (D3DMetal + FSR 2.1). Renderer switching,
+32-bit apps via Wine's WoW64, Windows runtimes, ReShade, and your Epic library via Legendary
+work too.
+
+## What doesn't work yet
+
+Several store launchers with an embedded browser (Chromium/CEF) UI don't render under this
+Wine build. Rockstar is blocked (it needs a CrossOver-only loader patch), and Ubisoft
+Connect and GOG Galaxy don't render a usable login window (Ubisoft stays unpainted, GOG comes
+up black), so you can't sign in. Battle.net and
+the EA app are flaky. GOG's DRM-free offline installers can be run directly in a bottle,
+and Epic works through Legendary. Each case is tracked in the recipe's `knownIssues`.
+
+## Getting started
+
+Requires Apple Silicon and macOS 14+, and prompts for Rosetta 2 if needed.
+
+First run takes a while: the engine download is a few hundred MB, and Steam's first launch
+unpacks its own ~235 MB client. Under Rosetta that can take 15–25 minutes and may look
+frozen. Let it finish. If it stalls, relaunch and it resumes.
+
+Everything lives in `~/Library/Application Support/Highball/`. Nothing touches `/usr` or
+`/Library`; deleting that folder is a full uninstall.
 
 <details><summary>Prefer the terminal? The CLI does everything the app does.</summary>
 
 ```sh
-git clone https://github.com/gauthierpiarrette/highball-db ../highball-db  # recipes + game database (CC0)
+git clone https://github.com/gauthierpiarrette/highball && cd highball        # the app + CLI
+git clone https://github.com/gauthierpiarrette/highball-db ../highball-db     # recipes + game database (CC0)
 swift build -c release
 .build/release/highball engine install spike/engine-manifest.json
 .build/release/highball engine accept x64-sikarugir10.0_6-r0 apple-gptk-license-2023-08-17  # optional: D3DMetal
 .build/release/highball bottle create play --recipe steam
 .build/release/highball run play Steam
 ```
+
+Run every command from the `highball` repo root. Recipe and database paths resolve relative
+to the current directory, with `highball-db` as a sibling folder.
 </details>
 
-Everything lives in `~/Library/Application Support/Highball/`. Nothing touches `/usr` or
-`/Library`; deleting that folder is a full uninstall.
+Played something? `highball report` files the result to the open database (community reports
+already cover M4, M5 and macOS 15). The in-app **Report a Problem** button is for bugs in
+Highball itself.
 
-## What works
+## Why Highball is built this way
 
-*Reference test machine: Apple M1 Pro · macOS 14.6; community reports cover M5 and macOS 15/26. Send yours via Highball menu → Report a Problem, or `highball report`.*
+This niche has a cautionary tale: [Whisky](https://github.com/Whisky-App/Whisky) was
+archived in 2025. Highball is built to avoid the ways these tools tend to die:
 
-| | |
-|---|---|
-| Steam 64-bit client | ✅ login, store, downloads (`sync: none` required — see the recipe) |
-| Aperture Desk Job | ✅ DXVK correct ~31 fps · ⚠️ D3DMetal fast but corrupted · ❌ DXMT black screen |
-| Renderer switching | ✅ per bottle and per pinned program, no reinstall |
-| 32-bit programs | ✅ via Wine WoW64 (Steam's own 32-bit bootstrapper ran) |
-| Cyberpunk 2077 | ✅ community-verified on M5 / macOS 15 (D3DMetal + AVX + `--launcher-skip`, ~17 fps Steam Deck preset) |
-| Epic Games | ✅ connect your account, install and play (via Legendary — the Epic launcher's install flow is broken under Wine and never used) |
-| Windows runtimes (VC++ 2015-2022, .NET Framework 4.8) | ✅ one-click per bottle (Settings → Dependencies) |
-| ReShade | ✅ verified under DXVK (dll next to the exe + a DLL override, now settable in Settings → Advanced) |
-| DLL overrides & env vars | ✅ per bottle (Settings → Advanced) — Cyber Engine Tweaks class mods work |
-| Kernel anti-cheat (Valorant, Fortnite, Destiny 2…) | ❌ structurally impossible — flagged in the DB before you download 80 GB |
+- **Engine-agnostic: zero Wine patches, zero hosted binaries.** Engines are assembled from *pinned,
+  SHA-256-verified* upstream releases ([Gcenx](https://github.com/Gcenx)'s builds,
+  [DXMT](https://github.com/3Shain/dxmt), the
+  [Sikarugir](https://github.com/Sikarugir-App/Sikarugir) runtime). An engine update is a
+  JSON pull request, not a build pipeline.
+- **The database is the product.** Recipes ("Steam needs `sync: none`; this game needs
+  DXVK") are versioned CC0 data anyone can use, CrossOver users included. We don't know of
+  another machine-readable, CC0 recipe dataset for Wine on Mac.
+- **Additive to the ecosystem.** Bugs go upstream, donation links point at Gcenx and DXMT,
+  and if you want commercial-grade support you should buy
+  [CrossOver](https://www.codeweavers.com/crossover): it's the paid, supported option, and
+  it funds most of Wine's Mac work.
 
 ## Architecture in one paragraph
 
@@ -85,19 +121,24 @@ this repository.
 
 ## Contributing
 
-- **Reports**: in the app, Highball menu → **Report a Problem** (pre-filled with your system info
-  and log). From the CLI: `highball report <bottle> "<title>" --rating N` — it
-  opens a pre-filled issue on [highball-db](https://github.com/gauthierpiarrette/highball-db). Accepted reports are folded into `db/reports/` by CI.
-- **Recipes**: PRs to [highball-db](https://github.com/gauthierpiarrette/highball-db) `recipes/` with the CLI output attached. Every recipe carries
-  `lastVerified` (engine id, macOS, chip) so stale data is visible, not silently wrong.
+- **Game results**: `highball report <bottle> "<title>" --rating N` opens a pre-filled
+  compatibility report on [highball-db](https://github.com/gauthierpiarrette/highball-db);
+  accepted ones are folded into `db/reports/` by CI.
+- **Bugs in Highball itself**: Highball menu → **Report a Problem** (pre-filled with your
+  system info and the log).
+- **Recipes**: PRs to [highball-db](https://github.com/gauthierpiarrette/highball-db)
+  `recipes/` with the CLI output attached. Every recipe carries `lastVerified` (engine id,
+  macOS, chip) so stale data is visible, not silently wrong.
 - **Engines**: manifest PRs bumping pinned versions, with a verification note.
 
 ## Licensing
 
 App + CLI + HighballKit: **GPL-3.0** ([LICENSE](LICENSE)). Recipes and database:
-**CC0-1.0** (in [highball-db](https://github.com/gauthierpiarrette/highball-db)). Wine is LGPL; DXMT is MIT/LGPL; DXVK is
-Zlib; D3DMetal is Apple-licensed (non-commercial, downloaded separately, never modified).
-Highball has no paid tier and never will — that's a license requirement, not a promise.
+**CC0-1.0** (in [highball-db](https://github.com/gauthierpiarrette/highball-db)). Wine is
+LGPL; DXMT is MIT/LGPL; DXVK is Zlib; D3DMetal is Apple-licensed (non-commercial, downloaded
+separately, never modified). Highball has no paid tier and never will: the app is GPL-3.0 and the
+data CC0, so anyone can rebuild and redistribute it for free, and a locked paid tier could
+never hold.
 
 ## Credits
 
