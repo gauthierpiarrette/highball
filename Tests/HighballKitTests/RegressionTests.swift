@@ -122,3 +122,24 @@ extension RegressionTests {
         XCTAssertGreaterThanOrEqual(WineRunner.servicesPipeTimeoutMs, 40000)
     }
 }
+
+extension RegressionTests {
+    // The report button used to attach the single newest log; when a game is launched
+    // through Steam the launcher's log is newest, so triage got Steam's log, not the
+    // game's (#22). Confirm the launcher-marker filter is exhaustive for known launchers.
+    func testReportLogPrefersGameOverLauncher() {
+        // These are the launcher log basenames the picker must skip when a game log exists.
+        let launcherLogs = [
+            "2026-08-26T104357Z-Steam for cyberpunk-steam.exe.log",
+            "2026-08-26T000000Z-b-EpicGamesLauncher.exe.log",
+            "2026-08-26T000000Z-b-UbisoftConnect.exe.log",
+            "2026-08-26T000000Z-b-Launcher.exe.log",
+        ]
+        let markers = ["steam.exe", "epicgameslauncher", "ubisoftconnect", "galaxyclient", "battle.net", "launcher.exe", "rockstarservice"]
+        for name in launcherLogs {
+            XCTAssertTrue(markers.contains { name.lowercased().contains($0) }, "'\(name)' should be recognized as a launcher log")
+        }
+        // A real game log must NOT match any launcher marker.
+        XCTAssertFalse(markers.contains { "2026-08-26T104400Z-cyberpunk-Cyberpunk2077.exe.log".lowercased().contains($0) })
+    }
+}

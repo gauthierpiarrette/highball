@@ -46,11 +46,20 @@ public enum BugReport {
         var logTail = ""
         if let files = try? FileManager.default.contentsOfDirectory(at: paths.logs, includingPropertiesForKeys: [.contentModificationDateKey]) {
             let logs = files.filter { $0.pathExtension == "log" }
-            let newest = logs.max { a, b in
+            let byNewest: (URL, URL) -> Bool = { a, b in
                 let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
                 let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
                 return da < db
             }
+            // Prefer the newest program log over a launcher's own log. When a game is
+            // started through Steam/Epic/etc the launcher process usually writes last,
+            // so the plain newest log is the launcher's, not the game's (issue #22).
+            let launcherMarkers = ["steam.exe", "epicgameslauncher", "ubisoftconnect", "galaxyclient", "battle.net", "launcher.exe", "rockstarservice"]
+            let isLauncher: (URL) -> Bool = { url in
+                let name = url.lastPathComponent.lowercased()
+                return launcherMarkers.contains { name.contains($0) }
+            }
+            let newest = logs.filter { !isLauncher($0) }.max(by: byNewest) ?? logs.max(by: byNewest)
             if let newest, let text = try? String(contentsOf: newest, encoding: .utf8) {
                 var tail = text.split(separator: "\n").suffix(30).joined(separator: "\n")
                 if tail.count > 3000 { tail = String(tail.suffix(3000)) }
