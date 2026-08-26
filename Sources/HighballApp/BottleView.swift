@@ -223,7 +223,7 @@ struct BottleView: View {
                         let installed = bottle.settings.recipes.contains(meta.id)
                         let pin = bottle.settings.pins.first { $0.name.lowercased().hasPrefix(meta.short.lowercased().prefix(5)) }
                         LauncherTile(title: meta.short, symbol: meta.symbol, installed: installed, busy: state.busy,
-                                     blockedReason: recipe.blocked?.reason) {
+                                     blockedReason: recipe.blocked?.reason, flakyReason: recipe.flaky?.reason) {
                             if installed, let pin { state.launch(pin: pin, in: bottle) }
                             else { state.applyRecipe(meta.id, to: bottle) }
                         }
@@ -435,10 +435,12 @@ struct LauncherTile: View {
     let installed: Bool
     let busy: Bool
     var blockedReason: String? = nil
+    var flakyReason: String? = nil
     let action: () -> Void
     @State private var hovering = false
 
     private var blocked: Bool { blockedReason != nil && !installed }
+    private var flaky: Bool { flakyReason != nil && !installed && !blocked }
 
     var body: some View {
         Button(action: action) {
@@ -465,9 +467,11 @@ struct LauncherTile: View {
                     }
                 }
                 Text(title).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
-                Text(installed ? L("Open") : (blocked ? L("Blocked") : L("Install")))
+                Text(installed ? L("Open") : (blocked ? L("Blocked") : (flaky ? L("Flaky") : L("Install"))))
                     .font(.system(size: 9.5).monospaced())
-                    .foregroundStyle(installed ? AnyShapeStyle(HB.good) : (blocked ? AnyShapeStyle(HB.bad.opacity(0.85)) : AnyShapeStyle(.tertiary)))
+                    .foregroundStyle(installed ? AnyShapeStyle(HB.good)
+                                     : (blocked ? AnyShapeStyle(HB.bad.opacity(0.85))
+                                        : (flaky ? AnyShapeStyle(HB.amber) : AnyShapeStyle(.tertiary))))
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
@@ -477,7 +481,8 @@ struct LauncherTile: View {
         }
         .buttonStyle(.plain)
         .disabled(busy || blocked)
-        .help(blockedReason.map { L("Blocked on the current engine: ") + $0 } ?? "")
+        .help(blockedReason.map { L("Blocked on the current engine: ") + $0 }
+              ?? flakyReason.map { L("Known issues: ") + $0 } ?? "")
         .animation(.easeOut(duration: 0.12), value: hovering)
         .onHover { hovering = $0 }
     }

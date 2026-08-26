@@ -37,6 +37,8 @@ enum L10n {
         "Scales the Windows desktop and UI, 100% to 250%. Launchers and desktop apps follow it; many full-screen games set their own resolution and won't. Above 100% uses native Retina pixels, so heavy games may run slower.":
             "Met à l'échelle le bureau et l'interface Windows, de 100 % à 250 %. Les lanceurs et applications de bureau la suivent ; beaucoup de jeux en plein écran définissent leur propre résolution et l'ignorent. Au-delà de 100 %, le rendu utilise les pixels Retina natifs, donc les jeux exigeants peuvent ralentir.",
         "Applying display scaling": "Application de la mise à l'échelle",
+        "Flaky": "Instable",
+        "Known issues: ": "Problèmes connus : ",
         "Report a Problem…": "Signaler un problème…",
         "Report this problem…": "Signaler ce problème…",
         "Duplicate bottle": "Dupliquer la bouteille",

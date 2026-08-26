@@ -83,6 +83,13 @@ public struct Recipe: Codable, Sendable, Identifiable {
         public var tracking: String?
     }
 
+    /// Partially works: installable and worth trying, but with known issues. Unlike `blocked`,
+    /// it does NOT stop `apply()` — the UI just flags it so the launcher grid stops presenting it
+    /// as a clean "Install".
+    public struct Flaky: Codable, Sendable {
+        public var reason: String
+    }
+
     public struct Verification: Codable, Sendable {
         public var date: String
         public var engine: String
@@ -100,6 +107,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
     public var knownIssues: [KnownIssue]?
     public var lastVerified: Verification?
     public var blocked: Blocked?
+    public var flaky: Flaky?
 
     public static func load(from url: URL) throws -> Recipe {
         try JSONDecoder.highball.decode(Recipe.self, from: Data(contentsOf: url))
