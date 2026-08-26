@@ -398,13 +398,13 @@ final class AppState {
         }
     }
 
-    func setRetina(_ on: Bool, in bottle: Bottle) {
+    func setDpi(_ scale: Int, in bottle: Bottle) {
         guard let engine = engine(for: bottle) else { return }
         var copy = bottle
-        copy.settings.retinaMode = on
+        copy.settings.dpiScale = scale
         update(copy)
-        runBusy(on ? "Enabling Retina mode" : "Disabling Retina mode", showLogSheet: false) { [self] in
-            try await WineRunner(paths: paths, engine: engine, bottle: copy).setRetinaMode(on)
+        runBusy("Applying display scaling", showLogSheet: false) { [self] in
+            try await WineRunner(paths: paths, engine: engine, bottle: copy).setDpi(logPixels: scale)
         }
     }
 

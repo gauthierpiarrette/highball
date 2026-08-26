@@ -500,7 +500,11 @@ struct BottleSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let bottle: Bottle
     @State private var confirmDelete = false
+    /// Live slider value while dragging; nil means "read the saved dpiScale". Applied on release
+    /// only, so dragging doesn't fire a wine registry write on every step.
+    @State private var dpiDraft: Double? = nil
 
+    private var currentDpi: Int { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.dpiScale }
     private var engine: InstalledEngine? { state.engine(for: bottle) }
     private var d3dmetalAvailable: Bool { engine?.rendererDir("d3dmetal") != nil }
     private var d3dmetalPossible: Bool {
@@ -546,8 +550,24 @@ struct BottleSettingsSheet: View {
                         Text("60 fps").tag(60)
                         Text("120 fps").tag(120)
                     }
-                    Toggle(L("Retina mode (native resolution)"), isOn: retinaBinding)
-                    Text(L("Crisper text and UI at your display's full resolution. Heavy games may run slower — pair with the frame rate cap."))
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(L("Display scaling"))
+                            Spacer()
+                            Text("\(Int(((dpiDraft ?? Double(currentDpi)) / 96 * 100).rounded()))%")
+                                .foregroundStyle(.secondary).monospacedDigit()
+                        }
+                        Slider(
+                            value: Binding(get: { dpiDraft ?? Double(currentDpi) }, set: { dpiDraft = $0 }),
+                            in: 96...240, step: 24,
+                            onEditingChanged: { editing in
+                                if !editing, let v = dpiDraft {
+                                    state.setDpi(Int(v.rounded()), in: state.bottles.first { $0.name == bottle.name } ?? bottle)
+                                    dpiDraft = nil
+                                }
+                            })
+                    }
+                    Text(L("Scales the Windows desktop and UI, 100% to 250%. Launchers and desktop apps follow it; many full-screen games set their own resolution and won't. Above 100% uses native Retina pixels, so heavy games may run slower."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section(L("Compatibility")) {
@@ -604,12 +624,6 @@ struct BottleSettingsSheet: View {
             Button(L("Delete"), role: .destructive) { dismiss(); state.deleteBottle(bottle.name) }
             Button(L("Cancel"), role: .cancel) {}
         }
-    }
-
-    private var retinaBinding: Binding<Bool> {
-        Binding(
-            get: { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.retinaMode },
-            set: { on in state.setRetina(on, in: state.bottles.first { $0.name == bottle.name } ?? bottle) })
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<BottleSettings, T>) -> Binding<T> {

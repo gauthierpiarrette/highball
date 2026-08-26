@@ -44,13 +44,40 @@ final class RegressionTests: XCTestCase {
         let old = #"{"formatVersion":1,"name":"aged","engineID":"x64-test","renderer":"dxmt","windowsVersion":"win10","sync":"msync","metalHUD":false,"advertiseAVX":false,"pins":[{"id":"6B1F0D2A-0000-4000-8000-000000000001","name":"Steam","path":"Program Files (x86)/Steam/steam.exe"}],"environment":{},"recipes":[]}"#
         let s = try JSONDecoder.highball.decode(BottleSettings.self, from: Data(old.utf8))
         XCTAssertEqual(s.name, "aged")
-        XCTAssertEqual(s.retinaMode, false, "field added in 0.7.x must default off")
+        XCTAssertEqual(s.dpiScale, 96, "no dpi field on an old bottle must default to 96 (100%)")
         XCTAssertEqual(s.dllOverrides, "", "field added in 0.7.2 must default empty")
         XCTAssertEqual(s.fpsCap, 0)
         XCTAssertEqual(s.dxvkAsync, true)
         XCTAssertEqual(s.pins.first?.arguments, [], "pin arguments default to empty")
         XCTAssertEqual(s.pins.first?.environment, [:])
         XCTAssertNil(s.pins.first?.renderer)
+    }
+
+    // The retinaMode on/off toggle became a dpiScale slider in 0.7.8. A bottle that had
+    // retinaMode:true must migrate to 200% (LogPixels 192), not silently reset to 100%.
+    func testRetinaModeMigratesToDpiScale() throws {
+        let on = try JSONDecoder.highball.decode(BottleSettings.self,
+            from: Data(#"{"name":"a","engineID":"e","retinaMode":true}"#.utf8))
+        XCTAssertEqual(on.dpiScale, 192, "legacy retinaMode:true -> 200% (LogPixels 192)")
+        let off = try JSONDecoder.highball.decode(BottleSettings.self,
+            from: Data(#"{"name":"a","engineID":"e","retinaMode":false}"#.utf8))
+        XCTAssertEqual(off.dpiScale, 96, "legacy retinaMode:false -> 100%")
+        let explicit = try JSONDecoder.highball.decode(BottleSettings.self,
+            from: Data(#"{"name":"a","engineID":"e","dpiScale":144,"retinaMode":true}"#.utf8))
+        XCTAssertEqual(explicit.dpiScale, 144, "an explicit dpiScale wins over the legacy key")
+    }
+
+    // The DPI slider generalizes the old 96/192 pair: native Retina pixels only above 100%,
+    // and values clamped to Wine's usable 96..240 range so a bad input can't write garbage.
+    func testDpiRegistryMappingAndClamp() {
+        XCTAssertEqual(WineRunner.dpiRegistry(for: 96).logPixels, 96)
+        XCTAssertEqual(WineRunner.dpiRegistry(for: 96).retinaMode, "n", "100% stays 1x")
+        XCTAssertEqual(WineRunner.dpiRegistry(for: 144).logPixels, 144)
+        XCTAssertEqual(WineRunner.dpiRegistry(for: 144).retinaMode, "y", "above 100% switches to native pixels")
+        XCTAssertEqual(WineRunner.dpiRegistry(for: 50).logPixels, 96, "below range clamps up to 96")
+        XCTAssertEqual(WineRunner.dpiRegistry(for: 50).retinaMode, "n")
+        XCTAssertEqual(WineRunner.dpiRegistry(for: 999).logPixels, 240, "above range clamps to 240")
+        XCTAssertEqual(WineRunner.dpiRegistry(for: 999).retinaMode, "y")
     }
 
     // Steam writes StateFlags 1026 while downloading; the game card must not offer Play.

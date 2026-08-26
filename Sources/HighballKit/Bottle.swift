@@ -156,8 +156,10 @@ public struct BottleSettings: Codable, Sendable {
     public var dxvkAsync: Bool = true
     /// Cap the frame rate (0 = uncapped). Applied per renderer (DXVK_FRAME_RATE / DXMT_CONFIG).
     public var fpsCap: Int = 0
-    /// Wine Mac driver Retina mode: expose native pixels + 192 DPI (applied via registry on toggle).
-    public var retinaMode: Bool = false
+    /// Windows UI scale as a DPI value (LogPixels): 96 = 100% (1x), up to 240 = 250%. Above 96 the
+    /// Mac driver switches to native Retina pixels so the scaled UI stays crisp. Applied to the prefix
+    /// registry on change. Supersedes the old on/off retinaMode (which was just 96 / 192).
+    public var dpiScale: Int = 96
     /// Extra WINEDLLOVERRIDES entries, e.g. "version=n,b" for Cyber Engine Tweaks. Appended to
     /// whatever the renderer sets, semicolon separated.
     public var dllOverrides: String = ""
@@ -183,13 +185,23 @@ public struct BottleSettings: Codable, Sendable {
         advertiseAVX = try c.decodeIfPresent(Bool.self, forKey: .advertiseAVX) ?? false
         dxvkAsync = try c.decodeIfPresent(Bool.self, forKey: .dxvkAsync) ?? true
         fpsCap = try c.decodeIfPresent(Int.self, forKey: .fpsCap) ?? 0
-        retinaMode = try c.decodeIfPresent(Bool.self, forKey: .retinaMode) ?? false
+        // dpiScale supersedes the old retinaMode toggle (on == 200% == LogPixels 192).
+        if let dpi = try c.decodeIfPresent(Int.self, forKey: .dpiScale) {
+            dpiScale = dpi
+        } else {
+            let legacyRetina = (try? decoder.container(keyedBy: LegacyCodingKeys.self)
+                .decodeIfPresent(Bool.self, forKey: .retinaMode)) ?? nil
+            dpiScale = legacyRetina == true ? 192 : 96
+        }
         dllOverrides = try c.decodeIfPresent(String.self, forKey: .dllOverrides) ?? ""
         environment = try c.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
         pins = try c.decodeIfPresent([Pin].self, forKey: .pins) ?? []
         recipes = try c.decodeIfPresent([String].self, forKey: .recipes) ?? []
         created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()
     }
+
+    /// Legacy key for migrating pre-dpiScale bottles that stored `retinaMode`.
+    private enum LegacyCodingKeys: String, CodingKey { case retinaMode }
 }
 
 public struct Bottle: Sendable {

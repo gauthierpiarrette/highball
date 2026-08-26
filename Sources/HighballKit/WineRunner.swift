@@ -145,11 +145,20 @@ public struct WineRunner: Sendable {
         return line.split(whereSeparator: \.isWhitespace).last.map(String.init)
     }
 
-    /// Wine's Mac driver renders at 1x by default. Retina mode exposes native pixels (crisper,
-    /// ~4x GPU work at native res) with a 192 DPI bump so Windows UI stays readable.
-    public func setRetinaMode(_ on: Bool) async throws {
-        try await regAdd(key: #"HKCU\Software\Wine\Mac Driver"#, name: "RetinaMode", type: "REG_SZ", data: on ? "y" : "n")
-        try await regAdd(key: #"HKCU\Control Panel\Desktop"#, name: "LogPixels", type: "REG_DWORD", data: on ? "192" : "96")
+    /// Windows UI scaling. LogPixels is the Windows system DPI (96 = 100%, 240 = 250%): DPI-aware
+    /// apps and launchers follow it, though many full-screen games set their own render resolution and
+    /// ignore it. At 96 the Mac driver renders at 1x; above that it switches to native Retina pixels
+    /// (crisper, ~4x GPU work at native res) so the scaled UI stays sharp. Clamped to the 96..240 range
+    /// Wine accepts. Pure so the mapping is unit-tested without touching a prefix.
+    public static func dpiRegistry(for logPixels: Int) -> (retinaMode: String, logPixels: Int) {
+        let clamped = min(max(logPixels, 96), 240)
+        return (clamped > 96 ? "y" : "n", clamped)
+    }
+
+    public func setDpi(logPixels: Int) async throws {
+        let v = Self.dpiRegistry(for: logPixels)
+        try await regAdd(key: #"HKCU\Software\Wine\Mac Driver"#, name: "RetinaMode", type: "REG_SZ", data: v.retinaMode)
+        try await regAdd(key: #"HKCU\Control Panel\Desktop"#, name: "LogPixels", type: "REG_DWORD", data: String(v.logPixels))
     }
 
     /// Wine's fallback D3D reports a fake NVIDIA GPU (GeForce 8800 GTX class) when it can't

@@ -109,7 +109,7 @@ struct Bottle: AsyncParsableCommand {
     }
 
     struct Set: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Change a bottle setting: renderer, winver, sync, hud, avx, retina, dlloverrides, env KEY=VALUE")
+        static let configuration = CommandConfiguration(abstract: "Change a bottle setting: renderer, winver, sync, hud, avx, dpi, dlloverrides, env KEY=VALUE")
         @Argument var name: String
         @Argument var setting: String
         @Argument var value: String
@@ -129,11 +129,11 @@ struct Bottle: AsyncParsableCommand {
             case "avx": b.settings.advertiseAVX = (value == "1" || value == "true")
             case "dlloverrides":
                 b.settings.dllOverrides = value
-            case "retina":
-                let on = (value == "1" || value == "true")
-                b.settings.retinaMode = on
+            case "dpi":
+                guard let scale = Int(value) else { fail("dpi expects a number (96..240; 96 = 100%, 192 = 200%)") }
+                b.settings.dpiScale = scale
                 let eng = try EngineStore().engine(b.settings.engineID)
-                try await WineRunner(engine: eng, bottle: b).setRetinaMode(on)
+                try await WineRunner(engine: eng, bottle: b).setDpi(logPixels: scale)
             case "env":
                 let parts = value.split(separator: "=", maxSplits: 1).map(String.init)
                 guard parts.count == 2 else { fail("env expects KEY=VALUE") }

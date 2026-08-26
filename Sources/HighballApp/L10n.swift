@@ -33,11 +33,10 @@ enum L10n {
         "Stop Everything & Quit": "Tout arrêter et quitter",
         "Leave Running & Quit": "Laisser tourner et quitter",
         "Stop All Windows Processes": "Arrêter tous les processus Windows",
-        "Retina mode (native resolution)": "Mode Retina (résolution native)",
-        "Crisper text and UI at your display's full resolution. Heavy games may run slower — pair with the frame rate cap.":
-            "Texte et interface plus nets à la pleine résolution de votre écran. Les jeux exigeants peuvent ralentir — combinez avec la limite d'images par seconde.",
-        "Enabling Retina mode": "Activation du mode Retina",
-        "Disabling Retina mode": "Désactivation du mode Retina",
+        "Display scaling": "Mise à l'échelle de l'affichage",
+        "Scales the Windows desktop and UI, 100% to 250%. Launchers and desktop apps follow it; many full-screen games set their own resolution and won't. Above 100% uses native Retina pixels, so heavy games may run slower.":
+            "Met à l'échelle le bureau et l'interface Windows, de 100 % à 250 %. Les lanceurs et applications de bureau la suivent ; beaucoup de jeux en plein écran définissent leur propre résolution et l'ignorent. Au-delà de 100 %, le rendu utilise les pixels Retina natifs, donc les jeux exigeants peuvent ralentir.",
+        "Applying display scaling": "Application de la mise à l'échelle",
         "Report a Problem…": "Signaler un problème…",
         "Report this problem…": "Signaler ce problème…",
         "Duplicate bottle": "Dupliquer la bouteille",
