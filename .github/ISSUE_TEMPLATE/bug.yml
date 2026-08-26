@@ -2,9 +2,11 @@ name: Bug report
 description: Something in Highball itself broke (for game results, use the report form on highball-db)
 labels: [bug]
 body:
-  - type: input
+  - type: textarea
     id: what
-    attributes: { label: What happened }
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Write as much as you need.
     validations: { required: true }
   - type: input
     id: chip
@@ -16,4 +18,4 @@ body:
     validations: { required: true }
   - type: textarea
     id: log
-    attributes: { label: Log, description: "Attach the newest file from ~/Library/Application Support/Highball/logs/" }
+    attributes: { label: Log, description: "Attach or paste the newest file from ~/Library/Application Support/Highball/logs/" }
