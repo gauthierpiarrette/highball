@@ -79,19 +79,33 @@ final class EnvironmentTests: XCTestCase {
         XCTAssertEqual(env["ROSETTA_ADVERTISE_AVX"], "1")
         XCTAssertNil(env["DXVK_FRAME_RATE"], "wined3d has no fps cap channel")
 
-        // DXVK renderer needs its overlay dir on disk for environment() to succeed.
+        // DXVK renderer needs BOTH overlay dirs on disk: d9vk (D3D9) and dxvk (D3D10/11).
+        let d9vkWine = engine.renderersDir.appending(path: "d9vk/wine")
         let dxvkWine = engine.renderersDir.appending(path: "dxvk/wine")
+        try FileManager.default.createDirectory(at: d9vkWine, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: dxvkWine, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: engine.root) }
         env = try bottle.environment(engine: engine, renderer: .dxvk)
         XCTAssertEqual(env["DXVK_FRAME_RATE"], "60")
         XCTAssertEqual(env["DXVK_ASYNC"], "1", "dxvkAsync defaults on")
-        XCTAssertEqual(env["WINEDLLPATH_PREPEND"], dxvkWine.path)
+        // d9vk must come first so DXVK's d3d9 wins the builtin search over wined3d (#21 CSM gate).
+        XCTAssertEqual(env["WINEDLLPATH_PREPEND"], "\(d9vkWine.path):\(dxvkWine.path)")
     }
 
     // A renderer whose overlay is missing must throw, not silently fall back.
     func testMissingRendererThrows() throws {
         let (engine, bottle) = try fixtures()
         XCTAssertThrowsError(try bottle.environment(engine: engine, renderer: .dxmt))
+    }
+
+    // .dxvk with the dxvk overlay present but d9vk (its D3D9) missing must throw — never
+    // silently regress D3D9 to builtin wined3d, which is exactly the #21 CSM-gate failure.
+    func testDxvkRequiresD9vkOverlay() throws {
+        let (engine, bottle) = try fixtures()
+        try FileManager.default.createDirectory(at: engine.renderersDir.appending(path: "dxvk/wine"),
+                                                withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: engine.root) }
+        XCTAssertThrowsError(try bottle.environment(engine: engine, renderer: .dxvk),
+                             "dxvk present but d9vk missing must throw, not fall back to wined3d")
     }
 }

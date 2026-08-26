@@ -28,8 +28,15 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
             env["DYLD_FALLBACK_LIBRARY_PATH+"] = external
             env["DYLD_FALLBACK_FRAMEWORK_PATH+"] = external
         case .dxvk:
-            guard let dir = engine.rendererDir("dxvk") else { throw HighballError.missing("dxvk renderer in engine \(engine.id)") }
-            env["WINEDLLPATH_PREPEND"] = dir.appending(path: "wine").path
+            // DXVK's D3D10/11 live in the "dxvk" overlay, but its D3D9 ships in a *separate*
+            // "d9vk" overlay. Both dirs must be on WINEDLLPATH_PREPEND or a D3D9 title's d3d9
+            // resolves to builtin wined3d, whose D3D9 lacks the DF16/DF24 shadow-depth formats
+            // Source's CSM check probes — CS:GO then quits with "graphics hardware does not
+            // support all features (CSM)" (#21). d9vk is required for .dxvk: a missing overlay
+            // must fail loudly, never silently regress D3D9 back to wined3d.
+            guard let dxvk = engine.rendererDir("dxvk") else { throw HighballError.missing("dxvk renderer in engine \(engine.id)") }
+            guard let d9vk = engine.rendererDir("d9vk") else { throw HighballError.missing("d9vk (DXVK D3D9) renderer in engine \(engine.id)") }
+            env["WINEDLLPATH_PREPEND"] = [d9vk.appending(path: "wine").path, dxvk.appending(path: "wine").path].joined(separator: ":")
             env["WINEDLLOVERRIDES+"] = "dxgi,d3d9,d3d10core,d3d11=n,b"
         }
         return env
