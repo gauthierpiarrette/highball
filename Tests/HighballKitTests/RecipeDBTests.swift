@@ -23,7 +23,7 @@ final class RecipeDBTests: XCTestCase {
             guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
             for f in files where f.pathExtension == "json" {
                 let r: Recipe
-                do { r = try JSONDecoder.gin.decode(Recipe.self, from: Data(contentsOf: f)) }
+                do { r = try JSONDecoder.highball.decode(Recipe.self, from: Data(contentsOf: f)) }
                 catch { XCTFail("\(f.lastPathComponent) failed to decode: \(error)"); continue }
                 XCTAssertFalse(r.id.isEmpty, f.lastPathComponent)
                 XCTAssertFalse(r.title.isEmpty, f.lastPathComponent)
@@ -47,7 +47,7 @@ final class RecipeDBTests: XCTestCase {
         for f in try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
         where f.pathExtension == "json" {
             do {
-                let e = try JSONDecoder.gin.decode(GameDBEntry.self, from: Data(contentsOf: f))
+                let e = try JSONDecoder.highball.decode(GameDBEntry.self, from: Data(contentsOf: f))
                 XCTAssertFalse(e.id.isEmpty, f.lastPathComponent)
                 XCTAssertTrue(["verified-local", "reported-upstream", "community", "blocked-anticheat"].contains(e.status),
                               "\(f.lastPathComponent): unknown status '\(e.status)'")
@@ -66,7 +66,7 @@ final class RecipeDBTests: XCTestCase {
         guard FileManager.default.fileExists(atPath: f.path) else {
             throw XCTSkip("highball-db checkout not found next to the repo")
         }
-        let r = try JSONDecoder.gin.decode(Recipe.self, from: Data(contentsOf: f))
+        let r = try JSONDecoder.highball.decode(Recipe.self, from: Data(contentsOf: f))
         let installers = r.steps.compactMap { step -> URL? in
             if case let .installer(url, _, _, _) = step { return url } else { return nil }
         }

@@ -44,7 +44,7 @@ public struct BottleStore: Sendable {
         return nil
     }
 
-    /// Creates the directory + gin.json, then runs `wineboot -u` to populate the prefix.
+    /// Creates the directory + bottle.json, then runs `wineboot -u` to populate the prefix.
     public func create(name rawName: String, engine: InstalledEngine, renderer: Renderer = .dxmt, windowsVersion: WindowsVersion = .win10) async throws -> Bottle {
         let name = rawName.trimmingCharacters(in: .whitespaces)
         if let problem = Self.nameProblem(name) { throw HighballError.invalid(problem) }

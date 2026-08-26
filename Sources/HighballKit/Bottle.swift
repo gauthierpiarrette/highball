@@ -4,7 +4,7 @@ import Foundation
 public enum Renderer: String, Codable, CaseIterable, Sendable {
     /// Wine's own D3D-on-OpenGL. Slow; last resort.
     case wined3d
-    /// D3D10/11 → Metal. Gin's default.
+    /// D3D10/11 → Metal. Highball's default.
     case dxmt
     /// Apple's D3D11/12 → Metal. Only D3D12 path. Apple-licensed, optional download.
     case d3dmetal
@@ -114,7 +114,7 @@ public enum ArgumentLine {
     }
 }
 
-/// Persisted as `<bottle>/gin.json`.
+/// Persisted as `<bottle>/bottle.json` (older bottles: `gin.json`, still read as a fallback).
 public struct BottleSettings: Codable, Sendable {
     public var formatVersion: Int = 1
     public var name: String
@@ -182,12 +182,12 @@ public struct Bottle: Sendable {
         let legacy = url.appending(path: "gin.json")
         let file = FileManager.default.fileExists(atPath: modern.path) ? modern : legacy
         let data = try Data(contentsOf: file)
-        let settings = try JSONDecoder.gin.decode(BottleSettings.self, from: data)
+        let settings = try JSONDecoder.highball.decode(BottleSettings.self, from: data)
         return Bottle(url: url, settings: settings)
     }
 
     public func save() throws {
-        try JSONEncoder.gin.encode(settings).write(to: settingsURL, options: .atomic)
+        try JSONEncoder.highball.encode(settings).write(to: settingsURL, options: .atomic)
     }
 
     /// Environment for running something in this bottle: engine base + bottle settings + renderer + extras.
@@ -243,7 +243,7 @@ public struct Bottle: Sendable {
 }
 
 extension JSONEncoder {
-    static var gin: JSONEncoder {
+    static var highball: JSONEncoder {
         let e = JSONEncoder()
         e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         e.dateEncodingStrategy = .iso8601
@@ -252,7 +252,7 @@ extension JSONEncoder {
 }
 
 extension JSONDecoder {
-    static var gin: JSONDecoder {
+    static var highball: JSONDecoder {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
         return d

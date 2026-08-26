@@ -1,5 +1,5 @@
 {
-  "$schema": "https://gin.app/schemas/engine-manifest/v0",
+  "$schema": "https://highball.app/schemas/engine-manifest/v0",
   "id": "x64-sikarugir10.0_6-r0",
   "displayName": "Wine 10.0 (Sikarugir) + DXMT 0.80 + D3DMetal 3.0",
   "arch": "x86_64",

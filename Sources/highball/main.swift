@@ -17,7 +17,7 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-// MARK: - gin engine
+// MARK: - highball engine
 
 struct Engine: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Manage engines (Wine + renderers).", subcommands: [List.self, Install.self, Accept.self])
@@ -67,7 +67,7 @@ struct Engine: AsyncParsableCommand {
     }
 }
 
-// MARK: - gin bottle
+// MARK: - highball bottle
 
 struct Bottle: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Manage bottles (Wine prefixes).", subcommands: [List.self, Create.self, Delete.self, Set.self, Kill.self, Duplicate.self, Repair.self])
@@ -186,9 +186,9 @@ struct Bottle: AsyncParsableCommand {
     }
 }
 
-// MARK: - gin run
+// MARK: - highball run
 
-// MARK: - gin pin
+// MARK: - highball pin
 
 struct PinCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -288,7 +288,7 @@ struct Run: AsyncParsableCommand {
     }
 }
 
-// MARK: - gin recipe
+// MARK: - highball recipe
 
 struct Recipe: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Apply a recipe to a bottle.", subcommands: [Apply.self, Show.self])
@@ -316,7 +316,7 @@ struct Recipe: AsyncParsableCommand {
     }
 }
 
-// MARK: - gin env
+// MARK: - highball env
 
 struct Env: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Print the environment Gin would use for a bottle (for debugging or a terminal session).")

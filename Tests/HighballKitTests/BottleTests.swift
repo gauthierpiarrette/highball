@@ -12,8 +12,8 @@ final class BottleTests: XCTestCase {
         var s = BottleSettings(name: "play", engineID: "x64-test")
         s.pins = [Pin(name: "Steam", path: "Program Files (x86)/Steam/steam.exe", renderer: .dxmt)]
         s.environment["FOO"] = "bar"
-        let data = try JSONEncoder.gin.encode(s)
-        let back = try JSONDecoder.gin.decode(BottleSettings.self, from: data)
+        let data = try JSONEncoder.highball.encode(s)
+        let back = try JSONDecoder.highball.decode(BottleSettings.self, from: data)
         XCTAssertEqual(back.pins.first?.name, "Steam")
         XCTAssertEqual(back.environment["FOO"], "bar")
         XCTAssertEqual(back.renderer, .dxmt)
@@ -26,7 +26,7 @@ final class BottleTests: XCTestCase {
           {"type":"note","text":"hello"},
           {"type":"renderer","renderer":"d3dmetal"}]}
         """
-        let r = try JSONDecoder.gin.decode(Recipe.self, from: Data(json.utf8))
+        let r = try JSONDecoder.highball.decode(Recipe.self, from: Data(json.utf8))
         XCTAssertEqual(r.steps.count, 3)
         if case let .registry(key, _, _, _) = r.steps[0] { XCTAssertEqual(key, "HKCU\\Software\\X") } else { XCTFail() }
     }

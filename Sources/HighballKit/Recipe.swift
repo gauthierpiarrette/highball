@@ -93,7 +93,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
     public var lastVerified: Verification?
 
     public static func load(from url: URL) throws -> Recipe {
-        try JSONDecoder.gin.decode(Recipe.self, from: Data(contentsOf: url))
+        try JSONDecoder.highball.decode(Recipe.self, from: Data(contentsOf: url))
     }
 }
 

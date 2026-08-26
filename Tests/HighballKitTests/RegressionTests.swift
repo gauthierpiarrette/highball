@@ -42,7 +42,7 @@ final class RegressionTests: XCTestCase {
     // Decoding must fill defaults, never throw (an early 0.5.x crashed on this class).
     func testSettingsDecodeFromOldVersion() throws {
         let old = #"{"formatVersion":1,"name":"aged","engineID":"x64-test","renderer":"dxmt","windowsVersion":"win10","sync":"msync","metalHUD":false,"advertiseAVX":false,"pins":[{"id":"6B1F0D2A-0000-4000-8000-000000000001","name":"Steam","path":"Program Files (x86)/Steam/steam.exe"}],"environment":{},"recipes":[]}"#
-        let s = try JSONDecoder.gin.decode(BottleSettings.self, from: Data(old.utf8))
+        let s = try JSONDecoder.highball.decode(BottleSettings.self, from: Data(old.utf8))
         XCTAssertEqual(s.name, "aged")
         XCTAssertEqual(s.retinaMode, false, "field added in 0.7.x must default off")
         XCTAssertEqual(s.dllOverrides, "", "field added in 0.7.2 must default empty")
@@ -85,7 +85,7 @@ final class RegressionTests: XCTestCase {
         p.arguments = ["-dx11", #"C:\a b\cfg"#]
         p.environment = ["WINE_SIMULATE_WRITECOPY": "1"]
         p.renderer = .dxvk
-        let back = try JSONDecoder.gin.decode(Pin.self, from: JSONEncoder.gin.encode(p))
+        let back = try JSONDecoder.highball.decode(Pin.self, from: JSONEncoder.highball.encode(p))
         XCTAssertEqual(back, p)
     }
 }
