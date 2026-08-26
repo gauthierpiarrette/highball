@@ -59,6 +59,41 @@ final class RecipeDBTests: XCTestCase {
         XCTAssertGreaterThan(checked, 0)
     }
 
+    // A blocked recipe must refuse to run before touching the bottle — the Rockstar
+    // installer would otherwise hang a user's install forever (Sikarugir#258).
+    func testBlockedRecipeRefusesToApply() async throws {
+        let json = """
+        {"id":"b","kind":"launcher","title":"Blocked Thing","steps":[{"type":"note","text":"x"}],
+         "blocked":{"reason":"engine cannot run it","tracking":"https://example.com/1"}}
+        """
+        let r = try JSONDecoder.highball.decode(Recipe.self, from: Data(json.utf8))
+        XCTAssertEqual(r.blocked?.reason, "engine cannot run it")
+        let manifestURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "spike/engine-manifest.json")
+        let engine = InstalledEngine(manifest: try EngineManifest.load(from: manifestURL),
+                                     root: FileManager.default.temporaryDirectory.appending(path: "hb-blocked-\(UUID().uuidString)"))
+        let bottle = Bottle(url: URL(fileURLWithPath: "/tmp/hb-blocked-bottle"),
+                            settings: BottleSettings(name: "b", engineID: engine.id))
+        var runner = RecipeRunner(engine: engine, bottle: bottle)
+        do {
+            _ = try await runner.apply(r)
+            XCTFail("blocked recipe must throw")
+        } catch {
+            XCTAssertTrue("\(error)".contains("blocked"), "error should explain the block: \(error)")
+        }
+    }
+
+    // The Rockstar db entry must stay blocked until the engine fix lands.
+    func testRockstarRecipeIsBlocked() throws {
+        let f = dbRoot.appending(path: "recipes/launchers/rockstar.json")
+        guard FileManager.default.fileExists(atPath: f.path) else {
+            throw XCTSkip("highball-db checkout not found next to the repo")
+        }
+        let r = try JSONDecoder.highball.decode(Recipe.self, from: Data(contentsOf: f))
+        XCTAssertNotNil(r.blocked, "unblock only after verifying the launcher actually runs (Sikarugir#258)")
+    }
+
     // The GOG recipe regression: the web installer trips its service-pack check under
     // Wine's win10 profile. The recipe must keep pointing at the offline installer.
     func testGogRecipeUsesOfflineInstaller() throws {

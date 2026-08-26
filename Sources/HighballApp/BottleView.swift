@@ -219,10 +219,11 @@ struct BottleView: View {
             HB.eyebrow(L("Launchers"))
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 108, maximum: 140), spacing: 12)], spacing: 12) {
                 ForEach(Self.launcherMeta, id: \.id) { meta in
-                    if AppState.recipe(meta.id) != nil {
+                    if let recipe = AppState.recipe(meta.id) {
                         let installed = bottle.settings.recipes.contains(meta.id)
                         let pin = bottle.settings.pins.first { $0.name.lowercased().hasPrefix(meta.short.lowercased().prefix(5)) }
-                        LauncherTile(title: meta.short, symbol: meta.symbol, installed: installed, busy: state.busy) {
+                        LauncherTile(title: meta.short, symbol: meta.symbol, installed: installed, busy: state.busy,
+                                     blockedReason: recipe.blocked?.reason) {
                             if installed, let pin { state.launch(pin: pin, in: bottle) }
                             else { state.applyRecipe(meta.id, to: bottle) }
                         }
@@ -433,8 +434,11 @@ struct LauncherTile: View {
     let symbol: String
     let installed: Bool
     let busy: Bool
+    var blockedReason: String? = nil
     let action: () -> Void
     @State private var hovering = false
+
+    private var blocked: Bool { blockedReason != nil && !installed }
 
     var body: some View {
         Button(action: action) {
@@ -461,17 +465,19 @@ struct LauncherTile: View {
                     }
                 }
                 Text(title).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
-                Text(installed ? L("Open") : L("Install"))
+                Text(installed ? L("Open") : (blocked ? L("Blocked") : L("Install")))
                     .font(.system(size: 9.5).monospaced())
-                    .foregroundStyle(installed ? AnyShapeStyle(HB.good) : AnyShapeStyle(.tertiary))
+                    .foregroundStyle(installed ? AnyShapeStyle(HB.good) : (blocked ? AnyShapeStyle(HB.bad.opacity(0.85)) : AnyShapeStyle(.tertiary)))
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
-            .background(RoundedRectangle(cornerRadius: 11).fill(hovering ? Color.white.opacity(0.09) : HB.card))
-            .overlay(RoundedRectangle(cornerRadius: 11).stroke(hovering ? HB.amber.opacity(0.4) : HB.cardStroke))
+            .background(RoundedRectangle(cornerRadius: 11).fill(hovering && !blocked ? Color.white.opacity(0.09) : HB.card))
+            .overlay(RoundedRectangle(cornerRadius: 11).stroke(hovering && !blocked ? HB.amber.opacity(0.4) : HB.cardStroke))
+            .opacity(blocked ? 0.55 : 1)
         }
         .buttonStyle(.plain)
-        .disabled(busy)
+        .disabled(busy || blocked)
+        .help(blockedReason.map { L("Blocked on the current engine: ") + $0 } ?? "")
         .animation(.easeOut(duration: 0.12), value: hovering)
         .onHover { hovering = $0 }
     }

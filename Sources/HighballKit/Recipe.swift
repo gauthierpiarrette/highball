@@ -75,6 +75,14 @@ public struct Recipe: Codable, Sendable, Identifiable {
         public var fix: String?
     }
 
+    /// A recipe the current engine cannot deliver: shown but not runnable, with the reason
+    /// and an upstream tracking link. Better one honest disabled tile than an installer
+    /// that hangs forever (the Rockstar case).
+    public struct Blocked: Codable, Sendable {
+        public var reason: String
+        public var tracking: String?
+    }
+
     public struct Verification: Codable, Sendable {
         public var date: String
         public var engine: String
@@ -91,6 +99,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
     public var steps: [Step]
     public var knownIssues: [KnownIssue]?
     public var lastVerified: Verification?
+    public var blocked: Blocked?
 
     public static func load(from url: URL) throws -> Recipe {
         try JSONDecoder.highball.decode(Recipe.self, from: Data(contentsOf: url))
@@ -110,6 +119,11 @@ public struct RecipeRunner: Sendable {
 
     /// Runs every step. Returns the notes the UI should show afterwards.
     public mutating func apply(_ recipe: Recipe, log: (@Sendable (String) -> Void)? = nil) async throws -> [String] {
+        if let b = recipe.blocked {
+            var msg = "'\(recipe.title)' is blocked on this engine: \(b.reason)"
+            if let t = b.tracking { msg += " Tracked at \(t)" }
+            throw HighballError.invalid(msg)
+        }
         var notes: [String] = []
         if let r = recipe.renderer { bottle.settings.renderer = r }
         for (i, step) in recipe.steps.enumerated() {
