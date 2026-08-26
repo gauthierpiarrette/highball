@@ -48,7 +48,9 @@ public enum SyncMode: String, Codable, CaseIterable, Sendable {
 public struct Pin: Codable, Sendable, Identifiable, Hashable {
     public var id: UUID = UUID()
     public var name: String
-    /// Path relative to the bottle's `drive_c`.
+    /// Path relative to the bottle's `drive_c`, or an absolute unix path (leading `/`)
+    /// for programs that live outside the bottle — preinstalled games on the Mac side,
+    /// which Wine reaches through its Z: drive.
     public var path: String
     public var arguments: [String] = []
     public var environment: [String: String] = [:]
@@ -56,6 +58,19 @@ public struct Pin: Codable, Sendable, Identifiable, Hashable {
 
     public init(name: String, path: String, arguments: [String] = [], environment: [String: String] = [:], renderer: Renderer? = nil) {
         self.name = name; self.path = path; self.arguments = arguments; self.environment = environment; self.renderer = renderer
+    }
+
+    /// Where the pin's executable actually lives for a given bottle.
+    public func executableURL(driveC: URL) -> URL {
+        path.hasPrefix("/") ? URL(fileURLWithPath: path) : driveC.appending(path: path)
+    }
+
+    /// How to store a picked file's location in a pin: drive_c-relative when the file is
+    /// inside the bottle, absolute otherwise. (Storing just a filename was the 0.7.x bug
+    /// that made "Run and add to Programs" produce dead entries for outside-the-bottle exes.)
+    public static func storagePath(for url: URL, driveC: URL) -> String {
+        let prefix = driveC.path.hasSuffix("/") ? driveC.path : driveC.path + "/"
+        return url.path.hasPrefix(prefix) ? String(url.path.dropFirst(prefix.count)) : url.path
     }
 
     enum CodingKeys: String, CodingKey { case id, name, path, arguments, environment, renderer }
@@ -235,6 +250,11 @@ public struct Bottle: Sendable {
     /// Convert a Windows path like `C:\Program Files (x86)\Steam\steam.exe` to a file URL inside the bottle.
     public func resolve(windowsPath: String) -> URL {
         var p = windowsPath
+        if p.lowercased().hasPrefix("z:") {
+            // Wine maps Z:\ to the unix root — hand back the real absolute path.
+            let rest = String(p.dropFirst(2)).replacingOccurrences(of: "\\", with: "/")
+            return URL(fileURLWithPath: rest.isEmpty ? "/" : rest)
+        }
         if p.lowercased().hasPrefix("c:") { p = String(p.dropFirst(2)) }
         p = p.replacingOccurrences(of: "\\", with: "/")
         if p.hasPrefix("/") { p.removeFirst() }

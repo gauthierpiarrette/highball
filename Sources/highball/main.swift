@@ -194,7 +194,35 @@ struct PinCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "pin",
         abstract: "Per-program settings: persistent launch arguments, environment, renderer.",
-        subcommands: [List.self, Set.self])
+        subcommands: [List.self, Add.self, Set.self])
+
+    struct Add: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Pin a program: a Windows path, a unix path (preinstalled games anywhere on disk), or a drive_c-relative path.")
+        @Argument var bottle: String
+        @Argument var name: String
+        @Argument var path: String
+
+        func run() async throws {
+            let bs = BottleStore()
+            var b = try bs.get(bottle)
+            guard !b.settings.pins.contains(where: { $0.name.lowercased() == name.lowercased() }) else {
+                fail("a pin named '\(name)' already exists in \(b.name)")
+            }
+            let url: URL
+            if path.contains(":") || path.contains("\\") {
+                url = b.resolve(windowsPath: path)
+            } else if path.hasPrefix("/") || path.hasPrefix("~") {
+                url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            } else {
+                url = b.driveC.appending(path: path)
+            }
+            guard FileManager.default.fileExists(atPath: url.path) else { fail("no file at \(url.path)") }
+            let pin = Pin(name: name, path: Pin.storagePath(for: url, driveC: b.driveC))
+            b.settings.pins.append(pin)
+            try bs.update(b)
+            print("pinned \(name) -> \(pin.path)")
+        }
+    }
 
     struct List: AsyncParsableCommand {
         @Argument var bottle: String
@@ -272,9 +300,13 @@ struct Run: AsyncParsableCommand {
                 result = try await runner.start(pin: p, onOutput: out)
             }
         } else if program.contains(":") || program.contains("\\") {
-            result = try await runner.start(b.resolve(windowsPath: program), arguments: arguments, renderer: renderer, onOutput: out)
+            let exe = b.resolve(windowsPath: program)
+            result = try await runner.start(exe, arguments: arguments, renderer: renderer,
+                                            workingDirectory: exe.deletingLastPathComponent(), onOutput: out)
         } else if FileManager.default.fileExists(atPath: program) {
-            result = try await runner.start(URL(fileURLWithPath: program), arguments: arguments, renderer: renderer, onOutput: out)
+            let exe = URL(fileURLWithPath: program)
+            result = try await runner.start(exe, arguments: arguments, renderer: renderer,
+                                            workingDirectory: exe.deletingLastPathComponent(), onOutput: out)
         } else {
             // Not a pin, not a Windows path, not a local file: let Wine resolve it (cmd, dxdiag,
             // notepad, anything on the Windows PATH) instead of failing on a made-up unix path.

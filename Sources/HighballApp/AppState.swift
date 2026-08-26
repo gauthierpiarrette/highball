@@ -282,15 +282,21 @@ final class AppState {
         guard let engine = engine(for: bottle) else { return }
         runBusy("Running \(url.lastPathComponent)") { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
-            let isMSI = url.pathExtension.lowercased() == "msi"
+            let ext = url.pathExtension.lowercased()
+            let isMSI = ext == "msi"
             let args = isMSI ? ["msiexec", "/i", url.path] : [url.path]
-            _ = try await runner.run(args, renderer: .wined3d, label: url.lastPathComponent) { line in
+            // Installers get the boring reliable backend; a game exe gets the bottle's
+            // real renderer and runs from its own folder so relative asset paths work.
+            let renderer: Renderer? = (ext == "exe") ? nil : .wined3d
+            _ = try await runner.run(args, renderer: renderer, label: url.lastPathComponent,
+                                     workingDirectory: url.deletingLastPathComponent()) { line in
                 Task { @MainActor in self.appendLog(line) }
             }
             if andPin {
                 await MainActor.run {
                     var copy = bottle
-                    copy.settings.pins.append(Pin(name: url.deletingPathExtension().lastPathComponent, path: url.lastPathComponent))
+                    copy.settings.pins.append(Pin(name: url.deletingPathExtension().lastPathComponent,
+                                                  path: Pin.storagePath(for: url, driveC: bottle.driveC)))
                     self.update(copy)
                 }
             }

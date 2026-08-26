@@ -79,6 +79,30 @@ final class RegressionTests: XCTestCase {
                        "/tmp/b/drive_c/windows/system32/cmd.exe")
     }
 
+    // "Run and add to Programs" on an exe outside the bottle used to store just the
+    // filename, producing a pin that resolved to a nonexistent drive_c file. Pins now
+    // store drive_c-relative paths inside the bottle and absolute paths outside it,
+    // and resolve accordingly. Preinstalled-games flow (Reddit report, 2026-08-26).
+    func testPinPathsInsideAndOutsideBottle() {
+        let driveC = URL(fileURLWithPath: "/tmp/b/drive_c")
+        let inside = URL(fileURLWithPath: "/tmp/b/drive_c/Games/Foo/foo.exe")
+        let outside = URL(fileURLWithPath: "/Users/someone/Games/Bar/bar.exe")
+        XCTAssertEqual(Pin.storagePath(for: inside, driveC: driveC), "Games/Foo/foo.exe")
+        XCTAssertEqual(Pin.storagePath(for: outside, driveC: driveC), "/Users/someone/Games/Bar/bar.exe")
+        XCTAssertEqual(Pin(name: "f", path: "Games/Foo/foo.exe").executableURL(driveC: driveC).path,
+                       "/tmp/b/drive_c/Games/Foo/foo.exe")
+        XCTAssertEqual(Pin(name: "b", path: "/Users/someone/Games/Bar/bar.exe").executableURL(driveC: driveC).path,
+                       "/Users/someone/Games/Bar/bar.exe")
+    }
+
+    // Z:\ is Wine's window onto the unix root; resolving it must leave the bottle.
+    func testWindowsPathZDrive() {
+        let b = Bottle(url: URL(fileURLWithPath: "/tmp/b"), settings: BottleSettings(name: "b", engineID: "e"))
+        XCTAssertEqual(b.resolve(windowsPath: #"Z:\Users\someone\Games\game.exe"#).path,
+                       "/Users/someone/Games/game.exe")
+        XCTAssertEqual(b.resolve(windowsPath: #"C:\Games\g.exe"#).path, "/tmp/b/drive_c/Games/g.exe")
+    }
+
     // Pins round trip with everything the program settings sheet can write.
     func testPinFullRoundTrip() throws {
         var p = Pin(name: "Launcher", path: "Games/l.exe")

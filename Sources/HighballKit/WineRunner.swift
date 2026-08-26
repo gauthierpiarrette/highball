@@ -91,9 +91,11 @@ public struct WineRunner: Sendable {
     /// Runs the pinned program, honouring its own renderer/env/args.
     @discardableResult
     public func start(pin: Pin, extraEnvironment: [String: String] = [:], onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
-        let exe = bottle.driveC.appending(path: pin.path)
+        let exe = pin.executableURL(driveC: bottle.driveC)
         let env = pin.environment.merging(extraEnvironment) { $1 }
-        return try await start(exe, arguments: pin.arguments, renderer: pin.renderer, extraEnvironment: env, onOutput: onOutput)
+        // cwd = the exe's folder, as a Windows shortcut would — games with relative asset paths need it.
+        return try await start(exe, arguments: pin.arguments, renderer: pin.renderer, extraEnvironment: env,
+                               workingDirectory: exe.deletingLastPathComponent(), onOutput: onOutput)
     }
 
     /// Steam's first self-update sometimes dies at a known Wine WoW64 spot and resumes cleanly
