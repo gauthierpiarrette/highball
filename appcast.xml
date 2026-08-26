@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.5</title>
+      <description><![CDATA[Blocked launcher tiles with reasons; Rockstar diagnosis filed upstream]]></description>
+      <pubDate>Wed, 26 Aug 2026 03:39:34 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.5/Highball-0.7.5.zip" sparkle:version="0.7.5" sparkle:shortVersionString="0.7.5" sparkle:edSignature="RvRLBKiccsCXbZMNtp7W5WWrYXBEwKZnX9K2gDmEQw6aoXa6+7qqcvSgNaNL7EtLOPnuvZSeMnblgzrGJDN1Dw==" length="2461176" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.4</title>
       <description><![CDATA[Per-program settings: launch arguments, environment and renderer per program]]></description>
       <pubDate>Tue, 25 Aug 2026 17:57:22 -0700</pubDate>
