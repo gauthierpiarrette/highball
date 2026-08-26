@@ -143,3 +143,36 @@ extension RegressionTests {
         XCTAssertFalse(markers.contains { "2026-08-26T104400Z-cyberpunk-Cyberpunk2077.exe.log".lowercased().contains($0) })
     }
 }
+
+extension RegressionTests {
+    // Pins written before 0.7.6 stored a bare filename, resolving to a drive_c-root path
+    // that isn't there; launching them died with an opaque wine c0000135. Launch now
+    // fails early with an actionable message (issue #23).
+    func testStalePinFailsClearly() async throws {
+        let manifestURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "spike/engine-manifest.json")
+        let engine = InstalledEngine(manifest: try EngineManifest.load(from: manifestURL),
+                                     root: FileManager.default.temporaryDirectory.appending(path: "hb-stale-\(UUID().uuidString)"))
+        let bottleURL = FileManager.default.temporaryDirectory.appending(path: "hb-stale-bottle-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: bottleURL.appending(path: "drive_c"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: bottleURL) }
+        var settings = BottleSettings(name: "b", engineID: engine.id)
+        settings.pins = [Pin(name: "Ghost", path: "Ghost.exe")]   // bare filename, target absent
+        let runner = WineRunner(engine: engine, bottle: Bottle(url: bottleURL, settings: settings))
+        do {
+            _ = try await runner.start(pin: settings.pins[0])
+            XCTFail("launching a stale pin must throw")
+        } catch {
+            XCTAssertTrue("\(error)".contains("isn't there"), "error should be actionable: \(error)")
+        }
+    }
+
+    // storagePath must match the bottle prefix case-insensitively (APFS default).
+    func testStoragePathCaseInsensitive() {
+        let driveC = URL(fileURLWithPath: "/Users/x/Highball/bottles/b/drive_c")
+        // A dropped URL with different casing on the volume path segments.
+        let mixed = URL(fileURLWithPath: "/Users/x/Highball/Bottles/b/drive_c/Games/g.exe")
+        XCTAssertEqual(Pin.storagePath(for: mixed, driveC: driveC), "Games/g.exe")
+    }
+}

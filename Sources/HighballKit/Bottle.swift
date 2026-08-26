@@ -70,7 +70,13 @@ public struct Pin: Codable, Sendable, Identifiable, Hashable {
     /// that made "Run and add to Programs" produce dead entries for outside-the-bottle exes.)
     public static func storagePath(for url: URL, driveC: URL) -> String {
         let prefix = driveC.path.hasSuffix("/") ? driveC.path : driveC.path + "/"
-        return url.path.hasPrefix(prefix) ? String(url.path.dropFirst(prefix.count)) : url.path
+        // Case-insensitive: macOS APFS is case-insensitive by default, so a dropped URL's
+        // casing can differ from the canonical bottles path. A case-sensitive match there
+        // would wrongly store an absolute path for an in-bottle file.
+        if url.path.lowercased().hasPrefix(prefix.lowercased()) {
+            return String(url.path.dropFirst(prefix.count))
+        }
+        return url.path
     }
 
     enum CodingKeys: String, CodingKey { case id, name, path, arguments, environment, renderer }

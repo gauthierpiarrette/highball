@@ -92,6 +92,13 @@ public struct WineRunner: Sendable {
     @discardableResult
     public func start(pin: Pin, extraEnvironment: [String: String] = [:], onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
         let exe = pin.executableURL(driveC: bottle.driveC)
+        // A pin whose target no longer exists otherwise dies deep in Wine with an opaque
+        // c0000135 ("failed to open"). Catch it here with a message the user can act on.
+        // Pins written before 0.7.6 stored only a filename, so old entries resolve to a
+        // drive_c-root path that isn't there (issue #23).
+        guard FileManager.default.fileExists(atPath: exe.path) else {
+            throw HighballError.invalid("\(pin.name) points at \(pin.path), which isn't there. If this was added by an older Highball, remove it and drag the program in again.")
+        }
         let env = pin.environment.merging(extraEnvironment) { $1 }
         // cwd = the exe's folder, as a Windows shortcut would — games with relative asset paths need it.
         return try await start(exe, arguments: pin.arguments, renderer: pin.renderer, extraEnvironment: env,
