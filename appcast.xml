@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.7</title>
+      <description><![CDATA[Clearer errors for stale entries, correct bug-report logs, more reliable launcher startup]]></description>
+      <pubDate>Wed, 26 Aug 2026 10:37:15 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.7/Highball-0.7.7.zip" sparkle:version="0.7.7" sparkle:shortVersionString="0.7.7" sparkle:edSignature="kzDAeNxoE8FtLoT3ciftmMeeyUyQHZKQ7DJPWFIrObKuzA/fRXU8v2gU2ClyMPQpL7dBZPnK+h1cevwqvwfXBw==" length="2463616" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.6</title>
       <description><![CDATA[Preinstalled games: run and pin exes from anywhere on disk]]></description>
       <pubDate>Wed, 26 Aug 2026 03:59:30 -0700</pubDate>
