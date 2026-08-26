@@ -64,6 +64,7 @@ public struct BottleStore: Sendable {
         }
         if windowsVersion != .win10 { try await runner.setWindowsVersion(windowsVersion) }
         try? await runner.setGpuIdentity()
+        try? await runner.setServiceTimeout()
         return bottle
     }
 

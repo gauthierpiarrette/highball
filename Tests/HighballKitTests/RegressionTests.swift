@@ -113,3 +113,12 @@ final class RegressionTests: XCTestCase {
         XCTAssertEqual(back, p)
     }
 }
+
+extension RegressionTests {
+    // Rosetta-cold services need more than upstream's 10 s SCM window (CW HACK 20218
+    // uses 40 s). Shrinking this re-deadlocks the Rockstar installer and slows GOG's
+    // and Battle.net's service starts.
+    func testServiceTimeoutAtLeastCrossOvers() {
+        XCTAssertGreaterThanOrEqual(WineRunner.servicesPipeTimeoutMs, 40000)
+    }
+}

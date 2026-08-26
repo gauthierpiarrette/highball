@@ -154,6 +154,17 @@ public struct WineRunner: Sendable {
     /// GPU table silently reverts bottles to the fake-NVIDIA identity (the 0.7.1 bug).
     public static let gpuIdentity: (vendor: Int, device: Int) = (0x1002, 0x73bf)
 
+    /// Windows services translated cold by Rosetta can take 20+ seconds to reach RUNNING;
+    /// upstream Wine's SCM gives up after 10. CrossOver quadruples the timeout in code
+    /// (CW HACK 20218, for the Rockstar service); upstream honors this registry override.
+    /// 60 s ceiling, no cost when services start fast. Applied at bottle creation and Repair.
+    public static let servicesPipeTimeoutMs = 60000
+
+    public func setServiceTimeout() async throws {
+        try await regAdd(key: #"HKLM\System\CurrentControlSet\Control"#, name: "ServicesPipeTimeout",
+                         type: "REG_SZ", data: String(Self.servicesPipeTimeoutMs))
+    }
+
     public func setGpuIdentity() async throws {
         try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciVendorID", type: "REG_DWORD", data: String(Self.gpuIdentity.vendor))
         try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciDeviceID", type: "REG_DWORD", data: String(Self.gpuIdentity.device))
