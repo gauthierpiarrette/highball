@@ -11,6 +11,22 @@ NOTES_FILE="${3:-}"
 # The tag below marks HEAD as the source of this build, so the tree must be clean.
 git diff-index --quiet HEAD -- || { echo "tracked files modified; commit before releasing" >&2; exit 1; }
 
+# Renderer regressions (the issue #21 class) ship via code/engine changes, not time,
+# so a release wants a recent Scripts/render-smoke.sh result. Warn, don't block:
+# hotfixes (like 0.7.9) must never be hostage to a benchmark run.
+if ! python3 - <<'PY' 2>/dev/null
+import json, sys, time
+d = json.load(open("private/render-smoke/latest.json"))
+sys.exit(0 if d.get("passed") and time.time() - d.get("epoch", 0) < 14*86400 else 1)
+PY
+then
+  echo "" >&2
+  echo "WARNING: no passing render-smoke result from the last 14 days." >&2
+  echo "         Run Scripts/render-smoke.sh when convenient — renderer regressions ship silently without it." >&2
+  echo "         Continuing in 5s…" >&2
+  sleep 5
+fi
+
 Scripts/make-app.sh release "$VERSION"
 ZIP="dist/Highball-$VERSION.zip"
 ditto -c -k --keepParent dist/Highball.app "$ZIP"

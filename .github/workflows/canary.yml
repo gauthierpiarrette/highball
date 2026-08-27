@@ -1,0 +1,77 @@
+# Canary — do the bytes users depend on still exist and match their pins?
+# Runs Scripts/e2e-canary.sh: re-hashes every engine-manifest component URL in
+# BOTH the repo manifest and the manifest inside the latest release bundle,
+# re-validates the published DMG/zip notarization, and checks appcast consistency.
+# Independent from nightly-e2e on purpose: this job keeps producing signal even
+# while the E2E is red, and an aka.ms hiccup there can never mask drift here.
+#
+# NOTE: scheduled workflows are auto-disabled after 60 days of repo inactivity
+# (GitHub emails first; re-enable is one click). No keepalive hacks by design.
+name: canary
+on:
+  schedule:
+    - cron: '43 7 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: macos-15        # needs xcrun stapler + spctl, hence macOS
+    timeout-minutes: 30
+    outputs:
+      kind: ${{ steps.run.outputs.kind }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: run canary
+        id: run
+        run: Scripts/e2e-canary.sh
+
+  # Separate job for the token: the canary itself only downloads and hashes, but
+  # keeping issues:write out of any job that touches third-party bytes is cheap.
+  alert:
+    needs: [canary]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: create/update or auto-close the dedup issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ needs.canary.result }}
+          KIND: ${{ needs.canary.outputs.kind }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create canary-drift -R "$GITHUB_REPOSITORY" --color B60205 \
+            --description "pinned upstream bytes or published assets drifted" --force
+          gh label create canary-availability -R "$GITHUB_REPOSITORY" --color D93F0B \
+            --description "an upstream host was unreachable" --force
+          if [ "$RESULT" = "failure" ]; then
+            case "$KIND" in
+              drift) LABEL=canary-drift; TITLE="canary: pinned bytes or published assets drifted" ;;
+              *)     LABEL=canary-availability; TITLE="canary: upstream availability failure" ;;
+            esac
+            NUM=$(gh issue list -R "$GITHUB_REPOSITORY" --label "$LABEL" --state open \
+              --json number --jq '.[0].number // empty')
+            if [ -n "$NUM" ]; then
+              gh issue comment "$NUM" -R "$GITHUB_REPOSITORY" --body "Still failing ($KIND): $RUN_URL"
+            else
+              gh issue create -R "$GITHUB_REPOSITORY" --title "$TITLE" --label "$LABEL" \
+                --body "The canary failed ($KIND): $RUN_URL
+
+Drift = a pinned URL now serves different bytes, a published asset fails notarization checks, or the appcast disagrees with the latest release — real users are (or will be) affected. Availability = an upstream host was unreachable; usually transient, watch for repeats."
+            fi
+          elif [ "$RESULT" = "success" ]; then
+            for LABEL in canary-drift canary-availability; do
+              NUM=$(gh issue list -R "$GITHUB_REPOSITORY" --label "$LABEL" --state open \
+                --json number --jq '.[0].number // empty')
+              [ -n "$NUM" ] && gh issue close "$NUM" -R "$GITHUB_REPOSITORY" --comment "Green again: $RUN_URL"
+            done
+            true
+          fi

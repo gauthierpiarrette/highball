@@ -1,0 +1,124 @@
+# Nightly fresh-install E2E — replays the bug classes that actually shipped:
+# winetricks pin drift (#27/#28), broken engine symlinks (0.7.9), the winetricks/
+# bash/SIP chain (#16). Runs Scripts/e2e-install.sh in an isolated HIGHBALL_HOME,
+# installing from the BUILT BUNDLE's manifest like a real user.
+#
+# NOTE: GitHub disables scheduled workflows after 60 days without repo activity
+# (one warning email; re-enabling is one click in the Actions tab). That is why
+# nightlies can silently stop — no keepalive hacks by design, the email is the
+# signal. workflow_dispatch always stays available.
+name: nightly-e2e
+on:
+  schedule:
+    - cron: '17 8 * * *'   # nightly (UTC, off-peak minute per GH docs)
+    - cron: '23 9 * * 6'   # Saturday: adds the dotnet48 chain
+  workflow_dispatch:
+    inputs:
+      dotnet48:
+        description: also run the dotnet48 recipe (adds up to ~90 min)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-e2e
+  cancel-in-progress: false   # a canary you cancel is a canary that lies
+
+jobs:
+  e2e:
+    runs-on: macos-15        # pinned: macos-latest re-points silently (it became 26 in mid-2026)
+    # Cold install ≈25-45 min on these runners; the Saturday dotnet48 chain can
+    # pessimistically add 1-2 h of virtualized ngen. Hangs are caught same-night
+    # by the alert job either way.
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: rosetta (idempotent; image rotations have shipped without it)
+        run: sudo softwareupdate --install-rosetta --agree-to-license || true
+      - name: disk headroom
+        run: df -h /
+      - name: cache engine downloads (sha256-reverified on every reuse; the script keeps winetricks out)
+        uses: actions/cache@v4
+        with:
+          path: ~/hb-e2e/downloads
+          key: engine-dl-${{ hashFiles('spike/engine-manifest.json') }}
+          restore-keys: engine-dl-
+      - name: cache winetricks payloads (winetricks sha-verifies its own cache entries)
+        uses: actions/cache@v4
+        with:
+          path: ~/hb-e2e/xdg-cache
+          key: winetricks-cache-v1
+      - name: run E2E
+        run: |
+          FLAGS=""
+          if [ "${{ github.event.schedule }}" = "23 9 * * 6" ] || [ "${{ inputs.dotnet48 }}" = "true" ]; then
+            FLAGS="--with-dotnet48"
+          fi
+          Scripts/e2e-install.sh $FLAGS
+      - name: teardown
+        if: always()
+        run: |
+          for ws in "$HOME"/hb-e2e/engines/*/engine/bin/wineserver; do
+            [ -x "$ws" ] && "$ws" -k 2>/dev/null || true
+          done
+
+  # Advisory forward-coverage on the newest macOS image. Failures here never block
+  # and never page; promote to a blocking row after a month of green.
+  e2e-macos26-advisory:
+    runs-on: macos-26
+    continue-on-error: true
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: rosetta
+        run: sudo softwareupdate --install-rosetta --agree-to-license || true
+      - name: cache engine downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/hb-e2e/downloads
+          key: engine-dl-${{ hashFiles('spike/engine-manifest.json') }}
+          restore-keys: engine-dl-
+      - name: run E2E (no dotnet48)
+        run: Scripts/e2e-install.sh
+      - name: teardown
+        if: always()
+        run: |
+          for ws in "$HOME"/hb-e2e/engines/*/engine/bin/wineserver; do
+            [ -x "$ws" ] && "$ws" -k 2>/dev/null || true
+          done
+
+  # Issue filing lives in its own job on a fresh VM: the E2E jobs execute
+  # third-party binaries (wine, vc_redist from aka.ms) and therefore run with
+  # contents:read only — this job runs no third-party code and holds issues:write.
+  alert:
+    needs: [e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: create/update or auto-close the dedup issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ needs.e2e.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create e2e-failure -R "$GITHUB_REPOSITORY" --color B60205 \
+            --description "the nightly fresh-install E2E is red" --force
+          TITLE="nightly install E2E failing"
+          NUM=$(gh issue list -R "$GITHUB_REPOSITORY" --label e2e-failure --state open \
+            --json number --jq '.[0].number // empty')
+          if [ "$RESULT" = "failure" ]; then
+            if [ -n "$NUM" ]; then
+              gh issue comment "$NUM" -R "$GITHUB_REPOSITORY" --body "Still failing: $RUN_URL"
+            else
+              gh issue create -R "$GITHUB_REPOSITORY" --title "$TITLE" --label e2e-failure \
+                --body "The nightly fresh-install E2E failed: $RUN_URL
+
+This guard replays the fresh-user path: engine download from the bundled manifest (winetricks fetched live), layout audit, wineboot, vcrun2022. A failure here usually means new users cannot install."
+            fi
+          elif [ "$RESULT" = "success" ] && [ -n "$NUM" ]; then
+            gh issue close "$NUM" -R "$GITHUB_REPOSITORY" --comment "Green again: $RUN_URL"
+          fi
