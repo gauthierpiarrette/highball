@@ -76,6 +76,26 @@ final class EnvironmentTests: XCTestCase {
         XCTAssertEqual(flat(""), [])
     }
 
+    // The generated dxvk.conf: global line follows the bottle toggle, and the [csgo.exe]
+    // section (issue #21: legacy CS:GO map-load freeze) must come AFTER it — later lines
+    // win in DXVK's parser — carrying async off, the 32-bit memory cap, and the device id.
+    func testDxvkConfigContent() {
+        let on = Bottle.dxvkConfig(async: true)
+        XCTAssertTrue(on.contains("dxvk.enableAsync = True"))
+        let section = on.range(of: "[csgo.exe]")
+        let global = on.range(of: "dxvk.enableAsync = True")
+        XCTAssertNotNil(section); XCTAssertNotNil(global)
+        XCTAssertTrue(global!.lowerBound < section!.lowerBound, "global line must precede the per-app section")
+        let tail = String(on[section!.lowerBound...])
+        XCTAssertTrue(tail.contains("dxvk.enableAsync = False"))
+        XCTAssertTrue(tail.contains("d3d9.maxAvailableMemory = 2048"))
+        XCTAssertTrue(tail.contains("d3d9.customDeviceId = 73BF"))
+
+        let off = Bottle.dxvkConfig(async: false)
+        XCTAssertTrue(off.contains("dxvk.enableAsync = False"))
+        XCTAssertFalse(off.contains("dxvk.enableAsync = True"))
+    }
+
     // extra (per-pin environment from the program settings sheet) wins over bottle env.
     func testExtraEnvironmentWins() throws {
         var (engine, bottle) = try fixtures()
@@ -102,7 +122,11 @@ final class EnvironmentTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: engine.root) }
         env = try bottle.environment(engine: engine, renderer: .dxvk)
         XCTAssertEqual(env["DXVK_FRAME_RATE"], "60")
-        XCTAssertEqual(env["DXVK_ASYNC"], "1", "dxvkAsync defaults on")
+        // The async toggle travels via the generated conf, never DXVK_ASYNC: the async fork
+        // reads `env == "1" || config.enableAsync`, so an env 1 would defeat the per-game
+        // [csgo.exe] override that issue #21 requires.
+        XCTAssertNil(env["DXVK_ASYNC"], "async must ride the conf, not the env")
+        XCTAssertEqual(env["DXVK_CONFIG_FILE"], #"C:\highball\dxvk.conf"#)
         // d9vk must come first so DXVK's d3d9 wins the builtin search over wined3d (#21 CSM gate).
         XCTAssertEqual(env["WINEDLLPATH_PREPEND"], "\(d9vkWine.path):\(dxvkWine.path)")
     }

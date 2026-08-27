@@ -109,7 +109,7 @@ struct Bottle: AsyncParsableCommand {
     }
 
     struct Set: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Change a bottle setting: renderer, winver, sync, hud, avx, dpi, dlloverrides, env KEY=VALUE")
+        static let configuration = CommandConfiguration(abstract: "Change a bottle setting: renderer, winver, sync, hud, avx, dpi, dxvkasync, dlloverrides, env KEY=VALUE")
         @Argument var name: String
         @Argument var setting: String
         @Argument var value: String
@@ -127,6 +127,7 @@ struct Bottle: AsyncParsableCommand {
             case "sync": guard let s = SyncMode(rawValue: value) else { fail("bad sync") }; b.settings.sync = s
             case "hud": b.settings.metalHUD = (value == "1" || value == "true")
             case "avx": b.settings.advertiseAVX = (value == "1" || value == "true")
+            case "dxvkasync": b.settings.dxvkAsync = (value == "1" || value == "true")
             case "dlloverrides":
                 b.settings.dllOverrides = value
             case "dpi":

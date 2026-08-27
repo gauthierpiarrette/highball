@@ -251,7 +251,11 @@ public struct Bottle: Sendable {
         if settings.metalHUD { env["MTL_HUD_ENABLED"] = "1" }
         if settings.advertiseAVX { env["ROSETTA_ADVERTISE_AVX"] = "1" }
         let r = renderer ?? settings.renderer
-        if r == .dxvk, settings.dxvkAsync { env["DXVK_ASYNC"] = "1" }
+        // The async toggle travels in the generated dxvk.conf, NOT the DXVK_ASYNC env var:
+        // the async fork reads `env == "1" || config.enableAsync`, so an env 1 can never be
+        // overridden for a single game, while the conf's [csgo.exe] section can (issue #21).
+        // WineRunner writes the file before each dxvk launch.
+        if r == .dxvk { env["DXVK_CONFIG_FILE"] = Self.dxvkConfigWindowsPath }
         if settings.fpsCap > 0 {
             switch r {
             case .dxvk: env["DXVK_FRAME_RATE"] = String(settings.fpsCap)
@@ -264,6 +268,45 @@ public struct Bottle: Sendable {
         merge(&env, try (renderer ?? settings.renderer).environment(engine: engine))
         merge(&env, extra)
         return env
+    }
+
+    /// Windows path of the generated DXVK config inside the prefix.
+    public static let dxvkConfigWindowsPath = #"C:\highball\dxvk.conf"#
+    /// Unix location of the same file.
+    public var dxvkConfigURL: URL { driveC.appending(path: "highball/dxvk.conf") }
+
+    /// Contents of the per-bottle dxvk.conf. The global line carries the bottle's async
+    /// toggle. The [csgo.exe] section is the issue #21 profile: legacy CS:GO (32-bit D3D9)
+    /// froze at map-load "Initializing game data" on defaults. Async compile off there
+    /// (the d9vk fork's own wrapper never enables async; the first map load's pipeline
+    /// burst is exactly the freeze point), 2 GB reported texture memory (DXVK's standard
+    /// 32-bit address-space mitigation, cf. its built-in Vampire profile), and a real
+    /// Radeon device id to pair with the AMD vendor id DXVK's built-in csgo profile
+    /// already forces, so the game's dxsupport.cfg picks a concrete GPU profile instead
+    /// of unknown-device failsafe. Later lines win, so the section must follow the global.
+    public static func dxvkConfig(async: Bool) -> String {
+        """
+        # Written by Highball before each DXVK launch — edits here are overwritten.
+        # The bottle's "DXVK async shader compilation" toggle sets the global line.
+        dxvk.enableAsync = \(async ? "True" : "False")
+
+        # Legacy CS:GO froze at map load with async compile on (issue #21).
+        [csgo.exe]
+        dxvk.enableAsync = False
+        d3d9.maxAvailableMemory = 2048
+        d3d9.customDeviceId = 73BF
+
+        """
+    }
+
+    /// Writes the generated dxvk.conf into the prefix (idempotent, compare-then-write).
+    public func writeDxvkConfig() throws {
+        let dir = dxvkConfigURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let content = Self.dxvkConfig(async: settings.dxvkAsync)
+        if (try? String(contentsOf: dxvkConfigURL, encoding: .utf8)) != content {
+            try content.write(to: dxvkConfigURL, atomically: true, encoding: .utf8)
+        }
     }
 
     private func merge(_ env: inout [String: String], _ add: [String: String]) {

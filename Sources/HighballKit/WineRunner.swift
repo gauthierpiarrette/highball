@@ -31,6 +31,9 @@ public struct WineRunner: Sendable {
         onOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> LaunchResult {
         try paths.ensure()
+        // The dxvk renderer reads its options from the generated conf (async toggle +
+        // per-game profiles like [csgo.exe], issue #21) — refresh it before the spawn.
+        if (renderer ?? bottle.settings.renderer) == .dxvk { try? bottle.writeDxvkConfig() }
         let env = try bottle.environment(engine: engine, renderer: renderer, extra: extraEnvironment)
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
         let logURL = paths.logs.appending(path: "\(stamp)-\(bottle.name)-\(label ?? args.first ?? "wine").log")
