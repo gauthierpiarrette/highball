@@ -109,7 +109,10 @@ final class AppState {
     private func runBusy(_ title: String, showLogSheet: Bool = true, cleanup: (() -> Void)? = nil, _ work: @escaping () async throws -> Void) {
         busy = true; busyTitle = title; stage = ""; logLines = []; showLog = showLogSheet
         Task {
-            do { try await work() } catch { errorMessage = "\(error)" }
+            // On failure, dismiss the log sheet ourselves: SwiftUI defers the error alert
+            // until the sheet closes, so a stuck sheet showed "Done" over a failed install
+            // and hid the alert until the user clicked Close (issues #27/#28).
+            do { try await work() } catch { showLog = false; errorMessage = "\(error)" }
             cleanup?()
             busy = false
             refresh()
