@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.9</title>
+      <description><![CDATA[Fixes fresh engine installs: the winetricks checksum mismatch and broken runtime links. DLL overrides now apply even while Steam is running, and failed installs show their error immediately.]]></description>
+      <pubDate>Thu, 27 Aug 2026 13:00:08 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.9/Highball-0.7.9.zip" sparkle:version="0.7.9" sparkle:shortVersionString="0.7.9" sparkle:edSignature="aYdiOxHdWtOVMl8B9VcH/HPY8YjpHhwMSLsxs5whm/ZERd0viAILnVzhYgMGA56XFGQYBxXILc+3vVY+1Y1nDQ==" length="2481433" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.8</title>
       <description><![CDATA[DirectX 9 games (like legacy CS:GO) now run on the full DXVK graphics path]]></description>
       <pubDate>Wed, 26 Aug 2026 14:22:39 -0700</pubDate>
