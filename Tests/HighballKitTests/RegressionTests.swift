@@ -203,6 +203,39 @@ extension RegressionTests {
         XCTAssertEqual(Pin.storagePath(for: mixed, driveC: driveC), "Games/g.exe")
     }
 
+    // The dotnet48 E2E gate caught this: install() ran linkRuntime inside the .partial
+    // staging dir with ABSOLUTE symlink targets, then renamed staging into place, so every
+    // fresh engine shipped dead runtime links (winetricks-based installs died in seconds;
+    // games survived on DYLD_FALLBACK_LIBRARY_PATH). Links must be relative, and re-running
+    // linkRuntime must heal a wrong target from an older install.
+    func testRuntimeLinksSurviveStagingRename() throws {
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appending(path: "hb-linkrt-\(UUID().uuidString)")
+        let staging = base.appending(path: ".engine.partial")
+        defer { try? fm.removeItem(at: base) }
+        try fm.createDirectory(at: staging.appending(path: "engine/lib"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: staging.appending(path: "frameworks/GStreamer.framework/Versions/1.0/lib"), withIntermediateDirectories: true)
+        try Data("lib".utf8).write(to: staging.appending(path: "frameworks/libinotify.0.dylib"))
+        try Data("gst".utf8).write(to: staging.appending(path: "frameworks/GStreamer.framework/Versions/1.0/lib/libgstreamer.dylib"))
+        // A dead absolute link, as pre-0.7.9 installs left behind — must be healed, not skipped.
+        try Data("st".utf8).write(to: staging.appending(path: "frameworks/libstale.dylib"))
+        try fm.createSymbolicLink(atPath: staging.appending(path: "engine/lib/libstale.dylib").path,
+                                  withDestinationPath: "/nonexistent/.old.partial/frameworks/libstale.dylib")
+
+        try EngineStore().linkRuntime(staging)
+        let final = base.appending(path: "engine-final")
+        try fm.moveItem(at: staging, to: final)   // the rename that killed absolute targets
+
+        for name in ["libinotify.0.dylib", "libgstreamer.dylib", "libstale.dylib"] {
+            let link = final.appending(path: "engine/lib/\(name)")
+            let target = try fm.destinationOfSymbolicLink(atPath: link.path)
+            XCTAssertTrue(target.hasPrefix("../../frameworks/"), "\(name) target must be relative, got \(target)")
+            XCTAssertTrue(fm.fileExists(atPath: link.path), "\(name) must resolve after the rename")
+        }
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: final.appending(path: "engine/lib/GStreamer.framework").path),
+                       "../../frameworks/GStreamer.framework")
+    }
+
     // Issues #27/#28: winetricks was sha256-pinned but fetched from .../master/..., so
     // upstream's next commit broke every fresh engine install with "checksum mismatch".
     // Manifest URLs must be immutable: a commit SHA or a tagged release asset, never a

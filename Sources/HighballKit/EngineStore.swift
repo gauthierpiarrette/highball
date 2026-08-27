@@ -38,6 +38,7 @@ public struct EngineStore: Sendable {
         return dirs.compactMap { dir in
             let manifest = dir.appending(path: "manifest.json")
             guard let m = try? EngineManifest.load(from: manifest) else { return nil }
+            try? linkRuntime(dir)   // heals broken runtime links from pre-0.7.9 installs
             return InstalledEngine(manifest: m, root: dir)
         }.sorted { $0.manifest.id < $1.manifest.id }
     }
@@ -45,6 +46,7 @@ public struct EngineStore: Sendable {
     public func engine(_ id: String) throws -> InstalledEngine {
         let root = paths.engine(id)
         let m = try EngineManifest.load(from: root.appending(path: "manifest.json"))
+        try? linkRuntime(root)      // heals broken runtime links from pre-0.7.9 installs
         return InstalledEngine(manifest: m, root: root)
     }
 
@@ -158,26 +160,38 @@ public struct EngineStore: Sendable {
     /// Symlinks the Template's runtime dylibs into engine/lib so Wine binaries resolve
     /// @loader_path/../lib/… and @rpath names without any DYLD_* environment (which SIP
     /// strips when a restricted binary like /bin/sh sits in the exec chain — winetricks does).
+    ///
+    /// Targets MUST be relative: install() links inside the .partial staging dir and then
+    /// renames it into place, so absolute targets died with the staging path — every fresh
+    /// install shipped broken links until 0.7.9 (caught by the dotnet48 E2E gate; games
+    /// still ran because launches carry DYLD_FALLBACK_LIBRARY_PATH, winetricks did not).
+    /// A link with any other target is replaced, which also heals engines installed by
+    /// older versions when this runs again from installedEngines()/engine(_:).
     func linkRuntime(_ root: URL) throws {
         let fm = FileManager.default
         let engineLib = root.appending(path: "engine/lib", directoryHint: .isDirectory)
         guard fm.fileExists(atPath: engineLib.path) else { return }
-        var sources = [root.appending(path: "frameworks", directoryHint: .isDirectory)]
-        sources.append(root.appending(path: "frameworks/GStreamer.framework/Versions/1.0/lib", directoryHint: .isDirectory))
-        for dir in sources {
+        var handled = Set<String>()
+        func link(_ name: String, to relativeTarget: String) {
+            guard handled.insert(name).inserted else { return }   // first source dir wins, as before
+            let dest = engineLib.appending(path: name)
+            if let existing = try? fm.destinationOfSymbolicLink(atPath: dest.path) {
+                if existing == relativeTarget { return }
+                try? fm.removeItem(at: dest)      // absolute/staging target from a pre-0.7.9 install
+            } else if fm.fileExists(atPath: dest.path) {
+                return                            // a real file — leave it alone
+            }
+            try? fm.createSymbolicLink(atPath: dest.path, withDestinationPath: relativeTarget)
+        }
+        for sub in ["frameworks", "frameworks/GStreamer.framework/Versions/1.0/lib"] {
+            let dir = root.appending(path: sub, directoryHint: .isDirectory)
             guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
             for entry in entries where entry.pathExtension == "dylib" {
-                let dest = engineLib.appending(path: entry.lastPathComponent)
-                if !fm.fileExists(atPath: dest.path) {
-                    try? fm.createSymbolicLink(at: dest, withDestinationURL: entry)
-                }
+                link(entry.lastPathComponent, to: "../../\(sub)/\(entry.lastPathComponent)")
             }
         }
         // GStreamer.framework itself, for modules that reference it by framework path.
-        let fw = engineLib.appending(path: "GStreamer.framework")
-        if !fm.fileExists(atPath: fw.path) {
-            try? fm.createSymbolicLink(at: fw, withDestinationURL: root.appending(path: "frameworks/GStreamer.framework"))
-        }
+        link("GStreamer.framework", to: "../../frameworks/GStreamer.framework")
     }
 
     func stripQuarantine(_ url: URL) throws {
