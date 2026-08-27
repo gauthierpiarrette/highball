@@ -62,10 +62,10 @@ jobs:
             if [ -n "$NUM" ]; then
               gh issue comment "$NUM" -R "$GITHUB_REPOSITORY" --body "Still failing ($KIND): $RUN_URL"
             else
-              gh issue create -R "$GITHUB_REPOSITORY" --title "$TITLE" --label "$LABEL" \
-                --body "The canary failed ($KIND): $RUN_URL
-
-Drift = a pinned URL now serves different bytes, a published asset fails notarization checks, or the appcast disagrees with the latest release — real users are (or will be) affected. Availability = an upstream host was unreachable; usually transient, watch for repeats."
+              BODY=$(printf '%s\n\n%s' \
+                "The canary failed ($KIND): $RUN_URL" \
+                "Drift = a pinned URL now serves different bytes, a published asset fails notarization checks, or the appcast disagrees with the latest release — real users are (or will be) affected. Availability = an upstream host was unreachable; usually transient, watch for repeats.")
+              gh issue create -R "$GITHUB_REPOSITORY" --title "$TITLE" --label "$LABEL" --body "$BODY"
             fi
           elif [ "$RESULT" = "success" ]; then
             for LABEL in canary-drift canary-availability; do

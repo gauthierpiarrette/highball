@@ -114,10 +114,10 @@ jobs:
             if [ -n "$NUM" ]; then
               gh issue comment "$NUM" -R "$GITHUB_REPOSITORY" --body "Still failing: $RUN_URL"
             else
-              gh issue create -R "$GITHUB_REPOSITORY" --title "$TITLE" --label e2e-failure \
-                --body "The nightly fresh-install E2E failed: $RUN_URL
-
-This guard replays the fresh-user path: engine download from the bundled manifest (winetricks fetched live), layout audit, wineboot, vcrun2022. A failure here usually means new users cannot install."
+              BODY=$(printf '%s\n\n%s' \
+                "The nightly fresh-install E2E failed: $RUN_URL" \
+                "This guard replays the fresh-user path: engine download from the bundled manifest (winetricks fetched live), layout audit, wineboot, vcrun2022. A failure here usually means new users cannot install.")
+              gh issue create -R "$GITHUB_REPOSITORY" --title "$TITLE" --label e2e-failure --body "$BODY"
             fi
           elif [ "$RESULT" = "success" ] && [ -n "$NUM" ]; then
             gh issue close "$NUM" -R "$GITHUB_REPOSITORY" --comment "Green again: $RUN_URL"
