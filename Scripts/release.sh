@@ -8,6 +8,9 @@ VERSION="${1:?usage: release.sh <version> <summary> [notes.md]}"
 SUMMARY="${2:?summary required}"
 NOTES_FILE="${3:-}"
 
+# The tag below marks HEAD as the source of this build, so the tree must be clean.
+git diff-index --quiet HEAD -- || { echo "tracked files modified; commit before releasing" >&2; exit 1; }
+
 Scripts/make-app.sh release "$VERSION"
 ZIP="dist/Highball-$VERSION.zip"
 ditto -c -k --keepParent dist/Highball.app "$ZIP"
@@ -65,6 +68,12 @@ hdiutil create -volname "Highball" -srcfolder dist/dmg-stage -ov -format UDZO "$
 codesign --sign "Developer ID Application: Gauthier PIARRETTE (B95M7DARU4)" --timestamp "$DMG"
 xcrun notarytool submit "$DMG" --keychain-profile highball --wait
 xcrun stapler staple "$DMG"
+
+# Tag the exact commit this build came from and push it BEFORE gh release create:
+# without an existing tag, gh tags the REMOTE default-branch head, which mislabeled
+# v0.7.8 (local fix commits weren't pushed yet, so the tag landed on the v0.7.7 commit).
+git tag "v$VERSION"
+git push origin HEAD "v$VERSION"
 
 if [ -n "$NOTES_FILE" ]; then
   gh release create "v$VERSION" "$ZIP" "$DMG" --latest --title "Highball $VERSION" --notes-file "$NOTES_FILE"
