@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.10</title>
+      <description><![CDATA[Legacy CS:GO map-load freeze fixed: per-game DXVK config turns async shader compilation off for csgo.exe and adds 32-bit memory headroom.]]></description>
+      <pubDate>Thu, 27 Aug 2026 14:50:56 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.10/Highball-0.7.10.zip" sparkle:version="0.7.10" sparkle:shortVersionString="0.7.10" sparkle:edSignature="SRct45bgvqtdJdPaxXbJ+n9sn3iNGDPgjRSNa2vizZbv3mNVRjmPs7ZnHbikLnCWq35940wA8SYes1Gq3NznAg==" length="2483134" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.9</title>
       <description><![CDATA[Fixes fresh engine installs: the winetricks checksum mismatch and broken runtime links. DLL overrides now apply even while Steam is running, and failed installs show their error immediately.]]></description>
       <pubDate>Thu, 27 Aug 2026 13:00:08 -0700</pubDate>
