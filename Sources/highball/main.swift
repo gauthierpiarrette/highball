@@ -381,7 +381,9 @@ struct Tricks: AsyncParsableCommand {
         env["WINE_BINDIR"] = eng.wineBinary.deletingLastPathComponent().path
         env["WINESERVER"] = eng.wineserverBinary.path
         env["PATH"] = "\(eng.engineDir.appending(path: "bin").path):/usr/bin:/bin:/usr/sbin:/sbin"
-        let out = try Shell.capture("/bin/sh", [wt.path, "--unattended"] + verbs, env: env)
+        // bash, not sh: same as the recipe path — winetricks' macOS guidance, and sh strips
+        // the DYLD vars winetricks' children need (issue #16 fix said "both paths"; this one lagged).
+        let out = try Shell.capture("/bin/bash", [wt.path, "--unattended"] + verbs, env: env)
         print(out.split(separator: "\n").suffix(12).joined(separator: "\n"))
     }
 }
