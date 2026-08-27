@@ -163,6 +163,11 @@ public struct BottleSettings: Codable, Sendable {
     /// Extra WINEDLLOVERRIDES entries, e.g. "version=n,b" for Cyber Engine Tweaks. Appended to
     /// whatever the renderer sets, semicolon separated.
     public var dllOverrides: String = ""
+    /// The dllOverrides value last mirrored into the prefix registry. The env var only reaches
+    /// process trees Highball spawns itself; a game started by an already-running Steam client
+    /// inherits Steam's environment from before the setting changed and never sees it
+    /// (issues #22/#25). Launches re-mirror when this differs from dllOverrides.
+    public var dllOverridesSynced: String?
     public var environment: [String: String] = [:]
     public var pins: [Pin] = []
     public var recipes: [String] = []
@@ -194,6 +199,7 @@ public struct BottleSettings: Codable, Sendable {
             dpiScale = legacyRetina == true ? 192 : 96
         }
         dllOverrides = try c.decodeIfPresent(String.self, forKey: .dllOverrides) ?? ""
+        dllOverridesSynced = try c.decodeIfPresent(String.self, forKey: .dllOverridesSynced)
         environment = try c.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
         pins = try c.decodeIfPresent([Pin].self, forKey: .pins) ?? []
         recipes = try c.decodeIfPresent([String].self, forKey: .recipes) ?? []

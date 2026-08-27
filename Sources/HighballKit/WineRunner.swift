@@ -85,7 +85,8 @@ public struct WineRunner: Sendable {
     /// everything it and its children print lands in the log. The call returns when the program exits.
     @discardableResult
     public func start(_ executable: URL, arguments: [String] = [], renderer: Renderer? = nil, extraEnvironment: [String: String] = [:], workingDirectory: URL? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
-        try await run([executable.path] + arguments, renderer: renderer, extraEnvironment: extraEnvironment, label: executable.lastPathComponent, workingDirectory: workingDirectory, onOutput: onOutput)
+        await syncDllOverridesRegistry()
+        return try await run([executable.path] + arguments, renderer: renderer, extraEnvironment: extraEnvironment, label: executable.lastPathComponent, workingDirectory: workingDirectory, onOutput: onOutput)
     }
 
     /// Runs the pinned program, honouring its own renderer/env/args.
@@ -136,6 +137,10 @@ public struct WineRunner: Sendable {
         _ = try await run(["reg", "add", key, "/v", name, "/t", type, "/d", data, "/f"], renderer: .wined3d, label: "reg")
     }
 
+    public func regDelete(key: String, name: String) async throws {
+        _ = try await run(["reg", "delete", key, "/v", name, "/f"], renderer: .wined3d, label: "reg")
+    }
+
     public func regQuery(key: String, name: String) async throws -> String? {
         var lines: [String] = []
         let collector = Collector()
@@ -143,6 +148,58 @@ public struct WineRunner: Sendable {
         lines = collector.lines
         guard let line = lines.first(where: { $0.contains("REG_") }) else { return nil }
         return line.split(whereSeparator: \.isWhitespace).last.map(String.init)
+    }
+
+    /// Parses a WINEDLLOVERRIDES-style string ("version=n,b;dxgi,d3d9=n") into per-dll registry
+    /// entries. Anything that isn't override syntax (pasted Proton launch options, quotes, spaces)
+    /// is skipped: the env var still carries the raw string, only the registry mirror filters.
+    /// Pure so it's unit-tested without a prefix.
+    public static func parseDllOverrides(_ overrides: String) -> [(name: String, order: String)] {
+        var entries: [(String, String)] = []
+        for entry in overrides.split(separator: ";") {
+            let parts = entry.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { continue }
+            let order = parts[1].trimmingCharacters(in: .whitespaces)
+            // n / b / native / builtin, optionally comma-paired; empty or d = disabled.
+            guard order.range(of: "^((n|b|native|builtin)(,(n|b|native|builtin))?|d|disabled)?$", options: .regularExpression) != nil else { continue }
+            for rawName in parts[0].split(separator: ",") {
+                var name = rawName.trimmingCharacters(in: .whitespaces).lowercased()
+                if name.hasSuffix(".dll") { name = String(name.dropLast(4)) }
+                guard !name.isEmpty, name.range(of: "^[a-z0-9_.+-]+$", options: .regularExpression) != nil else { continue }
+                entries.append((name, order))
+            }
+        }
+        return entries
+    }
+
+    static let dllOverridesKey = #"HKCU\Software\Wine\DllOverrides"#
+
+    /// Mirrors the bottle's DLL-overrides field into the prefix registry. The env var reaches only
+    /// process trees Highball spawns itself; a game launched through an already-running Steam client
+    /// inherits Steam's environment from before the setting changed and never sees the override, so
+    /// mods like Cyber Engine Tweaks stay silent (issues #22/#25). Every new Wine process reads this
+    /// registry key live, no matter who spawned it. No-ops unless the field changed since the last
+    /// successful sync; on failure the marker stays stale so the next launch retries.
+    public func syncDllOverridesRegistry() async {
+        let current = bottle.settings.dllOverrides
+        guard current != (bottle.settings.dllOverridesSynced ?? "") else { return }
+        let entries = Self.parseDllOverrides(current)
+        let previous = Self.parseDllOverrides(bottle.settings.dllOverridesSynced ?? "")
+        let names = Set(entries.map(\.name))
+        // Removals are best-effort: a value that's already gone makes reg exit non-zero anyway.
+        for old in previous where !names.contains(old.name) {
+            try? await regDelete(key: Self.dllOverridesKey, name: old.name)
+        }
+        var allAdded = true
+        for entry in entries {
+            let status = try? await run(["reg", "add", Self.dllOverridesKey, "/v", entry.name, "/t", "REG_SZ", "/d", entry.order, "/f"],
+                                        renderer: .wined3d, label: "reg").exitStatus
+            if status != 0 { allAdded = false }
+        }
+        guard allAdded else { return }
+        var copy = bottle
+        copy.settings.dllOverridesSynced = current
+        try? copy.save()
     }
 
     /// Windows UI scaling. LogPixels is the Windows system DPI (96 = 100%, 240 = 250%): DPI-aware

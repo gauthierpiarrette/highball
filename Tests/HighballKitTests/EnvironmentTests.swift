@@ -61,6 +61,21 @@ final class EnvironmentTests: XCTestCase {
         XCTAssertTrue(v.contains(";"), "WINEDLLOVERRIDES parts must be ';'-joined, got \(v)")
     }
 
+    // The registry mirror (issues #22/#25) parses only real override syntax: multi-name
+    // entries fan out, ".dll" is stripped, and pasted Proton launch options never leak
+    // garbage value names into HKCU\Software\Wine\DllOverrides.
+    func testDllOverridesRegistryParse() {
+        func flat(_ s: String) -> [String] { WineRunner.parseDllOverrides(s).map { "\($0.name)=\($0.order)" } }
+        XCTAssertEqual(flat("version=n,b"), ["version=n,b"])
+        XCTAssertEqual(flat("dxgi,D3D9.dll=n"), ["dxgi=n", "d3d9=n"])
+        XCTAssertEqual(flat("winmm="), ["winmm="])              // empty = disabled
+        XCTAssertEqual(flat("libglesv2=d"), ["libglesv2=d"])    // explicit disable
+        XCTAssertEqual(flat("version=native,builtin;winmm=b"), ["version=native,builtin", "winmm=b"])
+        XCTAssertEqual(flat(#"WINEDLLOVERRIDES="version=n,b" %command%"#), [])
+        XCTAssertEqual(flat("just some words"), [])
+        XCTAssertEqual(flat(""), [])
+    }
+
     // extra (per-pin environment from the program settings sheet) wins over bottle env.
     func testExtraEnvironmentWins() throws {
         var (engine, bottle) = try fixtures()
