@@ -202,4 +202,24 @@ extension RegressionTests {
         let mixed = URL(fileURLWithPath: "/Users/x/Highball/Bottles/b/drive_c/Games/g.exe")
         XCTAssertEqual(Pin.storagePath(for: mixed, driveC: driveC), "Games/g.exe")
     }
+
+    // Issues #27/#28: winetricks was sha256-pinned but fetched from .../master/..., so
+    // upstream's next commit broke every fresh engine install with "checksum mismatch".
+    // Manifest URLs must be immutable: a commit SHA or a tagged release asset, never a
+    // branch or a latest redirect. Raw-JSON scan on purpose — it also covers blocks the
+    // manifest type doesn't decode (alternatives).
+    func testManifestURLsAreImmutablyPinned() throws {
+        let manifestURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "spike/engine-manifest.json")
+        let json = try String(contentsOf: manifestURL, encoding: .utf8)
+        for bad in ["/master/", "/main/", "/refs/heads/", "/HEAD/", "/releases/latest/"] {
+            XCTAssertFalse(json.contains(bad), "engine-manifest.json contains mutable ref '\(bad)' — pin a commit SHA or a release asset")
+        }
+        let manifest = try EngineManifest.load(from: manifestURL)
+        for (name, component) in manifest.components {
+            XCTAssertEqual(component.sha256.count, 64, "\(name): sha256 required")
+            XCTAssertEqual(component.url.scheme, "https", "\(name): https only")
+        }
+    }
 }

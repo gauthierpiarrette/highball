@@ -69,10 +69,10 @@
     },
     "winetricks": {
       "kind": "tool",
-      "url": "https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks",
+      "url": "https://raw.githubusercontent.com/Winetricks/winetricks/5a59ea07513b24093bd90fad943ecf9543cf05bc/src/winetricks",
       "sha256": "f35c29737ca08a583569e6a3752d52fbe23333c5acfad5f16c4177d25eaf3f4b",
       "license": "LGPL-2.1",
-      "note": "Unpinned upstream master at fetch time; Gin should pin a tagged release."
+      "note": "Pinned to upstream commit 5a59ea07 (20260125+dev, 2026-08-07) — the exact bytes 0.7.x verified with dotnet48. The old branch URL drifted and broke every fresh engine install (issues #27/#28); URLs here must be immutable."
     }
   },
   "alternatives": {
