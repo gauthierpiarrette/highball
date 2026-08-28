@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.13</title>
+      <description><![CDATA[Library polish: every cover sits on the same baseline, verdict or not.]]></description>
+      <pubDate>Fri, 28 Aug 2026 12:23:16 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.13/Highball-0.7.13.zip" sparkle:version="0.7.13" sparkle:shortVersionString="0.7.13" sparkle:edSignature="I1yue1En6In+1U9rm3iYT1wSjIT6ZfCRhd57VpbKLgLgQ+90vwhwzX0FeYrsZqRbeiSAis2PkYIsXoUqNH9gDA==" length="2620077" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.12</title>
       <description><![CDATA[One Library: all your games across every bottle and store in a single cover grid, with a Continue Playing shelf, per-game pages, and custom covers.]]></description>
       <pubDate>Fri, 28 Aug 2026 12:17:53 -0700</pubDate>
