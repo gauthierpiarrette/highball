@@ -255,4 +255,44 @@ extension RegressionTests {
             XCTAssertEqual(component.url.scheme, "https", "\(name): https only")
         }
     }
+
+    // Issue #31: install progress must be legible without reading raw Wine output. The step
+    // line carries the label, the hint line the slow-step expectation, and neither may leak
+    // into the other.
+    func testProgressParserStagesAndHints() {
+        XCTAssertEqual(ProgressParser.stage(for: "[steam] step 2/6"), "Step 2 of 6")
+        XCTAssertEqual(ProgressParser.stage(for: "[dotnet48] step 1/2 — dotnet48"),
+                       "Step 1 of 2 — dotnet48")
+        XCTAssertNil(ProgressParser.stage(for: "[dotnet48] hint: takes 20-40 minutes"),
+                     "hint lines are not stages")
+        XCTAssertEqual(ProgressParser.hint(for: "[dotnet48] hint: takes 20-40 minutes"),
+                       "takes 20-40 minutes")
+        XCTAssertNil(ProgressParser.hint(for: "0024:err:something hint: not a recipe line"),
+                     "hints must come from a [recipe] line, not arbitrary output")
+        XCTAssertEqual(ProgressParser.stage(for: "Extracting package foo"),
+                       "Extracting the Steam client — this takes a few minutes")
+        XCTAssertNil(ProgressParser.stage(for: "plain wine noise"))
+    }
+
+    // Issue #31: the `slow` field must survive a decode/encode round trip, default to nil for
+    // existing recipes, and surface via slowHint for exactly the step kinds that can be slow.
+    func testRecipeSlowHintDecoding() throws {
+        let json = """
+        {"id":"t","kind":"tweak","title":"T","steps":[
+          {"type":"installer","url":"https://example.com/x.exe","label":"x",
+           "slow":"takes 20-40 minutes and can look idle"},
+          {"type":"winetricks","verbs":["corefonts"]},
+          {"type":"note","text":"done"}
+        ]}
+        """
+        let recipe = try JSONDecoder.highball.decode(Recipe.self, from: Data(json.utf8))
+        XCTAssertEqual(recipe.steps[0].slowHint, "takes 20-40 minutes and can look idle")
+        XCTAssertEqual(recipe.steps[0].progressLabel, "x")
+        XCTAssertNil(recipe.steps[1].slowHint, "absent slow decodes as nil")
+        XCTAssertEqual(recipe.steps[1].progressLabel, "corefonts")
+        XCTAssertNil(recipe.steps[2].slowHint)
+        let reencoded = try JSONEncoder().encode(recipe)
+        let again = try JSONDecoder.highball.decode(Recipe.self, from: reencoded)
+        XCTAssertEqual(again.steps[0].slowHint, "takes 20-40 minutes and can look idle")
+    }
 }

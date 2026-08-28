@@ -7,11 +7,13 @@ public struct Recipe: Codable, Sendable, Identifiable {
 
     public enum Step: Codable, Sendable {
         /// Download a file (verified if sha256 given) and run it inside the bottle.
-        case installer(url: URL, sha256: String?, arguments: [String], label: String)
+        /// `slow` is a user-facing expectation for long steps ("takes 20-40 min, can look idle");
+        /// the app shows it while the step runs so nobody has to guess whether it froze (#31).
+        case installer(url: URL, sha256: String?, arguments: [String], label: String, slow: String?)
         /// `wine reg add`.
         case registry(key: String, name: String, type: String, data: String)
-        /// Run winetricks verbs (unattended).
-        case winetricks(verbs: [String])
+        /// Run winetricks verbs (unattended). `slow` as on `installer`.
+        case winetricks(verbs: [String], slow: String?)
         /// Set a persistent environment variable on the bottle.
         case environment(name: String, value: String)
         /// Set the bottle's renderer.
@@ -25,7 +27,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
         /// Free-text instruction the UI surfaces to the user after install.
         case note(String)
 
-        private enum CodingKeys: String, CodingKey { case type, url, sha256, arguments, label, key, name, value, valueType, data, verbs, renderer, sync, path, contents, pin, text }
+        private enum CodingKeys: String, CodingKey { case type, url, sha256, arguments, label, slow, key, name, value, valueType, data, verbs, renderer, sync, path, contents, pin, text }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -34,11 +36,13 @@ public struct Recipe: Codable, Sendable, Identifiable {
                 self = .installer(url: try c.decode(URL.self, forKey: .url),
                                   sha256: try c.decodeIfPresent(String.self, forKey: .sha256),
                                   arguments: try c.decodeIfPresent([String].self, forKey: .arguments) ?? [],
-                                  label: try c.decodeIfPresent(String.self, forKey: .label) ?? "installer")
+                                  label: try c.decodeIfPresent(String.self, forKey: .label) ?? "installer",
+                                  slow: try c.decodeIfPresent(String.self, forKey: .slow))
             case "registry":
                 self = .registry(key: try c.decode(String.self, forKey: .key), name: try c.decode(String.self, forKey: .name),
                                  type: try c.decodeIfPresent(String.self, forKey: .valueType) ?? "REG_DWORD", data: try c.decode(String.self, forKey: .data))
-            case "winetricks": self = .winetricks(verbs: try c.decode([String].self, forKey: .verbs))
+            case "winetricks": self = .winetricks(verbs: try c.decode([String].self, forKey: .verbs),
+                                                  slow: try c.decodeIfPresent(String.self, forKey: .slow))
             case "environment": self = .environment(name: try c.decode(String.self, forKey: .name), value: try c.decode(String.self, forKey: .value))
             case "renderer": self = .renderer(try c.decode(Renderer.self, forKey: .renderer))
             case "sync": self = .sync(try c.decode(SyncMode.self, forKey: .sync))
@@ -52,19 +56,41 @@ public struct Recipe: Codable, Sendable, Identifiable {
         public func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             switch self {
-            case let .installer(url, sha256, arguments, label):
+            case let .installer(url, sha256, arguments, label, slow):
                 try c.encode("installer", forKey: .type); try c.encode(url, forKey: .url)
                 try c.encodeIfPresent(sha256, forKey: .sha256); try c.encode(arguments, forKey: .arguments); try c.encode(label, forKey: .label)
+                try c.encodeIfPresent(slow, forKey: .slow)
             case let .registry(key, name, type, data):
                 try c.encode("registry", forKey: .type); try c.encode(key, forKey: .key); try c.encode(name, forKey: .name)
                 try c.encode(type, forKey: .valueType); try c.encode(data, forKey: .data)
-            case let .winetricks(verbs): try c.encode("winetricks", forKey: .type); try c.encode(verbs, forKey: .verbs)
+            case let .winetricks(verbs, slow):
+                try c.encode("winetricks", forKey: .type); try c.encode(verbs, forKey: .verbs)
+                try c.encodeIfPresent(slow, forKey: .slow)
             case let .environment(name, value): try c.encode("environment", forKey: .type); try c.encode(name, forKey: .name); try c.encode(value, forKey: .value)
             case let .renderer(r): try c.encode("renderer", forKey: .type); try c.encode(r, forKey: .renderer)
             case let .sync(m): try c.encode("sync", forKey: .type); try c.encode(m, forKey: .sync)
             case let .file(path, contents): try c.encode("file", forKey: .type); try c.encode(path, forKey: .path); try c.encode(contents, forKey: .contents)
             case let .pin(p): try c.encode("pin", forKey: .type); try c.encode(p, forKey: .pin)
             case let .note(t): try c.encode("note", forKey: .type); try c.encode(t, forKey: .text)
+            }
+        }
+
+        /// Short human description for progress display ("Step 2 of 3 — Battle.net-Setup").
+        public var progressLabel: String? {
+            switch self {
+            case let .installer(_, _, _, label, _): return label
+            case let .winetricks(verbs, _): return verbs.joined(separator: " ")
+            case .registry: return nil
+            case .environment, .renderer, .sync, .file, .pin, .note: return nil
+            }
+        }
+
+        /// The step's slow-expectation text, if the recipe declared one.
+        public var slowHint: String? {
+            switch self {
+            case let .installer(_, _, _, _, slow): return slow
+            case let .winetricks(_, slow): return slow
+            default: return nil
             }
         }
     }
@@ -135,10 +161,17 @@ public struct RecipeRunner: Sendable {
         var notes: [String] = []
         if let r = recipe.renderer { bottle.settings.renderer = r }
         for (i, step) in recipe.steps.enumerated() {
-            log?("[\(recipe.id)] step \(i + 1)/\(recipe.steps.count)")
+            // The app parses these two lines into its progress display (#31): the step line
+            // becomes the stage, the hint line the "this is slow, don't worry" text under it.
+            if let desc = step.progressLabel {
+                log?("[\(recipe.id)] step \(i + 1)/\(recipe.steps.count) — \(desc)")
+            } else {
+                log?("[\(recipe.id)] step \(i + 1)/\(recipe.steps.count)")
+            }
+            if let slow = step.slowHint { log?("[\(recipe.id)] hint: \(slow)") }
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             switch step {
-            case let .installer(url, sha256, arguments, label):
+            case let .installer(url, sha256, arguments, label, _):
                 let component = EngineManifest.Component(kind: "installer", url: url, sha256: sha256 ?? "", size: nil, license: nil, optional: nil, acceptance: nil, extract: nil, note: nil, version: nil)
                 let file: URL
                 if sha256 != nil {
@@ -154,7 +187,7 @@ public struct RecipeRunner: Sendable {
                 }
             case let .registry(key, name, type, data):
                 try await runner.regAdd(key: key, name: name, type: type, data: data)
-            case let .winetricks(verbs):
+            case let .winetricks(verbs, _):
                 guard let wt = engine.winetricks else { throw HighballError.missing("winetricks in engine \(engine.id)") }
                 // WINE_BIN/WINESERVER_BIN/WINE_BINDIR are winetricks' own overrides for setups where
                 // its binary detection fails; without them dotnet48 and friends abort on this engine

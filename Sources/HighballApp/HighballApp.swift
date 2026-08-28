@@ -184,6 +184,9 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showCreate) { CreateBottleSheet() }
+        .onChange(of: state.requestCreateBottle) { _, wants in
+            if wants { showCreate = true; state.requestCreateBottle = false }
+        }
         .confirmationDialog("Delete bottle \"\(pendingDelete ?? "")\"? This removes its Windows drive and everything installed in it.",
                             isPresented: .init(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                             titleVisibility: .visible) {
@@ -255,8 +258,12 @@ struct LogSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                if state.busy { ProgressView().controlSize(.small) }
-                Text(state.busy ? state.busyTitle : L("Done")).font(.headline)
+                if state.busy {
+                    ProgressView().controlSize(.small)
+                } else if state.doneState != nil {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                }
+                Text(state.busy ? state.busyTitle : (state.doneState?.title ?? L("Done"))).font(.headline)
                 Spacer()
                 Button(state.busy ? "Hide" : "Close") { dismiss() }
             }
@@ -264,6 +271,33 @@ struct LogSheet: View {
                 Label(state.stage, systemImage: "clock")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+            }
+            // Recipe-declared expectation for the current step ("takes 20–40 min, looks idle").
+            // Shown while the step runs, so nobody has to guess whether it froze (#31).
+            if state.busy, !state.stageHint.isEmpty {
+                Label(state.stageHint, systemImage: "hourglass")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
+            if state.busy, let started = state.busyStartedAt {
+                TimelineView(.periodic(from: .now, by: 15)) { ctx in
+                    let mins = Int(ctx.date.timeIntervalSince(started) / 60)
+                    let elapsed = mins < 1 ? L("just started") : String(format: L("running for %d min"), mins)
+                    let liveness: String = {
+                        guard let last = state.lastOutputAt else { return "" }
+                        let quiet = ctx.date.timeIntervalSince(last)
+                        if quiet < 90 { return " · " + L("active") }
+                        // Quiet is expected during hinted-slow steps; the hint already explains it.
+                        return state.stageHint.isEmpty ? " · " + L("quiet — can be normal, see Details") : ""
+                    }()
+                    Text(elapsed + (state.busyExpected.map { " · " + $0 } ?? "") + liveness)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if !state.busy, let done = state.doneState, let ctaTitle = done.ctaTitle {
+                Button(ctaTitle) { dismiss(); done.cta?() }
+                    .buttonStyle(.borderedProminent)
             }
             DisclosureGroup(L("Details")) {
                 ScrollViewReader { proxy in

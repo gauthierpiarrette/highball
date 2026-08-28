@@ -119,6 +119,20 @@ enum L10n {
             "Une bouteille est un environnement Windows isolé. Le premier démarrage prend environ 90 secondes ; l’installation de Steam ajoute un téléchargement et une longue mise à jour initiale.",
         "Create": "Créer",
         "Done": "Terminé",
+        // Onboarding legibility (#31)
+        "Engine ready": "Moteur prêt",
+        "Create your first bottle": "Créez votre première bouteille",
+        "Bottle '%@' is ready": "La bouteille « %@ » est prête",
+        "%@ installed": "%@ installé",
+        "usually 5–15 minutes": "généralement 5 à 15 minutes",
+        "Starting Steam for the first time — it downloads and unpacks its own client":
+            "Premier démarrage de Steam — il télécharge et décompresse son propre client",
+        "usually 15–25 minutes; long quiet stretches are normal":
+            "généralement 15 à 25 minutes ; de longues périodes sans activité sont normales",
+        "just started": "vient de démarrer",
+        "running for %d min": "en cours depuis %d min",
+        "active": "actif",
+        "quiet — can be normal, see Details": "silencieux — peut être normal, voir Détails",
         "Hide": "Masquer",
         "Close": "Fermer",
         "Details": "Détails",

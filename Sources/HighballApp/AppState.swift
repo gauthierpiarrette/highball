@@ -17,6 +17,19 @@ final class AppState {
     var stage = ""
     var logLines: [String] = []
     var showLog = false
+    // Onboarding legibility (#31): a first-time user should never have to guess whether
+    // something is working, finished, or stuck.
+    var stageHint = ""                  // recipe-declared "slow step, this is normal" text
+    var busyStartedAt: Date?            // drives the "running for N min" row
+    var busyExpected: String?           // human duration ("usually 20–40 minutes")
+    var lastOutputAt: Date?             // liveness: when the task last produced output
+    var doneState: DoneState?           // explicit success panel with an optional next step
+    struct DoneState {
+        var title: String
+        var ctaTitle: String?
+        var cta: (() -> Void)?
+    }
+    var requestCreateBottle = false     // engine-done CTA → ContentView opens the sheet
 
     // Onboarding
     var rosettaInstalled = true
@@ -84,35 +97,28 @@ final class AppState {
     private func appendLog(_ line: String) {
         logLines.append(line)
         if logLines.count > 400 { logLines.removeFirst(logLines.count - 400) }
-        if let s = Self.stage(for: line) { stage = s }
+        lastOutputAt = Date()
+        if let s = ProgressParser.stage(for: line) {
+            stage = s
+            if s.hasPrefix("Step ") { stageHint = "" }  // a new step retires the old hint
+        }
+        // Recipe slow-hints ("[dotnet48] hint: takes 20-40 min…") ride the same log stream.
+        if let h = ProgressParser.hint(for: line) { stageHint = h }
     }
 
-    /// Turns raw Wine/recipe output into a human stage line.
-    static func stage(for line: String) -> String? {
-        if let m = line.firstMatch(of: #/\[(?<r>[a-z0-9-]+)\] step (?<a>\d+)/(?<b>\d+)/#) {
-            return "Step \(m.a) of \(m.b)"
-        }
-        if line.contains("Downloading update (") {
-            if let m = line.firstMatch(of: #/\((?<x>[\d,]+) of (?<y>[\d,]+) KB\)/#) {
-                return "Steam is updating itself — \(m.x) of \(m.y) KB"
-            }
-            return "Steam is updating itself"
-        }
-        if line.contains("Extracting package") { return "Extracting the Steam client — this takes a few minutes" }
-        if line.contains("Installing update") { return "Installing the Steam client update" }
-        if line.contains("Update complete") { return "Steam update complete — launching" }
-        if line.hasPrefix("downloaded ") { return "Downloaded \(line.dropFirst(11))" }
-        if line.contains("wineboot") && line.contains("start") { return "Preparing the Windows environment" }
-        return nil
-    }
-
-    private func runBusy(_ title: String, showLogSheet: Bool = true, cleanup: (() -> Void)? = nil, _ work: @escaping () async throws -> Void) {
-        busy = true; busyTitle = title; stage = ""; logLines = []; showLog = showLogSheet
+    private func runBusy(_ title: String, expected: String? = nil, showLogSheet: Bool = true,
+                         done: DoneState? = nil, cleanup: (() -> Void)? = nil,
+                         _ work: @escaping () async throws -> Void) {
+        busy = true; busyTitle = title; stage = ""; stageHint = ""; logLines = []; showLog = showLogSheet
+        busyStartedAt = Date(); busyExpected = expected; lastOutputAt = nil; doneState = nil
         Task {
             // On failure, dismiss the log sheet ourselves: SwiftUI defers the error alert
             // until the sheet closes, so a stuck sheet showed "Done" over a failed install
             // and hid the alert until the user clicked Close (issues #27/#28).
-            do { try await work() } catch { showLog = false; errorMessage = "\(error)" }
+            do {
+                try await work()
+                doneState = done ?? DoneState(title: L("Done"), ctaTitle: nil, cta: nil)
+            } catch { showLog = false; errorMessage = "\(error)" }
             cleanup?()
             busy = false
             refresh()
@@ -125,7 +131,10 @@ final class AppState {
         guard let manifestURL = Self.bundledManifest else {
             errorMessage = "No engine manifest found. Reinstall Highball."; return
         }
-        runBusy("Installing engine — about 500 MB of verified downloads") { [self] in
+        runBusy("Installing engine — about 500 MB of verified downloads",
+                expected: L("usually 5–15 minutes"),
+                done: DoneState(title: L("Engine ready"), ctaTitle: L("Create your first bottle"),
+                                cta: { [weak self] in self?.requestCreateBottle = true })) { [self] in
             let manifest = try EngineManifest.load(from: manifestURL)
             var accepted: Set<String> = []
             if acceptGPTK { accepted.insert("apple-gptk-license-2023-08-17") }
@@ -151,7 +160,8 @@ final class AppState {
 
     func createBottle(name: String, recipeID: String?) {
         guard let engine = engines.first else { return }
-        runBusy("Creating bottle '\(name)' — first boot takes about 90 seconds") { [self] in
+        runBusy("Creating bottle '\(name)' — first boot takes about 90 seconds",
+                done: DoneState(title: String(format: L("Bottle '%@' is ready"), name), ctaTitle: nil, cta: nil)) { [self] in
             let bottle = try await bottleStore.create(name: name, engine: engine)
             await MainActor.run { self.appendLog("bottle created") }
             if let recipeID, let recipe = Self.recipe(recipeID) {
@@ -165,7 +175,8 @@ final class AppState {
 
     func applyRecipe(_ id: String, to bottle: Bottle) {
         guard let engine = engine(for: bottle), let recipe = Self.recipe(id) else { return }
-        runBusy("Installing \(recipe.title)") { [self] in
+        runBusy("Installing \(recipe.title)",
+                done: DoneState(title: String(format: L("%@ installed"), recipe.title), ctaTitle: nil, cta: nil)) { [self] in
             var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
             let notes = try await runner.apply(recipe) { line in Task { @MainActor in self.appendLog(line) } }
             for n in notes { await MainActor.run { self.appendLog("note: \(n)") } }
@@ -190,7 +201,15 @@ final class AppState {
             return
         }
         launchingPins.insert(pin.id)
-        runBusy("Running \(pin.name)", showLogSheet: false, cleanup: { [weak self] in self?.launchingPins.remove(pin.id) }) { [self] in
+        // Steam's very first launch bootstraps its client for 15–25 minutes and looks frozen the
+        // whole time (#31, #9). Detect it (no CEF dir yet) and show the progress sheet with honest
+        // expectations instead of launching silently into what reads as a hang.
+        let steamFirstBoot = isSteamUI(pin) && !FileManager.default.fileExists(
+            atPath: bottle.driveC.appending(path: "Program Files (x86)/Steam/bin/cef").path)
+        runBusy(steamFirstBoot ? L("Starting Steam for the first time — it downloads and unpacks its own client") : "Running \(pin.name)",
+                expected: steamFirstBoot ? L("usually 15–25 minutes; long quiet stretches are normal") : nil,
+                showLogSheet: steamFirstBoot,
+                cleanup: { [weak self] in self?.launchingPins.remove(pin.id) }) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             var extra = [String: String]()
             if isSteamUI(pin), bottle.settings.sync != SyncMode.none {

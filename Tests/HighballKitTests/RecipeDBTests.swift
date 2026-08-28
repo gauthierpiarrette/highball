@@ -28,7 +28,7 @@ final class RecipeDBTests: XCTestCase {
                 XCTAssertFalse(r.id.isEmpty, f.lastPathComponent)
                 XCTAssertFalse(r.title.isEmpty, f.lastPathComponent)
                 for step in r.steps {
-                    if case let .installer(url, _, _, _) = step {
+                    if case let .installer(url, _, _, _, _) = step {
                         XCTAssertEqual(url.scheme, "https", "\(f.lastPathComponent): installer URLs must be https")
                     }
                 }
@@ -103,7 +103,7 @@ final class RecipeDBTests: XCTestCase {
         }
         let r = try JSONDecoder.highball.decode(Recipe.self, from: Data(contentsOf: f))
         let installers = r.steps.compactMap { step -> URL? in
-            if case let .installer(url, _, _, _) = step { return url } else { return nil }
+            if case let .installer(url, _, _, _, _) = step { return url } else { return nil }
         }
         XCTAssertFalse(installers.contains { $0.absoluteString.contains("webinstallers") },
                        "web installer fails its Windows 7 SP1 check under wine win10 — use the offline setup exe")
