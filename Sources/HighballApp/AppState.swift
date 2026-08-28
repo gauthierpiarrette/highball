@@ -48,6 +48,59 @@ final class AppState {
 
     var errorMessage: String?
 
+    // MARK: One Library (Phase 2)
+
+    /// Which primary surface the detail column shows. `selectedBottle` keeps backing every
+    /// bottle action and the File-menu commands; it just stopped being the router.
+    enum Pane: Hashable { case library, bottles }
+    var pane: Pane = .library
+    var libraryItems: [LibraryItem] = []
+    var libraryPlays: [String: LibraryStore.PlayRecord] = [:]
+    var libraryStore: LibraryStore { LibraryStore(paths: paths) }
+
+    func rebuildLibrary() {
+        libraryItems = LibraryIndex.build(bottles: bottles, steamByBottle: gamesByBottle,
+                                          epicOwned: epicOwned, epicInstalls: epicInstalls,
+                                          plays: libraryPlays)
+    }
+
+    /// The "never pick a bottle first" guarantee: every Play in the library resolves the
+    /// item's own bottle and dispatches by source.
+    func play(_ item: LibraryItem) {
+        guard let bottleName = item.bottleName,
+              let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
+        recordPlay(item)
+        switch item.source {
+        case .steam:
+            guard let game = (gamesByBottle[bottleName] ?? []).first(where: { $0.appid == item.steamAppID }) else { return }
+            launchGame(game, in: bottle)
+        case .epic:
+            guard let game = epicOwned.first(where: { $0.app_name == item.epicAppName }) else { return }
+            epicPlay(game, in: bottle)
+        case .pin:
+            guard let pin = bottle.settings.pins.first(where: { $0.id == item.pinID }) else { return }
+            launch(pin: pin, in: bottle)
+        }
+    }
+
+    /// Epic-only today: installs into the item's resolved bottle, else the selected one,
+    /// else the first — a menu in the detail view refines it, never a modal prerequisite.
+    func install(_ item: LibraryItem) {
+        guard item.source == .epic,
+              let game = epicOwned.first(where: { $0.app_name == item.epicAppName }) else { return }
+        let target = item.bottleName.flatMap { name in bottles.first { $0.name == name } }
+            ?? selectedBottle.flatMap { name in bottles.first { $0.name == name } }
+            ?? bottles.first
+        guard let target else { return }
+        epicInstall(game, in: target)
+    }
+
+    private func recordPlay(_ item: LibraryItem) {
+        libraryStore.recordPlay(id: item.id, bottle: item.bottleName)
+        libraryPlays[item.id] = LibraryStore.PlayRecord(lastPlayedAt: Date(), bottle: item.bottleName)
+        rebuildLibrary()
+    }
+
     // Epic (via Legendary; see EpicStore)
     var epicSignedIn = false
     var epicOwned: [EpicStore.Game] = []
@@ -82,6 +135,8 @@ final class AppState {
         if selectedBottle == nil { selectedBottle = bottles.first?.name }
         // Never trap on duplicate names (a Finder-duplicated bottle crashed the app at launch — issue #13).
         gamesByBottle = Dictionary(bottles.map { ($0.name, SteamLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
+        libraryPlays = libraryStore.load()
+        rebuildLibrary()
         epicRefresh()
         if gameDB.byAppID.isEmpty {
             var dirs: [URL] = []
@@ -172,7 +227,7 @@ final class AppState {
                 let notes = try await runner.apply(recipe) { line in Task { @MainActor in self.appendLog(line) } }
                 for n in notes { await MainActor.run { self.appendLog("note: \(n)") } }
             }
-            await MainActor.run { self.selectedBottle = name }
+            await MainActor.run { self.selectedBottle = name; self.pane = .bottles }
         }
     }
 
@@ -374,6 +429,7 @@ final class AppState {
                     installed.compactMap { g in g.install_path.map { (g.app_name, $0) } })
                 self?.epicLoading = false
                 self?.epicFetchInFlight = false
+                self?.rebuildLibrary()   // Epic results arrive after refresh(); fold them in
             }
         }
     }

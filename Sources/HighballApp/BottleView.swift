@@ -170,9 +170,8 @@ struct BottleView: View {
                 }
             }
         }
-        .sheet(isPresented: Binding(get: { state.showEpicSignIn }, set: { state.showEpicSignIn = $0 })) {
-            EpicSignInSheet()
-        }
+        // EpicSignInSheet is presented at ContentView level so the Library surface can
+        // trigger it too — a store account is a library-level concept, not a bottle one.
     }
 
     // MARK: Games

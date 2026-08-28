@@ -125,11 +125,37 @@ struct ContentView: View {
                             }
                             .padding(.vertical, 2)
                         }
+                        // One Library (Phase 2): the primary surface, above the bottles.
+                        Section {
+                            let onLibrary = state.pane == .library
+                            Button {
+                                state.pane = .library
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: onLibrary ? "square.grid.2x2.fill" : "square.grid.2x2")
+                                        .foregroundStyle(onLibrary ? HB.amber : Color.secondary)
+                                        .frame(width: 18)
+                                    Text(L("Library")).fontWeight(onLibrary ? .semibold : .regular)
+                                    Spacer()
+                                    Text("\(state.libraryItems.count)")
+                                        .font(.caption2.monospaced()).foregroundStyle(.tertiary)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.vertical, 5).padding(.horizontal, 7)
+                            .background(RoundedRectangle(cornerRadius: 7)
+                                .fill(onLibrary ? HB.amber.opacity(0.16) : .clear))
+                            .overlay(RoundedRectangle(cornerRadius: 7)
+                                .stroke(onLibrary ? HB.amber.opacity(0.35) : .clear))
+                            .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
+                        }
                         Section(L("Bottles")) {
                             ForEach(state.bottles, id: \.name) { bottle in
-                                let selected = state.selectedBottle == bottle.name
+                                let selected = state.selectedBottle == bottle.name && state.pane == .bottles
                                 Button {
                                     state.selectedBottle = bottle.name
+                                    state.pane = .bottles
                                 } label: {
                                     HStack(spacing: 8) {
                                         Image(systemName: "wineglass\(selected ? ".fill" : "")")
@@ -173,12 +199,17 @@ struct ContentView: View {
                         Button { showCreate = true } label: { Label(L("New Bottle"), systemImage: "plus") }
                     }
                 } detail: {
-                    if let name = state.selectedBottle,
-                       let bottle = state.bottles.first(where: { $0.name == name }) {
-                        BottleView(bottle: bottle)
-                    } else {
-                        ContentUnavailableView(L("No bottle selected"), systemImage: "wineglass",
-                                               description: Text(L("Create a bottle to install Steam and play.")))
+                    switch state.pane {
+                    case .library:
+                        NavigationStack { LibraryView() }
+                    case .bottles:
+                        if let name = state.selectedBottle,
+                           let bottle = state.bottles.first(where: { $0.name == name }) {
+                            BottleView(bottle: bottle)
+                        } else {
+                            ContentUnavailableView(L("No bottle selected"), systemImage: "wineglass",
+                                                   description: Text(L("Create a bottle to install Steam and play.")))
+                        }
                     }
                 }
             }
@@ -195,6 +226,7 @@ struct ContentView: View {
         }
         .sheet(isPresented: $state.showLog) { LogSheet() }
         .sheet(isPresented: $state.showGPTKLicense) { GPTKLicenseSheet() }
+        .sheet(isPresented: $state.showEpicSignIn) { EpicSignInSheet() }
         .alert(L("Something went wrong"), isPresented: .init(
             get: { state.errorMessage != nil },
             set: { if !$0 { state.errorMessage = nil } })) {

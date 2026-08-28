@@ -136,6 +136,22 @@ enum L10n {
         // Unified game cards (library Phase 1)
         "Not installed": "Non installé",
         "Play with %@": "Jouer avec %@",
+        // One Library (Phase 2)
+        "Library": "Bibliothèque",
+        "Continue playing": "Reprendre",
+        "Search your games": "Rechercher vos jeux",
+        "All": "Tous",
+        "No bottles yet. A bottle is a private Windows environment for your games.":
+            "Pas encore de bouteille. Une bouteille est un environnement Windows privé pour vos jeux.",
+        "No games yet. Install Steam in a bottle, or connect your Epic account.":
+            "Pas encore de jeux. Installez Steam dans une bouteille, ou connectez votre compte Epic.",
+        "Nothing matches these filters.": "Rien ne correspond à ces filtres.",
+        "Not installed in any bottle": "Installé dans aucune bouteille",
+        "Also installed in %@": "Aussi installé dans %@",
+        "Source": "Source",
+        "Size on disk": "Taille sur le disque",
+        "Last played": "Dernière partie",
+        "Windows program": "Programme Windows",
         "Hide": "Masquer",
         "Close": "Fermer",
         "Details": "Détails",
