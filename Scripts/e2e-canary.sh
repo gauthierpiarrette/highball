@@ -51,8 +51,33 @@ else
 fi
 
 echo "--- published zip (the Sparkle update enclosure) + its bundled manifest"
-TAG=$(curl -fsSL --retry 3 "https://api.github.com/repos/$REPO/releases/latest" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])') || TAG=""
-if [ -n "$TAG" ] && [ "$TAG" != "null" ]; then
+# Resolve the latest release tag via the API. Unauthenticated calls hit the
+# shared-runner-IP rate limit (403 -> empty body -> JSON traceback -> false
+# availability alarm; run 33204538325), so authenticate with GH_TOKEN when the
+# workflow provides it and retry with backoff on anything that isn't a usable
+# answer. A definitive 404 (no release published) is never retried: that is
+# DRIFT, not availability. Headers go via a file, not an array: /bin/bash on
+# macOS is 3.2, where empty-array expansion trips set -u.
+printf 'Accept: application/vnd.github+json\n' > "$G/api-headers"
+[ -n "${GH_TOKEN:-}" ] && printf 'Authorization: Bearer %s\n' "$GH_TOKEN" >> "$G/api-headers"
+TAG=""; TAG_HTTP=000
+for attempt in 1 2 3; do
+  TAG_HTTP=$(curl -sSL --max-time 60 -H @"$G/api-headers" \
+    -o "$G/latest-release.json" -w '%{http_code}' \
+    "https://api.github.com/repos/$REPO/releases/latest") || TAG_HTTP=000
+  [ "$TAG_HTTP" = "404" ] && break
+  if [ "$TAG_HTTP" = "200" ]; then
+    TAG=$(python3 -c 'import json,sys
+try: print(json.load(open(sys.argv[1])).get("tag_name") or "")
+except Exception: pass' "$G/latest-release.json")
+    [ -n "$TAG" ] && break
+  fi
+  if [ "$attempt" -lt 3 ]; then
+    echo "note: releases/latest attempt $attempt returned HTTP $TAG_HTTP without a usable tag; retrying in $((attempt == 1 ? 10 : 30))s"
+    sleep $((attempt == 1 ? 10 : 30))
+  fi
+done
+if [ -n "$TAG" ]; then
   VER=${TAG#v}
   if curl -fsSL --retry 3 --max-time 900 -o "$G/app.zip" "https://github.com/$REPO/releases/download/$TAG/Highball-$VER.zip"; then
     # ditto, never unzip: unzip flattens Sparkle's symlinks and manufactures a
@@ -68,8 +93,10 @@ if [ -n "$TAG" ] && [ "$TAG" != "null" ]; then
   else
     echo "AVAILABILITY: release zip unreachable for $TAG"; AVAIL=1
   fi
+elif [ "$TAG_HTTP" = "404" ]; then
+  echo "DRIFT: GitHub reports no latest release (HTTP 404) — the release users install from is gone"; DRIFT=1
 else
-  echo "AVAILABILITY: could not resolve the latest release tag"; AVAIL=1
+  echo "AVAILABILITY: GitHub API failed to return the latest release after 3 attempts (last HTTP $TAG_HTTP) — API-availability failure, not a missing release"; AVAIL=1
 fi
 
 echo "--- appcast consistency"

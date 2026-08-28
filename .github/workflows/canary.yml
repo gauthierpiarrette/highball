@@ -27,9 +27,14 @@ jobs:
     outputs:
       kind: ${{ steps.run.outputs.kind }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: run canary
         id: run
+        env:
+          # Read-only by this workflow's permissions block (contents: read).
+          # Authenticates the releases/latest API call so shared-runner-IP rate
+          # limits stop producing false availability alarms (run 33204538325).
+          GH_TOKEN: ${{ github.token }}
         run: Scripts/e2e-canary.sh
 
   # Separate job for the token: the canary itself only downloads and hashes, but

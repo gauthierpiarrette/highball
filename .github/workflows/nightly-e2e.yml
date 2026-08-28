@@ -34,19 +34,19 @@ jobs:
     # by the alert job either way.
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: rosetta (idempotent; image rotations have shipped without it)
         run: sudo softwareupdate --install-rosetta --agree-to-license || true
       - name: disk headroom
         run: df -h /
       - name: cache engine downloads (sha256-reverified on every reuse; the script keeps winetricks out)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/hb-e2e/downloads
           key: engine-dl-${{ hashFiles('spike/engine-manifest.json') }}
           restore-keys: engine-dl-
       - name: cache winetricks payloads (winetricks sha-verifies its own cache entries)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/hb-e2e/xdg-cache
           key: winetricks-cache-v1
@@ -71,11 +71,11 @@ jobs:
     continue-on-error: true
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: rosetta
         run: sudo softwareupdate --install-rosetta --agree-to-license || true
       - name: cache engine downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/hb-e2e/downloads
           key: engine-dl-${{ hashFiles('spike/engine-manifest.json') }}
