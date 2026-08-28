@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.11</title>
+      <description><![CDATA[Onboarding you can trust: explicit Done states, honest timing on slow installs, Epic games as first-class cards, and recipes that respect your renderer choice.]]></description>
+      <pubDate>Fri, 28 Aug 2026 11:21:29 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.11/Highball-0.7.11.zip" sparkle:version="0.7.11" sparkle:shortVersionString="0.7.11" sparkle:edSignature="QLWPbp+lAYUNAqVNo8ue51Wveot7V3VHqe+fNvCBisNP4+KnVISjJfqLmoxHMSwGGPR07T4ElIVTIndEvtRiAw==" length="2515227" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.10</title>
       <description><![CDATA[Legacy CS:GO map-load freeze fixed: per-game DXVK config turns async shader compilation off for csgo.exe and adds 32-bit memory headroom.]]></description>
       <pubDate>Thu, 27 Aug 2026 14:50:56 -0700</pubDate>
