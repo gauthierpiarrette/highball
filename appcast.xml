@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.14</title>
+      <description><![CDATA[Apply-fix button on game pages; Portal 1 and 2 verified working (96 / 210+ fps) with their recipes applying the fix for you.]]></description>
+      <pubDate>Fri, 28 Aug 2026 16:10:01 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.14/Highball-0.7.14.zip" sparkle:version="0.7.14" sparkle:shortVersionString="0.7.14" sparkle:edSignature="UIzaJmS8RBuX3MPLGe1EELDmZhboqYmLIknZbcaB99Ph/Rkydr8Lj10K8jMy0PlwaydaGh8X7El+s3DsKb93Dw==" length="2627212" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.13</title>
       <description><![CDATA[Library polish: every cover sits on the same baseline, verdict or not.]]></description>
       <pubDate>Fri, 28 Aug 2026 12:23:16 -0700</pubDate>
