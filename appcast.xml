@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.12</title>
+      <description><![CDATA[One Library: all your games across every bottle and store in a single cover grid, with a Continue Playing shelf, per-game pages, and custom covers.]]></description>
+      <pubDate>Fri, 28 Aug 2026 12:17:53 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.12/Highball-0.7.12.zip" sparkle:version="0.7.12" sparkle:shortVersionString="0.7.12" sparkle:edSignature="NG6mtiRTPIY3qUt/9vGsE9AJGj8vHhJ1RtcF1Iw9qHtjnls+U0TIl6t48GEOuOeI5X+lTze4349Sd2h1uZMzDA==" length="2619931" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.11</title>
       <description><![CDATA[Onboarding you can trust: explicit Done states, honest timing on slow installs, Epic games as first-class cards, and recipes that respect your renderer choice.]]></description>
       <pubDate>Fri, 28 Aug 2026 11:21:29 -0700</pubDate>
