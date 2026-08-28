@@ -282,6 +282,7 @@ extension RegressionTests {
           {"type":"installer","url":"https://example.com/x.exe","label":"x",
            "slow":"takes 20-40 minutes and can look idle"},
           {"type":"winetricks","verbs":["corefonts"]},
+          {"type":"winver","winver":"win10"},
           {"type":"note","text":"done"}
         ]}
         """
@@ -290,7 +291,11 @@ extension RegressionTests {
         XCTAssertEqual(recipe.steps[0].progressLabel, "x")
         XCTAssertNil(recipe.steps[1].slowHint, "absent slow decodes as nil")
         XCTAssertEqual(recipe.steps[1].progressLabel, "corefonts")
-        XCTAssertNil(recipe.steps[2].slowHint)
+        // The winver step (dotnet48 leaves prefixes on win7 — Steam deprecation banner —
+        // unless a recipe can restore win10) must decode.
+        guard case let .winver(v) = recipe.steps[2] else { return XCTFail("winver step did not decode") }
+        XCTAssertEqual(v, .win10)
+        XCTAssertNil(recipe.steps[3].slowHint)
         let reencoded = try JSONEncoder().encode(recipe)
         let again = try JSONDecoder.highball.decode(Recipe.self, from: reencoded)
         XCTAssertEqual(again.steps[0].slowHint, "takes 20-40 minutes and can look idle")

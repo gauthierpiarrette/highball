@@ -20,6 +20,10 @@ public struct Recipe: Codable, Sendable, Identifiable {
         case renderer(Renderer)
         /// Set the bottle's synchronization mode (none | esync | msync).
         case sync(SyncMode)
+        /// Set the prefix's Windows version. Needed because winetricks verbs like dotnet48
+        /// step the version during install and leave it on win7 — which broke Steam
+        /// (deprecation banner) and AC for every dotnet48 user until restored.
+        case winver(WindowsVersion)
         /// Write a text file inside drive_c.
         case file(path: String, contents: String)
         /// Add a pinned program to the bottle.
@@ -27,7 +31,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
         /// Free-text instruction the UI surfaces to the user after install.
         case note(String)
 
-        private enum CodingKeys: String, CodingKey { case type, url, sha256, arguments, label, slow, key, name, value, valueType, data, verbs, renderer, sync, path, contents, pin, text }
+        private enum CodingKeys: String, CodingKey { case type, url, sha256, arguments, label, slow, key, name, value, valueType, data, verbs, renderer, sync, winver, path, contents, pin, text }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -46,6 +50,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case "environment": self = .environment(name: try c.decode(String.self, forKey: .name), value: try c.decode(String.self, forKey: .value))
             case "renderer": self = .renderer(try c.decode(Renderer.self, forKey: .renderer))
             case "sync": self = .sync(try c.decode(SyncMode.self, forKey: .sync))
+            case "winver": self = .winver(try c.decode(WindowsVersion.self, forKey: .winver))
             case "file": self = .file(path: try c.decode(String.self, forKey: .path), contents: try c.decode(String.self, forKey: .contents))
             case "pin": self = .pin(try c.decode(Pin.self, forKey: .pin))
             case "note": self = .note(try c.decode(String.self, forKey: .text))
@@ -69,6 +74,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case let .environment(name, value): try c.encode("environment", forKey: .type); try c.encode(name, forKey: .name); try c.encode(value, forKey: .value)
             case let .renderer(r): try c.encode("renderer", forKey: .type); try c.encode(r, forKey: .renderer)
             case let .sync(m): try c.encode("sync", forKey: .type); try c.encode(m, forKey: .sync)
+            case let .winver(v): try c.encode("winver", forKey: .type); try c.encode(v, forKey: .winver)
             case let .file(path, contents): try c.encode("file", forKey: .type); try c.encode(path, forKey: .path); try c.encode(contents, forKey: .contents)
             case let .pin(p): try c.encode("pin", forKey: .type); try c.encode(p, forKey: .pin)
             case let .note(t): try c.encode("note", forKey: .type); try c.encode(t, forKey: .text)
@@ -81,7 +87,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case let .installer(_, _, _, label, _): return label
             case let .winetricks(verbs, _): return verbs.joined(separator: " ")
             case .registry: return nil
-            case .environment, .renderer, .sync, .file, .pin, .note: return nil
+            case .environment, .renderer, .sync, .winver, .file, .pin, .note: return nil
             }
         }
 
@@ -207,6 +213,9 @@ public struct RecipeRunner: Sendable {
                 bottle.settings.renderer = r
             case let .sync(m):
                 bottle.settings.sync = m
+            case let .winver(v):
+                bottle.settings.windowsVersion = v
+                try await runner.setWindowsVersion(v)
             case let .file(path, contents):
                 let url = bottle.driveC.appending(path: path)
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
