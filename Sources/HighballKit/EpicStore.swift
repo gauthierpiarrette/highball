@@ -100,6 +100,45 @@ public struct EpicStore: Sendable {
     public struct Game: Codable, Sendable {
         public let app_name: String
         public let app_title: String
+        /// Epic's own catalog art, embedded by legendary in `list --json` metadata.keyImages.
+        /// Wide (DieselGameBox) fits the 460:215 game card; tall (DieselGameBoxTall) is the
+        /// 2:3 cover for the future unified library. Same type mapping Heroic uses.
+        public let artworkWide: URL?
+        public let artworkTall: URL?
+
+        public init(app_name: String, app_title: String, artworkWide: URL? = nil, artworkTall: URL? = nil) {
+            self.app_name = app_name; self.app_title = app_title
+            self.artworkWide = artworkWide; self.artworkTall = artworkTall
+        }
+
+        private enum CodingKeys: String, CodingKey { case app_name, app_title, metadata }
+        private enum MetadataKeys: String, CodingKey { case keyImages }
+        private struct KeyImage: Codable { let type: String?; let url: String? }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            app_name = try c.decode(String.self, forKey: .app_name)
+            app_title = try c.decode(String.self, forKey: .app_title)
+            var images: [KeyImage] = []
+            if let md = try? c.nestedContainer(keyedBy: MetadataKeys.self, forKey: .metadata) {
+                images = (try? md.decode([KeyImage].self, forKey: .keyImages)) ?? []
+            }
+            func first(_ types: [String]) -> URL? {
+                for t in types {
+                    if let u = images.first(where: { $0.type == t })?.url, let url = URL(string: u) { return url }
+                }
+                return nil
+            }
+            artworkWide = first(["DieselGameBox", "OfferImageWide"])
+            artworkTall = first(["DieselGameBoxTall", "OfferImageTall", "DieselStoreFrontTall"])
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            // Artwork is derived from legendary's metadata on every decode; only identity persists.
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(app_name, forKey: .app_name)
+            try c.encode(app_title, forKey: .app_title)
+        }
     }
 
     /// Games the account owns (Windows builds).
@@ -108,11 +147,25 @@ public struct EpicStore: Sendable {
         return try JSONDecoder().decode([Game].self, from: Data(out.utf8))
     }
 
-    struct InstalledGame: Codable { let app_name: String }
-    /// App names of installed games (this endpoint uses `title`, not `app_title`, so it gets its own type).
-    public func installedAppNames() throws -> Set<String> {
+    public struct InstalledGame: Codable, Sendable {
+        public let app_name: String
+        public let install_path: String?
+    }
+
+    /// Everything legendary has installed, with where. Legendary's install state is global
+    /// across bottles; the bottle association lives in the path, so callers must check it
+    /// with `isInstalled(path:inDriveC:)` — a game installed in bottle A is NOT installed
+    /// in bottle B (the old Set-of-names API showed Play in bottles that had no files).
+    public func installedGames() throws -> [InstalledGame] {
         let out = try capture(["list-installed", "--json"])
-        return Set(try JSONDecoder().decode([InstalledGame].self, from: Data(out.utf8)).map(\.app_name))
+        return try JSONDecoder().decode([InstalledGame].self, from: Data(out.utf8))
+    }
+
+    /// True when an install path lies inside the given bottle's drive_c.
+    public static func isInstalled(path: String, inDriveC driveC: URL) -> Bool {
+        let p = URL(fileURLWithPath: path).standardizedFileURL.path + "/"
+        let c = driveC.standardizedFileURL.path + "/"
+        return p.hasPrefix(c)
     }
 
     /// Installs a game's Windows build into the bottle at drive_c/Games/<folder>.

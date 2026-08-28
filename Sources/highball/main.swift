@@ -528,9 +528,13 @@ struct Epic: AsyncParsableCommand {
             let store = EpicStore()
             _ = try await store.ensureInstalled()
             guard store.isAuthenticated else { fail("not signed in — run 'highball epic login' first") }
-            let installed = (try? store.installedAppNames()) ?? []
+            // Flat account view: show where each installed game lives, since legendary's
+            // install state is global but the files belong to one bottle.
+            let installed = Dictionary(uniqueKeysWithValues:
+                ((try? store.installedGames()) ?? []).compactMap { g in g.install_path.map { (g.app_name, $0) } })
             for g in try store.ownedGames().sorted(by: { $0.app_title < $1.app_title }) {
-                print("\(installed.contains(g.app_name) ? "[installed] " : "")\(g.app_name)\t\(g.app_title)")
+                let mark = installed[g.app_name].map { "[installed: \(($0 as NSString).abbreviatingWithTildeInPath)] " } ?? ""
+                print("\(mark)\(g.app_name)\t\(g.app_title)")
             }
         }
     }

@@ -133,6 +133,9 @@ enum L10n {
         "running for %d min": "en cours depuis %d min",
         "active": "actif",
         "quiet — can be normal, see Details": "silencieux — peut être normal, voir Détails",
+        // Unified game cards (library Phase 1)
+        "Not installed": "Non installé",
+        "Play with %@": "Jouer avec %@",
         "Hide": "Masquer",
         "Close": "Fermer",
         "Details": "Détails",

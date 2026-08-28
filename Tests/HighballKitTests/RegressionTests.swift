@@ -300,4 +300,36 @@ extension RegressionTests {
         let again = try JSONDecoder.highball.decode(Recipe.self, from: reencoded)
         XCTAssertEqual(again.steps[0].slowHint, "takes 20-40 minutes and can look idle")
     }
+
+    // Library Phase 1: Epic artwork comes from legendary's embedded catalog metadata
+    // (same keyImages mapping Heroic uses); a game without metadata must still decode.
+    func testEpicGameArtworkDecoding() throws {
+        let json = """
+        [{"app_name":"Duck","app_title":"Cardpocalypse","metadata":{"keyImages":[
+           {"type":"DieselGameBox","url":"https://cdn1.epicgames.com/item/x/wide.jpg"},
+           {"type":"DieselGameBoxTall","url":"https://cdn1.epicgames.com/item/x/tall.jpg"},
+           {"type":"Thumbnail","url":"https://cdn1.epicgames.com/item/x/thumb.jpg"}]}},
+         {"app_name":"Bare","app_title":"No Art"}]
+        """
+        let games = try JSONDecoder().decode([EpicStore.Game].self, from: Data(json.utf8))
+        XCTAssertEqual(games[0].artworkWide?.absoluteString, "https://cdn1.epicgames.com/item/x/wide.jpg")
+        XCTAssertEqual(games[0].artworkTall?.absoluteString, "https://cdn1.epicgames.com/item/x/tall.jpg")
+        XCTAssertNil(games[1].artworkWide, "missing metadata decodes, without artwork")
+        XCTAssertNil(games[1].artworkTall)
+    }
+
+    // Library Phase 1: legendary's install state is global; the bottle association is the
+    // install path. A game installed in bottle A must not read as installed in bottle B,
+    // and a sibling bottle whose name shares a prefix must not false-positive.
+    func testEpicInstallStateIsPerBottle() {
+        let a = URL(fileURLWithPath: "/tmp/bottles/actest/drive_c")
+        let b = URL(fileURLWithPath: "/tmp/bottles/spike/drive_c")
+        let path = "/tmp/bottles/actest/drive_c/Games/Cardpocalypse"
+        XCTAssertTrue(EpicStore.isInstalled(path: path, inDriveC: a))
+        XCTAssertFalse(EpicStore.isInstalled(path: path, inDriveC: b))
+        XCTAssertFalse(EpicStore.isInstalled(path: "/tmp/bottles/actest2/drive_c/Games/X",
+                                             inDriveC: a), "prefix of a sibling bottle must not match")
+        XCTAssertTrue(EpicStore.isInstalled(path: "/tmp/bottles/actest/drive_c", inDriveC: a),
+                      "drive_c itself counts as inside")
+    }
 }

@@ -51,7 +51,10 @@ final class AppState {
     // Epic (via Legendary; see EpicStore)
     var epicSignedIn = false
     var epicOwned: [EpicStore.Game] = []
-    var epicInstalled: Set<String> = []
+    /// app_name → install_path. Legendary's install state is global; which bottle a game
+    /// lives in is decided by its path, via epicInstalled(_:in:). (The old Set-of-names
+    /// showed Play in bottles that had no files.)
+    var epicInstalls: [String: String] = [:]
     var epicLoading = false
     private var epicFetchInFlight = false
     var showEpicSignIn = false
@@ -358,20 +361,28 @@ final class AppState {
 
     func epicRefresh() {
         epicSignedIn = epicStore.isAuthenticated
-        guard epicSignedIn else { epicOwned = []; epicInstalled = []; return }
+        guard epicSignedIn else { epicOwned = []; epicInstalls = [:]; return }
         guard !epicFetchInFlight else { return }
         epicFetchInFlight = true
         epicLoading = epicOwned.isEmpty
         Task.detached { [store = epicStore] in
             let owned = (try? store.ownedGames()) ?? []
-            let installed = (try? store.installedAppNames()) ?? []
+            let installed = (try? store.installedGames()) ?? []
             await MainActor.run { [weak self] in
                 self?.epicOwned = owned.sorted { $0.app_title < $1.app_title }
-                self?.epicInstalled = installed
+                self?.epicInstalls = Dictionary(uniqueKeysWithValues:
+                    installed.compactMap { g in g.install_path.map { (g.app_name, $0) } })
                 self?.epicLoading = false
                 self?.epicFetchInFlight = false
             }
         }
+    }
+
+    /// Installed *in this bottle* — a game legendary installed into another bottle's
+    /// drive_c is not playable here.
+    func epicInstalled(_ appName: String, in bottle: Bottle) -> Bool {
+        guard let path = epicInstalls[appName] else { return false }
+        return EpicStore.isInstalled(path: path, inDriveC: bottle.driveC)
     }
 
     func epicSignIn(code: String) {
@@ -398,7 +409,8 @@ final class AppState {
         }
     }
 
-    func epicPlay(_ game: EpicStore.Game, in bottle: Bottle, renderer: Renderer? = .dxvk) {
+    // renderer nil = the bottle's own renderer (the old hardcoded .dxvk default ignored it).
+    func epicPlay(_ game: EpicStore.Game, in bottle: Bottle, renderer: Renderer? = nil) {
         guard let engine = engine(for: bottle) else { return }
         runBusy("Running \(game.app_title)", showLogSheet: false) { [self] in
             let store = epicStore

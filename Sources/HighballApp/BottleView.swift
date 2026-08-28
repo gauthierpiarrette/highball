@@ -27,8 +27,11 @@ struct BottleView: View {
     @Environment(AppState.self) private var state
     let bottle: Bottle
 
+    // epic-games is deliberately absent: its installer cannot pass its permission audit
+    // under Wine (issue #14) — the Epic path is "Connect Epic account" (Legendary) below,
+    // and showing an "Install Epic Games" tile above it contradicted that.
     static let launcherMeta: [(id: String, symbol: String, short: String)] = [
-        ("steam", "gamecontroller.fill", "Steam"), ("epic-games", "e.circle.fill", "Epic Games"),
+        ("steam", "gamecontroller.fill", "Steam"),
         ("battle-net", "shield.fill", "Battle.net"), ("gog-galaxy", "g.circle.fill", "GOG Galaxy"),
         ("ea-app", "e.square.fill", "EA app"), ("ubisoft-connect", "u.circle.fill", "Ubisoft"),
         ("rockstar", "r.circle.fill", "Rockstar"),
@@ -144,35 +147,27 @@ struct BottleView: View {
                 Text(L("No games on this Epic account yet. Claimed games appear here."))
                     .font(.callout).foregroundStyle(.secondary)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 210), spacing: 12)], spacing: 12) {
+                // Same card component and grid metrics as the Steam section: one visual
+                // language for games, whatever the store (library unification Phase 1).
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280, maximum: 400), spacing: 16)], spacing: 16) {
                     ForEach(state.epicOwned, id: \.app_name) { g in
-                        let installed = state.epicInstalled.contains(g.app_name)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(g.app_title).font(.callout.weight(.semibold)).lineLimit(2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            HStack {
-                                if installed {
-                                    Button(L("Play")) { state.epicPlay(g, in: bottle) }
-                                        .buttonStyle(.borderedProminent).controlSize(.small).disabled(state.busy)
-                                } else {
-                                    Button(L("Install")) { state.epicInstall(g, in: bottle) }
-                                        .controlSize(.small).disabled(state.busy)
-                                }
-                                Spacer()
-                            }
-                        }
-                        .padding(12)
-                        .background(RoundedRectangle(cornerRadius: 10).fill(HB.card))
+                        let installed = state.epicInstalled(g.app_name, in: bottle)
+                        GameCard(model: GameCardModel(title: g.app_title, artwork: g.artworkWide,
+                                                      entry: nil, installed: installed),
+                                 busy: state.busy,
+                                 play: { state.epicPlay(g, in: bottle) },
+                                 install: { state.epicInstall(g, in: bottle) })
                         .contextMenu {
                             if installed {
-                                Button(L("Play with D3DMetal")) { state.epicPlay(g, in: bottle, renderer: .d3dmetal) }
-                                Button(L("Play with DXMT")) { state.epicPlay(g, in: bottle, renderer: .dxmt) }
+                                ForEach(HighballKit.Renderer.allCases, id: \.self) { r in
+                                    Button(String(format: L("Play with %@"), r.rawValue.uppercased())) {
+                                        state.epicPlay(g, in: bottle, renderer: r)
+                                    }
+                                }
                             }
                         }
                     }
                 }
-                Text(L("Epic games launch with DXVK, the renderer that works for most of them. Right-click a game to try another."))
-                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .sheet(isPresented: Binding(get: { state.showEpicSignIn }, set: { state.showEpicSignIn = $0 })) {
@@ -203,7 +198,9 @@ struct BottleView: View {
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 280, maximum: 400), spacing: 16)], spacing: 16) {
                     ForEach(games) { game in
-                        GameCard(game: game, entry: state.gameDB[game.appid], busy: state.busy) {
+                        GameCard(model: GameCardModel(title: game.name, artwork: game.headerImage,
+                                                      entry: state.gameDB[game.appid], installed: game.isReady),
+                                 busy: state.busy) {
                             state.launchGame(game, in: bottle)
                         }
                     }
@@ -297,15 +294,27 @@ struct BottleBackdrop: View {
 
 // MARK: - Game card: artwork-first, Play on hover
 
+/// Source-neutral input for GameCard: one card component for every store, same geometry,
+/// same affordances (library unification Phase 1 — Steam and Epic stop speaking different
+/// visual languages on the same screen).
+struct GameCardModel {
+    var title: String
+    var artwork: URL?
+    var entry: GameDBEntry?
+    /// Installed in the current bottle. False shows the card dimmed with an install
+    /// affordance (when `install` is provided) instead of Play.
+    var installed: Bool
+}
+
 struct GameCard: View {
-    let game: SteamGame
-    let entry: GameDBEntry?
+    let model: GameCardModel
     let busy: Bool
     let play: () -> Void
+    var install: (() -> Void)? = nil
     @State private var hovering = false
 
     private var verdict: (String, Color)? {
-        switch entry?.status {
+        switch model.entry?.status {
         case "verified-local": return (L("Verified"), HB.good)
         case "reported-upstream": return (L("Reported"), Color(red: 0.55, green: 0.70, blue: 0.90))
         case "community": return (L("Community"), HB.warn)
@@ -313,16 +322,17 @@ struct GameCard: View {
         default: return nil
         }
     }
-    private var blocked: Bool { entry?.isBlocked == true }
-    private var playable: Bool { game.isReady && !blocked && !busy }
+    private var blocked: Bool { model.entry?.isBlocked == true }
+    private var playable: Bool { model.installed && !blocked && !busy }
+    private var installable: Bool { !model.installed && install != nil && !blocked && !busy }
 
     var body: some View {
-        Button(action: { if playable { play() } }) {
+        Button(action: { if playable { play() } else if installable { install?() } }) {
             ZStack(alignment: .bottomLeading) {
                 Color.clear
                     .aspectRatio(460 / 215, contentMode: .fit)
                     .overlay(
-                        AsyncImage(url: game.headerImage) { phase in
+                        AsyncImage(url: model.artwork) { phase in
                             switch phase {
                             case .success(let image):
                                 image.resizable().scaledToFill()
@@ -333,7 +343,8 @@ struct GameCard: View {
                                 }
                             }
                         }
-                        .saturation(blocked ? 0.15 : 1)
+                        .saturation(blocked ? 0.15 : (model.installed ? 1 : 0.45))
+                        .brightness(model.installed ? 0 : -0.08)
                     )
                     .clipped()
 
@@ -341,7 +352,7 @@ struct GameCard: View {
                                startPoint: .bottom, endPoint: .center)
 
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(game.name)
+                    Text(model.title)
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .lineLimit(1)
@@ -355,32 +366,37 @@ struct GameCard: View {
                                 .overlay(Capsule().stroke(color.opacity(0.8), lineWidth: 1))
                                 .foregroundStyle(color)
                         }
-                        if let r = entry?.renderer {
+                        if let r = model.entry?.renderer {
                             Text(r.rawValue.uppercased())
                                 .font(.system(size: 9.5, weight: .medium).monospaced())
                                 .foregroundStyle(.white.opacity(0.75))
                         }
                         if blocked {
-                            Text(entry?.anticheat?.names.first ?? "anti-cheat")
+                            Text(model.entry?.anticheat?.names.first ?? "anti-cheat")
                                 .font(.system(size: 9.5).monospaced())
                                 .foregroundStyle(HB.bad.opacity(0.9))
                                 .lineLimit(1)
+                        }
+                        if installable {
+                            Text(L("Not installed"))
+                                .font(.system(size: 9.5).monospaced())
+                                .foregroundStyle(.white.opacity(0.6))
                         }
                     }
                 }
                 .padding(12)
 
-                if hovering && playable {
+                if hovering && (playable || installable) {
                     ZStack {
                         Color.black.opacity(0.25)
                         ZStack {
-                            Circle().fill(HB.amber)
+                            Circle().fill(playable ? HB.amber : Color.white.opacity(0.88))
                                 .frame(width: 52, height: 52)
                                 .shadow(color: .black.opacity(0.45), radius: 10, y: 3)
-                            Image(systemName: "play.fill")
+                            Image(systemName: playable ? "play.fill" : "arrow.down")
                                 .font(.system(size: 21, weight: .bold))
                                 .foregroundStyle(Color(red: 0.13, green: 0.08, blue: 0.01))
-                                .offset(x: 1.5)
+                                .offset(x: playable ? 1.5 : 0)
                         }
                     }
                     .transition(.opacity)
@@ -388,14 +404,14 @@ struct GameCard: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(hovering ? HB.amber.opacity(0.55) : HB.cardStroke, lineWidth: 1))
-            .scaleEffect(hovering && playable ? 1.02 : 1)
+            .scaleEffect(hovering && (playable || installable) ? 1.02 : 1)
             .shadow(color: .black.opacity(hovering ? 0.45 : 0.25), radius: hovering ? 14 : 7, y: 4)
         }
         .buttonStyle(.plain)
         .animation(.spring(duration: 0.22), value: hovering)
         .onHover { hovering = $0 }
-        .help(entry?.notes ?? game.name)
-        .accessibilityLabel("\(game.name), \(verdict?.0 ?? "")")
+        .help(model.entry?.notes ?? model.title)
+        .accessibilityLabel("\(model.title), \(verdict?.0 ?? (model.installed ? "" : L("Not installed")))")
     }
 }
 
