@@ -50,9 +50,9 @@ struct BottleView: View {
         }
     }
     /// Pins that aren't one of the known launchers (dropped .exe files, custom programs).
+    /// The filter itself lives in the Kit so the unified library shares one definition.
     private var customPins: [Pin] {
-        let launcherNames = ["steam", "epic games", "battle.net", "gog galaxy", "ea app", "ubisoft connect", "rockstar launcher", "rockstar"]
-        return bottle.settings.pins.filter { !launcherNames.contains($0.name.lowercased()) }
+        bottle.settings.pins.filter { !LibraryIndex.isLauncherPin($0) }
     }
 
     var body: some View {

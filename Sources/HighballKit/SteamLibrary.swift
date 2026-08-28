@@ -8,6 +8,9 @@ public struct SteamGame: Identifiable, Sendable, Hashable {
     public let installdir: String
     public let sizeOnDisk: Int64
     public let stateFlags: Int
+    /// Steam's own LastPlayed from the ACF (unix seconds; 0 = never). Seeds the library's
+    /// Continue shelf so it works on first run and tracks plays Steam started without us.
+    public let lastPlayed: Date?
 
     public var id: Int { appid }
     /// StateFlags 4 = fully installed; anything else is updating/downloading/broken.
@@ -46,12 +49,14 @@ public enum SteamLibrary {
             fields[String(match.1)] = String(match.2)
         }
         guard let appidText = fields["appid"], let appid = Int(appidText), let name = fields["name"] else { return nil }
+        let played = TimeInterval(fields["LastPlayed"] ?? "") ?? 0
         return SteamGame(
             appid: appid,
             name: name,
             installdir: fields["installdir"] ?? "",
             sizeOnDisk: Int64(fields["SizeOnDisk"] ?? "") ?? 0,
-            stateFlags: Int(fields["StateFlags"] ?? "") ?? 0
+            stateFlags: Int(fields["StateFlags"] ?? "") ?? 0,
+            lastPlayed: played > 0 ? Date(timeIntervalSince1970: played) : nil
         )
     }
 }
