@@ -545,7 +545,16 @@ struct BottleSettingsSheet: View {
             Divider()
             Form {
                 Section(L("Graphics")) {
-                    Picker(L("Renderer"), selection: binding(\.renderer)) {
+                    // Not the generic binding: picking a renderer here is an explicit choice,
+                    // which recipes must never clobber afterwards (#29).
+                    Picker(L("Renderer"), selection: Binding(
+                        get: { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.renderer },
+                        set: { newValue in
+                            var copy = state.bottles.first { $0.name == bottle.name } ?? bottle
+                            copy.settings.renderer = newValue
+                            copy.settings.rendererExplicit = true
+                            Task { @MainActor in state.update(copy) }
+                        })) {
                         Text(L("DXMT — D3D10/11 → Metal (default)")).tag(Renderer.dxmt)
                         if d3dmetalAvailable { Text(L("D3DMetal — D3D11/12, Apple")).tag(Renderer.d3dmetal) }
                         Text(L("DXVK — D3D9/10/11 → Vulkan")).tag(Renderer.dxvk)

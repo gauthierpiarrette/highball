@@ -332,4 +332,22 @@ extension RegressionTests {
         XCTAssertTrue(EpicStore.isInstalled(path: "/tmp/bottles/actest/drive_c", inDriveC: a),
                       "drive_c itself counts as inside")
     }
+
+    // Issue #29: a recipe's renderer is a default, never an override — the Steam recipe
+    // silently reset an explicitly-d3dmetal bottle to dxmt, black-screening AC.
+    func testRecipeRendererNeverOverridesExplicitChoice() {
+        var s = BottleSettings(name: "t", engineID: "e")
+        XCTAssertEqual(RecipeRunner.rendererToApply(recipeRenderer: .dxmt, settings: s), .dxmt,
+                       "default bottle: recipe renderer applies")
+        s.rendererExplicit = true
+        s.renderer = .d3dmetal
+        XCTAssertNil(RecipeRunner.rendererToApply(recipeRenderer: .dxmt, settings: s),
+                     "explicit choice: recipe renderer must not apply")
+        XCTAssertNil(RecipeRunner.rendererToApply(recipeRenderer: nil, settings: s))
+        // Old bottles without the field decode as not-explicit (recipes keep working).
+        let decoded = try? JSONDecoder.highball.decode(
+            BottleSettings.self,
+            from: Data(#"{"name":"o","engineID":"e"}"#.utf8))
+        XCTAssertEqual(decoded?.rendererExplicit, false)
+    }
 }

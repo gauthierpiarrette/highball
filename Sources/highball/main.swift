@@ -85,7 +85,7 @@ struct Bottle: AsyncParsableCommand {
     struct Create: AsyncParsableCommand {
         @Argument var name: String
         @Option(help: "Engine id (default: first installed).") var engine: String?
-        @Option(help: "Renderer: wined3d|dxmt|d3dmetal|dxvk") var renderer: HighballKit.Renderer = .dxmt
+        @Option(help: "Renderer: wined3d|dxmt|d3dmetal|dxvk (explicit choice; recipes won't override it)") var renderer: HighballKit.Renderer?
         @Option(help: "Apply this recipe after creation (id or path).") var recipe: String?
 
         func run() async throws {
@@ -93,7 +93,11 @@ struct Bottle: AsyncParsableCommand {
             let eng = try engine.map { try store.engine($0) } ?? store.installedEngines().first
             guard let eng else { fail("no engine installed") }
             print("creating bottle '\(name)' with \(eng.id) (wineboot takes ~90 s the first time)…")
-            let bottle = try await BottleStore().create(name: name, engine: eng, renderer: renderer)
+            var bottle = try await BottleStore().create(name: name, engine: eng, renderer: renderer ?? .dxmt)
+            if renderer != nil {   // a flag the user typed is an explicit choice (#29)
+                bottle.settings.rendererExplicit = true
+                try bottle.save()
+            }
             print("created \(bottle.url.path)")
             if let recipe {
                 var r = RecipeRunner(engine: eng, bottle: bottle)
@@ -118,7 +122,10 @@ struct Bottle: AsyncParsableCommand {
             let bs = BottleStore()
             var b = try bs.get(name)
             switch setting {
-            case "renderer": guard let r = HighballKit.Renderer(rawValue: value) else { fail("bad renderer") }; b.settings.renderer = r
+            case "renderer":
+                guard let r = HighballKit.Renderer(rawValue: value) else { fail("bad renderer") }
+                b.settings.renderer = r
+                b.settings.rendererExplicit = true   // recipes must not clobber this (#29)
             case "winver":
                 guard let v = WindowsVersion(rawValue: value) else { fail("bad winver") }
                 b.settings.windowsVersion = v

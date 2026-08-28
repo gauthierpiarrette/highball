@@ -157,6 +157,12 @@ public struct RecipeRunner: Sendable {
         self.paths = paths; self.engine = engine; self.bottle = bottle; self.store = EngineStore(paths: paths)
     }
 
+    /// The renderer a recipe may set, or nil when the user's explicit choice must stand (#29).
+    public static func rendererToApply(recipeRenderer: Renderer?, settings: BottleSettings) -> Renderer? {
+        guard let r = recipeRenderer, !settings.rendererExplicit else { return nil }
+        return r
+    }
+
     /// Runs every step. Returns the notes the UI should show afterwards.
     public mutating func apply(_ recipe: Recipe, log: (@Sendable (String) -> Void)? = nil) async throws -> [String] {
         if let b = recipe.blocked {
@@ -165,7 +171,15 @@ public struct RecipeRunner: Sendable {
             throw HighballError.invalid(msg)
         }
         var notes: [String] = []
-        if let r = recipe.renderer { bottle.settings.renderer = r }
+        // A recipe's renderer is a default, never an override: an explicit user choice wins
+        // (issue #29 — the Steam recipe silently reset a d3dmetal bottle to dxmt).
+        if let r = recipe.renderer {
+            if let applied = Self.rendererToApply(recipeRenderer: r, settings: bottle.settings) {
+                bottle.settings.renderer = applied
+            } else {
+                notes.append("Kept this bottle's renderer (\(bottle.settings.renderer.rawValue)); the recipe suggests \(r.rawValue).")
+            }
+        }
         for (i, step) in recipe.steps.enumerated() {
             // The app parses these two lines into its progress display (#31): the step line
             // becomes the stage, the hint line the "this is slow, don't worry" text under it.

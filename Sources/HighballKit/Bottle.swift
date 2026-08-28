@@ -148,6 +148,10 @@ public struct BottleSettings: Codable, Sendable {
     public var name: String
     public var engineID: String
     public var renderer: Renderer = .dxmt
+    /// True once the user explicitly chose a renderer (settings picker, CLI set/create flag).
+    /// Recipes then keep their hands off it: a launcher recipe silently replacing an explicit
+    /// choice cost a debugging session (issue #29, the AC-on-DXMT black screen).
+    public var rendererExplicit: Bool = false
     public var windowsVersion: WindowsVersion = .win10
     public var sync: SyncMode = .msync
     public var metalHUD: Bool = false
@@ -184,6 +188,7 @@ public struct BottleSettings: Codable, Sendable {
         name = try c.decode(String.self, forKey: .name)
         engineID = try c.decode(String.self, forKey: .engineID)
         renderer = try c.decodeIfPresent(Renderer.self, forKey: .renderer) ?? .dxmt
+        rendererExplicit = try c.decodeIfPresent(Bool.self, forKey: .rendererExplicit) ?? false
         windowsVersion = try c.decodeIfPresent(WindowsVersion.self, forKey: .windowsVersion) ?? .win10
         sync = try c.decodeIfPresent(SyncMode.self, forKey: .sync) ?? .msync
         metalHUD = try c.decodeIfPresent(Bool.self, forKey: .metalHUD) ?? false
