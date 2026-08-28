@@ -196,11 +196,11 @@ struct LibraryTile: View {
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
                     .foregroundStyle(.primary)
-                if let (label, color) = verdict {
-                    Text(label)
-                        .font(.system(size: 9, weight: .semibold).monospaced())
-                        .foregroundStyle(color)
-                }
+                // Always reserve the verdict line: cells without one were shorter, and
+                // LazyVGrid centers cells vertically, so those covers sank below the row.
+                Text(verdict?.0 ?? " ")
+                    .font(.system(size: 9, weight: .semibold).monospaced())
+                    .foregroundStyle(verdict?.1 ?? .clear)
             }
             .frame(width: width)
         }
