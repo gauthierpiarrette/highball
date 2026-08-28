@@ -208,6 +208,13 @@ struct LibraryTile: View {
         .animation(.spring(duration: 0.2), value: hovering)
         .onHover { hovering = $0 }
         .help(entry?.notes ?? item.title)
+        .contextMenu {
+            if playable { Button(L("Play")) { state.play(item) } }
+            Button(L("Choose cover image…")) { state.chooseCover(for: item) }
+            if state.coverStore.coverURL(for: item.id) != nil {
+                Button(L("Reset cover")) { state.resetCover(for: item) }
+            }
+        }
         .accessibilityLabel("\(item.title), \(item.source.rawValue)\(item.installed ? "" : ", " + L("Not installed"))")
     }
 
@@ -245,6 +252,7 @@ struct SourceBadge: View {
 /// AsyncImage can't chain URLs itself, so the state walks the chain on failure. Steam's
 /// library_600x900 404s for some older appids — the fallback is not optional polish.
 struct CoverArt: View {
+    @Environment(AppState.self) private var state
     let item: LibraryItem
     @State private var stage = 0
 
@@ -258,7 +266,14 @@ struct CoverArt: View {
 
     var body: some View {
         GeometryReader { geo in
-            if let url {
+            // A user-chosen cover always wins (coverVersion invalidates after changes).
+            if let custom = state.coverStore.coverURL(for: item.id),
+               let image = NSImage(contentsOf: custom) {
+                Image(nsImage: image).resizable().scaledToFill()
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                    .id(state.coverVersion)
+            } else if let url {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):

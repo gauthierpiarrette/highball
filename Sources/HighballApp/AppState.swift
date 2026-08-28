@@ -101,6 +101,25 @@ final class AppState {
         rebuildLibrary()
     }
 
+    // Custom covers (Phase 3): local images only, chosen by the user.
+    var coverStore: CoverStore { CoverStore(paths: paths) }
+    /// Bumped when a cover changes so tiles reload their local image.
+    var coverVersion = 0
+
+    func chooseCover(for item: LibraryItem) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.message = String(format: L("Choose a cover image for %@"), item.title)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { try coverStore.setCover(for: item.id, from: url); coverVersion += 1 }
+        catch { errorMessage = "\(error)" }
+    }
+
+    func resetCover(for item: LibraryItem) {
+        coverStore.clearCover(for: item.id)
+        coverVersion += 1
+    }
+
     // Epic (via Legendary; see EpicStore)
     var epicSignedIn = false
     var epicOwned: [EpicStore.Game] = []

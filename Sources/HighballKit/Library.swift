@@ -166,3 +166,43 @@ public struct LibraryStore: Sendable {
         }
     }
 }
+
+/// User-chosen cover art (Phase 3): a local image per library item, overriding the store's
+/// artwork. Pure files under covers/ at the Highball home — no API, no keys; the automatic
+/// pipeline (SteamGridDB) stays a deliberate non-feature until its ToS/key story is decided.
+public struct CoverStore: Sendable {
+    public let paths: HighballPaths
+    public init(paths: HighballPaths = HighballPaths()) { self.paths = paths }
+
+    var dir: URL { paths.home.appending(path: "covers", directoryHint: .isDirectory) }
+
+    /// Item ids contain ':'; filenames must not. Deterministic and collision-safe for our
+    /// id shapes (bottle names already reject path characters — issue #12).
+    static func filename(for id: String) -> String {
+        id.replacingOccurrences(of: ":", with: "_").replacingOccurrences(of: "/", with: "_")
+    }
+
+    /// The stored override for an item, if any.
+    public func coverURL(for id: String) -> URL? {
+        let base = dir.appending(path: Self.filename(for: id))
+        for ext in ["png", "jpg", "jpeg", "heic", "webp"] {
+            let url = base.appendingPathExtension(ext)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        return nil
+    }
+
+    /// Copies the chosen image in (replacing any previous override).
+    public func setCover(for id: String, from source: URL) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        clearCover(for: id)
+        let ext = source.pathExtension.isEmpty ? "png" : source.pathExtension.lowercased()
+        let dest = dir.appending(path: Self.filename(for: id)).appendingPathExtension(ext)
+        try FileManager.default.copyItem(at: source, to: dest)
+    }
+
+    public func clearCover(for id: String) {
+        guard let existing = coverURL(for: id) else { return }
+        try? FileManager.default.removeItem(at: existing)
+    }
+}

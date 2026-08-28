@@ -82,6 +82,26 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(store.load(), [:])
     }
 
+    func testCoverStoreRoundTrip() throws {
+        let tmp = FileManager.default.temporaryDirectory.appending(path: "hb-cover-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = CoverStore(paths: HighballPaths(home: tmp))
+        XCTAssertNil(store.coverURL(for: "steam:620"))
+        let src = tmp.appending(path: "src.png")
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: src)
+        try store.setCover(for: "steam:620", from: src)
+        let stored = store.coverURL(for: "steam:620")
+        XCTAssertEqual(stored?.lastPathComponent, "steam_620.png", "id colon sanitized, extension kept")
+        // Replacing with a different extension removes the old file.
+        let jpg = tmp.appending(path: "src2.jpg")
+        try Data([0xFF, 0xD8]).write(to: jpg)
+        try store.setCover(for: "steam:620", from: jpg)
+        XCTAssertEqual(store.coverURL(for: "steam:620")?.pathExtension, "jpg")
+        store.clearCover(for: "steam:620")
+        XCTAssertNil(store.coverURL(for: "steam:620"))
+    }
+
     func testACFLastPlayedSeedsShelf() {
         let acf = """
         "AppState" { "appid" "620" "name" "Portal 2" "StateFlags" "4" "LastPlayed" "1756300000" }
