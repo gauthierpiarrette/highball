@@ -11,6 +11,15 @@ struct GameDetailView: View {
     private var entry: GameDBEntry? { item.steamAppID.flatMap { state.gameDB[$0] } }
     private var bottle: Bottle? { item.bottleName.flatMap { name in state.bottles.first { $0.name == name } } }
     private var blocked: Bool { entry?.isBlocked == true }
+    /// A game recipe shares its id with the db entry (portal-2, assetto-corsa…). When one
+    /// exists, the page offers it — this was CLI-only, which no first-time user finds.
+    private var fixRecipe: HighballKit.Recipe? {
+        entry.flatMap { AppState.recipe($0.id) }.flatMap { $0.kind == .game ? $0 : nil }
+    }
+    private var fixApplied: Bool {
+        guard let fixRecipe, let bottle else { return false }
+        return bottle.settings.recipes.contains(fixRecipe.id)
+    }
 
     var body: some View {
         ScrollView {
@@ -101,6 +110,13 @@ struct GameDetailView: View {
                 }
                 Spacer()
                 if item.installed {
+                    if let fixRecipe, let bottle, !fixApplied {
+                        Button(String(format: L("Apply %@ fix"), item.title)) {
+                            state.applyRecipe(fixRecipe.id, to: bottle)
+                        }
+                        .disabled(state.busy)
+                        .help(L("Sets this game up the way the compatibility database verified it — renderer, settings, dependencies."))
+                    }
                     Button(L("Play")) { state.play(item) }
                         .buttonStyle(.borderedProminent).disabled(state.busy || blocked)
                     if bottle != nil {

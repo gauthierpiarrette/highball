@@ -155,6 +155,9 @@ enum L10n {
         "Choose cover image…": "Choisir une image de couverture…",
         "Reset cover": "Réinitialiser la couverture",
         "Choose a cover image for %@": "Choisir une image de couverture pour %@",
+        "Apply %@ fix": "Appliquer le correctif %@",
+        "Sets this game up the way the compatibility database verified it — renderer, settings, dependencies.":
+            "Configure ce jeu tel que la base de compatibilité l'a vérifié : moteur de rendu, réglages, dépendances.",
         "Hide": "Masquer",
         "Close": "Fermer",
         "Details": "Détails",
