@@ -64,15 +64,70 @@ final class AppState {
                                           plays: libraryPlays)
     }
 
+    /// The verified fix recipe for a library item, if the db has one (db entry id == recipe id).
+    func fixRecipe(for item: LibraryItem) -> HighballKit.Recipe? {
+        guard let appid = item.steamAppID, let entry = gameDB[appid],
+              let recipe = Self.recipe(entry.id), recipe.kind == .game else { return nil }
+        return recipe
+    }
+
+    /// A heavy fix waiting on the user's word before Play continues (installer/winetricks
+    /// class — honest prompt with the time cost instead of a silent 30-minute surprise).
+    var pendingHeavyFix: (item: LibraryItem, recipe: HighballKit.Recipe)?
+
     /// The "never pick a bottle first" guarantee: every Play in the library resolves the
-    /// item's own bottle and dispatches by source.
+    /// item's own bottle and dispatches by source. Play also means "make it work the way
+    /// the db verified it": an unapplied fix recipe whose steps are all harmless (config
+    /// files, renderer — no wine processes, no installs) is applied silently first; one
+    /// with heavy steps asks, with the cost stated.
     func play(_ item: LibraryItem) {
         guard let bottleName = item.bottleName,
               let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
+        if let recipe = fixRecipe(for: item), !bottle.settings.recipes.contains(recipe.id),
+           let engine = engine(for: bottle) {
+            if recipe.isAutoApplicable {
+                Task { @MainActor in
+                    var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
+                    if let notes = try? await runner.apply(recipe) {
+                        logLines.append("applied the \(recipe.title) fix")
+                        for n in notes { logLines.append("note: \(n)") }
+                    }
+                    refresh()
+                    let fresh = bottles.first { $0.name == bottleName } ?? runner.bottle
+                    launch(item, in: fresh)
+                }
+                return
+            }
+            pendingHeavyFix = (item, recipe)
+            return  // Play continues via confirmHeavyFix or skipHeavyFix
+        }
+        launch(item, in: bottle)
+    }
+
+    /// User confirmed the heavy fix: apply it (busy sheet shows progress), then launch.
+    func confirmHeavyFix() {
+        guard let (item, recipe) = pendingHeavyFix else { return }
+        pendingHeavyFix = nil
+        guard let bottleName = item.bottleName,
+              let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
+        applyRecipe(recipe.id, to: bottle)
+        // The user presses Play again after the install — auto-chaining a launch onto a
+        // 30-minute install would fire it long after they stopped watching.
+    }
+
+    func skipHeavyFix() {
+        guard let (item, _) = pendingHeavyFix else { return }
+        pendingHeavyFix = nil
+        guard let bottleName = item.bottleName,
+              let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
+        launch(item, in: bottle)
+    }
+
+    private func launch(_ item: LibraryItem, in bottle: Bottle) {
         recordPlay(item)
         switch item.source {
         case .steam:
-            guard let game = (gamesByBottle[bottleName] ?? []).first(where: { $0.appid == item.steamAppID }) else { return }
+            guard let game = (gamesByBottle[bottle.name] ?? []).first(where: { $0.appid == item.steamAppID }) else { return }
             launchGame(game, in: bottle)
         case .epic:
             guard let game = epicOwned.first(where: { $0.app_name == item.epicAppName }) else { return }

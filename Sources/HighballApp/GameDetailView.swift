@@ -11,11 +11,9 @@ struct GameDetailView: View {
     private var entry: GameDBEntry? { item.steamAppID.flatMap { state.gameDB[$0] } }
     private var bottle: Bottle? { item.bottleName.flatMap { name in state.bottles.first { $0.name == name } } }
     private var blocked: Bool { entry?.isBlocked == true }
-    /// A game recipe shares its id with the db entry (portal-2, assetto-corsa…). When one
-    /// exists, the page offers it — this was CLI-only, which no first-time user finds.
-    private var fixRecipe: HighballKit.Recipe? {
-        entry.flatMap { AppState.recipe($0.id) }.flatMap { $0.kind == .game ? $0 : nil }
-    }
+    /// Light fixes auto-apply at Play; this button remains the manual (re-)apply path,
+    /// mostly useful for heavy recipes and repair.
+    private var fixRecipe: HighballKit.Recipe? { state.fixRecipe(for: item) }
     private var fixApplied: Bool {
         guard let fixRecipe, let bottle else { return false }
         return bottle.settings.recipes.contains(fixRecipe.id)

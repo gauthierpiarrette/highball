@@ -227,6 +227,21 @@ struct ContentView: View {
         .sheet(isPresented: $state.showLog) { LogSheet() }
         .sheet(isPresented: $state.showGPTKLicense) { GPTKLicenseSheet() }
         .sheet(isPresented: $state.showEpicSignIn) { EpicSignInSheet() }
+        // Heavy fix at Play: installs take real time, so the cost is stated, never silent.
+        .confirmationDialog(
+            String(format: L("%@ needs a one-time setup to run the way it was verified."),
+                   state.pendingHeavyFix?.item.title ?? ""),
+            isPresented: .init(get: { state.pendingHeavyFix != nil },
+                               set: { if !$0 { state.pendingHeavyFix = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button(L("Install the fix first")) { state.confirmHeavyFix() }
+            Button(L("Play without it")) { state.skipHeavyFix() }
+            Button(L("Cancel"), role: .cancel) { state.pendingHeavyFix = nil }
+        } message: {
+            Text(state.pendingHeavyFix?.recipe.steps.compactMap(\.slowHint).first
+                 ?? L("This installs the dependencies the compatibility database verified."))
+        }
         .alert(L("Something went wrong"), isPresented: .init(
             get: { state.errorMessage != nil },
             set: { if !$0 { state.errorMessage = nil } })) {

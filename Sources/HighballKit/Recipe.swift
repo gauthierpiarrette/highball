@@ -30,8 +30,12 @@ public struct Recipe: Codable, Sendable, Identifiable {
         case pin(Pin)
         /// Free-text instruction the UI surfaces to the user after install.
         case note(String)
+        /// Per-app DXVK options ("csgo.exe" → dxvk.enableAsync=False…), stored on the bottle
+        /// and rendered into its dxvk.conf at every DXVK launch. This is how game-specific
+        /// DXVK knowledge ships as data instead of app code.
+        case dxvkConfig(exe: String, options: [String: String])
 
-        private enum CodingKeys: String, CodingKey { case type, url, sha256, arguments, label, slow, key, name, value, valueType, data, verbs, renderer, sync, winver, path, contents, pin, text }
+        private enum CodingKeys: String, CodingKey { case type, url, sha256, arguments, label, slow, key, name, value, valueType, data, verbs, renderer, sync, winver, path, contents, pin, text, exe, options }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -54,6 +58,8 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case "file": self = .file(path: try c.decode(String.self, forKey: .path), contents: try c.decode(String.self, forKey: .contents))
             case "pin": self = .pin(try c.decode(Pin.self, forKey: .pin))
             case "note": self = .note(try c.decode(String.self, forKey: .text))
+            case "dxvkconfig": self = .dxvkConfig(exe: try c.decode(String.self, forKey: .exe),
+                                                  options: try c.decode([String: String].self, forKey: .options))
             case let other: throw HighballError.invalid("unknown recipe step type '\(other)'")
             }
         }
@@ -78,6 +84,9 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case let .file(path, contents): try c.encode("file", forKey: .type); try c.encode(path, forKey: .path); try c.encode(contents, forKey: .contents)
             case let .pin(p): try c.encode("pin", forKey: .type); try c.encode(p, forKey: .pin)
             case let .note(t): try c.encode("note", forKey: .type); try c.encode(t, forKey: .text)
+            case let .dxvkConfig(exe, options):
+                try c.encode("dxvkconfig", forKey: .type); try c.encode(exe, forKey: .exe)
+                try c.encode(options, forKey: .options)
             }
         }
 
@@ -87,7 +96,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case let .installer(_, _, _, label, _): return label
             case let .winetricks(verbs, _): return verbs.joined(separator: " ")
             case .registry: return nil
-            case .environment, .renderer, .sync, .winver, .file, .pin, .note: return nil
+            case .environment, .renderer, .sync, .winver, .file, .pin, .note, .dxvkConfig: return nil
             }
         }
 
@@ -99,7 +108,22 @@ public struct Recipe: Codable, Sendable, Identifiable {
             default: return nil
             }
         }
+
+        /// True when the step is safe to run silently at Play time: touches no wine process
+        /// (registry/winver spawn wine and can die on the msync mismatch, issue #32) and
+        /// takes no meaningful time (installer/winetricks can take 20-40 minutes).
+        public var isAutoApplicable: Bool {
+            switch self {
+            case .file, .renderer, .sync, .environment, .pin, .note, .dxvkConfig: return true
+            case .installer, .winetricks, .registry, .winver: return false
+            }
+        }
     }
+
+    /// True when every step can run silently at Play time — the app then applies the recipe
+    /// as part of pressing Play ("make it work like the db verified it"), no clicks needed.
+    /// Recipes with heavy or wine-touching steps get an honest prompt instead.
+    public var isAutoApplicable: Bool { steps.allSatisfy(\.isAutoApplicable) }
 
     public struct KnownIssue: Codable, Sendable {
         public var symptom: String
@@ -238,6 +262,8 @@ public struct RecipeRunner: Sendable {
                 if !bottle.settings.pins.contains(where: { $0.path == p.path }) { bottle.settings.pins.append(p) }
             case let .note(t):
                 notes.append(t)
+            case let .dxvkConfig(exe, options):
+                bottle.settings.dxvkAppConfig[exe] = options
             }
         }
         if !bottle.settings.recipes.contains(recipe.id) { bottle.settings.recipes.append(recipe.id) }

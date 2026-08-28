@@ -333,6 +333,48 @@ extension RegressionTests {
                       "drive_c itself counts as inside")
     }
 
+    // Play-gate: only provably harmless steps may run silently at Play (no wine process —
+    // the msync trap #32 — and no long installs). Heavy or wine-touching steps must prompt.
+    func testRecipeAutoApplyClassification() throws {
+        let light = """
+        {"id":"l","kind":"game","title":"L","steps":[
+          {"type":"file","path":"a/b.cfg","contents":"x"},
+          {"type":"renderer","renderer":"dxvk"},
+          {"type":"dxvkconfig","exe":"csgo.exe","options":{"dxvk.enableAsync":"False"}},
+          {"type":"note","text":"n"}]}
+        """
+        XCTAssertTrue(try JSONDecoder.highball.decode(Recipe.self, from: Data(light.utf8)).isAutoApplicable)
+        for heavyStep in [
+            #"{"type":"winetricks","verbs":["dotnet48"]}"#,
+            #"{"type":"installer","url":"https://x.com/a.exe","label":"a"}"#,
+            #"{"type":"registry","key":"HKCU\\X","name":"n","data":"1"}"#,
+            #"{"type":"winver","winver":"win10"}"#,
+        ] {
+            let json = #"{"id":"h","kind":"game","title":"H","steps":[\#(heavyStep)]}"#
+            let r = try JSONDecoder.highball.decode(Recipe.self, from: Data(json.utf8))
+            XCTAssertFalse(r.isAutoApplicable, "step must not auto-apply: \(heavyStep)")
+        }
+    }
+
+    // Tech-debt migration (#21): per-app DXVK options are data now. Recipe-set values
+    // override the built-in csgo fallback, other exes render their own sections, and the
+    // fallback survives untouched for bottles without the recipe.
+    func testDxvkAppConfigDataDriven() {
+        // No data: fallback exactly as 0.7.10 shipped it (covered by testDxvkConfigContent too).
+        let plain = Bottle.dxvkConfig(async: true)
+        XCTAssertTrue(plain.contains("[csgo.exe]"))
+        // Recipe data overrides the fallback key but keeps un-overridden fallback keys.
+        let merged = Bottle.dxvkConfig(async: true, appConfig: [
+            "csgo.exe": ["d3d9.maxAvailableMemory": "3072"],
+            "portal2.exe": ["d3d9.deferSurfaceCreation": "True"],
+        ])
+        XCTAssertTrue(merged.contains("d3d9.maxAvailableMemory = 3072"), "recipe value wins")
+        XCTAssertFalse(merged.contains("d3d9.maxAvailableMemory = 2048"))
+        XCTAssertTrue(merged.contains("d3d9.customDeviceId = 73BF"), "fallback keys survive")
+        XCTAssertTrue(merged.contains("[portal2.exe]"))
+        XCTAssertTrue(merged.contains("d3d9.deferSurfaceCreation = True"))
+    }
+
     // Issue #29: a recipe's renderer is a default, never an override — the Steam recipe
     // silently reset an explicitly-d3dmetal bottle to dxmt, black-screening AC.
     func testRecipeRendererNeverOverridesExplicitChoice() {

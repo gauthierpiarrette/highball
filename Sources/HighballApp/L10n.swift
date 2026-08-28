@@ -156,6 +156,12 @@ enum L10n {
         "Reset cover": "Réinitialiser la couverture",
         "Choose a cover image for %@": "Choisir une image de couverture pour %@",
         "Apply %@ fix": "Appliquer le correctif %@",
+        "%@ needs a one-time setup to run the way it was verified.":
+            "%@ nécessite une configuration unique pour fonctionner comme vérifié.",
+        "Install the fix first": "Installer d'abord le correctif",
+        "Play without it": "Jouer sans",
+        "This installs the dependencies the compatibility database verified.":
+            "Ceci installe les dépendances vérifiées par la base de compatibilité.",
         "Sets this game up the way the compatibility database verified it — renderer, settings, dependencies.":
             "Configure ce jeu tel que la base de compatibilité l'a vérifié : moteur de rendu, réglages, dépendances.",
         "Hide": "Masquer",

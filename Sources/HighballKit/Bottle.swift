@@ -167,6 +167,9 @@ public struct BottleSettings: Codable, Sendable {
     /// Extra WINEDLLOVERRIDES entries, e.g. "version=n,b" for Cyber Engine Tweaks. Appended to
     /// whatever the renderer sets, semicolon separated.
     public var dllOverrides: String = ""
+    /// Per-app DXVK options (exe → key/value), set by recipe `dxvkconfig` steps and rendered
+    /// into dxvk.conf at every DXVK launch. Data-driven successor to hardcoded [exe] sections.
+    public var dxvkAppConfig: [String: [String: String]] = [:]
     /// The dllOverrides value last mirrored into the prefix registry. The env var only reaches
     /// process trees Highball spawns itself; a game started by an already-running Steam client
     /// inherits Steam's environment from before the setting changed and never sees it
@@ -189,6 +192,7 @@ public struct BottleSettings: Codable, Sendable {
         engineID = try c.decode(String.self, forKey: .engineID)
         renderer = try c.decodeIfPresent(Renderer.self, forKey: .renderer) ?? .dxmt
         rendererExplicit = try c.decodeIfPresent(Bool.self, forKey: .rendererExplicit) ?? false
+        dxvkAppConfig = try c.decodeIfPresent([String: [String: String]].self, forKey: .dxvkAppConfig) ?? [:]
         windowsVersion = try c.decodeIfPresent(WindowsVersion.self, forKey: .windowsVersion) ?? .win10
         sync = try c.decodeIfPresent(SyncMode.self, forKey: .sync) ?? .msync
         metalHUD = try c.decodeIfPresent(Bool.self, forKey: .metalHUD) ?? false
@@ -289,26 +293,39 @@ public struct Bottle: Sendable {
     /// Radeon device id to pair with the AMD vendor id DXVK's built-in csgo profile
     /// already forces, so the game's dxsupport.cfg picks a concrete GPU profile instead
     /// of unknown-device failsafe. Later lines win, so the section must follow the global.
-    public static func dxvkConfig(async: Bool) -> String {
-        """
+    public static func dxvkConfig(async: Bool, appConfig: [String: [String: String]] = [:]) -> String {
+        // FALLBACK, kept deliberately (do not delete yet): legacy CS:GO froze at map load
+        // with async on (issue #21), and legacy CS:GO can ONLY launch via Steam's own
+        // chooser (CEG DRM) — it never passes the app's Play-gate, so bottles without the
+        // counter-strike-2 recipe still need this. The same knowledge now ships as data
+        // (recipe dxvkconfig step); recipe-set values OVERRIDE this fallback. Remove after
+        // a deprecation window once recipe coverage is the norm.
+        let csgoFallback = ["dxvk.enableAsync": "False", "d3d9.maxAvailableMemory": "2048",
+                            "d3d9.customDeviceId": "73BF"]
+        var merged = appConfig
+        merged["csgo.exe"] = csgoFallback.merging(merged["csgo.exe"] ?? [:]) { _, recipe in recipe }
+
+        var out = """
         # Written by Highball before each DXVK launch — edits here are overwritten.
-        # The bottle's "DXVK async shader compilation" toggle sets the global line.
+        # The bottle's "DXVK async shader compilation" toggle sets the global line;
+        # per-app sections come from recipe dxvkconfig steps (plus the csgo fallback).
         dxvk.enableAsync = \(async ? "True" : "False")
 
-        # Legacy CS:GO froze at map load with async compile on (issue #21).
-        [csgo.exe]
-        dxvk.enableAsync = False
-        d3d9.maxAvailableMemory = 2048
-        d3d9.customDeviceId = 73BF
-
         """
+        for exe in merged.keys.sorted() {
+            out += "\n[\(exe)]\n"
+            for key in merged[exe]!.keys.sorted() {
+                out += "\(key) = \(merged[exe]![key]!)\n"
+            }
+        }
+        return out
     }
 
     /// Writes the generated dxvk.conf into the prefix (idempotent, compare-then-write).
     public func writeDxvkConfig() throws {
         let dir = dxvkConfigURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let content = Self.dxvkConfig(async: settings.dxvkAsync)
+        let content = Self.dxvkConfig(async: settings.dxvkAsync, appConfig: settings.dxvkAppConfig)
         if (try? String(contentsOf: dxvkConfigURL, encoding: .utf8)) != content {
             try content.write(to: dxvkConfigURL, atomically: true, encoding: .utf8)
         }
