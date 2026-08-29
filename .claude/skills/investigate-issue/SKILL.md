@@ -85,8 +85,3 @@ action to take, and ask for one specific thing if confirmation is still needed. 
 overclaiming - if you have not proven it fixes *their* case, say that.
 
 Leave the issue open until the reporter confirms.
-
-## Writing to users
-
-Plain, human, few dashes, no filler. Short sentences. Say what happened and what to do.
-Skip praise, apologies, and marketing.
