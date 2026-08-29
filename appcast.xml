@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.16</title>
+      <description><![CDATA[Fixes bottles that were created without 32-bit Windows support, which made every installer fail on macOS 26.6 and newer (#37).]]></description>
+      <pubDate>Sat, 29 Aug 2026 15:01:30 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.16/Highball-0.7.16.zip" sparkle:version="0.7.16" sparkle:shortVersionString="0.7.16" sparkle:edSignature="isQztMvrrkvIVTPsEpOeGcZun5FBklsVkas3Qq5vEqzCSMmiuXiTbG8bZ1R034rW8YGEah0WVUSZ4K6CuosFDw==" length="2654347" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.15</title>
       <description><![CDATA[Play applies verified fixes for you; Visual C++ installs no longer fail when the runtime is already present (#36); logs now record the exit code.]]></description>
       <pubDate>Sat, 29 Aug 2026 13:46:43 -0700</pubDate>
