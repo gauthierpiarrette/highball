@@ -90,23 +90,47 @@ public struct BottleStore: Sendable {
         bottle.driveC.appending(path: "windows/syswow64/kernel32.dll")
     }
 
-    /// Verifies the 32-bit half exists, retrying wineboot once before giving up. A failure
-    /// here is reported at bottle creation, where it is actionable, instead of surfacing later
-    /// as an opaque error on every install.
+    /// Verifies the 32-bit half exists and repairs it when it doesn't, so a prefix that missed
+    /// Wine's WoW64 step still ends up usable instead of failing every install.
+    ///
+    /// The repair is to place the engine's 32-bit builtins into `syswow64` ourselves. That is
+    /// not a workaround so much as the same outcome by a shorter route: a healthy prefix's
+    /// syswow64 files are byte-identical copies of `lib/wine/i386-windows` (verified), Wine
+    /// just normally puts them there via a 32-bit rundll32 that is exactly what fails here.
+    /// Verified end to end: a bottle with an emptied syswow64 goes from
+    /// "could not load kernel32.dll" to running 32-bit programs and installing Steam.
     public static func ensureWoW64(runner: WineRunner, bottle: Bottle, log: URL) async throws {
         if FileManager.default.fileExists(atPath: woW64Kernel32(in: bottle).path) { return }
         _ = try? await runner.wineboot(force: true)
+        if FileManager.default.fileExists(atPath: woW64Kernel32(in: bottle).path) { return }
+        try? seedWoW64(from: runner.engine, into: bottle)
         guard FileManager.default.fileExists(atPath: woW64Kernel32(in: bottle).path) else {
             // Wine only falls back to the engine's 32-bit builtins while a prefix is
             // bootstrapping, so a prefix that missed this step cannot be repaired in place
             // (verified: re-running wineboot, forced or not, leaves syswow64 empty). A fresh
             // bottle is the fix, which is why creation fails here rather than later.
             throw HighballError.invalid("""
-                Windows 32-bit support didn't finish setting up in this bottle, so most \
-                installers can't run in it (they fail with "could not load kernel32.dll"). \
-                Please create the bottle again. If it happens every time, report it with this \
-                log attached and we'll dig in: \(log.path)
+                Windows 32-bit support couldn't be set up in this bottle, so most installers \
+                can't run in it (they fail with "could not load kernel32.dll"), and repairing \
+                it from the engine didn't work either. Please report this with the log \
+                attached and we'll dig in: \(log.path)
                 """)
+        }
+    }
+
+    /// Copies the engine's 32-bit PE builtins into the prefix's `syswow64`, which is what Wine's
+    /// WoW64 setup step would have done. Existing files are left alone, so this only fills gaps.
+    static func seedWoW64(from engine: InstalledEngine, into bottle: Bottle) throws {
+        let source = engine.engineDir.appending(path: "lib/wine/i386-windows", directoryHint: .isDirectory)
+        let dest = bottle.driveC.appending(path: "windows/syswow64", directoryHint: .isDirectory)
+        guard FileManager.default.fileExists(atPath: source.path) else {
+            throw HighballError.missing("the engine's 32-bit Windows files (\(source.path))")
+        }
+        try FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+        for name in try FileManager.default.contentsOfDirectory(atPath: source.path) {
+            let target = dest.appending(path: name)
+            guard !FileManager.default.fileExists(atPath: target.path) else { continue }
+            try? FileManager.default.copyItem(at: source.appending(path: name), to: target)
         }
     }
 
