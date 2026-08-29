@@ -62,10 +62,52 @@ public struct BottleStore: Sendable {
         guard result.exitStatus == 0 else {
             throw HighballError.processFailed(command: "wineboot -u", status: result.exitStatus, output: "see \(result.log.path)")
         }
+        do {
+            try await Self.ensureWoW64(runner: runner, bottle: bottle, log: result.log)
+        } catch {
+            // Don't strand a half-built bottle: it can never run a 32-bit installer, and leaving
+            // it behind means retrying with the same name hits "bottle already exists".
+            try? runner.kill()
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
         if windowsVersion != .win10 { try await runner.setWindowsVersion(windowsVersion) }
         try? await runner.setGpuIdentity()
         try? await runner.setServiceTimeout()
         return bottle
+    }
+
+    /// The 32-bit half of a prefix, and whether it is actually there.
+    ///
+    /// Wine populates `syswow64` by launching a 32-bit rundll32 for the inf's Wow64Install
+    /// section; if that launch fails, wineboot's loop skips the wait and **still exits 0**
+    /// (verified in wineboot.c). So an exit-code check cannot tell a working bottle from one
+    /// with no 32-bit support — which is exactly issue #37: bottles create "fine", then every
+    /// installer dies with `could not load kernel32.dll, status c0000135`, because Wine will
+    /// not fall back to the engine's i386-windows dlls outside prefix bootstrap. Most Windows
+    /// installers are 32-bit, so such a bottle can install nothing at all.
+    public static func woW64Kernel32(in bottle: Bottle) -> URL {
+        bottle.driveC.appending(path: "windows/syswow64/kernel32.dll")
+    }
+
+    /// Verifies the 32-bit half exists, retrying wineboot once before giving up. A failure
+    /// here is reported at bottle creation, where it is actionable, instead of surfacing later
+    /// as an opaque error on every install.
+    public static func ensureWoW64(runner: WineRunner, bottle: Bottle, log: URL) async throws {
+        if FileManager.default.fileExists(atPath: woW64Kernel32(in: bottle).path) { return }
+        _ = try? await runner.wineboot(force: true)
+        guard FileManager.default.fileExists(atPath: woW64Kernel32(in: bottle).path) else {
+            // Wine only falls back to the engine's 32-bit builtins while a prefix is
+            // bootstrapping, so a prefix that missed this step cannot be repaired in place
+            // (verified: re-running wineboot, forced or not, leaves syswow64 empty). A fresh
+            // bottle is the fix, which is why creation fails here rather than later.
+            throw HighballError.invalid("""
+                Windows 32-bit support didn't finish setting up in this bottle, so most \
+                installers can't run in it (they fail with "could not load kernel32.dll"). \
+                Please create the bottle again. If it happens every time, report it with this \
+                log attached and we'll dig in: \(log.path)
+                """)
+        }
     }
 
     /// Copies a bottle under a new name (default "<name> copy", uniquified). Callers should stop

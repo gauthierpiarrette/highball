@@ -333,6 +333,28 @@ extension RegressionTests {
                       "drive_c itself counts as inside")
     }
 
+    // Issue #37: "Can't install anything". Wine builds a prefix's 32-bit half by launching a
+    // 32-bit rundll32; when that fails, wineboot skips it and STILL exits 0, so an exit-code
+    // check reports a healthy bottle in which every 32-bit installer dies with
+    // "could not load kernel32.dll, status c0000135". The 32-bit half must be checked by
+    // its files, not by the exit code.
+    func testWoW64PresenceIsCheckedByFileNotExitCode() throws {
+        let tmp = FileManager.default.temporaryDirectory.appending(path: "hb-wow64-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let bottle = Bottle(url: tmp, settings: BottleSettings(name: "b", engineID: "e"))
+        let marker = BottleStore.woW64Kernel32(in: bottle)
+        XCTAssertTrue(marker.path.hasSuffix("drive_c/windows/syswow64/kernel32.dll"),
+                      "the 32-bit half is proven by syswow64's kernel32, the dll Wine dies without")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path), "absent on a bare prefix")
+        try FileManager.default.createDirectory(at: marker.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        // An empty syswow64 directory is exactly the broken state — the folder existing is not
+        // enough, which is why the check names the file.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+        try Data("pe".utf8).write(to: marker)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+    }
+
     // Issue #36: "Visual C++ Failed to install". The exit code Swift sees is twice-truncated —
     // WiX Burn returns HRESULT_CODE (0x80070666 → 1638), then POSIX keeps 8 bits (1638 → 102).
     // A strict `== 0` guard therefore failed the VC++ recipe at step 1 of 14 whenever a newer

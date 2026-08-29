@@ -153,8 +153,10 @@ public struct WineRunner: Sendable {
         return (result, true)
     }
 
-    public func wineboot() async throws -> LaunchResult {
-        try await run(["wineboot", "-u"], renderer: .wined3d, label: "wineboot")
+    /// `force` adds -f: re-runs the inf installs even when the prefix looks current, which is
+    /// how a prefix missing its 32-bit half gets a second chance (issue #37).
+    public func wineboot(force: Bool = false) async throws -> LaunchResult {
+        try await run(["wineboot", force ? "-fu" : "-u"], renderer: .wined3d, label: "wineboot")
     }
 
     public func kill() throws {

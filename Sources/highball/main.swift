@@ -180,6 +180,9 @@ struct Bottle: AsyncParsableCommand {
             let r = try await runner.wineboot()
             try? await runner.setGpuIdentity()
             try? await runner.setServiceTimeout()
+            // Same 32-bit check the app and bottle creation use (#37): wineboot exits 0 even
+            // when it skipped building syswow64, so the exit code alone means little.
+            try await BottleStore.ensureWoW64(runner: runner, bottle: b, log: r.log)
             print(r.exitStatus == 0 ? "repaired \(name)" : "wineboot exited with \(r.exitStatus) — see \(r.log.path)")
         }
     }

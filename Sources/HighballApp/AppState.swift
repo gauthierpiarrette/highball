@@ -478,6 +478,8 @@ final class AppState {
             guard r.exitStatus == 0 else {
                 throw HighballError.processFailed(command: "wineboot -u", status: r.exitStatus, output: "see \(r.log.path)")
             }
+            // Repair is the escape hatch for a bottle whose 32-bit half never got built (#37).
+            try await BottleStore.ensureWoW64(runner: runner, bottle: bottle, log: r.log)
             try? await runner.setGpuIdentity()
             try? await runner.setServiceTimeout()
             await MainActor.run { self.appendLog("bottle repaired — Windows environment refreshed") }
