@@ -73,6 +73,16 @@ echo "symlinks ok: $n runtime links, none broken, none absolute"
 step "bottle create (wineboot)"
 "$HB" bottle create e2e
 
+# The 32-bit half is built by a 32-bit rundll32; when that fails, wineboot still exits 0 and
+# the bottle can't run any 32-bit installer — which is most of them (issue #37). The runner
+# label lies about the point release ("macos-26" was 26.5.2 while users broke on 26.6.2), so
+# assert the real thing here and record the OS version this run actually proves.
+sw="$(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+echo "tested on macOS $sw"
+test -f "$B/drive_c/windows/syswow64/kernel32.dll" || {
+  echo "no 32-bit Windows support in a fresh bottle on macOS $sw — every installer would fail"; exit 1; }
+echo "wow64 ok: $(ls "$B/drive_c/windows/syswow64" | wc -l | tr -d ' ') files in syswow64"
+
 step "bare wine smoke — runtime must resolve through engine/lib with NO DYLD vars (the SIP/winetricks path)"
 # Kill the create-step's wineserver first: it runs WITH the bottle's msync env, and a
 # bare env-less wine against a live msync server dies on the sync-mode mismatch
