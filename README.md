@@ -41,8 +41,9 @@ Not sure it'll run your game? **[Check the compatibility database →](https://g
 
 That's the whole point of the project, so the answer lives in an open, CC0 database: a
 verified renderer verdict, the frame rate people actually got, and provenance on every
-claim. It won't guess, and it flags kernel-anti-cheat titles as impossible before you
-download 80 GB.
+claim. Verified runs, community reports and machine-derived predictions are labelled
+separately, so you always know which one you're looking at, and it flags kernel-anti-cheat
+titles as impossible before you download 80 GB.
 
 ### [Search your game in the database →](https://gethighball.com/database/)
 
