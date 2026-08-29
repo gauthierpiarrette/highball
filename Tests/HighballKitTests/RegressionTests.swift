@@ -333,6 +333,47 @@ extension RegressionTests {
                       "drive_c itself counts as inside")
     }
 
+    // Issue #36: "Visual C++ Failed to install". The exit code Swift sees is twice-truncated —
+    // WiX Burn returns HRESULT_CODE (0x80070666 → 1638), then POSIX keeps 8 bits (1638 → 102).
+    // A strict `== 0` guard therefore failed the VC++ recipe at step 1 of 14 whenever a newer
+    // runtime was already present, leaving the 11 DLL overrides unapplied.
+    func testInstallerAcceptsBenignWindowsExitCodes() throws {
+        let json = """
+        {"id":"t","kind":"tweak","title":"T","steps":[
+          {"type":"installer","url":"https://example.com/a.exe","label":"a"},
+          {"type":"installer","url":"https://example.com/b.exe","label":"b","okExitCodes":[42]},
+          {"type":"winetricks","verbs":["corefonts"]}]}
+        """
+        let r = try JSONDecoder.highball.decode(Recipe.self, from: Data(json.utf8))
+        // Truncation arithmetic is the whole point — verify it, don't assume it.
+        XCTAssertEqual(1638 & 0xFF, 102); XCTAssertEqual(3010 & 0xFF, 194); XCTAssertEqual(1641 & 0xFF, 105)
+        for ok in [Int32(0), 102, 194, 105] {
+            XCTAssertTrue(r.steps[0].accepts(exitStatus: ok), "\(ok) is a documented success/no-op")
+        }
+        for bad in [Int32(67), 1, 66, 84] {   // 1603 truncated, unsupported-OS, cancelled, corrupt
+            XCTAssertFalse(r.steps[0].accepts(exitStatus: bad), "\(bad) is a real failure")
+        }
+        XCTAssertTrue(r.steps[1].accepts(exitStatus: 42), "recipe can widen the set as data")
+        XCTAssertFalse(r.steps[0].accepts(exitStatus: 42), "…and only for the step that declares it")
+        // Non-installer steps keep strict semantics.
+        XCTAssertTrue(r.steps[2].accepts(exitStatus: 0))
+        XCTAssertFalse(r.steps[2].accepts(exitStatus: 102))
+        // Round trip keeps the field; absent decodes as nil (existing recipes unchanged).
+        let again = try JSONDecoder.highball.decode(Recipe.self, from: try JSONEncoder().encode(r))
+        XCTAssertTrue(again.steps[1].accepts(exitStatus: 42))
+        XCTAssertFalse(again.steps[0].accepts(exitStatus: 42))
+    }
+
+    // The exit code must be explained where a human reads it: "exit=102" alone told us nothing
+    // and cost two research passes on #36.
+    func testExitCodeNotesAreHumanReadable() {
+        XCTAssertTrue(WineRunner.exitCodeNote(for: 102).contains("1638"))
+        XCTAssertTrue(WineRunner.exitCodeNote(for: 194).contains("3010"))
+        XCTAssertTrue(WineRunner.exitCodeNote(for: 105).contains("1641"))
+        XCTAssertEqual(WineRunner.exitCodeNote(for: 0), "")
+        XCTAssertEqual(WineRunner.exitCodeNote(for: 67), "")
+    }
+
     // Play-gate: only provably harmless steps may run silently at Play (no wine process —
     // the msync trap #32 — and no long installs). Heavy or wine-touching steps must prompt.
     func testRecipeAutoApplyClassification() throws {

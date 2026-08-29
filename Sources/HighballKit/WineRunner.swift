@@ -20,6 +20,18 @@ public struct WineRunner: Sendable {
         self.bottle = bottle
     }
 
+    /// Windows installer exit codes arrive twice-truncated: WiX Burn returns HRESULT_CODE
+    /// (low 16 bits, so 0x80070666 → 1638) and POSIX keeps only the low 8 (1638 → 102).
+    /// Without this note a log reads "exit=102", which means nothing to anyone.
+    static func exitCodeNote(for status: Int32) -> String {
+        switch status {
+        case 102: return " (Windows 1638: a newer version is already installed)"
+        case 194: return " (Windows 3010: success, restart required)"
+        case 105: return " (Windows 1641: success, restart initiated)"
+        default: return ""
+        }
+    }
+
     /// Runs `wine <args>` and waits. `onOutput` receives each line of combined stdout/stderr.
     @discardableResult
     public func run(
@@ -57,6 +69,9 @@ public struct WineRunner: Sendable {
         do { try process.run() } catch { try? logHandle.close(); throw error }
 
         let reader = pipe.fileHandleForReading
+        // The exit code used to be computed and thrown away: a failed install produced a log
+        // shape-identical to a successful one, so user-submitted reports were undiagnosable
+        // (issue #36 cost two research passes to answer). It is now a footer, written below.
         let status: Int32 = await withCheckedContinuation { cont in
             process.terminationHandler = { p in cont.resume(returning: p.terminationStatus) }
             // Drain on a background thread. The drain is the log handle's SOLE owner: it closes it
@@ -81,7 +96,20 @@ public struct WineRunner: Sendable {
                 try? logHandle.close()
             }
         }
-        return LaunchResult(exitStatus: status, duration: Date().timeIntervalSince(start), log: logURL)
+        let duration = Date().timeIntervalSince(start)
+        // Footer with the exit code. Written here, not in the drain: the drain blocks on
+        // availableData until every write end of the pipe closes, and wineserver outlives the
+        // process, so EOF often never arrives — a footer written there would never appear
+        // (measured). A second handle is safe because the process has already exited, so the
+        // drain has nothing left to write; the throwing write can't raise on a closed handle.
+        let footer = "# exit=\(status)\(Self.exitCodeNote(for: status)) after \(Int(duration))s\n"
+        if let tail = try? FileHandle(forWritingTo: logURL) {
+            _ = try? tail.seekToEnd()
+            try? tail.write(contentsOf: Data(footer.utf8))
+            try? tail.close()
+        }
+        onOutput?(footer.trimmingCharacters(in: .newlines))
+        return LaunchResult(exitStatus: status, duration: duration, log: logURL)
     }
 
     /// Runs the executable directly under `wine` (not `start /unix`) so the process stays attached and

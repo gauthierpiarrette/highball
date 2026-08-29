@@ -20,7 +20,7 @@ The difference is the data. Every verdict comes from an open, CC0 compatibility 
 verified runs, per-game renderer verdicts, and the kernel-anti-cheat blocklist, with
 provenance on every claim. It's a standalone dataset any tool can build on
 ([highball-db](https://github.com/gauthierpiarrette/highball-db), browsable at
-[gauthierpiarrette.github.io/highball-db](https://gauthierpiarrette.github.io/highball-db/)),
+[gethighball.com/database](https://gethighball.com/database/)),
 so you can check whether your game runs before downloading a byte.
 
 ## Download
@@ -30,7 +30,7 @@ so you can check whether your game runs before downloading a byte.
 macOS 14+, notarized. Drag it to Applications and open it. The app walks you through the
 rest: engine download, your first bottle, Steam.
 
-Not sure it'll run your game? **[Check the compatibility database →](https://gauthierpiarrette.github.io/highball-db/)**
+Not sure it'll run your game? **[Check the compatibility database →](https://gethighball.com/database/)**
 
 > **Beta, working end to end:** engine install → bottle → Steam login → game, with
 > per-bottle renderer switching and msync-accelerated launches. Auto-updating. Not a paid
@@ -44,7 +44,7 @@ verified renderer verdict, the frame rate people actually got, and provenance on
 claim. It won't guess, and it flags kernel-anti-cheat titles as impossible before you
 download 80 GB.
 
-### [Search your game in the database →](https://gauthierpiarrette.github.io/highball-db/)
+### [Search your game in the database →](https://gethighball.com/database/)
 
 Cyberpunk 2077, for one, runs 60–82 fps on an M5 (D3DMetal + FSR 2.1). Renderer switching,
 32-bit apps via Wine's WoW64, Windows runtimes, ReShade, and your Epic library via Legendary

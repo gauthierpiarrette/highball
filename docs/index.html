@@ -3,93 +3,27 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Highball — Windows games on Apple Silicon</title>
-<meta name="description" content="Free, open-source, notarized. One-click Steam, per-game renderer verdicts from an open database, honest about anti-cheat.">
+<title>Highball has moved to gethighball.com</title>
+<link rel="canonical" href="https://gethighball.com/">
+<meta http-equiv="refresh" content="0; url=https://gethighball.com/">
+<meta name="robots" content="noindex, follow">
 <link rel="icon" href="logo-128.png">
-<meta property="og:title" content="Highball — Windows games on Apple Silicon">
-<meta property="og:description" content="Free, open-source, notarized. One-click Steam, per-game renderer verdicts from an open database, honest about anti-cheat.">
-<meta property="og:image" content="https://gauthierpiarrette.github.io/highball/app.png">
-<meta property="og:url" content="https://gauthierpiarrette.github.io/highball/">
-<meta name="twitter:card" content="summary_large_image">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-  :root { --ground:#16110A; --surface:#211A10; --line:#3A2F1D; --ink:#EFE7D6; --ink2:#C8BCA2; --muted:#8F8266;
-          --amber:#D79A45; --amber-deep:#A5691C; --good:#7CC79E; --bad:#E07A7A; }
-  * { box-sizing:border-box }
-  body { margin:0; background:var(--ground); color:var(--ink); font:17px/1.6 "IBM Plex Sans",-apple-system,sans-serif; }
-  a { color:var(--amber) }
-  .wrap { max-width:1000px; margin:0 auto; padding-inline:clamp(1rem,4vw,2rem); }
-  .mono { font-family:"IBM Plex Mono",monospace }
-
-  header { padding-block:5rem 3rem; text-align:center; }
-  header img.logo { width:120px; height:120px; }
-  h1 { font-family:"Bricolage Grotesque",sans-serif; font-weight:800; font-size:clamp(2.6rem,7vw,4.2rem); margin:1rem 0 .5rem; letter-spacing:-.02em; }
-  .tag { font-size:clamp(1.05rem,2.5vw,1.3rem); color:var(--ink2); max-width:34em; margin:0 auto; }
-  .cta { margin:2.2rem 0 .75rem; }
-  .btn { display:inline-block; background:linear-gradient(180deg,var(--amber),var(--amber-deep)); color:#1C1204; font-weight:600;
-         padding:.85rem 1.8rem; border-radius:8px; text-decoration:none; font-size:1.05rem; box-shadow:0 6px 24px rgba(215,154,69,.25); }
-  .btn:hover { filter:brightness(1.06) }
-  .sub { font-size:.85rem; color:var(--muted); font-family:"IBM Plex Mono",monospace; }
-
-  .shot { margin:3rem auto 0; max-width:880px; }
-  .shot img { width:100%; height:auto; display:block; border-radius:10px; border:1px solid var(--line); }
-
-  section { padding-block:3.75rem; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1rem; }
-  .card { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:1.4rem 1.5rem; }
-  .card h3 { font-family:"Bricolage Grotesque",sans-serif; font-weight:700; margin:0 0 .5rem; font-size:1.15rem; }
-  .card p { margin:0; color:var(--ink2); font-size:.95rem; }
-  .card .k { font-family:"IBM Plex Mono",monospace; font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; color:var(--amber); display:block; margin-bottom:.5rem; }
-
-  .honest { border-left:3px solid var(--bad); background:var(--surface); padding:1.1rem 1.3rem; border-radius:0 8px 8px 0; max-width:46em; margin:0 auto; }
-  .honest b { color:var(--bad) }
-  h2 { font-family:"Bricolage Grotesque",sans-serif; font-weight:700; font-size:1.6rem; text-align:center; margin:0 0 1.5rem; }
-
-  footer { border-top:1px solid var(--line); padding-block:2.5rem 3.5rem; padding-inline:1rem; color:var(--muted); font-size:.85rem; text-align:center; }
-  footer a { color:var(--ink2) }
-  .foot-links { display:flex; gap:1.5rem; justify-content:center; flex-wrap:wrap; margin-bottom:1rem; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; text-align:center;
+         background:#16110A; color:#EFE7D6; font:17px/1.6 -apple-system,BlinkMacSystemFont,sans-serif; padding:2rem }
+  img { width:96px; height:96px }
+  h1 { font-weight:800; letter-spacing:-.02em; margin:1rem 0 .5rem }
+  p { color:#C8BCA2 }
+  a { color:#D79A45 }
 </style>
 </head>
 <body>
-
-<header class="wrap">
-  <img class="logo" src="logo.png" alt="Highball — an amber highball glass with ice">
-  <h1>Highball</h1>
-  <p class="tag">Run your Windows games on Apple Silicon. Free, open source, and honest about what works — down to which renderer each game needs.</p>
-  <div class="cta">
-    <a class="btn" href="https://github.com/gauthierpiarrette/highball/releases/latest/download/Highball.dmg">Download for macOS</a>
-  </div>
-  <p class="sub">notarized .dmg · auto-updating · Apple Silicon · macOS 14+ · GPL-3, no paid tier ever</p>
-  <div class="shot">
-    <img src="app.png" alt="Highball's Library: one cover grid across Steam and Epic with source badges, verified verdicts, and a Continue Playing shelf">
-  </div>
-</header>
-
-<section class="wrap">
-  <div class="grid">
-    <div class="card"><span class="k">One click</span><h3>Steam and Epic, ready to play</h3><p>A verified Wine engine is assembled from pinned, checksummed upstream releases. Steam installs with one click; your Epic library connects and plays through the open source Legendary client. .NET and VC++ runtimes are one click too.</p></div>
-    <div class="card"><span class="k">Per-game verdicts</span><h3>Your library, with answers</h3><p>Games appear as cards with a verdict from the open database: verified, reported, predicted — and the renderer that actually works (DXMT, D3DMetal, DXVK). Play launches with the right one.</p></div>
-    <div class="card"><span class="k">Open data</span><h3>A database, not a promise</h3><p>Every claim carries its provenance: verified on real hardware, reported upstream, or derived from 378k ProtonDB reports crossed with anti-cheat knowledge. CC0 — use it anywhere.</p></div>
-    <div class="card"><span class="k">Fast path</span><h3>Measured, not vibes</h3><p>msync-aware launching gave +42% frame rate on the reference machine, verified with Metal's own performance HUD. Frame caps and async shader compilation are one toggle away.</p></div>
-    <div class="card"><span class="k">Built to last</span><h3>Whisky's lesson, learned</h3><p>No Wine fork, no binary hosting, engine-agnostic by design — the failure modes that ended Whisky are structurally removed. Engines update via a JSON manifest.</p></div>
-    <div class="card"><span class="k">Ecosystem</span><h3>Additive, not extractive</h3><p>Bugs go upstream; the database helps CrossOver users too. If you want commercial-grade support, <a href="https://www.codeweavers.com/crossover">buy CrossOver</a> — it funds Wine's Mac work.</p></div>
-  </div>
-</section>
-
-<section class="wrap">
-  <h2>The honest part</h2>
-  <p class="honest"><b>Kernel anti-cheat cannot work.</b> Valorant, Fortnite, Destiny 2, Call of Duty and friends load Windows kernel drivers that no compatibility layer can provide. Highball flags them <i>before</i> you download 80&nbsp;GB — check the <a href="https://gauthierpiarrette.github.io/highball-db/">database</a> first.</p>
-</section>
-
-<footer>
-  <div class="foot-links">
-    <a href="https://github.com/gauthierpiarrette/highball">GitHub</a>
-    <a href="https://gauthierpiarrette.github.io/highball-db/">Compatibility database</a>
-    <a href="https://github.com/gauthierpiarrette/highball/discussions">Discussions</a>
-    <a href="https://github.com/gauthierpiarrette/highball-db">Contribute data</a>
-  </div>
-  Standing on Wine · Gcenx · DXMT · Sikarugir · Apple's Game Porting Toolkit — sponsor them first.
-</footer>
-
+<div>
+  <img src="logo.png" alt="">
+  <h1>Highball has moved</h1>
+  <p>This page now lives at <a href="https://gethighball.com/">gethighball.com</a>.</p>
+  <p><a href="https://gethighball.com/">Continue &rarr;</a></p>
+</div>
+<script>location.replace("https://gethighball.com/" + location.hash);</script>
 </body>
 </html>

@@ -9,7 +9,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
         /// Download a file (verified if sha256 given) and run it inside the bottle.
         /// `slow` is a user-facing expectation for long steps ("takes 20-40 min, can look idle");
         /// the app shows it while the step runs so nobody has to guess whether it froze (#31).
-        case installer(url: URL, sha256: String?, arguments: [String], label: String, slow: String?)
+        case installer(url: URL, sha256: String?, arguments: [String], label: String, slow: String?, okExitCodes: [Int32]?)
         /// `wine reg add`.
         case registry(key: String, name: String, type: String, data: String)
         /// Run winetricks verbs (unattended). `slow` as on `installer`.
@@ -35,7 +35,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
         /// DXVK knowledge ships as data instead of app code.
         case dxvkConfig(exe: String, options: [String: String])
 
-        private enum CodingKeys: String, CodingKey { case type, url, sha256, arguments, label, slow, key, name, value, valueType, data, verbs, renderer, sync, winver, path, contents, pin, text, exe, options }
+        private enum CodingKeys: String, CodingKey { case type, url, sha256, arguments, label, slow, okExitCodes, key, name, value, valueType, data, verbs, renderer, sync, winver, path, contents, pin, text, exe, options }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -45,7 +45,8 @@ public struct Recipe: Codable, Sendable, Identifiable {
                                   sha256: try c.decodeIfPresent(String.self, forKey: .sha256),
                                   arguments: try c.decodeIfPresent([String].self, forKey: .arguments) ?? [],
                                   label: try c.decodeIfPresent(String.self, forKey: .label) ?? "installer",
-                                  slow: try c.decodeIfPresent(String.self, forKey: .slow))
+                                  slow: try c.decodeIfPresent(String.self, forKey: .slow),
+                                  okExitCodes: try c.decodeIfPresent([Int32].self, forKey: .okExitCodes))
             case "registry":
                 self = .registry(key: try c.decode(String.self, forKey: .key), name: try c.decode(String.self, forKey: .name),
                                  type: try c.decodeIfPresent(String.self, forKey: .valueType) ?? "REG_DWORD", data: try c.decode(String.self, forKey: .data))
@@ -67,10 +68,11 @@ public struct Recipe: Codable, Sendable, Identifiable {
         public func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             switch self {
-            case let .installer(url, sha256, arguments, label, slow):
+            case let .installer(url, sha256, arguments, label, slow, okExitCodes):
                 try c.encode("installer", forKey: .type); try c.encode(url, forKey: .url)
                 try c.encodeIfPresent(sha256, forKey: .sha256); try c.encode(arguments, forKey: .arguments); try c.encode(label, forKey: .label)
                 try c.encodeIfPresent(slow, forKey: .slow)
+                try c.encodeIfPresent(okExitCodes, forKey: .okExitCodes)
             case let .registry(key, name, type, data):
                 try c.encode("registry", forKey: .type); try c.encode(key, forKey: .key); try c.encode(name, forKey: .name)
                 try c.encode(type, forKey: .valueType); try c.encode(data, forKey: .data)
@@ -93,7 +95,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
         /// Short human description for progress display ("Step 2 of 3 — Battle.net-Setup").
         public var progressLabel: String? {
             switch self {
-            case let .installer(_, _, _, label, _): return label
+            case let .installer(_, _, _, label, _, _): return label
             case let .winetricks(verbs, _): return verbs.joined(separator: " ")
             case .registry: return nil
             case .environment, .renderer, .sync, .winver, .file, .pin, .note, .dxvkConfig: return nil
@@ -103,10 +105,28 @@ public struct Recipe: Codable, Sendable, Identifiable {
         /// The step's slow-expectation text, if the recipe declared one.
         public var slowHint: String? {
             switch self {
-            case let .installer(_, _, _, _, slow): return slow
+            case let .installer(_, _, _, _, slow, _): return slow
             case let .winetricks(_, slow): return slow
             default: return nil
             }
+        }
+
+        /// Exit statuses that count as success for this step.
+        ///
+        /// Windows installers report success in more than one way, and the number Swift sees is
+        /// twice-truncated (WiX Burn returns HRESULT_CODE, then POSIX keeps 8 bits): 3010
+        /// "restart required" arrives as 194 and 1641 "restart initiated" as 105 — both are
+        /// documented by Microsoft as success — and 1638 "a newer version is already installed"
+        /// arrives as 102, which for a step whose job is to install that runtime means the goal
+        /// is already met. Accepting these by default is deliberate: it is generic Windows
+        /// knowledge, not per-app knowledge, so no recipe has to know it (issue #36, where the
+        /// strict `== 0` guard aborted the VC++ recipe at step 1 of 14 and left the DLL
+        /// overrides unapplied). A recipe can still widen the set for an installer with its own
+        /// conventions via `okExitCodes`.
+        public func accepts(exitStatus: Int32) -> Bool {
+            guard case let .installer(_, _, _, _, _, okExitCodes) = self else { return exitStatus == 0 }
+            return exitStatus == 0 || [102, 194, 105].contains(exitStatus)
+                || (okExitCodes ?? []).contains(exitStatus)
         }
 
         /// True when the step is safe to run silently at Play time: touches no wine process
@@ -215,7 +235,7 @@ public struct RecipeRunner: Sendable {
             if let slow = step.slowHint { log?("[\(recipe.id)] hint: \(slow)") }
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             switch step {
-            case let .installer(url, sha256, arguments, label, _):
+            case let .installer(url, sha256, arguments, label, _, _):
                 let component = EngineManifest.Component(kind: "installer", url: url, sha256: sha256 ?? "", size: nil, license: nil, optional: nil, acceptance: nil, extract: nil, note: nil, version: nil)
                 let file: URL
                 if sha256 != nil {
@@ -226,8 +246,14 @@ public struct RecipeRunner: Sendable {
                 let isMSI = file.pathExtension.lowercased() == "msi" || url.lastPathComponent.lowercased().contains(".msi")
                 let wineArgs = isMSI ? ["msiexec", "/i", file.path, "/qn"] + arguments : [file.path] + arguments
                 let result = try await runner.run(wineArgs, renderer: .wined3d, label: label, onOutput: log)
-                guard result.exitStatus == 0 else {
-                    throw HighballError.processFailed(command: label, status: result.exitStatus, output: "see \(result.log.path)")
+                guard step.accepts(exitStatus: result.exitStatus) else {
+                    throw HighballError.processFailed(command: label, status: result.exitStatus,
+                                                      output: WineRunner.exitCodeNote(for: result.exitStatus).isEmpty
+                                                        ? "see \(result.log.path)"
+                                                        : "\(WineRunner.exitCodeNote(for: result.exitStatus))\nsee \(result.log.path)")
+                }
+                if result.exitStatus != 0 {
+                    log?("[\(recipe.id)] \(label) exited with \(result.exitStatus)\(WineRunner.exitCodeNote(for: result.exitStatus)) — treating as done")
                 }
             case let .registry(key, name, type, data):
                 try await runner.regAdd(key: key, name: name, type: type, data: data)
