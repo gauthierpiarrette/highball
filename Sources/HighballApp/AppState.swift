@@ -482,6 +482,7 @@ final class AppState {
             try await BottleStore.ensureWoW64(runner: runner, bottle: bottle, log: r.log)
             try? await runner.setGpuIdentity()
             try? await runner.setServiceTimeout()
+            try? await runner.setKeyboardMapping(commandIsControl: bottle.settings.commandIsControl)
             await MainActor.run { self.appendLog("bottle repaired — Windows environment refreshed") }
         }
     }

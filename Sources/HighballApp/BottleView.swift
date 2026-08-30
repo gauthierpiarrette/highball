@@ -365,6 +365,9 @@ struct BottleSettingsSheet: View {
                         ForEach(WindowsVersion.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }
                     Toggle(L("Advertise AVX to games (Rosetta)"), isOn: binding(\.advertiseAVX))
+                    Toggle(L("Use ⌘C / ⌘V inside Windows apps"), isOn: binding(\.commandIsControl))
+                    Text(L("Maps the Command keys to Ctrl, so Mac copy and paste work in Steam and games. Option becomes Alt so Alt-based bindings keep working. Off = Wine's default, where Command acts as Alt."))
+                        .font(.caption).foregroundStyle(.secondary)
                     Text(L("Games run with the bottle’s sync (msync is fastest). Opening the Steam window restarts Windows processes with sync off — its interface needs it."))
                         .font(.caption).foregroundStyle(.secondary)
                 }

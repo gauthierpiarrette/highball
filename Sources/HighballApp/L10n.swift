@@ -10,6 +10,8 @@ func L(_ en: String) -> String {
 enum L10n {
     static let fr: [String: String] = [
         // Sidebar & shell
+        "Use ⌘C / ⌘V inside Windows apps": "Utiliser ⌘C / ⌘V dans les applications Windows",
+        "Maps the Command keys to Ctrl, so Mac copy and paste work in Steam and games. Option becomes Alt so Alt-based bindings keep working. Off = Wine's default, where Command acts as Alt.": "Associe les touches Command à Ctrl, pour que le copier-coller du Mac fonctionne dans Steam et les jeux. Option devient Alt afin que les raccourcis Alt continuent de fonctionner. Désactivé = comportement par défaut de Wine, où Command agit comme Alt.",
         "Bottles": "Bouteilles",
         "Engine": "Moteur",
         "New Bottle": "Nouvelle bouteille",

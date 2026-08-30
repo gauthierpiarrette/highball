@@ -80,6 +80,28 @@ final class RegressionTests: XCTestCase {
         XCTAssertEqual(WineRunner.dpiRegistry(for: 999).retinaMode, "y")
     }
 
+    // Cmd+V beeped instead of pasting in Steam: Wine's Mac driver leaves Command acting as Alt.
+    // Mapping Command to Ctrl without also mapping Option to Alt leaves no way to send Alt at all
+    // (winemac.drv warns about exactly that), so the four values must move together.
+    func testCommandKeyMappingMovesAsASet() throws {
+        let on = WineRunner.keyboardRegistry(commandIsControl: true)
+        XCTAssertEqual(on.count, 4)
+        XCTAssertEqual(Set(on.map(\.name)),
+                       ["LeftCommandIsCtrl", "RightCommandIsCtrl", "LeftOptionIsAlt", "RightOptionIsAlt"])
+        XCTAssertTrue(on.allSatisfy { $0.data == "1" }, "Command→Ctrl is useless without Option→Alt")
+
+        let off = WineRunner.keyboardRegistry(commandIsControl: false)
+        XCTAssertTrue(off.allSatisfy { $0.data == "0" }, "off restores Wine's default mapping")
+        XCTAssertEqual(Set(off.map(\.name)), Set(on.map(\.name)),
+                       "turning it off must clear the same keys it set, not leave half behind")
+    }
+
+    // New bottles get Mac-native copy/paste; the setting is what the registry write follows.
+    func testCommandIsControlDefaultsOn() throws {
+        let s = BottleSettings(name: "t", engineID: "e")
+        XCTAssertTrue(s.commandIsControl, "Mac users expect ⌘C/⌘V to work in Windows apps")
+    }
+
     // Steam writes StateFlags 1026 while downloading; the game card must not offer Play.
     func testACFDownloadingNotReady() throws {
         let acf = """

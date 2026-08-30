@@ -271,6 +271,30 @@ public struct WineRunner: Sendable {
                          type: "REG_SZ", data: String(Self.servicesPipeTimeoutMs))
     }
 
+    /// Wine's Mac driver leaves the Command keys acting as Alt, so Cmd+C / Cmd+V reach Windows
+    /// apps as Alt+C / Alt+V — nothing pastes and macOS beeps. Mapping Command to Ctrl fixes
+    /// copy/paste everywhere (Steam's login and store pages are the common report).
+    ///
+    /// Option must be mapped to Alt in the same breath: with both Command keys taken, winemac.drv
+    /// itself warns "there is no way to send an Alt key to Windows applications", which would break
+    /// Alt-driven game bindings. The four values move together or not at all.
+    ///
+    /// Pure so the mapping is unit-tested without touching a prefix.
+    public static func keyboardRegistry(commandIsControl: Bool) -> [(name: String, data: String)] {
+        let on = commandIsControl ? "1" : "0"
+        return [
+            ("LeftCommandIsCtrl", on), ("RightCommandIsCtrl", on),
+            ("LeftOptionIsAlt", on), ("RightOptionIsAlt", on),
+        ]
+    }
+
+    public func setKeyboardMapping(commandIsControl: Bool) async throws {
+        for v in Self.keyboardRegistry(commandIsControl: commandIsControl) {
+            try await regAdd(key: #"HKCU\Software\Wine\Mac Driver"#, name: v.name,
+                             type: "REG_DWORD", data: v.data)
+        }
+    }
+
     public func setGpuIdentity() async throws {
         try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciVendorID", type: "REG_DWORD", data: String(Self.gpuIdentity.vendor))
         try await regAdd(key: #"HKCU\Software\Wine\Direct3D"#, name: "VideoPciDeviceID", type: "REG_DWORD", data: String(Self.gpuIdentity.device))
