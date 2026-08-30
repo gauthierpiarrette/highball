@@ -49,8 +49,12 @@ public struct BottleStore: Sendable {
         let name = rawName.trimmingCharacters(in: .whitespaces)
         if let problem = Self.nameProblem(name) { throw HighballError.invalid(problem) }
         try paths.ensure()
-        let url = paths.bottle(name)
-        guard !FileManager.default.fileExists(atPath: url.path) else { throw HighballError.invalid("bottle '\(name)' already exists") }
+        let url = try Self.bottleURL(name, in: paths)
+        // lstat, not fileExists: fileExists follows symlinks, so a dangling one sailed through
+        // this guard and createDirectory then failed with a raw Foundation error on a name the
+        // user could not see in the list.
+        var existing = stat()
+        guard lstat(url.path, &existing) != 0 else { throw HighballError.invalid("bottle '\(name)' already exists") }
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         var settings = BottleSettings(name: name, engineID: engine.id)
         settings.renderer = renderer
@@ -255,15 +259,23 @@ public struct BottleStore: Sendable {
             .compactMap { url -> DamagedBottle? in
                 let name = url.lastPathComponent
                 if name.hasPrefix(".") { return nil }
+                // Deliberately lstat and no S_IFDIR requirement: anything occupying a name in
+                // bottles/ blocks create() and must therefore be reachable. Requiring a directory
+                // left a stray file or a dangling symlink invisible to both list() and damaged()
+                // while still taking the name — the #38 stranding shape in miniature.
                 var st = stat()
-                guard lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else { return nil }
+                guard lstat(url.path, &st) == 0 else { return nil }
                 if (try? Bottle.load(url)) != nil { return nil }
-                // A prefix with a Windows dir is a real bottle that lost its settings; anything
-                // else is the wreckage of a delete that stopped part way.
-                let hasPrefix = FileManager.default.fileExists(atPath: url.appending(path: "drive_c/windows").path)
-                return DamagedBottle(name: name, url: url,
-                                     reason: hasPrefix ? "its bottle.json is missing or unreadable"
-                                                       : "a delete stopped part way and left these files behind")
+                let reason: String
+                if (st.st_mode & S_IFMT) != S_IFDIR {
+                    reason = "something that isn't a bottle is using this name"
+                } else if FileManager.default.fileExists(atPath: url.appending(path: "drive_c/windows").path) {
+                    // A real prefix that lost its settings, rather than the wreckage of a delete.
+                    reason = "its bottle.json is missing or unreadable"
+                } else {
+                    reason = "a delete stopped part way and left these files behind"
+                }
+                return DamagedBottle(name: name, url: url, reason: reason)
             }
             .sorted { $0.name < $1.name }
     }

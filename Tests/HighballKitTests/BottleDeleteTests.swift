@@ -260,14 +260,33 @@ final class BottleDeleteTests: XCTestCase {
         XCTAssertThrowsError(try store.delete("nope"))
     }
 
-    func testDamagedIgnoresDotFilesLooseFilesAndSymlinks() throws {
+    /// Anything occupying a name in bottles/ blocks create(), so it must be reachable. Only
+    /// dot-files are hidden; a stray file or dangling symlink is reported so it can be removed.
+    func testDamagedSurfacesAnythingOccupyingABottleName() throws {
         try "x".write(to: paths.bottles.appending(path: ".DS_Store"), atomically: true, encoding: .utf8)
         try "x".write(to: paths.bottles.appending(path: "loose.txt"), atomically: true, encoding: .utf8)
-        try FileManager.default.createSymbolicLink(at: paths.bottles.appending(path: "alink"),
-                                                   withDestinationURL: home)
+        try FileManager.default.createSymbolicLink(atPath: paths.bottles.appending(path: "Unplugged").path,
+                                                   withDestinationPath: "/nonexistent-target")
         try makeBottle("play")
-        XCTAssertTrue(try store.damaged().isEmpty, "damaged() must list only real bottle directories")
+
         XCTAssertEqual(try store.list().map(\.name), ["play"])
+        XCTAssertEqual(try store.damaged().map(\.name), ["Unplugged", "loose.txt"],
+                       "a dot-file stays hidden; anything else taking a name must be visible")
+        // And each must be removable, or surfacing it would be pointless.
+        for name in ["Unplugged", "loose.txt"] { XCTAssertNoThrow(try store.delete(name)) }
+        XCTAssertTrue(try store.damaged().isEmpty)
+    }
+
+    /// A dangling symlink used to slip past create()'s fileExists guard, which follows links, so
+    /// creation failed later with a raw Foundation error on a name nothing would show.
+    func testCreateRefusesANameHeldByADanglingSymlink() throws {
+        try FileManager.default.createSymbolicLink(atPath: paths.bottle("Unplugged").path,
+                                                   withDestinationPath: "/nonexistent-target")
+        XCTAssertEqual(try store.damaged().map(\.name), ["Unplugged"])
+        var st = stat()
+        XCTAssertEqual(lstat(paths.bottle("Unplugged").path, &st), 0, "lstat must see the link")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.bottle("Unplugged").path),
+                       "fileExists follows the link, which is why the guard had to change")
     }
 
     func testSweepTrashClearsWhatAnEarlierPurgeLeft() throws {
