@@ -83,15 +83,17 @@ final class RegressionTests: XCTestCase {
     // Cmd+V beeped instead of pasting in Steam: Wine's Mac driver leaves Command acting as Alt.
     // Mapping Command to Ctrl without also mapping Option to Alt leaves no way to send Alt at all
     // (winemac.drv warns about exactly that), so the four values must move together.
+    // Mac Driver values are REG_SZ "y"/"n". Writing DWORD 1 reads as absent and the mapping
+    // silently stays off — the first cut of this shipped that way.
     func testCommandKeyMappingMovesAsASet() throws {
         let on = WineRunner.keyboardRegistry(commandIsControl: true)
         XCTAssertEqual(on.count, 4)
         XCTAssertEqual(Set(on.map(\.name)),
                        ["LeftCommandIsCtrl", "RightCommandIsCtrl", "LeftOptionIsAlt", "RightOptionIsAlt"])
-        XCTAssertTrue(on.allSatisfy { $0.data == "1" }, "Command→Ctrl is useless without Option→Alt")
+        XCTAssertTrue(on.allSatisfy { $0.data == "y" }, "Command→Ctrl is useless without Option→Alt")
 
         let off = WineRunner.keyboardRegistry(commandIsControl: false)
-        XCTAssertTrue(off.allSatisfy { $0.data == "0" }, "off restores Wine's default mapping")
+        XCTAssertTrue(off.allSatisfy { $0.data == "n" }, "off restores Wine's default mapping")
         XCTAssertEqual(Set(off.map(\.name)), Set(on.map(\.name)),
                        "turning it off must clear the same keys it set, not leave half behind")
     }

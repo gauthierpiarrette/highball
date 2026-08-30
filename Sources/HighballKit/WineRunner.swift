@@ -281,7 +281,9 @@ public struct WineRunner: Sendable {
     ///
     /// Pure so the mapping is unit-tested without touching a prefix.
     public static func keyboardRegistry(commandIsControl: Bool) -> [(name: String, data: String)] {
-        let on = commandIsControl ? "1" : "0"
+        // Mac Driver settings are REG_SZ "y"/"n", not DWORD — a DWORD 1 is read as absent and the
+        // mapping silently stays off, which is exactly how this was first shipped and had to be fixed.
+        let on = commandIsControl ? "y" : "n"
         return [
             ("LeftCommandIsCtrl", on), ("RightCommandIsCtrl", on),
             ("LeftOptionIsAlt", on), ("RightOptionIsAlt", on),
@@ -291,7 +293,7 @@ public struct WineRunner: Sendable {
     public func setKeyboardMapping(commandIsControl: Bool) async throws {
         for v in Self.keyboardRegistry(commandIsControl: commandIsControl) {
             try await regAdd(key: #"HKCU\Software\Wine\Mac Driver"#, name: v.name,
-                             type: "REG_DWORD", data: v.data)
+                             type: "REG_SZ", data: v.data)
         }
     }
 
