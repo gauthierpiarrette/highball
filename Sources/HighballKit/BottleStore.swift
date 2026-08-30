@@ -205,7 +205,11 @@ public struct BottleStore: Sendable {
         // whole copy at the destination and a gutted source. rename returns EXDEV and touches
         // neither side, which is the failure we want if `home` is ever split across volumes.
         guard rename(url.path, target.path) == 0 else {
-            let why = String(cString: strerror(errno))
+            let code = errno
+            // Something else already removed it — two deletes of the same bottle race here, and
+            // telling the loser "nothing was removed and the bottle still works" would be a lie.
+            if code == ENOENT { throw HighballError.missing("bottle '\(name)'") }
+            let why = String(cString: strerror(code))
             throw HighballError.failed("""
                 Couldn't delete '\(name)'. Highball couldn't move it out of the bottles folder \
                 (\(why)). Nothing was removed and the bottle still works.
