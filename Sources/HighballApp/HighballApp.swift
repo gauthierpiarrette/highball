@@ -278,8 +278,9 @@ struct ContentView: View {
             Alert(title: Text("\(s.program) exited right away"),
                   message: Text("That usually means the graphics backend doesn't suit it. Try \(s.renderer.rawValue.uppercased())? The log is at \(s.logPath)."),
                   primaryButton: .default(Text("Use \(s.renderer.rawValue.uppercased())")) {
-                      if let name = state.selectedBottle, var bottle = state.bottles.first(where: { $0.name == name }) {
+                      if var bottle = state.bottles.first(where: { $0.name == s.bottleName }) {
                           bottle.settings.renderer = s.renderer
+                          bottle.settings.rendererExplicit = true   // the user picked it; recipes must not clobber it (#29)
                           state.update(bottle)
                       }
                   },

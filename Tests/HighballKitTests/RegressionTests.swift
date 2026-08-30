@@ -151,23 +151,222 @@ extension RegressionTests {
 }
 
 extension RegressionTests {
-    // The report button used to attach the single newest log; when a game is launched
-    // through Steam the launcher's log is newest, so triage got Steam's log, not the
-    // game's (#22). Confirm the launcher-marker filter is exhaustive for known launchers.
-    func testReportLogPrefersGameOverLauncher() {
-        // These are the launcher log basenames the picker must skip when a game log exists.
-        let launcherLogs = [
-            "2026-08-26T104357Z-Steam for cyberpunk-steam.exe.log",
-            "2026-08-26T000000Z-b-EpicGamesLauncher.exe.log",
-            "2026-08-26T000000Z-b-UbisoftConnect.exe.log",
-            "2026-08-26T000000Z-b-Launcher.exe.log",
-        ]
-        let markers = ["steam.exe", "epicgameslauncher", "ubisoftconnect", "galaxyclient", "battle.net", "launcher.exe", "rockstarservice"]
-        for name in launcherLogs {
-            XCTAssertTrue(markers.contains { name.lowercased().contains($0) }, "'\(name)' should be recognized as a launcher log")
+    // The report button used to skip any log whose NAME looked like a launcher's, on the theory
+    // that a game started through Steam writes its own log last (#22). For a game that can only
+    // be started from the launcher's own UI — legacy CS:GO's CEG chooser — that is exactly
+    // backwards: Wine gives the whole process tree one pipe, so the game's DXVK output lands in
+    // the steam.exe log, and skipping it left a wineboot log with nothing in it. That is the
+    // file issue #21's reporter sent, and it cost four rounds. Selection is now by content.
+    func testReportPicksTheLogThatNamesTheBackendEvenWhenItIsALaunchers() throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "hb-report-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let steamLog = dir.appending(path: "2026-08-28T111314Z-play-steam.exe.log")
+        try """
+        # gin x64-sikarugir10.0_6-r0 bottle=play renderer=dxvk
+        # wine steam.exe -silent -applaunch 730
+        info:  Game: csgo.exe
+        info:  DXVK-Kegworks: v1.10.4-async
+        info:  Found config file: C:\\highball\\dxvk.conf
+        info:  Effective configuration:
+        info:    d3d9.customVendorId = 1002
+        info:    dxvk.enableAsync = False
+        """.write(to: steamLog, atomically: true, encoding: .utf8)
+
+        // Written LAST, so the old newest-non-launcher rule would have picked exactly this.
+        let winebootLog = dir.appending(path: "2026-08-28T111500Z-play-wineboot.log")
+        try """
+        # gin x64-sikarugir10.0_6-r0 bottle=play renderer=wined3d
+        # wine wineboot -u
+        err:kerberos:kerberos_LsaApInitializePackage no Kerberos support, expect problems
+        """.write(to: winebootLog, atomically: true, encoding: .utf8)
+        // Make the wineboot log unambiguously the newest.
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: winebootLog.path)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-60)],
+                                              ofItemAtPath: steamLog.path)
+
+        let found = BugReport.mostInformativeLog(in: [dir])
+        XCTAssertEqual(found?.url.lastPathComponent, steamLog.lastPathComponent,
+                       "must pick the log that actually recorded a graphics backend")
+        let digest = BugReport.digest(found?.text ?? "")
+        XCTAssertTrue(digest.contains("Game: csgo.exe"), "the banner naming the exe must survive")
+        XCTAssertTrue(digest.contains("dxvk.enableAsync = False"), "the effective config block must survive")
+    }
+
+    // A blind suffix(30) is useless on a wine log: the end is MoltenVK warning spam while the
+    // block that identifies the backend sits thousands of lines earlier (6547 of 8185 in #21).
+    func testReportDigestKeepsTheBackendBlockBuriedMidLogAndCollapsesSpam() {
+        var lines = ["# gin e bottle=b renderer=dxvk", "# wine steam.exe"]
+        lines += (0..<3000).map { "info:  chatter \($0)" }
+        lines += ["info:  Game: csgo.exe", "info:  Effective configuration:", "info:    dxvk.enableAsync = False"]
+        lines += (0..<200).map { _ in "[mvk-warn] Metal does not support disabling primitive restart." }
+        let digest = BugReport.digest(lines.joined(separator: "\n"))
+
+        XCTAssertTrue(digest.contains("Game: csgo.exe"))
+        XCTAssertTrue(digest.contains("dxvk.enableAsync = False"))
+        XCTAssertTrue(digest.contains("# wine steam.exe"), "the launch header must survive")
+        XCTAssertTrue(digest.contains("(x"), "identical repeated lines must collapse")
+        XCTAssertLessThan(digest.count, BugReport.maxDigestCharacters + 1)
+        XCTAssertFalse(digest.contains("chatter 1500"), "unremarkable middle must be dropped")
+    }
+}
+
+extension RegressionTests {
+    // The first cut of the digest capped itself with suffix(), which discards the FRONT — the
+    // launch header, the backend banner and the effective-configuration block it exists to keep —
+    // and preserves the MoltenVK tail spam, i.e. exactly the failure it was written to fix.
+    // Measured on this machine's real logs: 15 of 411 crossed the cap and 14 lost their header.
+    func testOversizedDigestKeepsTheHeadNotJustTheTail() {
+        var lines = ["# gin ENGINE bottle=b renderer=dxvk", "# wine steam.exe -applaunch 730",
+                     "info:  Game: csgo.exe", "info:  Effective configuration:",
+                     "info:    dxvk.enableAsync = False"]
+        // Distinct long error lines: the real shape that overflows the budget.
+        lines += (0..<400).map { "0\($0 % 10)a\($0 % 10):err:module:import_dll Library FOO\($0).dll not found in \(String(repeating: "path/", count: 20))" }
+        lines += (0..<60).map { "[mvk-warn] Metal does not support disabling primitive restart \($0)." }
+        let digest = BugReport.digest(lines.joined(separator: "\n"))
+
+        XCTAssertGreaterThan(lines.joined(separator: "\n").count, BugReport.maxDigestCharacters,
+                             "fixture must actually overflow, or this test is vacuous")
+        XCTAssertLessThanOrEqual(digest.count, BugReport.maxDigestCharacters + 200)
+        XCTAssertTrue(digest.contains("# gin ENGINE bottle=b renderer=dxvk"), "launch header must survive truncation")
+        XCTAssertTrue(digest.contains("Game: csgo.exe"), "backend banner must survive truncation")
+        XCTAssertTrue(digest.contains("dxvk.enableAsync = False"), "effective config must survive truncation")
+        XCTAssertTrue(digest.contains("digest lines dropped"), "truncation must be visible, never silent")
+    }
+
+    // No single line may be long enough to paste a launcher's auth token into a public issue,
+    // and the user's home directory must not carry their account name there either.
+    func testDigestClipsLongLinesAndRedactsHome() {
+        let token = String(repeating: "eyJhbGciOiJIUzI1NiJ9.", count: 60)
+        let digest = BugReport.digest("# wine x\nerr:  LogHttp: GET \(NSHomeDirectory())/x?auth=\(token)")
+        XCTAssertFalse(digest.contains(token), "a long opaque value must be clipped")
+        XCTAssertFalse(digest.contains(NSHomeDirectory()), "home path must be redacted to ~")
+        XCTAssertTrue(digest.contains("~"))
+    }
+
+    // The digest cap is not a URL cap: percent-encoding a log several-folds it, and GitHub
+    // answers a request URI over ~8 KB with 414 — the report button would silently fail.
+    func testReportURLStaysUnderGitHubsRequestLimit() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "hb-url-\(UUID().uuidString)")
+        let paths = HighballPaths(home: home)
+        try paths.ensure()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let noisy = (0..<3000).map { "0a0b:err:module:import_dll Library FOO\($0).dll not found" }
+        try (["# gin E bottle=b renderer=dxvk", "info:  Game: csgo.exe"] + noisy)
+            .joined(separator: "\n")
+            .write(to: paths.logs.appending(path: "2026-08-30T000000Z-b-steam.exe.log"),
+                   atomically: true, encoding: .utf8)
+
+        let url = BugReport.url(version: "0.7.17", paths: paths)
+        XCTAssertLessThanOrEqual(url.absoluteString.count, BugReport.maxURLCharacters)
+        XCTAssertTrue(url.absoluteString.contains("template=bug.yml"))
+    }
+}
+
+extension RegressionTests {
+    // D3D9 now reaches DXVK on every renderer, so the config that carries the per-game profiles
+    // and the per-process log path must follow it. Gating these on `== .dxvk` left a D3D9 title
+    // on a dxmt or d3dmetal bottle running DXVK with no profile and no log at all.
+    func testDxvkConfigAndLogPathReachEveryNonWineD3DRenderer() throws {
+        var manifest = try EngineManifest.load(from: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "spike/engine-manifest.json"))
+        manifest.acceptedLicenses = Array(EngineManifest.gatedRenderers.values)
+        let root = FileManager.default.temporaryDirectory.appending(path: "hb-cfg-\(UUID().uuidString)")
+        for r in ["dxmt", "d3dmetal", "dxvk", "d9vk"] {
+            try FileManager.default.createDirectory(
+                at: root.appending(path: "frameworks/renderer/\(r)/wine"), withIntermediateDirectories: true)
         }
-        // A real game log must NOT match any launcher marker.
-        XCTAssertFalse(markers.contains { "2026-08-26T104400Z-cyberpunk-Cyberpunk2077.exe.log".lowercased().contains($0) })
+        defer { try? FileManager.default.removeItem(at: root) }
+        let engine = InstalledEngine(manifest: manifest, root: root)
+        let bottle = Bottle(url: FileManager.default.temporaryDirectory.appending(path: "hb-cfg-bottle"),
+                            settings: BottleSettings(name: "t", engineID: manifest.id))
+
+        for renderer in [Renderer.dxmt, .d3dmetal, .dxvk] {
+            let env = try bottle.environment(engine: engine, renderer: renderer)
+            XCTAssertEqual(env["DXVK_CONFIG_FILE"], Bottle.dxvkConfigWindowsPath, "\(renderer.rawValue)")
+            XCTAssertEqual(env["DXVK_LOG_PATH"], Bottle.dxvkLogWindowsPath, "\(renderer.rawValue)")
+        }
+        let plain = try bottle.environment(engine: engine, renderer: .wined3d)
+        XCTAssertNil(plain["DXVK_CONFIG_FILE"], "wined3d uses no DXVK")
+        XCTAssertNil(plain["DXVK_LOG_PATH"])
+    }
+}
+
+extension RegressionTests {
+    // Reproduced on this machine 2026-08-30: legacy CS:GO on a bottle using the DEFAULT renderer
+    // (dxmt) died with "Your graphics hardware does not support all features (CSM)". Neither the
+    // dxmt nor the d3dmetal overlay ships a d3d9 for either architecture, so D3D9 fell through to
+    // Wine's wined3d, whose D3D9 lacks the shadow-depth formats Source probes. 0.7.9 fixed this
+    // for the dxvk renderer ONLY, leaving the default broken. Every renderer must now reach
+    // DXVK's d3d9 (issue #21).
+    func testEveryRendererReachesDXVKsD3D9() throws {
+        let manifestURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "spike/engine-manifest.json")
+        var manifest = try EngineManifest.load(from: manifestURL)
+        // d3dmetal is licence-gated (Apple GPTK); accept it so the gate isn't what's under test.
+        manifest.acceptedLicenses = Array(EngineManifest.gatedRenderers.values)
+        let root = FileManager.default.temporaryDirectory.appending(path: "hb-d9vk-\(UUID().uuidString)")
+        // rendererDir only returns a directory that exists, so lay out the overlays it looks for.
+        for r in ["dxmt", "d3dmetal", "dxvk", "d9vk"] {
+            try FileManager.default.createDirectory(
+                at: root.appending(path: "frameworks/renderer/\(r)/wine"), withIntermediateDirectories: true)
+        }
+        defer { try? FileManager.default.removeItem(at: root) }
+        let engine = InstalledEngine(manifest: manifest, root: root)
+        guard let d9vk = engine.rendererDir("d9vk") else { return XCTFail("fixture missing d9vk") }
+        let d9vkPath = d9vk.appending(path: "wine").path
+
+        for renderer in [Renderer.dxmt, .d3dmetal, .dxvk] {
+            let env = try renderer.environment(engine: engine)
+            let search = env["WINEDLLPATH_PREPEND"] ?? ""
+            XCTAssertTrue(search.split(separator: ":").contains { $0 == d9vkPath },
+                          "\(renderer.rawValue) must reach DXVK's d3d9 or D3D9 titles fall back to wined3d (CSM gate, #21)")
+        }
+        // wined3d is Wine's own stack by definition and contributes no overlay.
+        XCTAssertNil(try Renderer.wined3d.environment(engine: engine)["WINEDLLPATH_PREPEND"])
+    }
+
+    // The alert used to edit `selectedBottle`, which launchGame never sets, so accepting a
+    // suggestion could rewrite an unrelated bottle. The cycle itself must stay total.
+    func testRendererSuggestionCyclesAndNeverSuggestsItself() {
+        for r in Renderer.allCases {
+            XCTAssertNotEqual(Renderer.suggestion(after: r), r)
+        }
+        XCTAssertEqual(Renderer.suggestion(after: .dxmt), .d3dmetal)
+        XCTAssertEqual(Renderer.suggestion(after: .d3dmetal), .dxvk)
+    }
+}
+
+extension RegressionTests {
+    // The ISO 8601 stamp is second-resolution and createFile truncates, so two launches inside
+    // one second destroyed each other's log. Repair fires reg, reg and wineboot back to back.
+    func testLogNamesDoNotCollideWithinASecond() throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "hb-logname-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let first = WineRunner.uniqueLogURL(in: dir, named: "2026-08-28T111314Z-play-reg")
+        FileManager.default.createFile(atPath: first.path, contents: nil)
+        let second = WineRunner.uniqueLogURL(in: dir, named: "2026-08-28T111314Z-play-reg")
+        XCTAssertNotEqual(first, second)
+        // label falls back to args.first, which can be a full path — never make subdirectories.
+        let flattened = WineRunner.uniqueLogURL(in: dir, named: "stamp-b-/Users/x/Program Files/a.exe")
+        XCTAssertEqual(flattened.deletingLastPathComponent().path, dir.path)
+    }
+
+    // A pin's own environment is merged LAST, so Steam's persisted WINEMSYNC=0/WINEESYNC=0 wins
+    // over the bottle's setting for everything launched from its window. The header must record
+    // what the process really got, or a report cannot tell "sync was applied" from "sync was
+    // silently overridden" — the ambiguity that made "try sync=none" a no-op in issue #21.
+    func testEffectiveSyncReportsTheOverrideNotTheSetting() {
+        var settings = BottleSettings(name: "t", engineID: "e")
+        settings.sync = .msync
+        let overridden = WineRunner.effectiveSync(env: ["WINEMSYNC": "0", "WINEESYNC": "0"], settings: settings)
+        XCTAssertTrue(overridden.hasPrefix("none"))
+        XCTAssertTrue(overridden.contains("bottle asks msync"))
+        XCTAssertEqual(WineRunner.effectiveSync(env: ["WINEMSYNC": "1", "WINEESYNC": "0"], settings: settings), "msync")
     }
 }
 

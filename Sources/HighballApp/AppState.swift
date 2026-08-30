@@ -45,6 +45,9 @@ final class AppState {
     struct CrashSuggestion: Identifiable {
         let id = UUID()
         let program: String
+        /// The bottle that was actually launched. The alert used to edit `selectedBottle`, which
+        /// `launchGame` never sets — so accepting could rewrite an unrelated bottle, or none.
+        let bottleName: String
         let renderer: Renderer
         let logPath: String
     }
@@ -385,9 +388,10 @@ final class AppState {
             }
             if result.crashedEarly {
                 let current = pin.renderer ?? bottle.settings.renderer
-                let next: Renderer = current == .dxmt ? .d3dmetal : (current == .d3dmetal ? .dxvk : .dxmt)
                 await MainActor.run {
-                    self.crashSuggestion = CrashSuggestion(program: pin.name, renderer: next, logPath: result.log.path)
+                    self.crashSuggestion = CrashSuggestion(program: pin.name, bottleName: bottle.name,
+                                                           renderer: Renderer.suggestion(after: current),
+                                                           logPath: result.log.path)
                 }
             }
         }
@@ -465,9 +469,10 @@ final class AppState {
             }
             if result.crashedEarly {
                 let current = renderer ?? bottle.settings.renderer
-                let next: Renderer = current == .dxmt ? .d3dmetal : (current == .d3dmetal ? .dxvk : .dxmt)
                 await MainActor.run {
-                    self.crashSuggestion = CrashSuggestion(program: game.name, renderer: next, logPath: result.log.path)
+                    self.crashSuggestion = CrashSuggestion(program: game.name, bottleName: bottle.name,
+                                                           renderer: Renderer.suggestion(after: current),
+                                                           logPath: result.log.path)
                 }
             }
         }
@@ -597,10 +602,11 @@ final class AppState {
                 Task { @MainActor in self.appendLog(line) }
             }
             if result.crashedEarly {
+                let current = renderer ?? bottle.settings.renderer
                 await MainActor.run {
-                    self.crashSuggestion = CrashSuggestion(program: game.app_title,
-                                                          renderer: renderer == .dxvk ? .d3dmetal : .dxvk,
-                                                          logPath: result.log.path)
+                    self.crashSuggestion = CrashSuggestion(program: game.app_title, bottleName: bottle.name,
+                                                           renderer: Renderer.suggestion(after: current),
+                                                           logPath: result.log.path)
                 }
             }
         }

@@ -19,11 +19,11 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
             return env
         case .dxmt:
             guard let dir = engine.rendererDir("dxmt") else { throw HighballError.missing("dxmt renderer in engine \(engine.id)") }
-            env["WINEDLLPATH_PREPEND"] = dir.appending(path: "wine").path
+            env["WINEDLLPATH_PREPEND"] = Self.withD9VK(dir.appending(path: "wine").path, engine: engine)
         case .d3dmetal:
             guard let dir = engine.rendererDir("d3dmetal") else { throw HighballError.missing("d3dmetal renderer in engine \(engine.id) (optional component not installed?)") }
             let external = dir.appending(path: "external").path
-            env["WINEDLLPATH_PREPEND"] = dir.appending(path: "wine").path
+            env["WINEDLLPATH_PREPEND"] = Self.withD9VK(dir.appending(path: "wine").path, engine: engine)
             env["CX_D3DMETALPATH"] = external
             env["DYLD_FALLBACK_LIBRARY_PATH+"] = external
             env["DYLD_FALLBACK_FRAMEWORK_PATH+"] = external
@@ -40,6 +40,39 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
             env["WINEDLLOVERRIDES+"] = "dxgi,d3d9,d3d10core,d3d11=n,b"
         }
         return env
+    }
+
+    /// Appends the d9vk overlay (DXVK's D3D9) to a Metal backend's DLL search path.
+    ///
+    /// The renderer setting chooses the D3D10/11/12 backend; D3D9 must not be collateral damage.
+    /// Neither the dxmt nor the d3dmetal overlay ships a d3d9 for either architecture (d3dmetal's
+    /// i386 directory is a symlink to cnc-ddraw's and holds only ddraw.dll), so without this a
+    /// D3D9 title silently gets Wine's own wined3d, whose D3D9 lacks the DF16/DF24 shadow-depth
+    /// formats Source's CSM check probes. Legacy CS:GO then refuses to start with "graphics
+    /// hardware does not support all features (CSM)".
+    ///
+    /// 0.7.9 fixed this for the dxvk renderer only, leaving it live on dxmt — the DEFAULT — and
+    /// on d3dmetal. Reproduced on a dxmt bottle 2026-08-30 with that exact dialog (issue #21).
+    /// Appended, not prepended, so the chosen backend keeps priority for everything it does ship;
+    /// d9vk contributes only d3d9.dll, so the two never collide.
+    ///
+    /// Degrades to the backend alone if the engine has no d9vk, rather than throwing: this is the
+    /// default renderer's path, and an engine missing d9vk should still run D3D11 titles. The
+    /// dxvk case keeps its hard failure, because there D3D9 is the whole point.
+    private static func withD9VK(_ path: String, engine: InstalledEngine) -> String {
+        guard let d9vk = engine.rendererDir("d9vk") else { return path }
+        return [path, d9vk.appending(path: "wine").path].joined(separator: ":")
+    }
+
+    /// The backend to offer after `current` failed on launch, cycling through the Metal-backed
+    /// options. Direct3D 9 no longer constrains this: `withD9VK` attaches DXVK's d3d9 to every
+    /// renderer, so switching backend can't drop D3D9 support the way it could before 0.7.17.
+    public static func suggestion(after current: Renderer) -> Renderer {
+        switch current {
+        case .dxmt: return .d3dmetal
+        case .d3dmetal: return .dxvk
+        case .dxvk, .wined3d: return .dxmt
+        }
     }
 }
 
@@ -264,7 +297,17 @@ public struct Bottle: Sendable {
         // the async fork reads `env == "1" || config.enableAsync`, so an env 1 can never be
         // overridden for a single game, while the conf's [csgo.exe] section can (issue #21).
         // WineRunner writes the file before each dxvk launch.
-        if r == .dxvk { env["DXVK_CONFIG_FILE"] = Self.dxvkConfigWindowsPath }
+        // Every renderer but wined3d now reaches DXVK's d3d9 (see withD9VK), so the config and
+        // the per-process log must follow it. Gating these on `== .dxvk` left D3D9 titles on a
+        // dxmt or d3dmetal bottle running DXVK with no per-game profile and no log at all.
+        if r != .wined3d {
+            env["DXVK_CONFIG_FILE"] = Self.dxvkConfigWindowsPath
+            // DXVK also writes a per-process <exe>_d3d9.log naming the backend, the config it
+            // read and the device it got. Pointing it inside the bottle gives Highball the one
+            // artifact that survives a game started by a launcher client Highball did not spawn —
+            // the case where the game has no wine log of its own at all (issue #21).
+            env["DXVK_LOG_PATH"] = Self.dxvkLogWindowsPath
+        }
         if settings.fpsCap > 0 {
             switch r {
             case .dxvk: env["DXVK_FRAME_RATE"] = String(settings.fpsCap)
@@ -283,6 +326,9 @@ public struct Bottle: Sendable {
     public static let dxvkConfigWindowsPath = #"C:\highball\dxvk.conf"#
     /// Unix location of the same file.
     public var dxvkConfigURL: URL { driveC.appending(path: "highball/dxvk.conf") }
+    /// Windows path DXVK writes its per-process logs to, and its Unix location.
+    public static let dxvkLogWindowsPath = #"C:\highball\logs"#
+    public var dxvkLogURL: URL { driveC.appending(path: "highball/logs") }
 
     /// Contents of the per-bottle dxvk.conf. The global line carries the bottle's async
     /// toggle. The [csgo.exe] section is the issue #21 profile: legacy CS:GO (32-bit D3D9)
@@ -294,10 +340,15 @@ public struct Bottle: Sendable {
     /// already forces, so the game's dxsupport.cfg picks a concrete GPU profile instead
     /// of unknown-device failsafe. Later lines win, so the section must follow the global.
     public static func dxvkConfig(async: Bool, appConfig: [String: [String: String]] = [:]) -> String {
-        // FALLBACK, kept deliberately (do not delete yet): legacy CS:GO froze at map load
-        // with async on (issue #21), and legacy CS:GO can ONLY launch via Steam's own
-        // chooser (CEG DRM) — it never passes the app's Play-gate, so bottles without the
-        // counter-strike-2 recipe still need this. The same knowledge now ships as data
+        // FALLBACK, kept deliberately (do not delete yet): legacy CS:GO can only be started
+        // from Steam's own launch-option chooser, so it never passes the app's Play-gate and a
+        // bottle without the counter-strike-2 recipe still needs these values. Re-confirmed
+        // 2026-08-30: even with the csgo_legacy beta branch selected, `steam -applaunch 730`
+        // starts cs2.exe, because -applaunch cannot answer the chooser ("LaunchApp waiting for
+        // user response" in Steam's own log) and takes the default option.
+        // NOTE: async is NOT the cause of the #21 map-load freeze. The logs show this config
+        // reaching csgo.exe exactly as designed and the game froze anyway. These values stay
+        // because each is individually sound, not because they fixed it. The same knowledge
         // (recipe dxvkconfig step); recipe-set values OVERRIDE this fallback. Remove after
         // a deprecation window once recipe coverage is the norm.
         let csgoFallback = ["dxvk.enableAsync": "False", "d3d9.maxAvailableMemory": "2048",
@@ -325,6 +376,8 @@ public struct Bottle: Sendable {
     public func writeDxvkConfig() throws {
         let dir = dxvkConfigURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // DXVK only writes its per-process log if the directory exists.
+        try FileManager.default.createDirectory(at: dxvkLogURL, withIntermediateDirectories: true)
         let content = Self.dxvkConfig(async: settings.dxvkAsync, appConfig: settings.dxvkAppConfig)
         if (try? String(contentsOf: dxvkConfigURL, encoding: .utf8)) != content {
             try content.write(to: dxvkConfigURL, atomically: true, encoding: .utf8)

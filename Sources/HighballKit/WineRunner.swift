@@ -32,6 +32,60 @@ public struct WineRunner: Sendable {
         }
     }
 
+    /// A log URL that cannot overwrite an existing one. The ISO 8601 stamp is second-resolution
+    /// and `createFile` truncates, so two launches inside the same second used to destroy one
+    /// another's log — routine during Repair, which fires reg, reg and wineboot back to back.
+    /// The name is also flattened: `label` falls back to `args.first`, which can be a full path.
+    static func uniqueLogURL(in directory: URL, named name: String) -> URL {
+        let flat = name.replacingOccurrences(of: "/", with: "_")
+        let base = directory.appending(path: "\(flat).log")
+        guard FileManager.default.fileExists(atPath: base.path) else { return base }
+        for n in 2...99 {
+            let candidate = directory.appending(path: "\(flat)-\(n).log")
+            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return base
+    }
+
+    /// What the process will really synchronize with, which is not always the bottle's setting:
+    /// a pin's own environment is merged LAST and wins, and Steam's pin persists
+    /// WINEMSYNC=0/WINEESYNC=0 so its interface stays responsive. Every game launched from that
+    /// Steam window therefore inherits sync-off whatever the bottle says — the reason "try
+    /// sync=none" was a no-op in issue #21 and the reporter's negative result meant nothing.
+    static func effectiveSync(env: [String: String], settings: BottleSettings) -> String {
+        let actual: SyncMode
+        if env["WINEMSYNC"] == "1" { actual = .msync }
+        else if env["WINEESYNC"] == "1" { actual = .esync }
+        else { actual = SyncMode.none }
+        return actual == settings.sync ? actual.rawValue : "\(actual.rawValue) (bottle asks \(settings.sync.rawValue))"
+    }
+
+    /// The log's opening block. Beyond the command line it records the few settings that decide
+    /// which graphics and synchronization stack the process actually got.
+    ///
+    /// Allowlisted on purpose, never the whole environment: this text is pre-filled into a public
+    /// GitHub issue, and a bottle's env can hold personal paths or tokens. Without it a report
+    /// cannot separate "the config was never delivered" from "the config was delivered and did
+    /// not help", which is exactly where issue #21 stalled for two rounds.
+    static func launchHeader(engine: InstalledEngine, bottle: Bottle, renderer: Renderer,
+                             env: [String: String], args: [String]) -> String {
+        var out = "# gin \(engine.id) bottle=\(bottle.name) renderer=\(renderer)\n"
+        out += "# wine \(args.joined(separator: " "))\n"
+        out += "# sync=\(Self.effectiveSync(env: env, settings: bottle.settings))"
+        out += " winver=\(bottle.settings.windowsVersion.rawValue) dpi=\(bottle.settings.dpiScale)"
+        out += " dxvkAsync=\(bottle.settings.dxvkAsync)\n"
+        for key in ["WINEDLLPATH_PREPEND", "WINEDLLOVERRIDES", "DXVK_CONFIG_FILE", "DXVK_LOG_PATH"] {
+            if let value = env[key] { out += "# \(key)=\(value)\n" }
+        }
+        // The generated dxvk.conf decides per-game behaviour, so quote it rather than making the
+        // reader ask for a second file that Repair may already have rewritten.
+        if env["DXVK_CONFIG_FILE"] != nil,
+           let conf = try? String(contentsOf: bottle.dxvkConfigURL, encoding: .utf8) {
+            out += conf.split(separator: "\n").map { "#   \($0)\n" }.joined()
+        }
+        return out
+    }
+
     /// Runs `wine <args>` and waits. `onOutput` receives each line of combined stdout/stderr.
     @discardableResult
     public func run(
@@ -43,15 +97,17 @@ public struct WineRunner: Sendable {
         onOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> LaunchResult {
         try paths.ensure()
-        // The dxvk renderer reads its options from the generated conf (async toggle +
-        // per-game profiles like [csgo.exe], issue #21) — refresh it before the spawn.
-        if (renderer ?? bottle.settings.renderer) == .dxvk { try? bottle.writeDxvkConfig() }
+        // DXVK reads its options from the generated conf (async toggle + per-game profiles like
+        // [csgo.exe], issue #21) — refresh it before the spawn. Every renderer but wined3d gets
+        // DXVK's d3d9 attached, so every one of them needs the conf, not just .dxvk.
+        if (renderer ?? bottle.settings.renderer) != .wined3d { try? bottle.writeDxvkConfig() }
         let env = try bottle.environment(engine: engine, renderer: renderer, extra: extraEnvironment)
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
-        let logURL = paths.logs.appending(path: "\(stamp)-\(bottle.name)-\(label ?? args.first ?? "wine").log")
+        let logURL = Self.uniqueLogURL(in: paths.logs, named: "\(stamp)-\(bottle.name)-\(label ?? args.first ?? "wine")")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         let logHandle = try FileHandle(forWritingTo: logURL)
-        let header = "# gin \(engine.id) bottle=\(bottle.name) renderer=\(renderer ?? bottle.settings.renderer)\n# wine \(args.joined(separator: " "))\n"
+        let header = Self.launchHeader(engine: engine, bottle: bottle,
+                                       renderer: renderer ?? bottle.settings.renderer, env: env, args: args)
         logHandle.write(Data(header.utf8))
 
         let process = Process()

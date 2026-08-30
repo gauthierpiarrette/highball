@@ -1,7 +1,8 @@
 #!/bin/bash
 # On-demand renderer smoke (the release gate's evidence). Runs Unigine Heaven in a
 # scratch bottle across the renderer matrix that issue #21 taught us to cover:
-#   dxmt/D3D11, dxvk/D3D11, dxvk/D3D9 with async on, dxvk/D3D9 with async off.
+#   dxmt/D3D11, dxvk/D3D11, dxvk/D3D9 with async on, dxvk/D3D9 with async off,
+#   and dxmt/D3D9 — the combination that shipped broken from 0.7.9 to 0.7.16.
 # Pass criterion is liveness (still rendering at T+45 s, no dyld/library failure,
 # expected DXVK banner state) — a headless script cannot judge pixels; real-game
 # verification stays a human job. Result lands in private/render-smoke/latest.json,
@@ -62,8 +63,12 @@ run_case() { # name renderer video_app async(0|1|-)
       dxvk:1) grep -q 'async compiler threads' "$log" || { echo "FAIL: async expected but absent"; pass=0; } ;;
       dxvk:0) grep -q 'async compiler threads' "$log" && { echo "FAIL: async present despite toggle off"; pass=0; } ;;
     esac
-    if [ "$renderer" = dxvk ]; then
-      grep -q 'DXVK' "$log" || { echo "FAIL: no DXVK banner"; pass=0; }
+    # Any D3D9 case must show a DXVK banner. That is the issue #21 tripwire: the dxmt and
+    # d3dmetal overlays ship no d3d9, so without the d9vk overlay attached D3D9 silently drops
+    # to wined3d, whose missing shadow-depth formats fail Source's CSM check and kept legacy
+    # CS:GO from starting on the DEFAULT renderer from 0.7.9 to 0.7.16.
+    if [ "$renderer" = dxvk ] || [ "$vapp" = direct3d9 ]; then
+      grep -q 'DXVK' "$log" || { echo "FAIL: no DXVK banner (D3D9 fell back to wined3d?)"; pass=0; }
     fi
   else
     echo "FAIL: no run log found"; pass=0
@@ -79,6 +84,7 @@ run_case "dxmt-d3d11"      dxmt direct3d11 "-"
 run_case "dxvk-d3d11"      dxvk direct3d11 "1"
 run_case "dxvk-d3d9-async" dxvk direct3d9  "1"
 run_case "dxvk-d3d9-sync"  dxvk direct3d9  "0"
+run_case "dxmt-d3d9"       dxmt direct3d9  "-"
 
 "$HB" bottle kill "$BOTTLE" >/dev/null 2>&1 || true
 "$HB" bottle delete "$BOTTLE" || true
