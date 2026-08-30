@@ -66,9 +66,11 @@ public struct BottleStore: Sendable {
             try await Self.ensureWoW64(runner: runner, bottle: bottle, log: result.log)
         } catch {
             // Don't strand a half-built bottle: it can never run a 32-bit installer, and leaving
-            // it behind means retrying with the same name hits "bottle already exists".
+            // it behind means retrying with the same name hits "bottle already exists". This has
+            // to go through discard() for the same reason delete() does — a plain removeItem
+            // here fails the same way (#38) and, wrapped in try?, strands the bottle silently.
             try? runner.kill()
-            try? FileManager.default.removeItem(at: url)
+            _ = try? discard(url, name: name)
             throw error
         }
         if windowsVersion != .win10 { try await runner.setWindowsVersion(windowsVersion) }
@@ -153,13 +155,112 @@ public struct BottleStore: Sendable {
         return copy
     }
 
-    public func delete(_ name: String) throws {
+    /// Deletes a bottle by moving it out of `bottles/` first, then purging it.
+    ///
+    /// The move is one `rename(2)`: it either happens or it doesn't, so a bottle can never be
+    /// left half-deleted. A recursive remove can, and did (#38) — it walks the prefix in readdir
+    /// order and abandons the rest of a directory at the first entry macOS refuses to unlink.
+    /// `drive_c` sorts last in a bottle, so a blocker almost anywhere destroys `bottle.json`
+    /// first, and that made the bottle invisible to `list()`, refused by `delete()`'s old
+    /// bottle.json guard and blocked by `create()`'s name check, with its files still on disk.
+    ///
+    /// Returns whatever the purge could not remove. The bottle is gone from `bottles/` and its
+    /// name is free either way; leftovers wait in `.trash` for `sweepTrash()` to retry.
+    @discardableResult
+    public func delete(_ name: String) throws -> [PurgeFailure] {
         let url = paths.bottle(name)
-        guard FileManager.default.fileExists(atPath: url.appending(path: "bottle.json").path) else {
-            throw HighballError.missing("bottle '\(name)'")
+        // Resolve by folder, not by bottle.json. The folder is the bottle's identity — the same
+        // rule list() reconciles names to — and a bottle whose settings file is unreadable is
+        // precisely the one that most needs deleting.
+        var st = stat()
+        guard lstat(url.path, &st) == 0 else { throw HighballError.missing("bottle '\(name)'") }
+        return try discard(url, name: name)
+    }
+
+    /// Moves a bottle directory into `.trash` and purges it there. Shared by `delete` and
+    /// `create`'s rollback so both are atomic in the only way that matters to the user: the
+    /// moment the call returns, the name is reusable.
+    @discardableResult
+    func discard(_ url: URL, name: String) throws -> [PurgeFailure] {
+        try FileManager.default.createDirectory(at: paths.trash, withIntermediateDirectories: true)
+        // rename(2) needs write on the two parent directories and nothing else, so it succeeds
+        // over trees removeItem cannot touch (0555 and 0000 directories, uchg flags, deny-delete
+        // ACLs). A poisoned root node is the one case it can't, so repair that node first.
+        var st = stat()
+        if lstat(url.path, &st) == 0 {
+            if st.st_flags != 0 { _ = lchflags(url.path, 0) }
+            if (st.st_mode & 0o700) != 0o700 { _ = chmod(url.path, st.st_mode | 0o700) }
         }
-        try FileManager.default.removeItem(at: url)
+        let target = paths.trash.appending(path: "\(Self.trashName(name))-\(UUID().uuidString)",
+                                           directoryHint: .isDirectory)
+        // rename(2) and deliberately not FileManager.moveItem: across filesystems moveItem
+        // copies and then deletes, and the delete half fails exactly the way #38 does, leaving a
+        // whole copy at the destination and a gutted source. rename returns EXDEV and touches
+        // neither side, which is the failure we want if `home` is ever split across volumes.
+        guard rename(url.path, target.path) == 0 else {
+            let why = String(cString: strerror(errno))
+            throw HighballError.failed("""
+                Couldn't delete '\(name)'. Highball couldn't move it out of the bottles folder \
+                (\(why)). Nothing was removed and the bottle still works.
+                """)
+        }
+        return Purge.tree(at: target)
+    }
+
+    /// Bottle names are user-supplied, so keep them from steering the trash path anywhere.
+    static func trashName(_ name: String) -> String {
+        let safe = name.map { $0 == "/" || $0 == ":" || $0 == "." ? "_" : $0 }
+        return safe.isEmpty ? "bottle" : String(safe.prefix(64))
+    }
+
+    /// Directories under `bottles/` that `list()` cannot show, because their settings file is
+    /// missing or unreadable. `list()` and `damaged()` together cover every folder, so a bottle
+    /// can never be invisible again — being invisible is what stranded the reporter of #38.
+    public func damaged() throws -> [DamagedBottle] {
+        guard FileManager.default.fileExists(atPath: paths.bottles.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(at: paths.bottles, includingPropertiesForKeys: nil)
+            .compactMap { url -> DamagedBottle? in
+                let name = url.lastPathComponent
+                if name.hasPrefix(".") { return nil }
+                var st = stat()
+                guard lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else { return nil }
+                if (try? Bottle.load(url)) != nil { return nil }
+                // A prefix with a Windows dir is a real bottle that lost its settings; anything
+                // else is the wreckage of a delete that stopped part way.
+                let hasPrefix = FileManager.default.fileExists(atPath: url.appending(path: "drive_c/windows").path)
+                return DamagedBottle(name: name, url: url,
+                                     reason: hasPrefix ? "its bottle.json is missing or unreadable"
+                                                       : "a delete stopped part way and left these files behind")
+            }
+            .sorted { $0.name < $1.name }
+    }
+
+    /// Retries anything a previous purge left in `.trash`. Cheap when it is empty, which is the
+    /// normal case, so it is safe to call at launch and before each delete: a leftover whose
+    /// cause was transient clears itself with no user action.
+    @discardableResult
+    public func sweepTrash() -> [(entry: URL, failures: [PurgeFailure])] {
+        let entries = (try? FileManager.default.contentsOfDirectory(at: paths.trash, includingPropertiesForKeys: nil)) ?? []
+        return entries.compactMap { url in
+            let failures = Purge.tree(at: url)
+            return failures.isEmpty ? nil : (url, failures)
+        }
     }
 
     public func update(_ bottle: Bottle) throws { try bottle.save() }
+}
+
+/// A directory under `bottles/` that isn't a loadable bottle. Surfaced so the user can act on
+/// it: without a UI row there is no way to reach a bottle whose settings file is gone.
+public struct DamagedBottle: Sendable, Identifiable, Hashable {
+    public var id: String { name }
+    public let name: String
+    public let url: URL
+    public let reason: String
+
+    public init(name: String, url: URL, reason: String) {
+        self.name = name
+        self.url = url
+        self.reason = reason
+    }
 }

@@ -23,12 +23,17 @@ public struct HighballPaths: Sendable {
     public var bottles: URL { home.appending(path: "bottles", directoryHint: .isDirectory) }
     public var logs: URL { home.appending(path: "logs", directoryHint: .isDirectory) }
     public var manifests: URL { home.appending(path: "manifests", directoryHint: .isDirectory) }
+    /// Staging for bottles on their way out. A sibling of `bottles/` rather than a child, so
+    /// nothing that enumerates bottles ever sees a half-purged tree, and inside `home` rather
+    /// than `~/.Trash` so the move is always same-filesystem — `rename(2)` cannot cross one,
+    /// and Finder could not empty an undeletable prefix anyway.
+    public var trash: URL { home.appending(path: ".trash", directoryHint: .isDirectory) }
 
     public func engine(_ id: String) -> URL { engines.appending(path: id, directoryHint: .isDirectory) }
     public func bottle(_ name: String) -> URL { bottles.appending(path: name, directoryHint: .isDirectory) }
 
     public func ensure() throws {
-        for dir in [home, downloads, engines, bottles, logs, manifests] {
+        for dir in [home, downloads, engines, bottles, logs, manifests, trash] {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
     }

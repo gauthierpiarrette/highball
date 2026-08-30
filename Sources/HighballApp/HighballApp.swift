@@ -15,7 +15,7 @@ struct HighballApp: App {
                 .tint(HB.amber)
                 .preferredColorScheme(.dark)
                 .frame(minWidth: 820, minHeight: 560)
-                .onAppear { state.refresh(); delegate.appState = state }
+                .onAppear { state.refresh(); state.sweepTrash(); delegate.appState = state }
         }
         .windowResizability(.contentSize)
         .commands {
@@ -181,6 +181,29 @@ struct ContentView: View {
                                     Divider()
                                     Button(L("Delete bottle…"), role: .destructive) { pendingDelete = bottle.name }
                                 }
+                            }
+                            // A folder under bottles/ that isn't a loadable bottle still needs
+                            // somewhere to be acted on. Before #38 it was simply invisible, which
+                            // left its files stranded and its name unusable.
+                            ForEach(state.damagedBottles) { damaged in
+                                Button { pendingDelete = damaged.name } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .foregroundStyle(.orange)
+                                            .frame(width: 18)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(damaged.name)
+                                            Text(L("damaged — click to delete"))
+                                                .font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help(damaged.reason)
+                                .padding(.vertical, 5).padding(.horizontal, 7)
+                                .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
                             }
                         }
                         if let engine = state.engines.first {

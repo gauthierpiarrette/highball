@@ -74,11 +74,16 @@ struct Bottle: AsyncParsableCommand {
 
     struct List: AsyncParsableCommand {
         func run() async throws {
-            let bottles = try BottleStore().list()
-            if bottles.isEmpty { print("no bottles"); return }
+            let store = BottleStore()
+            let bottles = try store.list()
+            let damaged = (try? store.damaged()) ?? []
+            if bottles.isEmpty && damaged.isEmpty { print("no bottles"); return }
             for b in bottles {
                 print("\(b.name)\tengine=\(b.settings.engineID)\trenderer=\(b.settings.renderer.rawValue)\tpins=\(b.settings.pins.count)\trecipes=\(b.settings.recipes.joined(separator: ","))")
             }
+            // A folder that isn't a loadable bottle used to be silently skipped, which is how a
+            // half-deleted bottle became invisible and unreachable (#38).
+            for d in damaged { print("\(d.name)\tDAMAGED — \(d.reason) (delete it to free the name)") }
         }
     }
 
@@ -109,7 +114,17 @@ struct Bottle: AsyncParsableCommand {
 
     struct Delete: AsyncParsableCommand {
         @Argument var name: String
-        func run() async throws { try BottleStore().delete(name); print("deleted \(name)") }
+        func run() async throws {
+            let store = BottleStore()
+            // Stop the bottle first, like every other subcommand that touches a prefix. The
+            // kill resolves the prefix by path, so it has to happen before the move.
+            if let b = try? store.get(name), let eng = try? EngineStore().engine(b.settings.engineID) {
+                try? WineRunner(engine: eng, bottle: b).kill()
+            }
+            let leftovers = try store.delete(name)
+            print("deleted \(name)")
+            for failure in leftovers { print("left behind: \(failure)") }
+        }
     }
 
     struct Set: AsyncParsableCommand {

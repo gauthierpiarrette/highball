@@ -6,6 +6,9 @@ public enum HighballError: Error, CustomStringConvertible {
     case processFailed(command: String, status: Int32, output: String)
     case missing(String)
     case invalid(String)
+    /// A message already written for the user. Carries no prefix, so it reads as a sentence
+    /// rather than as a category the reader has to decode.
+    case failed(String)
 
     public var description: String {
         switch self {
@@ -15,6 +18,7 @@ public enum HighballError: Error, CustomStringConvertible {
             return "\(command) exited with \(status)\n\(output)"
         case let .missing(what): return "missing: \(what)"
         case let .invalid(what): return "invalid: \(what)"
+        case let .failed(message): return message
         }
     }
 }

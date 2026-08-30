@@ -7,6 +7,9 @@ import Observation
 final class AppState {
     var engines: [InstalledEngine] = []
     var bottles: [Bottle] = []
+    /// Directories under bottles/ that aren't loadable bottles. Shown alongside the real
+    /// ones so a bottle whose settings file is gone still has somewhere to be acted on (#38).
+    var damagedBottles: [DamagedBottle] = []
     var selectedBottle: String?
     var gamesByBottle: [String: [SteamGame]] = [:]
     var gameDB = GameDB(directories: [])
@@ -167,7 +170,7 @@ final class AppState {
         panel.message = String(format: L("Choose a cover image for %@"), item.title)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try coverStore.setCover(for: item.id, from: url); coverVersion += 1 }
-        catch { errorMessage = "\(error)" }
+        catch { errorMessage = Self.message(for: error) }
     }
 
     func resetCover(for item: LibraryItem) {
@@ -204,6 +207,7 @@ final class AppState {
     func refresh() {
         engines = (try? engineStore.installedEngines()) ?? []
         bottles = (try? bottleStore.list()) ?? []
+        damagedBottles = (try? bottleStore.damaged()) ?? []
         needsOnboarding = engines.isEmpty
         rosettaInstalled = FileManager.default.fileExists(atPath: "/Library/Apple/usr/share/rosetta/rosetta")
         if selectedBottle == nil { selectedBottle = bottles.first?.name }
@@ -224,6 +228,21 @@ final class AppState {
 
     func engine(for bottle: Bottle) -> InstalledEngine? {
         (try? engineStore.engine(bottle.settings.engineID)) ?? engines.first
+    }
+
+    /// What to put in front of the user when something throws. Interpolating an NSError dumps
+    /// its domain, code, userInfo and a pointer address, with the one readable sentence buried
+    /// in the middle — that is what a failed delete looked like in #38.
+    static func message(for error: Error) -> String {
+        if let known = error as? HighballError { return known.description }
+        return (error as NSError).localizedDescription
+    }
+
+    /// Retries anything a previous purge could not remove. Free when `.trash` is empty, which
+    /// is the normal case, so a leftover with a transient cause clears itself at the next launch.
+    func sweepTrash() {
+        let store = bottleStore
+        Task.detached { store.sweepTrash() }
     }
 
     private func appendLog(_ line: String) {
@@ -250,7 +269,7 @@ final class AppState {
             do {
                 try await work()
                 doneState = done ?? DoneState(title: L("Done"), ctaTitle: nil, cta: nil)
-            } catch { showLog = false; errorMessage = "\(error)" }
+            } catch { showLog = false; errorMessage = Self.message(for: error) }
             cleanup?()
             busy = false
             refresh()
@@ -287,7 +306,7 @@ final class AppState {
 
     func acceptGPTK(engine: InstalledEngine) {
         do { _ = try engineStore.accept(license: "apple-gptk-license-2023-08-17", engine: engine); refresh() }
-        catch { errorMessage = "\(error)" }
+        catch { errorMessage = Self.message(for: error) }
     }
 
     func createBottle(name: String, recipeID: String?) {
@@ -375,17 +394,40 @@ final class AppState {
     }
 
     func update(_ bottle: Bottle) {
-        do { try bottleStore.update(bottle); refresh() } catch { errorMessage = "\(error)" }
+        do { try bottleStore.update(bottle); refresh() } catch { errorMessage = Self.message(for: error) }
     }
 
     func deleteBottle(_ name: String) {
-        killBottleNamed(name)
-        do { try bottleStore.delete(name); if selectedBottle == name { selectedBottle = nil }; refresh() }
-        catch { errorMessage = "\(error)" }
+        runBusy("Deleting '\(name)'", showLogSheet: false) { [self] in
+            // Stop the bottle before anything moves: `wineserver -k` resolves the prefix by
+            // path, so after the rename it exits 1 and leaves the server running.
+            killBottleNamed(name)
+            let store = bottleStore
+            // A prefix can be tens of GB, and the old delete ran the whole walk on the main
+            // actor — 985 ms for 20,841 entries, minutes for a big Steam bottle.
+            let leftovers = try await Task.detached { try store.delete(name) }.value
+            await MainActor.run {
+                if self.selectedBottle == name { self.selectedBottle = nil }
+                guard let first = leftovers.first else { return }
+                self.errorMessage = """
+                    '\(name)' is deleted and the name is free again. Some of its files are still \
+                    on disk because macOS refused to remove them, starting at \(first.path) \
+                    (\(first.reason)). Highball keeps them in .trash inside its data folder and \
+                    tries again each time it starts.
+                    """
+            }
+        }
     }
 
     private func killBottleNamed(_ name: String) {
-        if let bottle = bottles.first(where: { $0.name == name }) { killBottle(bottle) }
+        if let bottle = bottles.first(where: { $0.name == name }) { killBottle(bottle); return }
+        // A damaged bottle is not in `bottles`, and it is exactly the one whose wineserver most
+        // needs stopping: nothing else has been able to touch it.
+        guard let engine = engines.first else { return }
+        let url = paths.bottle(name)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let bottle = Bottle(url: url, settings: BottleSettings(name: name, engineID: engine.id))
+        try? WineRunner(paths: paths, engine: engine, bottle: bottle).kill()
     }
 
     func removePin(_ pin: Pin, from bottle: Bottle) {
