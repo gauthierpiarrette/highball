@@ -23,8 +23,8 @@ public struct PurgeFailure: Sendable, Hashable, CustomStringConvertible {
     /// The errno text, e.g. "Permission denied".
     public var reason: String { String(cString: strerror(code)) }
 
-    /// Mode, flags and uid go in the message on purpose: they are the only evidence that can
-    /// tell us what makes a directory unremovable inside a real prefix, which #38 left open.
+    /// Mode, flags and uid are recorded as observed BEFORE any repair, because they are the only
+    /// evidence of what made an entry unremovable — the open question left by issue #38.
     public var description: String {
         "\(path): \(reason) (mode \(String(mode & 0o7777, radix: 8)) flags \(flags) uid \(uid))"
     }
@@ -32,18 +32,28 @@ public struct PurgeFailure: Sendable, Hashable, CustomStringConvertible {
 
 /// Removes a directory tree, doing everything a user could do without privilege escalation.
 ///
-/// `FileManager.removeItem` gives up on far less than the filesystem actually allows: it stops
-/// at the first unwritable directory, immutable flag or deny ACL, and cannot delete a path over
-/// `PATH_MAX` at all. Since a Wine prefix is written by arbitrary Windows installers, any of
-/// those can appear in one.
+/// `FileManager.removeItem` gives up on far less than the filesystem allows: it stops at the
+/// first unwritable directory, immutable flag or deny ACL, and cannot delete a path over
+/// `PATH_MAX` at all. A Wine prefix is written by arbitrary Windows installers, so any of those
+/// can appear in one.
+///
+/// The walk is **fd-relative** — `openat`/`fstatat`/`unlinkat` against a directory descriptor,
+/// with `O_NOFOLLOW`, never a re-resolved path string. That is not a micro-optimisation, it is
+/// the safety property: every bottle contains symlinks pointing out of itself
+/// (`drive_c/users/<user>/{Documents,Desktop,Downloads}` at the real home folders, `dosdevices/z:`
+/// at `/`), and Wine's mountmgr writes into a live prefix. A path-based walk re-resolves each
+/// component after checking it, so a directory that becomes a symlink between the check and the
+/// unlink redirects the delete outside the tree — verified: a path-based version deleted every
+/// file in a directory outside the bottle, 6 runs out of 6. Holding descriptors makes that
+/// unrepresentable, and it removes the PATH_MAX ceiling for free, since each name is relative.
 public enum Purge {
-    /// Best effort. Returns what is still on disk afterwards, deepest entry first, so the
-    /// caller can name the real cause rather than an ENOTEMPTY cascade above it.
+    /// Best effort. Returns what is still on disk afterwards. An empty result means the tree is
+    /// genuinely gone: the caller is told so only after a positive check, never by assumption.
     @discardableResult
     public static func tree(at url: URL) -> [PurgeFailure] {
-        // This deletes recursively and eventually shells out to `rm -rf`, so refuse the shallow
-        // paths a bug upstream could produce: "/", "/Users", "/Users/someone", a volume root.
-        // Everything Highball actually purges is at least <home>/.trash/<entry>, far deeper.
+        // This deletes recursively, so refuse the shallow paths a bug upstream could produce:
+        // "/", "/Users", "/Users/someone", a volume root. Everything Highball purges is at least
+        // <home>/.trash/<entry>, far deeper.
         guard url.isFileURL, url.pathComponents.count >= 4 else {
             return [PurgeFailure(path: url.path, code: EINVAL)]
         }
@@ -51,73 +61,158 @@ public enum Purge {
         if (try? FileManager.default.removeItem(at: url)) != nil { return [] }
 
         var failures: [PurgeFailure] = []
-        force(url.path, &failures)
-        if !exists(url.path) { return [] }
+        let parentPath = url.deletingLastPathComponent().path
+        let name = url.lastPathComponent
+        let parent = open(parentPath, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        if parent < 0 {
+            return [PurgeFailure(path: parentPath, code: errno)]
+        }
+        remove(in: parent, named: name, at: url.path, &failures)
+        close(parent)
 
-        // Two things the walk above cannot clear: stripping an ACL needs acl(3), and unlink()
-        // on a path over PATH_MAX fails with ENAMETOOLONG whatever the permissions. Both fall
-        // to the system tools — chmod uses acl_set_file, and rm walks with fts, which chdirs
-        // so a long path is never formed. Ordering matters: modes are already repaired here,
-        // so chmod can descend.
-        _ = run("/bin/chmod", ["-R", "-N", url.path])
-        _ = run("/bin/rm", ["-rf", url.path])
-        if !exists(url.path) { return [] }
-
-        failures.removeAll()
-        collect(url.path, &failures)
+        // Never report an all-clear we have not verified. A silently stranded prefix is how the
+        // original bug hid: the caller believed the delete had finished.
+        var st = stat()
+        if lstat(url.path, &st) == 0, failures.isEmpty {
+            failures.append(PurgeFailure(path: url.path, code: ENOTEMPTY,
+                                         mode: st.st_mode, flags: st.st_flags, uid: st.st_uid))
+        }
         return failures
     }
 
-    /// Depth-first, repairing each node on the way down.
-    private static func force(_ path: String, _ failures: inout [PurgeFailure]) {
+    /// Removes one entry by name, relative to an open descriptor for its parent directory.
+    ///
+    /// Iterative, with an explicit stack, deliberately. The recursive version overflowed the
+    /// 512 KB stack of a Swift cooperative-pool thread at around 450 levels and wedged the
+    /// process in an uninterruptible wait — a prefix deep enough to hit that is exactly the kind
+    /// a runaway Windows installer produces, and it would have hung the app with no error.
+    private static func remove(in parent: Int32, named name: String, at path: String,
+                               _ failures: inout [PurgeFailure]) {
         var st = stat()
-        guard lstat(path, &st) == 0 else {
-            if errno != ENOENT { failures.append(PurgeFailure(path: path, code: errno)) }
+        guard fstatat(parent, name, &st, AT_SYMLINK_NOFOLLOW) == 0 else {
+            let e = errno
+            if e != ENOENT { failures.append(PurgeFailure(path: path, code: e)) }
             return
         }
-        // uchg/uappnd block unlink and rmdir. lchflags, never chflags: every bottle links
-        // drive_c/users/<user>/{Documents,Desktop,Downloads} at the real home folders and
-        // dosdevices/z: at /, and chflags follows symlinks straight out of the tree.
-        if st.st_flags != 0 { _ = lchflags(path, 0) }
-
-        // Likewise lstat, never fileExists(atPath:isDirectory:) — that call follows symlinks
-        // and calls a link to ~/Documents a directory, so a recursion built on it would
-        // descend into and delete the user's home folders.
-        guard (st.st_mode & S_IFMT) == S_IFDIR else {
-            if unlink(path) != 0, errno != ENOENT { failures.append(fail(path, st)) }
+        if (st.st_mode & S_IFMT) != S_IFDIR {
+            removeLeaf(in: parent, named: name, at: path, observed: st, &failures)
             return
         }
-        // A directory's contents cannot be listed or unlinked without owner rwx on it.
-        if (st.st_mode & 0o700) != 0o700 { _ = chmod(path, st.st_mode | 0o700) }
-        for entry in (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? [] {
-            force(path + "/" + entry, &failures)
-        }
-        if rmdir(path) != 0, errno != ENOENT { failures.append(fail(path, st)) }
-    }
 
-    /// Reports what survived. Directories that are merely non-empty are skipped, so the list
-    /// holds the entries that actually refused to go rather than every parent above them.
-    private static func collect(_ path: String, _ failures: inout [PurgeFailure]) {
-        var st = stat()
-        guard lstat(path, &st) == 0 else { return }
-        guard (st.st_mode & S_IFMT) == S_IFDIR else {
-            if unlink(path) != 0 { failures.append(fail(path, st)) }
+        /// One open directory on the way down, with the children still to process.
+        struct Level {
+            let fd: Int32, parent: Int32
+            let name: String, path: String
+            let observed: stat
+            var kids: [String]
+            var next: Int
+        }
+        var stack: [Level] = []
+
+        func push(parent: Int32, name: String, path: String, observed: stat) -> Bool {
+            var fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            if fd < 0, errno == EACCES || errno == EPERM {
+                // A directory's contents cannot be listed, or even opened, without owner rwx on
+                // it — a 0000 directory fails openat outright, so the mode has to be repaired
+                // before the descriptor exists. fchmodat is name-relative and does not follow a
+                // symlink, so this cannot reach outside the tree.
+                _ = fchmodat(parent, name, observed.st_mode | 0o700, AT_SYMLINK_NOFOLLOW)
+                fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            }
+            guard fd >= 0 else { return false }
+            if observed.st_flags != 0 { _ = fchflags(fd, 0) }
+            if (observed.st_mode & 0o700) != 0o700 { _ = fchmod(fd, observed.st_mode | 0o700) }
+            stack.append(Level(fd: fd, parent: parent, name: name, path: path,
+                               observed: observed, kids: entries(of: fd), next: 0))
+            return true
+        }
+
+        if !push(parent: parent, name: name, path: path, observed: st) {
+            // Unreadable even to open: still try to unlink it, it may be empty.
+            unlink(in: parent, named: name, at: path, flag: AT_REMOVEDIR, observed: st, &failures)
             return
         }
-        let entries = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
-        for entry in entries { collect(path + "/" + entry, &failures) }
-        if (try? FileManager.default.contentsOfDirectory(atPath: path))?.isEmpty ?? false {
-            if rmdir(path) != 0 { failures.append(fail(path, st)) }
+
+        while var level = stack.last {
+            if level.next < level.kids.count {
+                let kid = level.kids[level.next]
+                level.next += 1
+                stack[stack.count - 1] = level
+                let kidPath = level.path + "/" + kid
+                var kst = stat()
+                guard fstatat(level.fd, kid, &kst, AT_SYMLINK_NOFOLLOW) == 0 else {
+                    let e = errno
+                    if e != ENOENT { failures.append(PurgeFailure(path: kidPath, code: e)) }
+                    continue
+                }
+                if (kst.st_mode & S_IFMT) == S_IFDIR {
+                    if !push(parent: level.fd, name: kid, path: kidPath, observed: kst) {
+                        unlink(in: level.fd, named: kid, at: kidPath, flag: AT_REMOVEDIR,
+                               observed: kst, &failures)
+                    }
+                } else {
+                    removeLeaf(in: level.fd, named: kid, at: kidPath, observed: kst, &failures)
+                }
+            } else {
+                // Children done: close this directory and unlink it from its own parent.
+                stack.removeLast()
+                close(level.fd)
+                unlink(in: level.parent, named: level.name, at: level.path,
+                       flag: AT_REMOVEDIR, observed: level.observed, &failures)
+            }
         }
     }
 
-    private static func fail(_ path: String, _ st: stat) -> PurgeFailure {
-        PurgeFailure(path: path, code: errno, mode: st.st_mode, flags: st.st_flags, uid: st.st_uid)
+    /// A non-directory: clear any flag that blocks unlink, then unlink it.
+    private static func removeLeaf(in parent: Int32, named name: String, at path: String,
+                                   observed: stat, _ failures: inout [PurgeFailure]) {
+        // uchg/uappnd block unlink. O_SYMLINK opens a symlink itself rather than its target,
+        // so clearing flags can never reach through one.
+        if observed.st_flags != 0 {
+            let fd = openat(parent, name, O_SYMLINK | O_CLOEXEC)
+            if fd >= 0 { _ = fchflags(fd, 0); close(fd) }
+        }
+        unlink(in: parent, named: name, at: path, flag: 0, observed: observed, &failures)
     }
 
-    private static func exists(_ path: String) -> Bool {
-        var st = stat()
-        return lstat(path, &st) == 0
+    /// unlinkat, and on a permission failure one retry after stripping the entry's ACL.
+    /// `chmod -h -N` takes a single path and never recurses, so unlike `chmod -R` it cannot
+    /// follow a symlink out of the tree — a real defect found in review, where `chmod -R -N`
+    /// stripped the ACL off the user's actual home folder through a bottle's Documents link.
+    private static func unlink(in parent: Int32, named name: String, at path: String,
+                               flag: Int32, observed: stat, _ failures: inout [PurgeFailure]) {
+        if unlinkat(parent, name, flag) == 0 { return }
+        var e = errno
+        if e == ENOENT { return }
+        if e == EACCES || e == EPERM {
+            _ = run("/bin/chmod", ["-h", "-N", path])
+            if unlinkat(parent, name, flag) == 0 { return }
+            e = errno
+            if e == ENOENT { return }
+        }
+        failures.append(PurgeFailure(path: path, code: e, mode: observed.st_mode,
+                                     flags: observed.st_flags, uid: observed.st_uid))
+    }
+
+    /// Child names of an open directory, excluding "." and "..". Collected before recursing so
+    /// the directory stream is closed while its entries are being removed.
+    private static func entries(of fd: Int32) -> [String] {
+        let copy = dup(fd)
+        guard copy >= 0, let dir = fdopendir(copy) else {
+            if copy >= 0 { close(copy) }
+            return []
+        }
+        defer { closedir(dir) }
+        var names: [String] = []
+        while let entry = readdir(dir) {
+            var e = entry.pointee
+            let name = withUnsafePointer(to: &e.d_name) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(e.d_namlen) + 1) { String(cString: $0) }
+            }
+            if name == "." || name == ".." { continue }
+            names.append(name)
+        }
+        return names
     }
 
     private static func run(_ tool: String, _ args: [String]) -> Int32 {

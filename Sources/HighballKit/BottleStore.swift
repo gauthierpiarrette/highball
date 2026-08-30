@@ -168,10 +168,10 @@ public struct BottleStore: Sendable {
     /// name is free either way; leftovers wait in `.trash` for `sweepTrash()` to retry.
     @discardableResult
     public func delete(_ name: String) throws -> [PurgeFailure] {
-        let url = paths.bottle(name)
         // Resolve by folder, not by bottle.json. The folder is the bottle's identity — the same
         // rule list() reconciles names to — and a bottle whose settings file is unreadable is
         // precisely the one that most needs deleting.
+        let url = try Self.bottleURL(name, in: paths)
         var st = stat()
         guard lstat(url.path, &st) == 0 else { throw HighballError.missing("bottle '\(name)'") }
         return try discard(url, name: name)
@@ -182,6 +182,13 @@ public struct BottleStore: Sendable {
     /// moment the call returns, the name is reusable.
     @discardableResult
     func discard(_ url: URL, name: String) throws -> [PurgeFailure] {
+        Purge.tree(at: try moveToTrash(url, name: name))
+    }
+
+    /// The atomic half, split out so the rename can be tested on its own: once the purge has run
+    /// there is nothing left to compare, and a copy-then-delete implementation would look
+    /// identical from the outside.
+    func moveToTrash(_ url: URL, name: String) throws -> URL {
         try FileManager.default.createDirectory(at: paths.trash, withIntermediateDirectories: true)
         // rename(2) needs write on the two parent directories and nothing else, so it succeeds
         // over trees removeItem cannot touch (0555 and 0000 directories, uchg flags, deny-delete
@@ -204,7 +211,29 @@ public struct BottleStore: Sendable {
                 (\(why)). Nothing was removed and the bottle still works.
                 """)
         }
-        return Purge.tree(at: target)
+        return target
+    }
+
+    /// Resolves a bottle name to its directory, refusing anything that is not a single component
+    /// inside `bottles/`.
+    ///
+    /// This guard is load-bearing for a destructive call. delete() used to be protected by
+    /// accident: its old bottle.json check meant a traversing name found no settings file and was
+    /// rejected. Removing that check for #38 removed the protection with it, and
+    /// `highball bottle delete ../../Something` then resolved outside the bottles folder and
+    /// purged it — found in review, reproduced against the built CLI.
+    static func bottleURL(_ name: String, in paths: HighballPaths) throws -> URL {
+        guard !name.isEmpty, name != ".", name != "..",
+              !name.contains("/"), !name.unicodeScalars.contains("\0") else {
+            throw HighballError.invalid("'\(name)' isn't a bottle name")
+        }
+        let url = paths.bottle(name)
+        // Belt and braces: whatever the name did, the result must sit directly in bottles/.
+        guard url.deletingLastPathComponent().standardizedFileURL.path
+                == paths.bottles.standardizedFileURL.path else {
+            throw HighballError.invalid("'\(name)' isn't a bottle name")
+        }
+        return url
     }
 
     /// Bottle names are user-supplied, so keep them from steering the trash path anywhere.

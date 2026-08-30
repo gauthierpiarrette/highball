@@ -4,6 +4,11 @@ import XCTest
 /// Issue #38: deleting a bottle reported "you don't have permission to access it" and left the
 /// bottle half-destroyed — invisible to `list()`, refused by `delete()` and blocked by
 /// `create()`'s name check, with its files still on disk.
+///
+/// Every test here asserts `assertFullyGone`, not just that `bottles/<name>` disappeared. The
+/// first version of this suite checked only the latter, which `rename(2)` alone guarantees — so
+/// a purge that deleted nothing at all kept 12 of 13 tests green. Checking `.trash` is what makes
+/// these tests able to fail.
 final class BottleDeleteTests: XCTestCase {
     private var home: URL!
     private var paths: HighballPaths!
@@ -17,13 +22,30 @@ final class BottleDeleteTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        if let home { Purge.tree(at: home) }
+        guard let home else { return }
+        // Deliberately not Purge.tree: cleaning up with the code under test would let a broken
+        // purge tidy away its own evidence.
+        _ = try? Process.run(URL(fileURLWithPath: "/bin/chmod"), arguments: ["-R", "-N", home.path]).waitUntilExit()
+        _ = try? Process.run(URL(fileURLWithPath: "/usr/bin/chflags"), arguments: ["-R", "nouchg", home.path]).waitUntilExit()
+        _ = try? Process.run(URL(fileURLWithPath: "/bin/chmod"), arguments: ["-R", "u+rwX", home.path]).waitUntilExit()
+        _ = try? Process.run(URL(fileURLWithPath: "/bin/rm"), arguments: ["-rf", home.path]).waitUntilExit()
     }
 
-    /// A bottle shaped like a real one: the same top-level entries, in a tree deep enough that
-    /// a blocker is reached only after the metadata.
+    // MARK: Helpers
+
+    /// The assertion that matters: the bottle is gone from `bottles/` AND the purge finished, so
+    /// nothing is parked in `.trash` and no leftovers were reported.
+    private func assertFullyGone(_ name: String, _ leftovers: [PurgeFailure],
+                                 file: StaticString = #filePath, line: UInt = #line) throws {
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.bottle(name).path),
+                       "bottles/\(name) still exists", file: file, line: line)
+        XCTAssertEqual(leftovers.map(\.description), [], "delete reported leftovers", file: file, line: line)
+        let trash = (try? FileManager.default.contentsOfDirectory(atPath: paths.trash.path)) ?? []
+        XCTAssertEqual(trash, [], "the purge left the tree in .trash", file: file, line: line)
+    }
+
     @discardableResult
-    private func makeBottle(_ name: String, files: Int = 40) throws -> URL {
+    private func makeBottle(_ name: String, files: Int = 30) throws -> URL {
         let url = paths.bottle(name)
         let system32 = url.appending(path: "drive_c/windows/system32")
         try FileManager.default.createDirectory(at: system32, withIntermediateDirectories: true)
@@ -38,7 +60,7 @@ final class BottleDeleteTests: XCTestCase {
         return url
     }
 
-    /// Plants the thing that broke #38: a directory macOS will not let us empty.
+    /// A directory macOS will not let us empty — what broke #38.
     private func lock(_ url: URL) throws {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         try "locked".write(to: url.appending(path: "inside.dat"), atomically: true, encoding: .utf8)
@@ -49,12 +71,13 @@ final class BottleDeleteTests: XCTestCase {
 
     func testDeleteSucceedsWithAnUnwritableSubdirectory() throws {
         let url = try makeBottle("play")
-        try lock(url.appending(path: "drive_c/Program Files/Game/data"))
+        let locked = url.appending(path: "drive_c/Program Files/Game/data")
+        try lock(locked)
+        // Naming the file proves the purge descended, not merely that the bottle was renamed.
+        let inside = locked.appending(path: "inside.dat").path
 
-        XCTAssertNoThrow(try store.delete("play"))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "bottles/play must be gone")
-        XCTAssertTrue(try store.list().isEmpty)
-        XCTAssertTrue(try store.damaged().isEmpty, "nothing may be left behind in bottles/")
+        try assertFullyGone("play", try store.delete("play"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: inside), "the unwritable directory's contents survived")
     }
 
     func testDeleteSucceedsWithImmutableAndUnreadableEntries() throws {
@@ -64,66 +87,51 @@ final class BottleDeleteTests: XCTestCase {
         let immutable = dir.appending(path: "locked.dat")
         try "x".write(to: immutable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: immutable.path)
-        try FileManager.default.createDirectory(at: dir.appending(path: "unreadable"), withIntermediateDirectories: true)
-        try FileManager.default.setAttributes([.posixPermissions: 0o000],
-                                              ofItemAtPath: dir.appending(path: "unreadable").path)
+        let unreadable = dir.appending(path: "unreadable")
+        try FileManager.default.createDirectory(at: unreadable, withIntermediateDirectories: true)
+        try "x".write(to: unreadable.appending(path: "f"), atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadable.path)
 
-        XCTAssertNoThrow(try store.delete("play"))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        try assertFullyGone("play", try store.delete("play"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: immutable.path), "the immutable file survived")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: unreadable.path), "the unreadable directory survived")
     }
 
-    /// The name must be reusable the instant delete returns. #38's reporter could not recreate
-    /// his bottle: `create()` refused because the gutted directory was still there.
-    func testDeleteFreesTheNameEvenWhenFilesCannotBeRemoved() throws {
+    func testDeleteSucceedsWithADenyDeleteACL() throws {
+        let url = try makeBottle("play")
+        let dir = url.appending(path: "drive_c/Program Files/Game")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let guarded = dir.appending(path: "guarded.dat")
+        try "x".write(to: guarded, atomically: true, encoding: .utf8)
+        let chmod = Process()
+        chmod.executableURL = URL(fileURLWithPath: "/bin/chmod")
+        chmod.arguments = ["+a", "everyone deny delete", guarded.path]
+        try chmod.run(); chmod.waitUntilExit()
+
+        try assertFullyGone("play", try store.delete("play"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: guarded.path), "the ACL-protected file survived")
+    }
+
+    /// The name must be reusable the instant delete returns; #38's reporter could not recreate his.
+    func testDeleteFreesTheNameForReuse() throws {
         let url = try makeBottle("play")
         try lock(url.appending(path: "drive_c/Program Files/Game/data"))
-
-        try store.delete("play")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.bottle("play").path),
-                       "the name must be free for create() to reuse")
-    }
-
-    // MARK: Atomicity
-
-    func testDeleteMovesTheBottleOutOfBottlesBeforePurging() throws {
-        let url = try makeBottle("play")
-        // An unpurgeable entry: a 0555 directory whose parent is also 0555, so even the forced
-        // walk leaves something behind and we can observe where the tree went.
-        try lock(url.appending(path: "drive_c/keep/inner"))
-        try FileManager.default.setAttributes([.posixPermissions: 0o555],
-                                              ofItemAtPath: url.appending(path: "drive_c/keep").path)
-
         _ = try store.delete("play")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path),
-                       "bottles/ must be clean whatever the purge managed")
-    }
-
-    /// Guards against someone "simplifying" rename(2) back into FileManager.moveItem, which
-    /// across volumes copies and then deletes — reproducing #38 with a full duplicate on the side.
-    func testDeleteIsARenameNotACopy() throws {
-        let url = try makeBottle("play")
-        try lock(url.appending(path: "drive_c/Program Files/Game/data"))
-        let before = try FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] as? Int
-
-        _ = try store.delete("play")
-        let moved = (try? FileManager.default.contentsOfDirectory(at: paths.trash, includingPropertiesForKeys: nil)) ?? []
-        let after = moved.first.flatMap {
-            try? FileManager.default.attributesOfItem(atPath: $0.path)[.systemFileNumber] as? Int
-        }
-        XCTAssertNotNil(before)
-        XCTAssertEqual(before, after ?? before, "the tree must keep its inode: rename, not copy")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.bottle("play").path))
+        XCTAssertNoThrow(try makeBottle("play"), "the name must be reusable")
     }
 
     // MARK: Safety
 
-    /// The one mistake that would be catastrophic. Every bottle links
+    /// The mistake that would be catastrophic. Every bottle links
     /// drive_c/users/<user>/{Documents,Desktop,Downloads} at the real home folders and
-    /// dosdevices/z: at /, so a purge that followed symlinks would delete the user's data.
+    /// dosdevices/z: at /, so a purge that resolved paths instead of holding descriptors would
+    /// delete the user's data — a path-based version did exactly that under a concurrent swap.
     func testPurgeNeverFollowsSymlinksOutOfTheTree() throws {
         let url = try makeBottle("play")
         let outside = home.appending(path: "precious")
-        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
-        let canary = outside.appending(path: "canary.txt")
+        try FileManager.default.createDirectory(at: outside.appending(path: "sub"), withIntermediateDirectories: true)
+        let canary = outside.appending(path: "sub/canary.txt")
         try "do not delete".write(to: canary, atomically: true, encoding: .utf8)
 
         let users = url.appending(path: "drive_c/users/tester")
@@ -131,77 +139,147 @@ final class BottleDeleteTests: XCTestCase {
         try FileManager.default.createSymbolicLink(at: users.appending(path: "Documents"), withDestinationURL: outside)
         try FileManager.default.createSymbolicLink(at: url.appending(path: "dosdevices/z:"),
                                                    withDestinationURL: URL(fileURLWithPath: "/"))
-        // Force the slow path, so the hand-written recursion is what gets exercised.
+        // Force the slow path so the hand-written walk is what runs.
         try lock(url.appending(path: "drive_c/Program Files/Game/data"))
 
-        _ = try store.delete("play")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: canary.path),
-                      "the purge followed a symlink out of the bottle")
+        try assertFullyGone("play", try store.delete("play"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: canary.path), "the purge followed a symlink out of the bottle")
         XCTAssertEqual(try String(contentsOf: canary, encoding: .utf8), "do not delete")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: "/usr"), "/ must be untouched")
+    }
+
+    /// `chmod -R -N` follows symlinks (and macOS refuses `-R -h` together), so the ACL-clearing
+    /// step used to reach through a bottle's Documents link and strip the ACL off the real folder.
+    func testPurgeLeavesACLsOnSymlinkTargetsOutsideTheTree() throws {
+        let url = try makeBottle("play")
+        let outside = home.appending(path: "outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let chmod = Process()
+        chmod.executableURL = URL(fileURLWithPath: "/bin/chmod")
+        chmod.arguments = ["+a", "everyone deny delete", outside.path]
+        try chmod.run(); chmod.waitUntilExit()
+
+        let users = url.appending(path: "drive_c/users/tester")
+        try FileManager.default.createDirectory(at: users, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: users.appending(path: "Documents"), withDestinationURL: outside)
+        try lock(url.appending(path: "drive_c/Program Files/Game/data"))
+
+        try assertFullyGone("play", try store.delete("play"))
+        let ls = Process(), pipe = Pipe()
+        ls.executableURL = URL(fileURLWithPath: "/bin/ls")
+        ls.arguments = ["-lde", outside.path]
+        ls.standardOutput = pipe
+        try ls.run(); ls.waitUntilExit()
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertTrue(out.contains("deny delete"), "the purge stripped an ACL outside the bottle:\n\(out)")
+    }
+
+    /// A destructive call must not take a name that resolves anywhere but inside bottles/.
+    /// Dropping the old bottle.json guard removed this protection by accident, and
+    /// `bottle delete ../../Something` then purged that directory.
+    func testDeleteRefusesNamesThatEscapeTheBottlesFolder() throws {
+        let outside = home.appending(path: "outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let canary = outside.appending(path: "canary.txt")
+        try "keep".write(to: canary, atomically: true, encoding: .utf8)
+
+        for bad in ["..", ".", "", "../outside", "../../etc", "a/b", "bottles/../../outside"] {
+            XCTAssertThrowsError(try store.delete(bad), "'\(bad)' must be refused")
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: canary.path), "an escaping name reached outside bottles/")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outside.path))
+    }
+
+    /// A prefix deeper than a thread's stack must not wedge the app. A recursive walk overflowed
+    /// the 512 KB stack of a cooperative-pool thread at ~450 levels and hung in an uninterruptible
+    /// wait; the iterative walk has no depth ceiling.
+    func testDeleteHandlesATreeDeeperThanTheStack() throws {
+        let url = try makeBottle("play")
+        let fm = FileManager.default
+        let start = fm.currentDirectoryPath
+        defer { fm.changeCurrentDirectoryPath(start) }
+        let deep = url.appending(path: "drive_c/deep")
+        try fm.createDirectory(at: deep, withIntermediateDirectories: true)
+        // chdir-relative, because an absolute path over PATH_MAX cannot even be created.
+        XCTAssertTrue(fm.changeCurrentDirectoryPath(deep.path))
+        let segment = String(repeating: "d", count: 31)
+        for _ in 0..<700 {
+            guard (try? fm.createDirectory(atPath: segment, withIntermediateDirectories: false)) != nil,
+                  fm.changeCurrentDirectoryPath(segment) else { break }
+        }
+        fm.createFile(atPath: "leaf.txt", contents: Data("x".utf8))
+        fm.changeCurrentDirectoryPath(start)
+
+        try assertFullyGone("play", try store.delete("play"))
+    }
+
+    func testPurgeRefusesShallowPaths() {
+        for dangerous in ["/", "/Users", "/Users/someone", "/Volumes"] {
+            let failures = Purge.tree(at: URL(fileURLWithPath: dangerous))
+            XCTAssertEqual(failures.first?.code, EINVAL, "\(dangerous) must be refused")
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: "/Users"))
+    }
+
+    /// Guards against someone replacing rename(2) with a copy-then-delete implementation, which
+    /// across volumes is exactly what reintroduces #38. Tests the move on its own, because after
+    /// the purge there is nothing left to compare and a copy would look identical from outside.
+    func testDeleteMovesTheTreeWithoutCopyingIt() throws {
+        let url = try makeBottle("play")
+        let before = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: url.path)[.systemFileNumber] as? Int)
+
+        let moved = try store.moveToTrash(url, name: "play")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "the source must be gone at once")
+        let after = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: moved.path)[.systemFileNumber] as? Int)
+        XCTAssertEqual(before, after, "the tree was copied, not renamed")
+        // A copy would also duplicate the contents; the rename moves the whole subtree intact.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: moved.appending(path: "drive_c/windows/system32/lib0.dll").path))
     }
 
     // MARK: Recovery
 
-    /// The state #38's reporter is stuck in: a directory with no readable settings file. It was
-    /// invisible to `list()` and `delete()` refused it, so there was no way out from the app.
     func testADamagedBottleIsListedAndDeletable() throws {
         let url = try makeBottle("play")
         try FileManager.default.removeItem(at: url.appending(path: "bottle.json"))
 
-        XCTAssertTrue(try store.list().isEmpty, "list() still only shows loadable bottles")
+        XCTAssertTrue(try store.list().isEmpty)
         XCTAssertEqual(try store.damaged().map(\.name), ["play"])
-        XCTAssertNoThrow(try store.delete("play"))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        try assertFullyGone("play", try store.delete("play"))
     }
 
-    /// A Gin-era bottle keeps its settings in gin.json. `Bottle.load` accepts it, so `list()`
-    /// showed it while the old bottle.json guard made it permanently undeletable.
     func testALegacyGinBottleIsDeletable() throws {
         let url = try makeBottle("play")
         try FileManager.default.moveItem(at: url.appending(path: "bottle.json"),
                                          to: url.appending(path: "gin.json"))
-
         XCTAssertEqual(try store.list().map(\.name), ["play"])
-        XCTAssertNoThrow(try store.delete("play"))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertTrue(try store.damaged().isEmpty, "a loadable bottle must never also be damaged")
+        try assertFullyGone("play", try store.delete("play"))
     }
 
-    func testDeletingAnAbsentBottleStillReportsItMissing() throws {
+    func testDeletingAnAbsentBottleReportsItMissing() {
         XCTAssertThrowsError(try store.delete("nope"))
     }
 
-    func testDamagedIgnoresDotFilesAndLooseFiles() throws {
+    func testDamagedIgnoresDotFilesLooseFilesAndSymlinks() throws {
         try "x".write(to: paths.bottles.appending(path: ".DS_Store"), atomically: true, encoding: .utf8)
+        try "x".write(to: paths.bottles.appending(path: "loose.txt"), atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: paths.bottles.appending(path: "alink"),
+                                                   withDestinationURL: home)
         try makeBottle("play")
-        XCTAssertTrue(try store.damaged().isEmpty)
+        XCTAssertTrue(try store.damaged().isEmpty, "damaged() must list only real bottle directories")
+        XCTAssertEqual(try store.list().map(\.name), ["play"])
     }
 
-    // MARK: Leftovers
+    func testSweepTrashClearsWhatAnEarlierPurgeLeft() throws {
+        let stale = paths.trash.appending(path: "play-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: stale.appending(path: "drive_c"), withIntermediateDirectories: true)
+        try "x".write(to: stale.appending(path: "drive_c/f"), atomically: true, encoding: .utf8)
 
-    func testLeftoversAreReportedAndSweptLater() throws {
-        let url = try makeBottle("play")
-        let stubborn = url.appending(path: "drive_c/mnt")
-        try FileManager.default.createDirectory(at: stubborn, withIntermediateDirectories: true)
-
-        _ = try store.delete("play")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
-        // Nothing genuinely unpurgeable here, so the sweep has nothing to report and .trash empties.
-        XCTAssertTrue(store.sweepTrash().isEmpty)
-        let left = (try? FileManager.default.contentsOfDirectory(at: paths.trash, includingPropertiesForKeys: nil)) ?? []
-        XCTAssertTrue(left.isEmpty, "a purgeable tree must not linger in .trash")
+        XCTAssertTrue(store.sweepTrash().isEmpty, "a purgeable leftover must not be reported as a failure")
+        let trash = (try? FileManager.default.contentsOfDirectory(atPath: paths.trash.path)) ?? []
+        XCTAssertEqual(trash, [], "sweepTrash left the tree behind")
     }
 
-    /// The purge deletes recursively and shells out to rm -rf, so it must refuse a shallow
-    /// path outright rather than trust every future caller. "/" and a bare home must be inert.
-    func testPurgeRefusesShallowPaths() {
-        for dangerous in ["/", "/Users", "/Users/someone", "/Volumes"] {
-            let failures = Purge.tree(at: URL(fileURLWithPath: dangerous))
-            XCTAssertEqual(failures.first?.code, EINVAL, "\(dangerous) must be refused, not purged")
-            XCTAssertTrue(FileManager.default.fileExists(atPath: "/Users"), "/Users must still exist")
-        }
-    }
-
-    /// Bottle names reach the trash path, so they must not be able to steer it.
     func testTrashNameCannotEscapeTheTrashDirectory() {
         XCTAssertFalse(BottleStore.trashName("../../etc").contains("/"))
         XCTAssertFalse(BottleStore.trashName("..").contains("."))
