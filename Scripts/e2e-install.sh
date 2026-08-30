@@ -121,7 +121,14 @@ fi
 
 step "teardown"
 "$HB" bottle kill e2e || true
-"$HB" bottle delete e2e || true
+# Deleting is an assertion, not cleanup. This ran nightly with `|| true` throughout issue #38,
+# where every delete failed and left a half-destroyed bottle behind, and CI never noticed.
+"$HB" bottle delete e2e
+[ -e "$HIGHBALL_HOME/bottles/e2e" ] && { echo "delete left bottles/e2e behind:"; ls -la "$HIGHBALL_HOME/bottles/e2e"; exit 1; }
+# The name must be reusable, and nothing may be stranded in the trash.
+leftovers=$(ls -A "$HIGHBALL_HOME/.trash" 2>/dev/null || true)
+[ -n "$leftovers" ] && { echo "delete stranded files in .trash: $leftovers"; exit 1; }
+echo "bottle delete ok"
 "$ENGINE/engine/bin/wineserver" -k 2>/dev/null || true
 rm -rf "$HIGHBALL_HOME/engines/.$ENGINE_ID.partial"
 echo
