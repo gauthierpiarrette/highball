@@ -213,6 +213,36 @@ final class BottleDeleteTests: XCTestCase {
         try assertFullyGone("play", try store.delete("play"))
     }
 
+    /// The walk holds one descriptor per level, so its ceiling is RLIMIT_NOFILE, not the stack —
+    /// and the shipping app is not the shell. A GUI-launched .app starts with a soft limit of 256
+    /// while a login shell has over a million, so a deep prefix purged fine in testing and
+    /// stranded itself permanently for a real user, blaming "Directory not empty".
+    func testDeleteHandlesADeepTreeUnderTheAppsFileLimit() throws {
+        var original = rlimit()
+        XCTAssertEqual(getrlimit(RLIMIT_NOFILE, &original), 0)
+        defer { var restore = original; _ = setrlimit(RLIMIT_NOFILE, &restore) }
+        var tight = original
+        tight.rlim_cur = 256
+        try XCTSkipUnless(setrlimit(RLIMIT_NOFILE, &tight) == 0, "cannot lower RLIMIT_NOFILE here")
+
+        let url = try makeBottle("play")
+        let fm = FileManager.default
+        let start = fm.currentDirectoryPath
+        defer { fm.changeCurrentDirectoryPath(start) }
+        let deep = url.appending(path: "drive_c/deep")
+        try fm.createDirectory(at: deep, withIntermediateDirectories: true)
+        XCTAssertTrue(fm.changeCurrentDirectoryPath(deep.path))
+        let segment = String(repeating: "d", count: 20)
+        for _ in 0..<500 {
+            guard (try? fm.createDirectory(atPath: segment, withIntermediateDirectories: false)) != nil,
+                  fm.changeCurrentDirectoryPath(segment) else { break }
+        }
+        fm.createFile(atPath: "leaf.txt", contents: Data("x".utf8))
+        fm.changeCurrentDirectoryPath(start)
+
+        try assertFullyGone("play", try store.delete("play"))
+    }
+
     func testPurgeRefusesShallowPaths() {
         for dangerous in ["/", "/Users", "/Users/someone", "/Volumes"] {
             let failures = Purge.tree(at: URL(fileURLWithPath: dangerous))

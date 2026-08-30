@@ -60,6 +60,12 @@ public enum Purge {
         // Healthy trees, which is nearly all of them, take the cheap path.
         if (try? FileManager.default.removeItem(at: url)) != nil { return [] }
 
+        // The walk below holds one descriptor per directory level, so its ceiling is the file
+        // limit rather than the stack. That matters because the shipping app is not the shell:
+        // a GUI-launched .app gets a soft RLIMIT_NOFILE of 256, so a prefix a few hundred levels
+        // deep stranded itself in .trash and blamed "Directory not empty".
+        raiseFileLimit()
+
         var failures: [PurgeFailure] = []
         let parentPath = url.deletingLastPathComponent().path
         let name = url.lastPathComponent
@@ -69,6 +75,17 @@ public enum Purge {
         }
         remove(in: parent, named: name, at: url.path, &failures)
         close(parent)
+
+        // Last resort for whatever the walk could not finish — a depth past even the raised
+        // file limit, most realistically. rm walks with fts, which recycles descriptors and does
+        // not follow symlinks, so it is safe to point at a tree already isolated inside .trash.
+        if !failures.isEmpty {
+            var probe = stat()
+            if lstat(url.path, &probe) == 0 {
+                _ = run("/bin/rm", ["-rf", url.path])
+                if lstat(url.path, &probe) != 0 { return [] }
+            }
+        }
 
         // Never report an all-clear we have not verified. A silently stranded prefix is how the
         // original bug hid: the caller believed the delete had finished.
@@ -213,6 +230,20 @@ public enum Purge {
             names.append(name)
         }
         return names
+    }
+
+    /// Lifts the soft file limit toward the hard one. A GUI-launched app starts at 256, which is
+    /// far below what a deep prefix needs, and the limit is per-process so raising it here is
+    /// enough for the walk.
+    private static func raiseFileLimit() {
+        var lim = rlimit()
+        guard getrlimit(RLIMIT_NOFILE, &lim) == 0 else { return }
+        // macOS refuses an unlimited value here, so aim at a large concrete one; when the hard
+        // limit is effectively unlimited this simply lands on `want`.
+        let target = min(rlim_t(65536), lim.rlim_max)
+        guard lim.rlim_cur < target else { return }
+        lim.rlim_cur = target
+        _ = setrlimit(RLIMIT_NOFILE, &lim)
     }
 
     private static func run(_ tool: String, _ args: [String]) -> Int32 {

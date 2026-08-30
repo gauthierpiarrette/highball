@@ -8,6 +8,10 @@ public struct BottleStore: Sendable {
         guard FileManager.default.fileExists(atPath: paths.bottles.path) else { return [] }
         return try FileManager.default.contentsOfDirectory(at: paths.bottles, includingPropertiesForKeys: nil)
             .compactMap { url -> Bottle? in
+                // Real directories only. Listing used to reconcile the name of a symlinked entry
+                // by writing bottle.json through the link, mutating a file outside bottles/.
+                var st = stat()
+                guard lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else { return nil }
                 guard var b = try? Bottle.load(url) else { return nil }
                 // The folder is the bottle's identity (get/delete resolve by folder). A copied
                 // folder keeps the old internal name, which crashed the app and confused lookups
@@ -22,7 +26,9 @@ public struct BottleStore: Sendable {
     }
 
     public func get(_ name: String) throws -> Bottle {
-        try Bottle.load(paths.bottle(name))
+        // Every subcommand resolves through here, so the name guard belongs here too rather than
+        // only on the destructive calls.
+        try Bottle.load(try Self.bottleURL(name, in: paths))
     }
 
     /// Returns a human-readable problem with a bottle name, or nil if it is usable.
@@ -198,9 +204,18 @@ public struct BottleStore: Sendable {
         // over trees removeItem cannot touch (0555 and 0000 directories, uchg flags, deny-delete
         // ACLs). A poisoned root node is the one case it can't, so repair that node first.
         var st = stat()
-        if lstat(url.path, &st) == 0 {
+        if lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR {
+            // Only a real directory is repaired, and only through lchflags/fchmodat, which do not
+            // follow links: chmod(2) here would have rewritten the mode of whatever a symlinked
+            // bottle entry pointed at, outside bottles/ entirely.
             if st.st_flags != 0 { _ = lchflags(url.path, 0) }
-            if (st.st_mode & 0o700) != 0o700 { _ = chmod(url.path, st.st_mode | 0o700) }
+            if (st.st_mode & 0o700) != 0o700 {
+                let parent = open(paths.bottles.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+                if parent >= 0 {
+                    _ = fchmodat(parent, url.lastPathComponent, st.st_mode | 0o700, AT_SYMLINK_NOFOLLOW)
+                    close(parent)
+                }
+            }
         }
         let target = paths.trash.appending(path: "\(Self.trashName(name))-\(UUID().uuidString)",
                                            directoryHint: .isDirectory)
