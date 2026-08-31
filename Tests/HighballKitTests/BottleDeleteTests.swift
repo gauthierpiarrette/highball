@@ -243,6 +243,46 @@ final class BottleDeleteTests: XCTestCase {
         try assertFullyGone("play", try store.delete("play"))
     }
 
+    /// Opening a FIFO for read waits for a writer that never comes, so a uchg FIFO inside a
+    /// prefix wedged the entire purge in openat. Wine prefixes can and do contain odd node types.
+    func testDeleteHandlesAnImmutableFIFO() throws {
+        let url = try makeBottle("play")
+        let dir = url.appending(path: "drive_c/pipes")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fifo = dir.appending(path: "pipe")
+        XCTAssertEqual(mkfifo(fifo.path, 0o600), 0)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: fifo.path)
+
+        try assertFullyGone("play", try store.delete("play"))
+    }
+
+    /// A file that is both unreadable and immutable: the flag cannot be cleared without opening
+    /// it, and it cannot be opened without repairing the mode first, so it was unremovable.
+    func testDeleteHandlesAFileThatIsBothUnreadableAndImmutable() throws {
+        let url = try makeBottle("play")
+        let dir = url.appending(path: "drive_c/locked")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let f = dir.appending(path: "sealed.dat")
+        try "x".write(to: f, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: f.path)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: f.path)
+
+        try assertFullyGone("play", try store.delete("play"))
+    }
+
+    /// A directory that is both unreadable and immutable is the same deadlock as the file case,
+    /// and rm cannot clear the flag either, so it stranded the bottle in .trash permanently.
+    func testDeleteHandlesADirectoryThatIsBothUnreadableAndImmutable() throws {
+        let url = try makeBottle("play")
+        let sealed = url.appending(path: "drive_c/sealed")
+        try FileManager.default.createDirectory(at: sealed, withIntermediateDirectories: true)
+        try "x".write(to: sealed.appending(path: "f"), atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: sealed.path)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: sealed.path)
+
+        try assertFullyGone("play", try store.delete("play"))
+    }
+
     func testPurgeRefusesShallowPaths() {
         for dangerous in ["/", "/Users", "/Users/someone", "/Volumes"] {
             let failures = Purge.tree(at: URL(fileURLWithPath: dangerous))

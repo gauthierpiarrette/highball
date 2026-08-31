@@ -57,10 +57,13 @@ public enum Purge {
         guard url.isFileURL, url.pathComponents.count >= 4 else {
             return [PurgeFailure(path: url.path, code: EINVAL)]
         }
-        // Healthy trees, which is nearly all of them, take the cheap path.
-        if (try? FileManager.default.removeItem(at: url)) != nil { return [] }
-
-        // The walk below holds one descriptor per directory level, so its ceiling is the file
+        // Deliberately no FileManager.removeItem fast path. removefile(3) resolves paths as it
+        // walks, so it has exactly the symlink-swap TOCTOU the walk below exists to remove —
+        // measured destroying data outside the tree in 39 of 45 rounds. Keeping it in front "for
+        // speed" would have reintroduced the bug behind the fix. The walk costs a little more on
+        // a healthy prefix and is the only thing that touches user data.
+        //
+        // The walk holds one descriptor per directory level, so its ceiling is the file
         // limit rather than the stack. That matters because the shipping app is not the shell:
         // a GUI-launched .app gets a soft RLIMIT_NOFILE of 256, so a prefix a few hundred levels
         // deep stranded itself in .trash and blamed "Directory not empty".
@@ -133,6 +136,12 @@ public enum Purge {
                 // it — a 0000 directory fails openat outright, so the mode has to be repaired
                 // before the descriptor exists. fchmodat is name-relative and does not follow a
                 // symlink, so this cannot reach outside the tree.
+                //
+                // Order matters: chmod on an immutable directory fails, so the flag has to go
+                // first, and clearing it needs a descriptor we cannot get. lchflags is the only
+                // way out of that deadlock; without it a 0000+uchg directory stranded the bottle
+                // in .trash forever, and rm cannot clear the flag either.
+                if observed.st_flags != 0 { _ = lchflags(path, 0) }
                 _ = fchmodat(parent, name, observed.st_mode | 0o700, AT_SYMLINK_NOFOLLOW)
                 fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
             }
@@ -183,13 +192,34 @@ public enum Purge {
     /// A non-directory: clear any flag that blocks unlink, then unlink it.
     private static func removeLeaf(in parent: Int32, named name: String, at path: String,
                                    observed: stat, _ failures: inout [PurgeFailure]) {
-        // uchg/uappnd block unlink. O_SYMLINK opens a symlink itself rather than its target,
-        // so clearing flags can never reach through one.
-        if observed.st_flags != 0 {
-            let fd = openat(parent, name, O_SYMLINK | O_CLOEXEC)
-            if fd >= 0 { _ = fchflags(fd, 0); close(fd) }
-        }
+        // uchg/uappnd block unlink, and clearing them needs a descriptor for the entry itself.
+        if observed.st_flags != 0 { clearFlags(in: parent, named: name, at: path, observed: observed) }
         unlink(in: parent, named: name, at: path, flag: 0, observed: observed, &failures)
+    }
+
+    /// Clears BSD flags on a non-directory without following a symlink and without blocking.
+    ///
+    /// Only the flag matters here: unlink needs write on the *parent*, not on the entry, so a
+    /// mode-0000 file unlinks fine once uchg is gone. Repairing its mode first is not just
+    /// unnecessary, it is impossible — chmod on an immutable file fails, and the file cannot be
+    /// opened to clear the flag, which is the deadlock that left a 0000+uchg file unremovable.
+    ///
+    /// O_NONBLOCK matters: opening a FIFO for read otherwise waits for a writer that never
+    /// arrives, and a uchg FIFO inside a prefix wedged the whole purge in openat.
+    private static func clearFlags(in parent: Int32, named name: String, at path: String,
+                                   observed: stat) {
+        // O_SYMLINK opens a symlink itself rather than its target.
+        var fd = openat(parent, name, O_SYMLINK | O_NONBLOCK | O_CLOEXEC)
+        if fd < 0 { fd = openat(parent, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC) }
+        if fd >= 0 {
+            _ = fchflags(fd, 0)
+            close(fd)
+            return
+        }
+        // No descriptor is obtainable (an unreadable file, an exotic node type). lchflags is the
+        // only remaining route. It is path-based, which the walk otherwise avoids, but it does
+        // not follow the final symlink and it changes a flag rather than removing anything.
+        _ = lchflags(path, 0)
     }
 
     /// unlinkat, and on a permission failure one retry after stripping the entry's ACL.
