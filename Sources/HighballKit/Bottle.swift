@@ -335,10 +335,21 @@ public struct Bottle: Sendable {
     /// froze at map-load "Initializing game data" on defaults. Async compile off there
     /// (the d9vk fork's own wrapper never enables async; the first map load's pipeline
     /// burst is exactly the freeze point), 2 GB reported texture memory (DXVK's standard
-    /// 32-bit address-space mitigation, cf. its built-in Vampire profile), and a real
-    /// Radeon device id to pair with the AMD vendor id DXVK's built-in csgo profile
-    /// already forces, so the game's dxsupport.cfg picks a concrete GPU profile instead
-    /// of unknown-device failsafe. Later lines win, so the section must follow the global.
+    /// 32-bit address-space mitigation, cf. its built-in Vampire profile), and a Radeon
+    /// device id to pair with the AMD vendor id DXVK's built-in csgo profile already
+    /// forces. Later lines win, so the section must follow the global.
+    ///
+    /// Two of those three are unvalidated, and the device id's stated reason was wrong.
+    /// It read "so the game's dxsupport.cfg picks a concrete GPU profile instead of
+    /// unknown-device failsafe". 0x73BF is a 2019 Navi part; in the only Source
+    /// dxsupport.cfg on hand (Portal's, which knows no id above 0x9715) it falls into
+    /// `"ATI Unknown"` — VendorID 0x1002, MinDeviceID 0x0000, MaxDeviceID 0xffff,
+    /// MakeMeLast 1 — which IS the failsafe bucket, the opposite of the claim. CS:GO
+    /// ships its own newer dxsupport.cfg that may well know the part, and nobody has
+    /// checked, so the honest status is unverified rather than disproven. The 2 GB cap
+    /// has never been validated either: measured on an M1 Pro, a Source D3D9 map load
+    /// took 11.1 s with and without it. Both stay because they are individually
+    /// defensible, not because they are known to help. Do not restate the old rationale.
     public static func dxvkConfig(async: Bool, appConfig: [String: [String: String]] = [:]) -> String {
         // FALLBACK, kept deliberately (do not delete yet): legacy CS:GO can only be started
         // from Steam's own launch-option chooser, so it never passes the app's Play-gate and a
