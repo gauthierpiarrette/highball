@@ -71,6 +71,10 @@ frozen. Let it finish. If it stalls, relaunch and it resumes.
 Everything lives in `~/Library/Application Support/Highball/`. Nothing touches `/usr` or
 `/Library`; deleting that folder is a full uninstall.
 
+⌘C / ⌘V / ⌘A work inside Windows apps — the Command keys are mapped to Ctrl, and Option to
+Alt so Alt-based game bindings keep working. Turn it off per bottle in settings for Wine's
+default, where Command acts as Alt.
+
 <details><summary>Prefer the terminal? The CLI does everything the app does.</summary>
 
 ```sh
