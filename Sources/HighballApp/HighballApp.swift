@@ -274,13 +274,19 @@ struct ContentView: View {
             Text(state.pendingHeavyFix?.recipe.steps.compactMap(\.slowHint).first
                  ?? L("This installs the dependencies the compatibility database verified."))
         }
-        .alert(L("Something went wrong"), isPresented: .init(
+        // A partial delete succeeded — the bottle is gone and the name is free — so framing it as
+        // a failure, with an invitation to file a bug, misreads what happened. Same alert, honest
+        // title, and no Report button for something that is not a problem to report.
+        .alert(state.errorIsPartialSuccess ? L("Some files couldn't be removed") : L("Something went wrong"),
+               isPresented: .init(
             get: { state.errorMessage != nil },
             set: { if !$0 { state.errorMessage = nil } })) {
             Button("OK") { state.errorMessage = nil }
-            Button(L("Report this problem…")) {
-                state.errorMessage = nil
-                NSWorkspace.shared.open(BugReport.url(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"))
+            if !state.errorIsPartialSuccess {
+                Button(L("Report this problem…")) {
+                    state.errorMessage = nil
+                    NSWorkspace.shared.open(BugReport.url(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"))
+                }
             }
         } message: { Text(state.errorMessage ?? "") }
         .alert(item: $state.crashSuggestion) { s in

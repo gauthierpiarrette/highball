@@ -55,6 +55,9 @@ final class AppState {
     }
 
     var errorMessage: String?
+    /// True when errorMessage describes an operation that SUCCEEDED with something left over,
+    /// so the alert can say so instead of calling it a failure.
+    var errorIsPartialSuccess = false
 
     // MARK: One Library (Phase 2)
 
@@ -175,7 +178,7 @@ final class AppState {
         panel.message = String(format: L("Choose a cover image for %@"), item.title)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try coverStore.setCover(for: item.id, from: url); coverVersion += 1 }
-        catch { errorMessage = Self.message(for: error) }
+        catch { errorIsPartialSuccess = false; errorMessage = Self.message(for: error) }
     }
 
     func resetCover(for item: LibraryItem) {
@@ -278,7 +281,7 @@ final class AppState {
             do {
                 try await work()
                 doneState = done ?? DoneState(title: L("Done"), ctaTitle: nil, cta: nil)
-            } catch { showLog = false; errorMessage = Self.message(for: error) }
+            } catch { showLog = false; errorIsPartialSuccess = false; errorMessage = Self.message(for: error) }
             cleanup?()
             busy = false
             refresh()
@@ -315,7 +318,7 @@ final class AppState {
 
     func acceptGPTK(engine: InstalledEngine) {
         do { _ = try engineStore.accept(license: "apple-gptk-license-2023-08-17", engine: engine); refresh() }
-        catch { errorMessage = Self.message(for: error) }
+        catch { errorIsPartialSuccess = false; errorMessage = Self.message(for: error) }
     }
 
     func createBottle(name: String, recipeID: String?) {
@@ -404,7 +407,7 @@ final class AppState {
     }
 
     func update(_ bottle: Bottle) {
-        do { try bottleStore.update(bottle); refresh() } catch { errorMessage = Self.message(for: error) }
+        do { try bottleStore.update(bottle); refresh() } catch { errorIsPartialSuccess = false; errorMessage = Self.message(for: error) }
     }
 
     func deleteBottle(_ name: String) {
@@ -430,6 +433,7 @@ final class AppState {
             await MainActor.run {
                 if self.selectedBottle == name { self.selectedBottle = nil }
                 guard let first = leftovers.first else { return }
+                self.errorIsPartialSuccess = true
                 self.errorMessage = """
                     '\(name)' is deleted and the name is free again. Some of its files are still \
                     on disk because macOS refused to remove them, starting at \(first.path) \
