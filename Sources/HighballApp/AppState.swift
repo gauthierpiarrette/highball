@@ -10,6 +10,8 @@ final class AppState {
     /// Directories under bottles/ that aren't loadable bottles. Shown alongside the real
     /// ones so a bottle whose settings file is gone still has somewhere to be acted on (#38).
     var damagedBottles: [DamagedBottle] = []
+    /// Bottles with a delete in flight. Their rows show it and refuse a second click.
+    var deletingBottles: Set<String> = []
     var selectedBottle: String?
     var gamesByBottle: [String: [SteamGame]] = [:]
     var gameDB = GameDB(directories: [])
@@ -402,14 +404,25 @@ final class AppState {
     }
 
     func deleteBottle(_ name: String) {
-        runBusy("Deleting '\(name)'", showLogSheet: false) { [self] in
-            // Stop the bottle before anything moves: `wineserver -k` resolves the prefix by
-            // path, so after the rename it exits 1 and leaves the server running.
-            killBottleNamed(name)
+        // The row and its Delete item stay on screen for the whole operation, so without this a
+        // second click started a second delete and the loser reported "missing" for a delete that
+        // was in fact succeeding.
+        guard !deletingBottles.contains(name) else { return }
+        deletingBottles.insert(name)
+        runBusy("Deleting '\(name)'", showLogSheet: false,
+                cleanup: { [weak self] in self?.deletingBottles.remove(name) }) { [self] in
             let store = bottleStore
+            let killer = killerFor(name)
+            // Stop the bottle before anything moves: `wineserver -k` resolves the prefix by path,
+            // so after the rename it exits 1 and leaves the server running. It is a synchronous
+            // wineserver call that measured 2.3 s against a live server, so it belongs off the
+            // main actor with the purge rather than in front of it, freezing the window.
             // A prefix can be tens of GB, and the old delete ran the whole walk on the main
             // actor — 985 ms for 20,841 entries, minutes for a big Steam bottle.
-            let leftovers = try await Task.detached { try store.delete(name) }.value
+            let leftovers = try await Task.detached {
+                killer?()
+                return try store.delete(name)
+            }.value
             await MainActor.run {
                 if self.selectedBottle == name { self.selectedBottle = nil }
                 guard let first = leftovers.first else { return }
@@ -423,15 +436,17 @@ final class AppState {
         }
     }
 
-    private func killBottleNamed(_ name: String) {
-        if let bottle = bottles.first(where: { $0.name == name }) { killBottle(bottle); return }
+    /// Builds the stop-the-bottle work on the main actor (where the state lives) but hands it
+    /// back as a closure, so the blocking `wineserver -k` runs wherever the caller wants it.
+    private func killerFor(_ name: String) -> (@Sendable () -> Void)? {
         // A damaged bottle is not in `bottles`, and it is exactly the one whose wineserver most
         // needs stopping: nothing else has been able to touch it.
-        guard let engine = engines.first else { return }
-        let url = paths.bottle(name)
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        let bottle = Bottle(url: url, settings: BottleSettings(name: name, engineID: engine.id))
-        try? WineRunner(paths: paths, engine: engine, bottle: bottle).kill()
+        let bottle = bottles.first { $0.name == name }
+            ?? Bottle(url: paths.bottle(name),
+                      settings: BottleSettings(name: name, engineID: engines.first?.id ?? ""))
+        guard let engine = engine(for: bottle) else { return nil }
+        let paths = paths
+        return { try? WineRunner(paths: paths, engine: engine, bottle: bottle).kill() }
     }
 
     func removePin(_ pin: Pin, from bottle: Bottle) {

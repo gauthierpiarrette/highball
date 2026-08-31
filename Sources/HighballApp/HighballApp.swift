@@ -161,8 +161,16 @@ struct ContentView: View {
                                         Image(systemName: "wineglass\(selected ? ".fill" : "")")
                                             .foregroundStyle(selected ? HB.amber : Color.secondary)
                                             .frame(width: 18)
-                                        Text(bottle.name)
-                                            .fontWeight(selected ? .semibold : .regular)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(bottle.name)
+                                                .fontWeight(selected ? .semibold : .regular)
+                                            // A large prefix takes a while to purge, and the row
+                                            // used to sit there looking idle and clickable.
+                                            if state.deletingBottles.contains(bottle.name) {
+                                                Text(L("deleting…"))
+                                                    .font(.caption).foregroundStyle(.secondary)
+                                            }
+                                        }
                                         Spacer()
                                     }
                                     .contentShape(Rectangle())
@@ -180,6 +188,7 @@ struct ContentView: View {
                                     Button(L("Repair bottle (re-run first boot)")) { state.repairBottle(bottle) }
                                     Divider()
                                     Button(L("Delete bottle…"), role: .destructive) { pendingDelete = bottle.name }
+                                        .disabled(state.deletingBottles.contains(bottle.name))
                                 }
                             }
                             // A folder under bottles/ that isn't a loadable bottle still needs
