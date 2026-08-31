@@ -215,6 +215,10 @@ final class AppState {
         damagedBottles = (try? bottleStore.damaged()) ?? []
         needsOnboarding = engines.isEmpty
         rosettaInstalled = FileManager.default.fileExists(atPath: "/Library/Apple/usr/share/rosetta/rosetta")
+        // Drop a selection whose bottle is gone, not merely a nil one: a delete that threw after
+        // the bottle had in fact been removed (the losing side of a race) left the selection
+        // pinned to a name nothing could resolve.
+        if let sel = selectedBottle, !bottles.contains(where: { $0.name == sel }) { selectedBottle = nil }
         if selectedBottle == nil { selectedBottle = bottles.first?.name }
         // Never trap on duplicate names (a Finder-duplicated bottle crashed the app at launch — issue #13).
         gamesByBottle = Dictionary(bottles.map { ($0.name, SteamLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
