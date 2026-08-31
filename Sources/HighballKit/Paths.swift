@@ -258,13 +258,26 @@ public enum BugReport {
             (try? $0.resourceValues(forKeys: key))?.contentModificationDate ?? .distantPast
         }
         let newestFirst = logs.sorted { modified($0) > modified($1) }.prefix(maxLogsExamined)
+        // A wineboot log is the prefix booting, and it ends before the game starts, so it can
+        // never show a game failing. It nonetheless matches a backend marker, because wineboot
+        // creates a d3d adapter and Wine shouts `wined3d_adapter_create` while doing it — so the
+        // marker test alone ranked it "informative". In issue #21 the reporter sent one twice,
+        // both times chosen by this picker, and each round cost days. Repair runs wineboot, so it
+        // is also the log most likely to be the newest one after someone follows fix instructions.
+        let isPrefixBoot: (URL) -> Bool = { $0.lastPathComponent.hasSuffix("-wineboot.log") }
         var fallback: (url: URL, text: String)?
+        var bootFallback: (url: URL, text: String)?
         for url in newestFirst {
             guard let text = boundedText(of: url) else { continue }
+            if isPrefixBoot(url) {
+                if bootFallback == nil { bootFallback = (url, text) }
+                continue
+            }
             if backendMarkers.contains(where: text.contains) { return (url, text) }
             if fallback == nil { fallback = (url, text) }
         }
-        return fallback
+        // Only when it is genuinely the only thing on disk — a bottle that has never run anything.
+        return fallback ?? bootFallback
     }
 
     public static func url(version: String, paths: HighballPaths = HighballPaths()) -> URL {
