@@ -157,6 +157,53 @@ extension RegressionTests {
     // backwards: Wine gives the whole process tree one pipe, so the game's DXVK output lands in
     // the steam.exe log, and skipping it left a wineboot log with nothing in it. That is the
     // file issue #21's reporter sent, and it cost four rounds. Selection is now by content.
+    /// Issue #21: the reporter sent a `-wineboot.log` twice, both times chosen by this picker,
+    /// and each round cost days. A wineboot log is the prefix booting and ends before the game
+    /// starts, so it can never show a game failing — but it matches a backend marker anyway,
+    /// because wineboot creates a d3d adapter and Wine shouts `wined3d_adapter_create`.
+    func testReportSkipsAPrefixBootLogWhenAnythingElseExists() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "hb-boot-\(UUID().uuidString)")
+        let paths = HighballPaths(home: home)
+        try paths.ensure()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        // Where legacy CS:GO's output actually lands: the launcher's log, written before the
+        // Repair that follows a fix instruction — so the boot log is the newer of the two.
+        let game = paths.logs.appending(path: "2026-08-29T210000Z-CS-steam.exe.log")
+        try ["# gin E bottle=CS renderer=dxvk", "info:  DXVK-Kegworks: v1.10.4-async",
+             "info:  Game: csgo.exe", "Initializing game data", "# exit=0 (ok) after 300s"]
+            .joined(separator: "\n").write(to: game, atomically: true, encoding: .utf8)
+        let boot = paths.logs.appending(path: "2026-08-29T211442Z-CS-wineboot.log")
+        try ["# gin E bottle=CS renderer=dxvk", "# wine wineboot -u",
+             "01b4:err:winediag:wined3d_adapter_create Using the Vulkan renderer for d3d10/11 applications.",
+             "# exit=0 (ok) after 12s"]
+            .joined(separator: "\n").write(to: boot, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-600)],
+                                              ofItemAtPath: game.path)
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: boot.path)
+
+        let body = BugReport.url(version: "0.7.17", paths: paths).absoluteString.removingPercentEncoding ?? ""
+        XCTAssertTrue(body.contains("DXVK-Kegworks"), "the game's own output must be attached")
+        XCTAssertFalse(body.contains("wineboot -u"), "a prefix-boot log must never win over a real log")
+    }
+
+    /// But a bottle that has only ever booted still has something worth sending.
+    func testReportStillAttachesABootLogWhenItIsTheOnlyOne() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "hb-boot1-\(UUID().uuidString)")
+        let paths = HighballPaths(home: home)
+        try paths.ensure()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try ["# gin E bottle=CS renderer=dxvk", "# wine wineboot -u",
+             "01b4:err:winediag:wined3d_adapter_create Using the Vulkan renderer",
+             "# exit=53 (failed) after 12s"]
+            .joined(separator: "\n")
+            .write(to: paths.logs.appending(path: "2026-08-29T211442Z-CS-wineboot.log"),
+                   atomically: true, encoding: .utf8)
+
+        let body = BugReport.url(version: "0.7.17", paths: paths).absoluteString.removingPercentEncoding ?? ""
+        XCTAssertTrue(body.contains("wineboot -u"), "with nothing else on disk it is still the best evidence")
+    }
+
     func testReportPicksTheLogThatNamesTheBackendEvenWhenItIsALaunchers() throws {
         let dir = FileManager.default.temporaryDirectory.appending(path: "hb-report-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
