@@ -117,6 +117,7 @@ public struct WineRunner: Sendable {
     @discardableResult
     public func start(_ executable: URL, arguments: [String] = [], renderer: Renderer? = nil, extraEnvironment: [String: String] = [:], workingDirectory: URL? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
         await syncDllOverridesRegistry()
+        await syncKeyboardRegistry()
         return try await run([executable.path] + arguments, renderer: renderer, extraEnvironment: extraEnvironment, label: executable.lastPathComponent, workingDirectory: workingDirectory, onOutput: onOutput)
     }
 
@@ -288,6 +289,18 @@ public struct WineRunner: Sendable {
             ("LeftCommandIsCtrl", on), ("RightCommandIsCtrl", on),
             ("LeftOptionIsAlt", on), ("RightOptionIsAlt", on),
         ]
+    }
+
+    /// Applies the Command→Ctrl mapping when it differs from what the prefix already has, so an
+    /// existing bottle picks it up on its next launch and the settings toggle takes effect without
+    /// a Repair. Same shape as syncDllOverridesRegistry.
+    public func syncKeyboardRegistry() async {
+        let current = bottle.settings.commandIsControl
+        guard current != bottle.settings.commandIsControlSynced else { return }
+        guard (try? await setKeyboardMapping(commandIsControl: current)) != nil else { return }
+        var copy = bottle
+        copy.settings.commandIsControlSynced = current
+        try? copy.save()
     }
 
     public func setKeyboardMapping(commandIsControl: Bool) async throws {

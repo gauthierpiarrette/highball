@@ -98,6 +98,17 @@ final class RegressionTests: XCTestCase {
                        "turning it off must clear the same keys it set, not leave half behind")
     }
 
+    // A bottle made before this setting existed decodes with commandIsControlSynced == nil, which
+    // is what makes the first launch after updating apply the mapping instead of waiting for Repair.
+    func testPreExistingBottleIsUnsyncedSoLaunchApplies() throws {
+        let json = #"{"formatVersion":1,"name":"old","engineID":"e"}"#
+        let s = try JSONDecoder().decode(BottleSettings.self, from: Data(json.utf8))
+        XCTAssertTrue(s.commandIsControl, "the default carries into bottles that predate it")
+        XCTAssertNil(s.commandIsControlSynced, "never mirrored → next launch applies it")
+        XCTAssertNotEqual(s.commandIsControl, s.commandIsControlSynced,
+                          "differing is the trigger syncKeyboardRegistry checks")
+    }
+
     // New bottles get Mac-native copy/paste; the setting is what the registry write follows.
     func testCommandIsControlDefaultsOn() throws {
         let s = BottleSettings(name: "t", engineID: "e")

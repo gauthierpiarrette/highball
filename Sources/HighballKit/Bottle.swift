@@ -165,6 +165,11 @@ public struct BottleSettings: Codable, Sendable {
     /// beeps instead of pasting. Option is mapped to Alt alongside it — without that, mapping both
     /// Command keys leaves no way to send Alt at all (winemac.drv warns about exactly this).
     public var commandIsControl: Bool = true
+    /// The commandIsControl value last mirrored into the prefix registry. Bottles created before
+    /// this setting existed carry nil, so the first launch after updating applies it — otherwise a
+    /// user would have to know to press Repair, which is exactly the discoverability problem this
+    /// setting exists to fix.
+    public var commandIsControlSynced: Bool?
     /// Windows UI scale as a DPI value (LogPixels): 96 = 100% (1x), up to 240 = 250%. Above 96 the
     /// Mac driver switches to native Retina pixels so the scaled UI stays crisp. Applied to the prefix
     /// registry on change. Supersedes the old on/off retinaMode (which was just 96 / 192).
