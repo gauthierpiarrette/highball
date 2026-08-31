@@ -177,7 +177,8 @@ public enum ArgumentLine {
 
 /// Persisted as `<bottle>/bottle.json` (older bottles: `gin.json`, still read as a fallback).
 public struct BottleSettings: Codable, Sendable {
-    public var formatVersion: Int = 1
+    /// 2: dxvkAsync no longer defaults on. Bottles written at 1 are migrated off once on load.
+    public var formatVersion: Int = 2
     public var name: String
     public var engineID: String
     public var renderer: Renderer = .dxmt
@@ -189,8 +190,20 @@ public struct BottleSettings: Codable, Sendable {
     public var sync: SyncMode = .msync
     public var metalHUD: Bool = false
     public var advertiseAVX: Bool = false
-    /// DXVK async pipeline compilation — big shader-stutter relief, minor risk of artifacts.
-    public var dxvkAsync: Bool = true
+    /// DXVK async pipeline compilation. Off, and deliberately so.
+    ///
+    /// The name oversells it: on a pipeline miss it does not compile in the background and draw
+    /// later, it SKIPS THE DRAW and presents the frame without that geometry. Upstream DXVK has
+    /// refused the patch twice, naming multiplayer explicitly, and refused it even as an
+    /// off-by-default option; the fork that carries it tells users not to report bugs with it
+    /// enabled, and warns it may be risky in multiplayer. The engine's own built-in default is
+    /// off, so writing True was an active opt-in for every game, not stock behaviour.
+    ///
+    /// It was on for every game from 0.3.0, arriving as a trailing clause in a commit about sync
+    /// modes, and it has never been measured to help here: 16 alternated Unigine Heaven runs
+    /// through d9vk on an M1 Pro gave −0.1%, p = 0.43. Turn it on per game with a recipe
+    /// dxvkconfig step if a title ever demonstrates a win.
+    public var dxvkAsync: Bool = false
     /// Cap the frame rate (0 = uncapped). Applied per renderer (DXVK_FRAME_RATE / DXMT_CONFIG).
     public var fpsCap: Int = 0
     /// Windows UI scale as a DPI value (LogPixels): 96 = 100% (1x), up to 240 = 250%. Above 96 the
@@ -230,7 +243,7 @@ public struct BottleSettings: Codable, Sendable {
         sync = try c.decodeIfPresent(SyncMode.self, forKey: .sync) ?? .msync
         metalHUD = try c.decodeIfPresent(Bool.self, forKey: .metalHUD) ?? false
         advertiseAVX = try c.decodeIfPresent(Bool.self, forKey: .advertiseAVX) ?? false
-        dxvkAsync = try c.decodeIfPresent(Bool.self, forKey: .dxvkAsync) ?? true
+        dxvkAsync = try c.decodeIfPresent(Bool.self, forKey: .dxvkAsync) ?? false
         fpsCap = try c.decodeIfPresent(Int.self, forKey: .fpsCap) ?? 0
         // dpiScale supersedes the old retinaMode toggle (on == 200% == LogPixels 192).
         if let dpi = try c.decodeIfPresent(Int.self, forKey: .dpiScale) {
@@ -246,6 +259,15 @@ public struct BottleSettings: Codable, Sendable {
         pins = try c.decodeIfPresent([Pin].self, forKey: .pins) ?? []
         recipes = try c.decodeIfPresent([String].self, forKey: .recipes) ?? []
         created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()
+
+        // Every bottle written before format 2 carries dxvkAsync: true because that was the
+        // default, not because anyone chose it — there is no explicit-choice flag for it the way
+        // rendererExplicit exists for the renderer. Switch those off once and stamp the version,
+        // so a user who deliberately turns it back on keeps it.
+        if formatVersion < 2 {
+            dxvkAsync = false
+            formatVersion = 2
+        }
     }
 
     /// Legacy key for migrating pre-dpiScale bottles that stored `retinaMode`.
