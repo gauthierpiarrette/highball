@@ -145,8 +145,19 @@ public enum Purge {
             guard fd >= 0 else { return false }
             if observed.st_flags != 0 { _ = fchflags(fd, 0) }
             if (observed.st_mode & 0o700) != 0o700 { _ = fchmod(fd, observed.st_mode | 0o700) }
+            // A directory we cannot READ is not a directory that is EMPTY. Returning [] for a
+            // failed listing made the walk pop straight back out, rmdir the still-full directory,
+            // and report ENOTEMPTY — naming a consequence and hiding the cause. Under descriptor
+            // exhaustion that turned one EMFILE into hundreds of misleading failures.
+            guard let kids = entries(of: fd) else {
+                let e = errno
+                close(fd)
+                failures.append(PurgeFailure(path: path, code: e, mode: observed.st_mode,
+                                             flags: observed.st_flags, uid: observed.st_uid))
+                return true
+            }
             stack.append(Level(fd: fd, parent: parent, name: name, path: path,
-                               observed: observed, kids: entries(of: fd), next: 0))
+                               observed: observed, kids: kids, next: 0))
             return true
         }
 
@@ -240,11 +251,15 @@ public enum Purge {
 
     /// Child names of an open directory, excluding "." and "..". Collected before recursing so
     /// the directory stream is closed while its entries are being removed.
-    private static func entries(of fd: Int32) -> [String] {
+    ///
+    /// nil means the listing failed, which the caller must not confuse with an empty directory.
+    private static func entries(of fd: Int32) -> [String]? {
         let copy = dup(fd)
         guard copy >= 0, let dir = fdopendir(copy) else {
+            let e = errno
             if copy >= 0 { close(copy) }
-            return []
+            errno = e
+            return nil
         }
         defer { closedir(dir) }
         var names: [String] = []
