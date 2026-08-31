@@ -8,17 +8,18 @@ public struct BottleStore: Sendable {
         guard FileManager.default.fileExists(atPath: paths.bottles.path) else { return [] }
         return try FileManager.default.contentsOfDirectory(at: paths.bottles, includingPropertiesForKeys: nil)
             .compactMap { url -> Bottle? in
-                // Real directories only. Listing used to reconcile the name of a symlinked entry
-                // by writing bottle.json through the link, mutating a file outside bottles/.
-                var st = stat()
-                guard lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR else { return nil }
                 guard var b = try? Bottle.load(url) else { return nil }
                 // The folder is the bottle's identity (get/delete resolve by folder). A copied
                 // folder keeps the old internal name, which crashed the app and confused lookups
                 // (issue #13) — reconcile so "play copy" is simply a bottle called "play copy".
                 if b.settings.name != url.lastPathComponent {
                     b.settings.name = url.lastPathComponent
-                    try? b.save()
+                    // Reconcile in memory always, but persist only into a real directory: saving
+                    // through a symlinked entry rewrites a bottle.json outside bottles/ as a side
+                    // effect of merely listing. Skipping such entries entirely would be worse —
+                    // a bottle deliberately linked to another disk would vanish from the list.
+                    var st = stat()
+                    if lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR { try? b.save() }
                 }
                 return b
             }

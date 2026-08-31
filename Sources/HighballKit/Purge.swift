@@ -79,16 +79,13 @@ public enum Purge {
         remove(in: parent, named: name, at: url.path, &failures)
         close(parent)
 
-        // Last resort for whatever the walk could not finish — a depth past even the raised
-        // file limit, most realistically. rm walks with fts, which recycles descriptors and does
-        // not follow symlinks, so it is safe to point at a tree already isolated inside .trash.
-        if !failures.isEmpty {
-            var probe = stat()
-            if lstat(url.path, &probe) == 0 {
-                _ = run("/bin/rm", ["-rf", url.path])
-                if lstat(url.path, &probe) != 0 { return [] }
-            }
-        }
+        // Deliberately no `rm -rf` last resort either. It was added here as belt and braces for a
+        // depth past the raised file limit, with a comment asserting rm does not follow symlinks.
+        // That is true of its traversal and false of the path it is handed: measured, it followed
+        // a swap out of the tree in 22 of 40 rounds — a bigger hole than the removeItem fast path
+        // it sat next to, and it fired precisely when the walk had reported failures, which is
+        // exactly when something is still fighting the delete. raiseFileLimit covers the depth
+        // case; anything the walk genuinely cannot remove is reported rather than forced.
 
         // Never report an all-clear we have not verified. A silently stranded prefix is how the
         // original bug hid: the caller believed the delete had finished.
