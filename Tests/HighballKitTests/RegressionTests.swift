@@ -4,6 +4,31 @@ import XCTest
 /// Tripwires for bugs that shipped once and must not ship twice.
 final class RegressionTests: XCTestCase {
 
+    /// DXVK async was on for every game from 0.3.0, not because anyone chose it but because it
+    /// was the default. It skips draws while a pipeline compiles, upstream refuses to ship it,
+    /// and it measured no benefit here, so format 2 switches existing bottles off once.
+    func testOldBottlesAreMigratedOffDxvkAsync() throws {
+        let json = #"{"name":"b","engineID":"e","dxvkAsync":true,"formatVersion":1}"#
+        let s = try JSONDecoder.highball.decode(BottleSettings.self, from: Data(json.utf8))
+        XCTAssertFalse(s.dxvkAsync, "a bottle written before format 2 must be switched off")
+        XCTAssertEqual(s.formatVersion, 2, "and stamped, so the migration never runs twice")
+    }
+
+    /// But a user who turns it back on afterwards keeps it: the stamp is what makes it one-shot.
+    func testADeliberateDxvkAsyncChoiceSurvives() throws {
+        let json = #"{"name":"b","engineID":"e","dxvkAsync":true,"formatVersion":2}"#
+        let s = try JSONDecoder.highball.decode(BottleSettings.self, from: Data(json.utf8))
+        XCTAssertTrue(s.dxvkAsync, "format 2 means the value was chosen, not inherited")
+    }
+
+    /// A fresh bottle is off, and the generated conf says so rather than staying silent — the
+    /// explicit line is what keeps DXVK printing its "Effective configuration" block, the one
+    /// artefact that survives a game started by a launcher Highball did not spawn (#21).
+    func testNewBottlesDefaultAsyncOffAndSaySo() {
+        XCTAssertFalse(BottleSettings(name: "b", engineID: "e").dxvkAsync)
+        XCTAssertTrue(Bottle.dxvkConfig(async: false).contains("dxvk.enableAsync = False"))
+    }
+
     // Issue #12: Windows-invalid characters in a bottle name break wineboot (exit 53).
     func testBottleNameValidation() {
         XCTAssertNil(BottleStore.nameProblem("games"))
@@ -47,7 +72,8 @@ final class RegressionTests: XCTestCase {
         XCTAssertEqual(s.dpiScale, 96, "no dpi field on an old bottle must default to 96 (100%)")
         XCTAssertEqual(s.dllOverrides, "", "field added in 0.7.2 must default empty")
         XCTAssertEqual(s.fpsCap, 0)
-        XCTAssertEqual(s.dxvkAsync, true)
+        // That fixture predates formatVersion 2, so it exercises the migration below.
+        XCTAssertEqual(s.dxvkAsync, false)
         XCTAssertEqual(s.pins.first?.arguments, [], "pin arguments default to empty")
         XCTAssertEqual(s.pins.first?.environment, [:])
         XCTAssertNil(s.pins.first?.renderer)

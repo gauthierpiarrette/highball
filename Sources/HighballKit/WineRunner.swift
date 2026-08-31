@@ -286,9 +286,17 @@ public struct WineRunner: Sendable {
             if status != 0 { allAdded = false }
         }
         guard allAdded else { return }
-        var copy = bottle
-        copy.settings.dllOverridesSynced = current
-        try? copy.save()
+        markSynced { $0.dllOverridesSynced = current }
+    }
+
+    /// Records a "last mirrored into the prefix registry" marker. Re-reads from disk rather than
+    /// saving `bottle`, which is a snapshot taken when the runner was built: saving it whole also
+    /// rewrites every other setting as it stood then, so a second sync in the same launch would
+    /// revert the marker the first one just wrote.
+    private func markSynced(_ apply: (inout BottleSettings) -> Void) {
+        guard var fresh = try? Bottle.load(bottle.url) else { return }
+        apply(&fresh.settings)
+        try? fresh.save()
     }
 
     /// Windows UI scaling. LogPixels is the Windows system DPI (96 = 100%, 240 = 250%): DPI-aware

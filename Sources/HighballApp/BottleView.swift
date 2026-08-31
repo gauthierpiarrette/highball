@@ -328,7 +328,7 @@ struct BottleSettingsSheet: View {
                         }
                     }
                     Toggle(L("Metal performance HUD"), isOn: binding(\.metalHUD))
-                    Toggle(L("DXVK async shader compilation (less stutter)"), isOn: binding(\.dxvkAsync))
+                    Toggle(L("DXVK async shader compilation (experimental — can skip draws while a shader compiles)"), isOn: binding(\.dxvkAsync))
                     Picker(L("Frame rate cap"), selection: binding(\.fpsCap)) {
                         Text(L("Uncapped")).tag(0)
                         Text("30 fps").tag(30)

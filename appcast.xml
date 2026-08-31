@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.18</title>
+      <description><![CDATA[DXVK async shader compilation is off by default and existing bottles are switched off; bug reports no longer attach a bottle's startup log (#21).]]></description>
+      <pubDate>Mon, 31 Aug 2026 07:49:19 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.18/Highball-0.7.18.zip" sparkle:version="0.7.18" sparkle:shortVersionString="0.7.18" sparkle:edSignature="FVfG6bau0AJx2CyGmkZgjIn0pZrys3BKi8yl0q1byKrSvt9xROoq1DNl97rG9wo6ZC2RESzCR4tGJAcE4X12CA==" length="2715200" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.17</title>
       <description><![CDATA[Deleting a bottle no longer leaves it half-removed and unusable (#38); D3D9 games now get DXVK on every renderer (#21).]]></description>
       <pubDate>Mon, 31 Aug 2026 00:41:58 -0700</pubDate>
