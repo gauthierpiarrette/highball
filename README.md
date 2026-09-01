@@ -30,6 +30,12 @@ so you can check whether your game runs before downloading a byte.
 macOS 14+, notarized. Drag it to Applications and open it. The app walks you through the
 rest: engine download, your first bottle, Steam.
 
+Or with Homebrew:
+
+```sh
+brew install --cask gauthierpiarrette/highball/highball
+```
+
 Not sure it'll run your game? **[Check the compatibility database →](https://gethighball.com/database/)**
 
 > **Beta, working end to end:** engine install → bottle → Steam login → game, with
