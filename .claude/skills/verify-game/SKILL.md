@@ -61,9 +61,15 @@ Pick the status by what was actually observed:
 | status | means |
 |---|---|
 | `verified-local` | someone ran it here, start to finish |
-| `reported-upstream` | tested and known broken, with the cause recorded |
+| `reported-upstream` | named in DXMT release notes as working or fixed; not verified here |
 | `community` | reported by users, unverified by us |
 | `blocked-anticheat` | cannot work, anti-cheat |
+
+There is deliberately no status for "we tested it here and it does not work". Do not stretch
+`reported-upstream` to mean that, and do not invent a status: record the failure in `notes`
+and `knownIssues`, leave the status at what is actually true, and raise the gap with the
+maintainer. `reported-upstream` is defined by the site build (`Scripts/build-site.py`), and
+changing what it means silently changes what every existing entry claims.
 
 `lastVerified` carries date, engine id, macOS version, and chip, because the answer differs
 across all four. Notes say what to do, what it costs, and what still fails.
