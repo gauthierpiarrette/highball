@@ -96,6 +96,53 @@ public enum BugReport {
     static let maxHeadBytes = 1 << 20
     static let maxTailBytes = 256 << 10
 
+    /// Wine infrastructure and launcher processes that are never the frozen game. Anything
+    /// else running from a bottle's drive_c with an .exe suffix is a candidate.
+    static let infraExes: Set<String> = [
+        "steam.exe", "steamwebhelper.exe", "steamservice.exe", "steamerrorreporter.exe",
+        "services.exe", "svchost.exe", "winedevice.exe", "plugplay.exe", "rpcss.exe",
+        "explorer.exe", "wineboot.exe", "conhost.exe", "rundll32.exe", "reg.exe",
+        "gameoverlayui.exe", "gameoverlayui64.exe", "x86launcher.exe", "cmd.exe",
+        "epicgameslauncher.exe", "epicwebhelper.exe", "unrealcefsubprocess.exe",
+    ]
+
+    /// Parses `ps -Ao pid=,command=` output into candidate game processes: anything running
+    /// out of a bottle's drive_c that isn't wine plumbing or a launcher. Pure for testability.
+    public static func gameProcesses(fromPS ps: String) -> [(pid: Int32, exe: String)] {
+        var out: [(Int32, String)] = []
+        for line in ps.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard let sp = trimmed.firstIndex(of: " "), let pid = Int32(trimmed[..<sp]) else { continue }
+            let command = String(trimmed[trimmed.index(after: sp)...])
+            guard command.contains("/drive_c/") else { continue }
+            // The executable path ends at ".exe"; what follows are the game's own arguments.
+            guard let range = command.range(of: ".exe", options: [.caseInsensitive]) else { continue }
+            let exePath = String(command[..<range.upperBound])
+            let exe = (exePath as NSString).lastPathComponent.lowercased()
+            guard !infraExes.contains(exe) else { continue }
+            out.append((pid, exe))
+        }
+        return out
+    }
+
+    /// The issue #21 lesson, made permanent: a frozen game produces no crash, no exit and no
+    /// fresh log lines, so a report filed DURING the freeze used to contain nothing at all —
+    /// five diagnostic rounds to learn where one stack trace would have answered it. Now the
+    /// report button samples any live game process (macOS `sample`, 5 s) into the logs
+    /// directory, and the digest names the file so the user attaches it.
+    static func sampleRunningGames(paths: HighballPaths) -> [String] {
+        guard let ps = try? Shell.capture("/bin/ps", ["-Ao", "pid=,command="]) else { return [] }
+        var written: [String] = []
+        for (pid, exe) in gameProcesses(fromPS: ps).prefix(2) {
+            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
+            let file = paths.logs.appending(path: "\(stamp)-sample-\(exe).txt")
+            if (try? Shell.run("/usr/bin/sample", [String(pid), "5", "-f", file.path])) != nil {
+                written.append(file.lastPathComponent)
+            }
+        }
+        return written
+    }
+
     /// Where a launch can leave a log: Highball's own directory, plus the per-process files DXVK
     /// writes inside each bottle (DXVK_LOG_PATH, set in `Bottle.environment`). The DXVK files
     /// matter because they survive the one case Highball cannot otherwise observe — a game
@@ -280,15 +327,23 @@ public enum BugReport {
         return fallback ?? bootFallback
     }
 
-    public static func url(version: String, paths: HighballPaths = HighballPaths()) -> URL {
+    /// `samplingLiveGames: false` skips the live-process sample (tests; callers that must not
+    /// block for the ~5 s a sample takes).
+    public static func url(version: String, paths: HighballPaths = HighballPaths(), samplingLiveGames: Bool = true) -> URL {
         let chip = (try? Shell.capture("/usr/sbin/sysctl", ["-n", "machdep.cpu.brand_string"]))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? "unknown chip"
         let macos = (try? Shell.capture("/usr/bin/sw_vers", ["-productVersion"]))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? "?"
         var logDigest = ""
+        // A game frozen right now is the one moment its stack is capturable — grab it first.
+        let samples = samplingLiveGames ? sampleRunningGames(paths: paths) : []
+        if !samples.isEmpty {
+            logDigest += "Live game sampled during this report — PLEASE ATTACH from ~/Library/Application Support/Highball/logs/:\n"
+                + samples.map { "  \($0)" }.joined(separator: "\n") + "\n\n"
+        }
         if let found = mostInformativeLog(in: logDirectories(paths)) {
             // Name the full file too: the digest is a summary, and triage may want the original.
-            logDigest = "\(redactHome(found.url.path)):\n\(digest(found.text))"
+            logDigest += "\(redactHome(found.url.path)):\n\(digest(found.text))"
         }
         func url(log: String) -> URL {
             var comps = URLComponents(string: "https://github.com/gauthierpiarrette/highball/issues/new")!

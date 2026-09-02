@@ -208,7 +208,7 @@ extension RegressionTests {
                                               ofItemAtPath: game.path)
         try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: boot.path)
 
-        let body = BugReport.url(version: "0.7.17", paths: paths).absoluteString.removingPercentEncoding ?? ""
+        let body = BugReport.url(version: "0.7.17", paths: paths, samplingLiveGames: false).absoluteString.removingPercentEncoding ?? ""
         XCTAssertTrue(body.contains("DXVK-Kegworks"), "the game's own output must be attached")
         XCTAssertFalse(body.contains("wineboot -u"), "a prefix-boot log must never win over a real log")
     }
@@ -226,7 +226,7 @@ extension RegressionTests {
             .write(to: paths.logs.appending(path: "2026-08-29T211442Z-CS-wineboot.log"),
                    atomically: true, encoding: .utf8)
 
-        let body = BugReport.url(version: "0.7.17", paths: paths).absoluteString.removingPercentEncoding ?? ""
+        let body = BugReport.url(version: "0.7.17", paths: paths, samplingLiveGames: false).absoluteString.removingPercentEncoding ?? ""
         XCTAssertTrue(body.contains("wineboot -u"), "with nothing else on disk it is still the best evidence")
     }
 
@@ -331,7 +331,7 @@ extension RegressionTests {
             .write(to: paths.logs.appending(path: "2026-08-30T000000Z-b-steam.exe.log"),
                    atomically: true, encoding: .utf8)
 
-        let url = BugReport.url(version: "0.7.17", paths: paths)
+        let url = BugReport.url(version: "0.7.17", paths: paths, samplingLiveGames: false)
         XCTAssertLessThanOrEqual(url.absoluteString.count, BugReport.maxURLCharacters)
         XCTAssertTrue(url.absoluteString.contains("template=bug.yml"))
     }
@@ -364,6 +364,49 @@ extension RegressionTests {
         let plain = try bottle.environment(engine: engine, renderer: .wined3d)
         XCTAssertNil(plain["DXVK_CONFIG_FILE"], "wined3d uses no DXVK")
         XCTAssertNil(plain["DXVK_LOG_PATH"])
+    }
+}
+
+extension RegressionTests {
+    // Issue #21 cost five diagnostic rounds because a frozen game leaves no evidence: no crash,
+    // no exit, no fresh log lines. The report flow now samples live game processes. The parser
+    // must find the game and never the wine plumbing or launchers around it.
+    func testGameProcessParserFindsTheGameNotThePlumbing() {
+        let ps = """
+          312 /Users/u/Library/Application Support/Highball/bottles/B/drive_c/Program Files (x86)/Steam/steam.exe -silent
+          410 /Users/u/Library/Application Support/Highball/bottles/B/drive_c/Program Files (x86)/Steam/steamapps/common/csgo legacy/csgo.exe -steam -novid
+          411 C:\\windows\\system32\\winedevice.exe
+          500 /Users/u/Library/Application Support/Highball/bottles/B/drive_c/windows/system32/rundll32.exe d3d9.dll,Direct3DCreate9
+          600 /Users/u/.build/debug/highball run B something
+          700 /bin/zsh -c grep csgo.exe somewhere
+          801 /Users/u/Library/Application Support/Highball/bottles/B/drive_c/Games/Some Game/Game.exe -windowed
+        """
+        let found = BugReport.gameProcesses(fromPS: ps)
+        XCTAssertEqual(found.map(\.pid), [410, 801])
+        XCTAssertEqual(found.map(\.exe), ["csgo.exe", "game.exe"])
+    }
+
+    // Launch args are DATA (db), and a workaround gated to one macOS must not leak onto
+    // versions where the game already works (#21: windowed only on macOS 26+).
+    func testLaunchArgsRespectTheOSGate() throws {
+        let json = """
+        {"id":"csgo-legacy","title":"CS:GO Legacy","steam_appid":4465480,"status":"community",
+         "launchArgs":["-windowed","-noborder"],"launchArgsMinMacOS":"26.0"}
+        """
+        let entry = try JSONDecoder().decode(GameDBEntry.self, from: Data(json.utf8))
+        XCTAssertEqual(entry.effectiveLaunchArgs(osMajor: 26), ["-windowed", "-noborder"])
+        XCTAssertEqual(entry.effectiveLaunchArgs(osMajor: 27), ["-windowed", "-noborder"])
+        XCTAssertEqual(entry.effectiveLaunchArgs(osMajor: 14), [], "must not change working setups")
+
+        // Ungated args apply everywhere; absent args apply nowhere.
+        let ungated = try JSONDecoder().decode(GameDBEntry.self, from: Data("""
+        {"id":"x","title":"X","steam_appid":1,"status":"community","launchArgs":["-novid"]}
+        """.utf8))
+        XCTAssertEqual(ungated.effectiveLaunchArgs(osMajor: 14), ["-novid"])
+        let none = try JSONDecoder().decode(GameDBEntry.self, from: Data("""
+        {"id":"y","title":"Y","steam_appid":2,"status":"community"}
+        """.utf8))
+        XCTAssertEqual(none.effectiveLaunchArgs(osMajor: 26), [])
     }
 }
 
