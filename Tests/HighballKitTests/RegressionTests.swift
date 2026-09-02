@@ -651,6 +651,82 @@ extension RegressionTests {
         }
     }
 
+    // A component that replaces a file another component installed (the patched MoltenVK on
+    // top of the runtime's) must extract after it. `order` is the only thing that guarantees
+    // that: by key alone "moltenvk" sorts before "runtime" and would be silently overwritten.
+    func testComponentOrderBeatsAlphabeticalKey() throws {
+        let json = """
+        {"id":"e","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{
+          "moltenvk":{"kind":"runtime","url":"https://x/m.tgz","sha256":"a","order":1,
+                      "extract":{"subpath":"libMoltenVK.dylib","into":"frameworks/libMoltenVK.dylib"}},
+          "runtime":{"kind":"frameworks","url":"https://x/r.tgz","sha256":"b","extract":{"into":"frameworks"}},
+          "d3dmetal":{"kind":"renderer","url":"https://x/d.tgz","sha256":"c","optional":true,"acceptance":"l"}
+        }}
+        """
+        let m = try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8))
+        XCTAssertEqual(m.orderedComponents.map(\.name), ["runtime", "moltenvk", "d3dmetal"],
+                       "required components by order then key, optional ones last")
+    }
+
+    // The shipped manifest must keep that guarantee: the runtime's frameworks land first, the
+    // patched MoltenVK replaces exactly one file inside them afterwards.
+    func testShippedMoltenVKComponentLandsAfterRuntime() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "spike/engine-manifest.json")
+        let m = try EngineManifest.load(from: url)
+        let names = m.orderedComponents.map(\.name)
+        guard let r = names.firstIndex(of: "runtime"), let v = names.firstIndex(of: "moltenvk") else {
+            return XCTFail("manifest needs both runtime and moltenvk components")
+        }
+        XCTAssertLessThan(r, v, "moltenvk must extract after runtime or the runtime overwrites it")
+        XCTAssertEqual(m.components["moltenvk"]?.extract?.into, "frameworks/libMoltenVK.dylib")
+    }
+
+    // After an engine update the old and new engines coexist until the old one is removed;
+    // sorted by id the old one comes first, so "first installed" would keep choosing it for
+    // new bottles and the sidebar. The bundled manifest's id must win when it is installed.
+    func testDefaultEnginePrefersBundledManifestID() throws {
+        func engine(_ id: String) throws -> InstalledEngine {
+            let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#
+            let m = try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8))
+            return InstalledEngine(manifest: m, root: URL(fileURLWithPath: "/tmp/\(id)"))
+        }
+        let old = try engine("x64-sikarugir10.0_6-r0"), new = try engine("x64-sikarugir10.0_6-r1")
+        XCTAssertEqual(EngineStore.defaultEngine(installed: [old, new], bundledID: new.id)?.id, new.id)
+        XCTAssertEqual(EngineStore.defaultEngine(installed: [old, new], bundledID: nil)?.id, old.id, "no manifest: first installed")
+        XCTAssertEqual(EngineStore.defaultEngine(installed: [old], bundledID: new.id)?.id, old.id, "update not installed yet: keep using the old one")
+        XCTAssertNil(EngineStore.defaultEngine(installed: [], bundledID: new.id))
+    }
+
+    // extract() with a single-file `into` replaces that file and nothing else in the directory.
+    // The old code treated every target as a directory, so a file target would have removed
+    // the whole frameworks tree on the way in.
+    func testExtractSingleFileTargetKeepsSiblings() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appending(path: "hb-extract-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let root = tmp.appending(path: "root", directoryHint: .isDirectory)
+        let frameworks = root.appending(path: "frameworks", directoryHint: .isDirectory)
+        try fm.createDirectory(at: frameworks, withIntermediateDirectories: true)
+        try "old".write(to: frameworks.appending(path: "libMoltenVK.dylib"), atomically: true, encoding: .utf8)
+        try "keep".write(to: frameworks.appending(path: "libother.dylib"), atomically: true, encoding: .utf8)
+        let src = tmp.appending(path: "src", directoryHint: .isDirectory)
+        try fm.createDirectory(at: src, withIntermediateDirectories: true)
+        try "new".write(to: src.appending(path: "libMoltenVK.dylib"), atomically: true, encoding: .utf8)
+        let archive = tmp.appending(path: "m.tar.gz")
+        try Shell.run("/usr/bin/tar", ["-czf", archive.path, "-C", src.path, "libMoltenVK.dylib"])
+        defer { try? fm.removeItem(at: tmp) }
+
+        let component = try JSONDecoder().decode(EngineManifest.Component.self, from: Data("""
+        {"kind":"runtime","url":"https://x/m.tgz","sha256":"a","order":1,
+         "extract":{"subpath":"libMoltenVK.dylib","into":"frameworks/libMoltenVK.dylib"}}
+        """.utf8))
+        try EngineStore().extract(archive, component: component, name: "moltenvk", into: root)
+        XCTAssertEqual(try String(contentsOf: frameworks.appending(path: "libMoltenVK.dylib"), encoding: .utf8), "new")
+        XCTAssertEqual(try String(contentsOf: frameworks.appending(path: "libother.dylib"), encoding: .utf8), "keep",
+                       "a file target must not wipe the directory it lands in")
+    }
+
     // Issue #31: install progress must be legible without reading raw Wine output. The step
     // line carries the label, the hint line the slow-step expectation, and neither may leak
     // into the other.

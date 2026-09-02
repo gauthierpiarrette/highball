@@ -1,0 +1,104 @@
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
+index 534a414..d7641b3 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
+@@ -1106,6 +1106,14 @@ protected:
+ 	MVKLiveResourceSet _liveResources;
+ 	std::mutex _rezLock;
+ 	std::mutex _sem4Lock;
++	std::mutex _shadowLock;
++	std::vector<MVKDeviceMemory*> _shadowMems;
++public:
++	void addShadowMemory(MVKDeviceMemory* m) { std::lock_guard<std::mutex> l(_shadowLock); _shadowMems.push_back(m); }
++	void removeShadowMemory(MVKDeviceMemory* m) { std::lock_guard<std::mutex> l(_shadowLock); for (auto it=_shadowMems.begin(); it!=_shadowMems.end(); ++it) { if (*it==m) { _shadowMems.erase(it); break; } } }
++	void syncShadowMemoriesToDevice();
++	void syncShadowMemoriesFromDevice();
++protected:
+     std::mutex _perfLock;
+ 	std::mutex _vizLock;
+ 	std::string _capturePipeFileName;
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
+index 9772757..dab10d9 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
+@@ -5638,3 +5638,13 @@ uint64_t mvkGetLocationID(id<MTLDevice> mtlDevice) {
+ 
+ 	return hash;
+ }
++
++// HIGHBALL EXPERIMENT: shadow-import sync hooks.
++void MVKDevice::syncShadowMemoriesToDevice() {
++	std::lock_guard<std::mutex> l(_shadowLock);
++	for (auto* m : _shadowMems) { m->syncShadowToDevice(); }
++}
++void MVKDevice::syncShadowMemoriesFromDevice() {
++	std::lock_guard<std::mutex> l(_shadowLock);
++	for (auto* m : _shadowMems) { m->syncShadowFromDevice(); }
++}
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.h b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.h
+index b349d6e..e0f56fe 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.h
+@@ -185,6 +185,12 @@ protected:
+ 	MTLCPUCacheMode _mtlCPUCacheMode;
+ 	bool _isDedicated = false;
+ 	bool _isHostMemImported = false;
++	// HIGHBALL EXPERIMENT: imported host memory backed by a private copy instead of no-copy.
++	void* _pShadowHost = nullptr;
++	NSUInteger _shadowLen = 0;
++public:
++	void syncShadowToDevice();
++	void syncShadowFromDevice();
+ 	VkExternalMemoryHandleTypeFlags _externalMemoryHandleType = 0u;
+ };
+ 
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm
+index e6e7786..f82460a 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm
+@@ -255,7 +255,15 @@
+ 		[buf makeAliasable];
+ 	} else if (_pHostMemory) {
+ 		auto rezOpts = getMTLResourceOptions();
+-		if (_isHostMemImported) {
++		if (_isHostMemImported && getenv("MVK_SHADOW_IMPORT")) {
++			// HIGHBALL EXPERIMENT: back imported host memory with a normal MTLBuffer and keep the
++			// host pages as the CPU-side shadow, synced on every queue submission.
++			buf = [getMTLDevice() newBufferWithBytes: _pHostMemory length: memLen options: rezOpts];	// retained
++			_pShadowHost = _pHostMemory;
++			_shadowLen = memLen;
++			_device->addShadowMemory(this);
++			MVKLogInfo("HIGHBALL shadow-import: %lu bytes at %p", (unsigned long)memLen, _pHostMemory);
++		} else if (_isHostMemImported) {
+ 			buf = [getMTLDevice() newBufferWithBytesNoCopy: _pHostMemory length: memLen options: rezOpts deallocator: nil];	// retained
+ 		} else {
+ 			buf = [getMTLDevice() newBufferWithBytes: _pHostMemory length: memLen options: rezOpts];     // retained
+@@ -499,7 +507,16 @@
+ 	}
+ }
+ 
++void MVKDeviceMemory::syncShadowToDevice() {
++	if (_pShadowHost && _mtlBuffer) { memcpy(_mtlBuffer.contents, _pShadowHost, _shadowLen); }
++}
++
++void MVKDeviceMemory::syncShadowFromDevice() {
++	if (_pShadowHost && _mtlBuffer) { memcpy(_pShadowHost, _mtlBuffer.contents, _shadowLen); }
++}
++
+ MVKDeviceMemory::~MVKDeviceMemory() {
++	if (_pShadowHost) { _device->removeShadowMemory(this); _pShadowHost = nullptr; }
+ 	// Unbind any resources that are using me.
+ 	// Manually null the binding parameter to prevent them from trying to remove themselves from the array.
+ 	// This will leave texture buffer pointers dangling, but according to Vulkan, those are not supposed to be used again anyways.
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm b/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm
+index dec4b45..6b81d2a 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm
+@@ -84,6 +84,7 @@
+ 	// Submit regardless of config result, to ensure submission semaphores and fences are signalled.
+ 	// The submissions will ensure a misconfiguration will be safe to execute.
+ 	VkResult rslt = qSubmit->getConfigurationResult();
++	_device->syncShadowMemoriesToDevice();	// HIGHBALL EXPERIMENT
+ 	if (_execQueue) {
+ 		std::unique_lock lock(_execQueueMutex);
+ 		_execQueueJobCount++;

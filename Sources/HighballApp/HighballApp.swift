@@ -215,7 +215,7 @@ struct ContentView: View {
                                 .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
                             }
                         }
-                        if let engine = state.engines.first {
+                        if let engine = state.defaultEngine {
                             Section(L("Engine")) {
                                 Label {
                                     VStack(alignment: .leading, spacing: 1) {
@@ -223,6 +223,21 @@ struct ContentView: View {
                                         Text(engine.id).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                                     }
                                 } icon: { Image(systemName: "gearshape.2").foregroundStyle(.secondary) }
+                                if let update = state.engineUpdate {
+                                    Button {
+                                        state.updateEngine()
+                                    } label: {
+                                        Label {
+                                            VStack(alignment: .leading, spacing: 1) {
+                                                Text(L("Update engine")).font(.caption)
+                                                Text(update.id).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                                            }
+                                        } icon: { Image(systemName: "arrow.down.circle").foregroundStyle(.tint) }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(state.busy)
+                                    .help(L("Installs the newer engine this version of Highball ships, moves every bottle to it and refreshes their Windows environment. Only changed components are downloaded."))
+                                }
                             }
                         }
                     }

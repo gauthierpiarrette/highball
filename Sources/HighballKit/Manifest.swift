@@ -25,6 +25,10 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
         public var extract: Extract?
         public var note: String?
         public var version: String?
+        /// Install order among components of the same optionality (default 0, lower first).
+        /// A component that must land on top of another one's files, like a patched
+        /// MoltenVK replacing the runtime's, declares a higher order than the one it overrides.
+        public var order: Int?
 
         public var isOptional: Bool { optional ?? false }
     }
@@ -67,6 +71,7 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
     public var orderedComponents: [(name: String, component: Component)] {
         components.sorted { a, b in
             if a.value.isOptional != b.value.isOptional { return !a.value.isOptional }
+            if (a.value.order ?? 0) != (b.value.order ?? 0) { return (a.value.order ?? 0) < (b.value.order ?? 0) }
             return a.key < b.key
         }.map { ($0.key, $0.value) }
     }
