@@ -76,11 +76,9 @@ PY
 # (proven 2026-08-25, repeated Reddit reports). A DMG has no extraction step to mangle.
 # The zip stays as the Sparkle update enclosure. Landing/README link
 # .../releases/latest/download/Highball.dmg, so the DMG asset name must stay unversioned.
+# The window layout (background, icon positions, volume icon) lives in Scripts/make-dmg.sh.
 DMG="dist/Highball.dmg"
-rm -rf dist/dmg-stage "$DMG"; mkdir dist/dmg-stage
-ditto dist/Highball.app dist/dmg-stage/Highball.app
-ln -s /Applications dist/dmg-stage/Applications
-hdiutil create -volname "Highball" -srcfolder dist/dmg-stage -ov -format UDZO "$DMG" -quiet
+Scripts/make-dmg.sh
 codesign --sign "Developer ID Application: Gauthier PIARRETTE (B95M7DARU4)" --timestamp "$DMG"
 xcrun notarytool submit "$DMG" --keychain-profile highball --wait
 xcrun stapler staple "$DMG"
