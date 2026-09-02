@@ -29,12 +29,17 @@ concurrency:
 jobs:
   e2e:
     runs-on: macos-15        # pinned: macos-latest re-points silently (it became 26 in mid-2026)
+    outputs:
+      macos: ${{ steps.os.outputs.version }}
     # Cold install ≈25-45 min on these runners; the Saturday dotnet48 chain can
     # pessimistically add 1-2 h of virtualized ngen. Hangs are caught same-night
     # by the alert job either way.
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
+      - name: record the macOS version actually tested
+        id: os
+        run: echo "version=$(sw_vers -productVersion) ($(sw_vers -buildVersion))" >> "$GITHUB_OUTPUT"
       - name: rosetta (idempotent; image rotations have shipped without it)
         run: sudo softwareupdate --install-rosetta --agree-to-license || true
       - name: disk headroom
@@ -64,14 +69,23 @@ jobs:
             [ -x "$ws" ] && "$ws" -k 2>/dev/null || true
           done
 
-  # Advisory forward-coverage on the newest macOS image. Failures here never block
-  # and never page; promote to a blocking row after a month of green.
+  # Advisory forward-coverage on the newest macOS image. Failures here never block a
+  # release, but they are no longer silent: the alert job files a separate advisory
+  # issue. This is the only row testing the macOS version most users are on, and it is
+  # where #36 and #37 came from — both reached users before CI ever mentioned them.
+  # Green since 2026-08-27; promote to a blocking row after a month (2026-09-27).
   e2e-macos26-advisory:
     runs-on: macos-26
     continue-on-error: true
     timeout-minutes: 90
+    outputs:
+      macos: ${{ steps.os.outputs.version }}
+      result: ${{ steps.result.outputs.status }}
     steps:
       - uses: actions/checkout@v7
+      - name: record the macOS version actually tested
+        id: os
+        run: echo "version=$(sw_vers -productVersion) ($(sw_vers -buildVersion))" >> "$GITHUB_OUTPUT"
       - name: rosetta
         run: sudo softwareupdate --install-rosetta --agree-to-license || true
       - name: cache engine downloads
@@ -81,7 +95,13 @@ jobs:
           key: engine-dl-${{ hashFiles('spike/engine-manifest.json') }}
           restore-keys: engine-dl-
       - name: run E2E (no dotnet48)
+        id: run
+        continue-on-error: true
         run: Scripts/e2e-install.sh
+      - name: record the outcome for the alert job
+        id: result
+        if: always()
+        run: echo "status=${{ steps.run.outcome }}" >> "$GITHUB_OUTPUT"
       - name: teardown
         if: always()
         run: |
@@ -93,32 +113,55 @@ jobs:
   # third-party binaries (wine, vc_redist from aka.ms) and therefore run with
   # contents:read only — this job runs no third-party code and holds issues:write.
   alert:
-    needs: [e2e]
+    # Both rows report. The advisory row used to be excluded here, so a break on the
+    # newest macOS filed nothing and paged nobody — which is how #36 and #37 reached
+    # users first. It still does not block; it is just no longer silent.
+    needs: [e2e, e2e-macos26-advisory]
     if: always()
     runs-on: ubuntu-latest
     permissions:
       issues: write
     steps:
-      - name: create/update or auto-close the dedup issue
+      - name: create/update or auto-close the dedup issues
         env:
           GH_TOKEN: ${{ github.token }}
           RESULT: ${{ needs.e2e.result }}
+          MACOS: ${{ needs.e2e.outputs.macos }}
+          ADVISORY: ${{ needs.e2e-macos26-advisory.outputs.result }}
+          MACOS_ADVISORY: ${{ needs.e2e-macos26-advisory.outputs.macos }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh label create e2e-failure -R "$GITHUB_REPOSITORY" --color B60205 \
             --description "the nightly fresh-install E2E is red" --force
-          TITLE="nightly install E2E failing"
-          NUM=$(gh issue list -R "$GITHUB_REPOSITORY" --label e2e-failure --state open \
-            --json number --jq '.[0].number // empty')
-          if [ "$RESULT" = "failure" ]; then
-            if [ -n "$NUM" ]; then
-              gh issue comment "$NUM" -R "$GITHUB_REPOSITORY" --body "Still failing: $RUN_URL"
-            else
-              BODY=$(printf '%s\n\n%s' \
-                "The nightly fresh-install E2E failed: $RUN_URL" \
-                "This guard replays the fresh-user path: engine download from the bundled manifest (winetricks fetched live), layout audit, wineboot, vcrun2022. A failure here usually means new users cannot install.")
-              gh issue create -R "$GITHUB_REPOSITORY" --title "$TITLE" --label e2e-failure --body "$BODY"
+          gh label create e2e-advisory -R "$GITHUB_REPOSITORY" --color FBCA04 \
+            --description "the nightly E2E is red on the newest macOS image (advisory)" --force
+
+          # The runner label does not pin the point release: "macos-26" was 26.5.2 while
+          # users broke on 26.6.2 (#36/#37), so record what was really tested.
+          triage() {
+            local label="$1" title="$2" result="$3" osver="${4:-unknown}" blurb="$5" num
+            num=$(gh issue list -R "$GITHUB_REPOSITORY" --label "$label" --state open \
+              --json number --jq '.[0].number // empty')
+            if [ "$result" = "failure" ]; then
+              if [ -n "$num" ]; then
+                gh issue comment "$num" -R "$GITHUB_REPOSITORY" \
+                  --body "Still failing, on macOS $osver: $RUN_URL"
+              else
+                gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --label "$label" \
+                  --body "$(printf '%s\n\n%s\n\n%s' \
+                    "Failed on macOS $osver: $RUN_URL" "$blurb" \
+                    "The runner label does not pin the point release, so the version above is what actually ran.")"
+              fi
+            elif [ "$result" = "success" ] && [ -n "$num" ]; then
+              gh issue close "$num" -R "$GITHUB_REPOSITORY" \
+                --comment "Green again on macOS $osver: $RUN_URL"
             fi
-          elif [ "$RESULT" = "success" ] && [ -n "$NUM" ]; then
-            gh issue close "$NUM" -R "$GITHUB_REPOSITORY" --comment "Green again: $RUN_URL"
-          fi
+          }
+
+          triage e2e-failure "nightly install E2E failing" \
+            "$RESULT" "$MACOS" \
+            "This guard replays the fresh-user path: engine download from the bundled manifest (winetricks fetched live), layout audit, wineboot, vcrun2022. A failure here usually means new users cannot install."
+
+          triage e2e-advisory "nightly install E2E failing on the newest macOS (advisory)" \
+            "$ADVISORY" "$MACOS_ADVISORY" \
+            "Advisory row: it does not block a release. It is also the only row testing the macOS version most users are on, which is where #36 and #37 came from."
