@@ -1,0 +1,39 @@
+# One-off, manually dispatched: run the issue #21 D3D9 fullscreen probe on the
+# macOS 26 runner image. Never scheduled, never blocking — a diagnostic instrument.
+name: probe-macos26-d3d9
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: record macOS version
+        run: sw_vers
+      - name: rosetta
+        run: sudo softwareupdate --install-rosetta --agree-to-license || true
+      - name: cache engine + heaven downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/hb-probe/downloads
+          key: probe-dl-${{ hashFiles('spike/engine-manifest.json') }}
+          restore-keys: |
+            probe-dl-
+            engine-dl-
+      - name: run probe
+        run: Scripts/probe-d3d9-fullscreen.sh
+      - name: upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-evidence
+          path: probe-out/
+      - name: teardown
+        if: always()
+        run: |
+          for ws in "$HOME"/hb-probe/engines/*/engine/bin/wineserver; do
+            [ -x "$ws" ] && "$ws" -k 2>/dev/null || true
+          done
