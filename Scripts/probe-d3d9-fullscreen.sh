@@ -26,21 +26,25 @@ fi
 EXE="$HIGHBALL_HOME/bottles/probe/drive_c/Program Files (x86)/Unigine/Heaven Benchmark 4.0/bin/Heaven.exe"
 test -f "$EXE" || { log "FATAL: Heaven install failed"; exit 1; }
 ARGS=(-project_name Heaven -data_path ../ -engine_config ../data/heaven_4.0.cfg
-      -system_script heaven/unigine.cpp -sound_app null -video_app direct3d9
+      -system_script heaven/unigine.cpp -sound_app null
       -video_multisample 0 -video_mode -1 -extern_define RELEASE)
-D="$HIGHBALL_HOME/bottles/probe/drive_c/highball/logs/Heaven_d3d9.log"
+DLOGS="$HIGHBALL_HOME/bottles/probe/drive_c/highball/logs"
 
-leg(){ # name fullscreen(0|1) width height
-  local name="$1" fs="$2" w="$3" h="$4" verdict=WEDGE
+leg(){ # name videoapp fullscreen(0|1) width height
+  local name="$1" vapp="$2" fs="$3" w="$4" h="$5" verdict=WEDGE
   log "leg $name: fullscreen=$fs ${w}x${h}"
   "$HB" bottle kill probe >/dev/null 2>&1; sleep 5
-  rm -f "$D"
-  "$HB" run probe "$EXE" --renderer dxvk -- "${ARGS[@]}" -video_fullscreen "$fs" -video_width "$w" -video_height "$h" >/dev/null 2>&1 &
-  for i in $(seq 1 10); do
+  rm -f "$DLOGS"/Heaven_*.log; local D="$DLOGS/Heaven_d3d9.log"; [ "$vapp" = direct3d11 ] && D="$DLOGS/Heaven_d3d11.log"
+  "$HB" run probe "$EXE" --renderer dxvk -- "${ARGS[@]}" -video_app "$vapp" -video_fullscreen "$fs" -video_width "$w" -video_height "$h" >/dev/null 2>&1 &
+  for i in $(seq 1 20); do
     sleep 12
     if grep -qa "compiler threads\|Presenter: Actual swap chain" "$D" 2>/dev/null; then verdict=RENDERING; break; fi
   done
-  local pid; pid=$(ps -Ao pid=,command= | grep -F "Heaven.exe" | grep -v -e grep -e zsh | awk '{print $1; exit}')
+  # The game process's command line IS the exe path; the CLI wrapper's merely contains it.
+  # Excluding our own binary matters: v1 sampled the Swift CLI three times (3 idle threads,
+  # zero wine frames) and learned nothing.
+  ps -Ao pid=,command= > "$OUT/ps-$name.txt"
+  local pid; pid=$(ps -Ao pid=,command= | grep -F "Unigine/Heaven Benchmark 4.0/bin/Heaven.exe" | grep -v -e grep -e zsh -e "debug/highball" | awk '{print $1; exit}')
   if [ -n "${pid:-}" ]; then
     sample "$pid" 10 -f "$OUT/sample-$name.txt" 2>/dev/null || true
   else
@@ -52,9 +56,11 @@ leg(){ # name fullscreen(0|1) width height
   "$HB" bottle kill probe >/dev/null 2>&1; sleep 3
 }
 
-leg windowed-800   0 800 600
-leg fullscreen-1080 1 1920 1080
-leg fullscreen-native 1 0 0
+# d3d11 first: the artifact discriminator. If the runner cannot render ANY Metal-backed
+# API, every other verdict is noise about the VM, not about #21.
+leg d3d11-windowed-control direct3d11 0 800 600
+leg windowed-800   direct3d9 0 800 600
+leg fullscreen-1080 direct3d9 1 1920 1080
 
 log "verdicts:"; cat "$OUT/VERDICTS.txt"
 # Exit 0 always: the probe reports, the workflow judges nothing — humans read artifacts.
