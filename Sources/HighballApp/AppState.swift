@@ -103,6 +103,13 @@ final class AppState {
                         logLines.append("applied the \(recipe.title) fix")
                         for n in notes { logLines.append("note: \(n)") }
                     }
+                    if recipe.changesLaunchEnvironment {
+                        // A running Steam keeps the environment it started with; the game we are
+                        // about to launch through it would never see the recipe's settings.
+                        try? WineRunner(paths: paths, engine: engine, bottle: bottle).kill()
+                        try? await Task.sleep(for: .seconds(2))
+                        logLines.append("stopped the bottle so the new settings apply to this launch")
+                    }
                     refresh()
                     let fresh = bottles.first { $0.name == bottleName } ?? runner.bottle
                     launch(item, in: fresh)

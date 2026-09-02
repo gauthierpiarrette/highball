@@ -714,6 +714,19 @@ extension RegressionTests {
         XCTAssertTrue(EngineManifest.needsPrefixRefresh(from: try manifest(nil, id: "x"), to: r1), "unknown: be safe, boot")
     }
 
+    // A Play that auto-applies a recipe with environment or renderer steps must restart the
+    // bottle: a running Steam keeps its old environment and the game would launch without the
+    // fix (the Sims recipe's MVK_SHADOW_IMPORT=1 would silently do nothing).
+    func testRecipeKnowsWhenItChangesTheLaunchEnvironment() throws {
+        func recipe(_ steps: String) throws -> HighballKit.Recipe {
+            try JSONDecoder().decode(HighballKit.Recipe.self, from: Data(#"{"id":"r","kind":"game","title":"r","steps":[\#(steps)]}"#.utf8))
+        }
+        XCTAssertTrue(try recipe(#"{"type":"environment","name":"MVK_SHADOW_IMPORT","value":"1"}"#).changesLaunchEnvironment)
+        XCTAssertTrue(try recipe(#"{"type":"renderer","renderer":"dxvk"}"#).changesLaunchEnvironment)
+        XCTAssertFalse(try recipe(#"{"type":"file","path":"a/b.txt","contents":"x"},{"type":"note","text":"n"}"#).changesLaunchEnvironment,
+                       "config files alone do not need a restart")
+    }
+
     // extract() with a single-file `into` replaces that file and nothing else in the directory.
     // The old code treated every target as a directory, so a file target would have removed
     // the whole frameworks tree on the way in.
