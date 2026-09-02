@@ -103,6 +103,13 @@ final class AppState {
                         logLines.append("applied the \(recipe.title) fix")
                         for n in notes { logLines.append("note: \(n)") }
                     }
+                    if recipe.changesLaunchEnvironment {
+                        // A running Steam keeps the environment it started with; the game we are
+                        // about to launch through it would never see the recipe's settings.
+                        try? WineRunner(paths: paths, engine: engine, bottle: bottle).kill()
+                        try? await Task.sleep(for: .seconds(2))
+                        logLines.append("stopped the bottle so the new settings apply to this launch")
+                    }
                     refresh()
                     let fresh = bottles.first { $0.name == bottleName } ?? runner.bottle
                     launch(item, in: fresh)
@@ -239,7 +246,76 @@ final class AppState {
     }
 
     func engine(for bottle: Bottle) -> InstalledEngine? {
-        (try? engineStore.engine(bottle.settings.engineID)) ?? engines.first
+        (try? engineStore.engine(bottle.settings.engineID)) ?? defaultEngine
+    }
+
+    /// The engine new bottles get and the sidebar shows: the one the bundled manifest names when
+    /// it is installed, else the first installed. Without this, an engine update would leave
+    /// two engines side by side and `engines.first` (alphabetical) would keep picking the old one.
+    var defaultEngine: InstalledEngine? {
+        EngineStore.defaultEngine(installed: engines, bundledID: Self.bundledManifestID)
+    }
+
+    static var bundledManifestID: String? {
+        guard let url = bundledManifest, let m = try? EngineManifest.load(from: url) else { return nil }
+        return m.id
+    }
+
+    /// The bundled manifest when it names an engine that is not installed yet while another one
+    /// is: an engine update is available. New installs never see this (onboarding installs the
+    /// bundled engine directly).
+    var engineUpdate: EngineManifest? {
+        guard !engines.isEmpty, let url = Self.bundledManifest,
+              let m = try? EngineManifest.load(from: url),
+              !engines.contains(where: { $0.id == m.id }) else { return nil }
+        return m
+    }
+
+    /// Installs the bundled engine next to the current one, points every bottle at it, refreshes
+    /// each bottle's Windows environment (wineboot), and removes the old engine directory.
+    /// Licenses already accepted on the old engine carry over; the download cache makes an
+    /// update cost only the components that actually changed.
+    func updateEngine() {
+        guard let manifest = engineUpdate, let old = defaultEngine else { return }
+        let oldID = old.id
+        let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
+        let title = String(format: L("Updating engine to %@"), manifest.id)
+        runBusy(title, expected: L("usually a few minutes"),
+                done: DoneState(title: L("Engine updated"), ctaTitle: nil, cta: nil)) { [self] in
+            let fresh = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
+                Task { @MainActor in
+                    let mb = { (b: Int64) in String(format: "%.0f", Double(b) / 1_048_576) }
+                    if let total, total > 0 { self.stage = "Downloading \(name) — \(mb(received)) / \(mb(total)) MB" }
+                    else { self.stage = "Downloading \(name) — \(mb(received)) MB" }
+                }
+            }
+            await MainActor.run { self.appendLog("engine \(fresh.id) installed") }
+            let refresh = EngineManifest.needsPrefixRefresh(from: old.manifest, to: fresh.manifest)
+            for var bottle in try bottleStore.list() where bottle.settings.engineID != fresh.id {
+                let runnerOld = WineRunner(paths: paths, engine: old, bottle: bottle)
+                try? runnerOld.kill()
+                try? await Task.sleep(for: .seconds(2))
+                bottle.settings.engineID = fresh.id
+                try bottle.save()
+                guard refresh else {
+                    await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(fresh.id) (same Wine, no prefix refresh needed)") }
+                    continue
+                }
+                await MainActor.run { self.stage = String(format: L("Refreshing bottle '%@'"), bottle.name) }
+                let runner = WineRunner(paths: paths, engine: fresh, bottle: bottle)
+                let r = try await runner.wineboot()
+                guard r.exitStatus == 0 else {
+                    throw HighballError.processFailed(command: "wineboot -u", status: r.exitStatus, output: "see \(r.log.path)")
+                }
+                try await BottleStore.ensureWoW64(runner: runner, bottle: bottle, log: r.log)
+                try? await runner.setGpuIdentity()
+                try? await runner.setServiceTimeout()
+                try? await runner.setKeyboardMapping(commandIsControl: bottle.settings.commandIsControl)
+                await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(fresh.id)") }
+            }
+            if oldID != fresh.id { try? FileManager.default.removeItem(at: old.root) }
+            await MainActor.run { self.appendLog("old engine \(oldID) removed") }
+        }
     }
 
     /// What to put in front of the user when something throws. Interpolating an NSError dumps
@@ -322,7 +398,7 @@ final class AppState {
     }
 
     func createBottle(name: String, recipeID: String?) {
-        guard let engine = engines.first else { return }
+        guard let engine = defaultEngine else { return }
         runBusy("Creating bottle '\(name)' — first boot takes about 90 seconds",
                 done: DoneState(title: String(format: L("Bottle '%@' is ready"), name), ctaTitle: nil, cta: nil)) { [self] in
             let bottle = try await bottleStore.create(name: name, engine: engine)

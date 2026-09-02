@@ -1,7 +1,7 @@
 {
   "$schema": "https://highball.app/schemas/engine-manifest/v0",
-  "id": "x64-sikarugir10.0_6-r0",
-  "displayName": "Wine 10.0 (Sikarugir) + DXMT 0.80 + D3DMetal 3.0",
+  "id": "x64-sikarugir10.0_6-r1",
+  "displayName": "Wine 10.0 (Sikarugir) + DXMT 0.80 + D3DMetal 3.0 + MoltenVK 1.4.1 (shadow-import patch)",
   "arch": "x86_64",
   "minMacOS": "14.0",
   "requires": [
@@ -12,7 +12,8 @@
     "Vanilla Gcenx wine-devel 11.15 lacks the macdrv_functions export -> DXMT and D3DMetal do NOT work on it. Verified 2026-08-23 with nm.",
     "Runtime dylibs (GStreamer, MoltenVK, gnutls, freetype, SDL2, icu...) are NOT inside the engine; they come from the Sikarugir Wrapper Template's Frameworks/ and are found via DYLD_FALLBACK_LIBRARY_PATH.",
     "Wine 10 still ships a wine64 binary but the loader is `wine`; use `wine` so Wine 11 engines work unchanged.",
-    "D3DMetal is NOT downloaded separately: the Template's frameworks/renderer/d3dmetal overlay is used, but only exposed once the user has accepted the Apple GPTK license (recorded in manifest.json as acceptedLicenses)."
+    "D3DMetal is NOT downloaded separately: the Template's frameworks/renderer/d3dmetal overlay is used, but only exposed once the user has accepted the Apple GPTK license (recorded in manifest.json as acceptedLicenses).",
+    "r1 (2026-09-02): adds the moltenvk component. Everything else is byte-identical to r0, so existing downloads are reused; only the 5 MB MoltenVK tarball is new."
   ],
   "components": {
     "wine": {
@@ -73,6 +74,20 @@
       "sha256": "f35c29737ca08a583569e6a3752d52fbe23333c5acfad5f16c4177d25eaf3f4b",
       "license": "LGPL-2.1",
       "note": "Pinned to upstream commit 5a59ea07 (20260125+dev, 2026-08-07) — the exact bytes 0.7.x verified with dotnet48. The old branch URL drifted and broke every fresh engine install (issues #27/#28); URLs here must be immutable."
+    },
+    "moltenvk": {
+      "kind": "runtime",
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/moltenvk-1.4.1-shadow-import-1-x86_64.tar.gz",
+      "sha256": "fbed7b80d6dc2aeaba6fa7047c1fe64827d5004c28029fb43c2bc34f80c35228",
+      "size": 1674937,
+      "license": "Apache-2.0",
+      "version": "1.4.1+shadow-import-1",
+      "order": 1,
+      "extract": {
+        "subpath": "libMoltenVK.dylib",
+        "into": "frameworks/libMoltenVK.dylib"
+      },
+      "note": "MoltenVK 1.4.1 rebuilt with Highball's shadow-import patch (spike/patches/moltenvk-shadow-import.patch, Scripts/build-moltenvk.sh). Replaces the Template's libMoltenVK.dylib. Off unless a launch sets MVK_SHADOW_IMPORT=1: with it, Wine's wow64 host-memory imports are backed by a private Metal buffer synced on every submit, which is what makes 32-bit native-Vulkan games (The Sims Legacy Collection) render instead of losing the device on every vkQueueSubmit."
     }
   },
   "alternatives": {

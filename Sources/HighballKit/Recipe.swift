@@ -145,6 +145,20 @@ public struct Recipe: Codable, Sendable, Identifiable {
     /// Recipes with heavy or wine-touching steps get an honest prompt instead.
     public var isAutoApplicable: Bool { steps.allSatisfy(\.isAutoApplicable) }
 
+    /// True when applying the recipe changes what a launch inherits: the renderer, the sync
+    /// mode or an environment variable. A Steam client that is already running keeps the
+    /// environment it started with (issues #22/#25), so a Play that auto-applied such a recipe
+    /// must stop the bottle first or the game it launches never sees the change. The Sims
+    /// recipe's MVK_SHADOW_IMPORT=1 is the case that made this visible.
+    public var changesLaunchEnvironment: Bool {
+        steps.contains { step in
+            switch step {
+            case .renderer, .sync, .environment: return true
+            default: return false
+            }
+        }
+    }
+
     public struct KnownIssue: Codable, Sendable {
         public var symptom: String
         public var cause: String?

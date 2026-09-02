@@ -47,6 +47,13 @@ public struct EngineStore: Sendable {
         }.sorted { $0.manifest.id < $1.manifest.id }
     }
 
+    /// The engine to use by default: the one the bundled manifest names when it is installed,
+    /// else the first installed (alphabetical). After an engine update two engines can coexist
+    /// briefly, and "first" would be the old one.
+    public static func defaultEngine(installed: [InstalledEngine], bundledID: String?) -> InstalledEngine? {
+        installed.first { $0.id == bundledID } ?? installed.first
+    }
+
     public func engine(_ id: String) throws -> InstalledEngine {
         let root = paths.engine(id)
         let m = try EngineManifest.load(from: root.appending(path: "manifest.json"))
@@ -154,7 +161,12 @@ public struct EngineStore: Sendable {
         guard FileManager.default.fileExists(atPath: source.path) else {
             throw HighballError.missing("\(ex.subpath ?? ex.strip ?? "") inside \(archive.lastPathComponent)")
         }
-        let dest = root.appending(path: ex.into, directoryHint: .isDirectory)
+        // `into` names a directory (a whole overlay) or a single file: a component that replaces
+        // one file another component installed, like a patched libMoltenVK.dylib on top of the
+        // runtime's. A file target leaves the rest of the parent directory alone.
+        var isDir: ObjCBool = false
+        _ = FileManager.default.fileExists(atPath: source.path, isDirectory: &isDir)
+        let dest = root.appending(path: ex.into, directoryHint: isDir.boolValue ? .isDirectory : .notDirectory)
         try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: source, to: dest)
