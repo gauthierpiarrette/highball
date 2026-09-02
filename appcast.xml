@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.19</title>
+      <description><![CDATA[The Sims Legacy Collection renders; engine updates without reinstall]]></description>
+      <pubDate>Wed, 02 Sep 2026 16:04:42 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.19/Highball-0.7.19.zip" sparkle:version="0.7.19" sparkle:shortVersionString="0.7.19" sparkle:edSignature="0IxpssPTku7J6tt9lzW8rGlvKNs7y8DNOTUehElrJu4W/LxwxFMv7thXQbnhCPQaXWp+wVYYB2capzTUfAmaCQ==" length="2752544" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.18</title>
       <description><![CDATA[DXVK async shader compilation is off by default and existing bottles are switched off; bug reports no longer attach a bottle's startup log (#21).]]></description>
       <pubDate>Mon, 31 Aug 2026 07:49:19 -0700</pubDate>
