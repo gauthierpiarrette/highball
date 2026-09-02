@@ -115,6 +115,51 @@ final class RegressionTests: XCTestCase {
         XCTAssertTrue(s.commandIsControl, "Mac users expect ⌘C/⌘V to work in Windows apps")
     }
 
+    // The exact bug from review: commandIsControl encoded but never decoded, so a bottle saved with
+    // the mapping off came back on after every relaunch and the toggle could not be turned off.
+    func testCommandIsControlOffSurvivesSaveAndLoad() throws {
+        var s = BottleSettings(name: "rt", engineID: "eng")
+        s.commandIsControl = false
+        s.commandIsControlSynced = false
+        let reloaded = try JSONDecoder.highball.decode(BottleSettings.self,
+                                                       from: try JSONEncoder.highball.encode(s))
+        XCTAssertFalse(reloaded.commandIsControl, "off must still be off after a reload")
+        XCTAssertEqual(reloaded.commandIsControlSynced, false,
+                       "synced must round-trip too, or every launch re-mirrors the registry")
+    }
+
+    // A settings field that isn't in the hand-written init(from:) encodes but never decodes,
+    // so it silently reverts to its default on the next load. Generic on purpose: this is the
+    // tripwire for the next setting anyone adds, not just for commandIsControl.
+    func testEverySettingSurvivesSaveAndLoad() throws {
+        var s = BottleSettings(name: "rt", engineID: "eng")
+        s.renderer = .wined3d
+        s.rendererExplicit = true
+        s.windowsVersion = .win11
+        s.sync = .esync
+        s.metalHUD = true
+        s.advertiseAVX = true
+        s.dxvkAsync = false
+        s.fpsCap = 60
+        s.dpiScale = 192
+        s.dllOverrides = "version=n,b"
+        s.dllOverridesSynced = "version=n,b"
+        s.dxvkAppConfig = ["a.exe": ["k": "v"]]
+        s.commandIsControl = false
+        s.commandIsControlSynced = false
+        s.environment = ["K": "V"]
+        s.pins = [Pin(name: "p", path: #"C:\g.exe"#)]
+        s.recipes = ["r"]
+
+        // Every value differs from its default, so a field the decoder forgot comes back as the
+        // default and the two encodings diverge on exactly that key.
+        let written = try JSONEncoder.highball.encode(s)
+        let reloaded = try JSONDecoder.highball.decode(BottleSettings.self, from: written)
+        XCTAssertEqual(String(data: written, encoding: .utf8),
+                       String(data: try JSONEncoder.highball.encode(reloaded), encoding: .utf8),
+                       "a settings field is missing its decodeIfPresent line in BottleSettings.init(from:)")
+    }
+
     // Steam writes StateFlags 1026 while downloading; the game card must not offer Play.
     func testACFDownloadingNotReady() throws {
         let acf = """

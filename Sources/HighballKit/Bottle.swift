@@ -219,6 +219,8 @@ public struct BottleSettings: Codable, Sendable {
         }
         dllOverrides = try c.decodeIfPresent(String.self, forKey: .dllOverrides) ?? ""
         dllOverridesSynced = try c.decodeIfPresent(String.self, forKey: .dllOverridesSynced)
+        commandIsControl = try c.decodeIfPresent(Bool.self, forKey: .commandIsControl) ?? true
+        commandIsControlSynced = try c.decodeIfPresent(Bool.self, forKey: .commandIsControlSynced)
         environment = try c.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
         pins = try c.decodeIfPresent([Pin].self, forKey: .pins) ?? []
         recipes = try c.decodeIfPresent([String].self, forKey: .recipes) ?? []
