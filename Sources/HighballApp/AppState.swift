@@ -484,10 +484,13 @@ final class AppState {
     func launchGame(_ game: SteamGame, in bottle: Bottle) {
         guard let engine = engine(for: bottle) else { return }
         let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
-        let renderer = gameDB[game.appid]?.renderer
+        let entry = gameDB[game.appid]
+        let renderer = entry?.renderer
+        // Per-game launch args ride the db (e.g. windowed for legacy CS:GO on macOS 26, #21).
+        let extraArgs = entry?.effectiveLaunchArgs() ?? []
         runBusy("Running \(game.name)", showLogSheet: false) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
-            let result = try await runner.start(steam, arguments: ["-silent", "-applaunch", String(game.appid)], renderer: renderer) { line in
+            let result = try await runner.start(steam, arguments: ["-silent", "-applaunch", String(game.appid)] + extraArgs, renderer: renderer) { line in
                 Task { @MainActor in self.appendLog(line) }
             }
             if result.crashedEarly {

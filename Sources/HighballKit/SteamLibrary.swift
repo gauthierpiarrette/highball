@@ -78,8 +78,25 @@ public struct GameDBEntry: Codable, Sendable {
     public var provenance: String?
     public var notes: String?
     public var anticheat: AnticheatInfo?
+    /// Extra arguments appended to the game's launch (Steam forwards -applaunch trailing args
+    /// to the game). Data, not code: game-specific knowledge stays in the db (issue #21's
+    /// windowed workaround for legacy CS:GO's macOS 26 fullscreen freeze is the first user).
+    public var launchArgs: [String]?
+    /// Apply launchArgs only at or above this macOS version ("26.0"). A workaround for one OS
+    /// must not change behaviour for users where the game already works (14.x fullscreen is
+    /// fine); nil means the args apply everywhere.
+    public var launchArgsMinMacOS: String?
 
     public var isBlocked: Bool { status == "blocked-anticheat" }
+
+    /// The launch args that apply on the given OS version. Pure for testability.
+    public func effectiveLaunchArgs(osMajor: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion) -> [String] {
+        guard let args = launchArgs else { return [] }
+        if let gate = launchArgsMinMacOS, let want = Int(gate.split(separator: ".").first ?? "") {
+            guard osMajor >= want else { return [] }
+        }
+        return args
+    }
 }
 
 public struct GameDB: Sendable {
