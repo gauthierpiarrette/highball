@@ -73,21 +73,30 @@ setenv(){ "$HB" bottle set probe env "$1" >/dev/null 2>&1; }
 
 # d3d11 first: the artifact discriminator. If the runner cannot render ANY Metal-backed
 # API, every other verdict is noise about the VM, not about #21.
-leg baseline direct3d9 0 800 600
+# v3 found: baseline/syncsubmit/mvk142 all WEDGE, but DXVK_LOG_LEVEL=debug RENDERED —
+# a timing-sensitive race inside vkCreateDevice (wedged logs cut mid feature-dump; the
+# healthy debug log continues straight into queue setup). v4 asks: does the debug pass
+# repeat, and do race-targeted d3d9 options fix it at full speed?
+CONF_DIR="$HIGHBALL_HOME/bottles/probe/drive_c"
+useconf(){ # options... -> write probe.conf and point DXVK at it
+  printf '%s\n' "$@" > "$CONF_DIR/probe.conf"
+  setenv 'DXVK_CONFIG_FILE=C:\probe.conf'
+}
+stockconf(){ setenv 'DXVK_CONFIG_FILE=C:\highball\dxvk.conf'; }
 
-setenv "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=1"
-leg syncsubmit direct3d9 0 800 600
-setenv "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0"
-
-if [ -f "$MVK142/libMoltenVK.dylib" ]; then
-  setenv "DYLD_FALLBACK_LIBRARY_PATH=$MVK142:$DYLD_ORIG"
-  leg mvk142 direct3d9 0 800 600
-  setenv "DYLD_FALLBACK_LIBRARY_PATH=$DYLD_ORIG"
-fi
+leg baseline-a direct3d9 0 800 600
+leg baseline-b direct3d9 0 800 600
 
 setenv "DXVK_LOG_LEVEL=debug"
-leg debuglog direct3d9 0 800 600
+leg debuglog-a direct3d9 0 800 600
+leg debuglog-b direct3d9 0 800 600
 setenv "DXVK_LOG_LEVEL=info"
+
+useconf "d3d9.deferSurfaceCreation = True" "dxvk.enableAsync = False"
+leg defersurface direct3d9 0 800 600
+useconf "dxvk.numCompilerThreads = 1" "dxvk.enableAsync = False"
+leg onethread direct3d9 0 800 600
+stockconf
 
 log "verdicts:"; cat "$OUT/VERDICTS.txt"
 # Exit 0 always: the probe reports, the workflow judges nothing — humans read artifacts.
