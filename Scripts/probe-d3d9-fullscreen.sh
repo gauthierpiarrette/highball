@@ -56,11 +56,38 @@ leg(){ # name videoapp fullscreen(0|1) width height
   "$HB" bottle kill probe >/dev/null 2>&1; sleep 3
 }
 
+# MoltenVK 1.4.2 for the swap leg: the engine's template pins 1.4.1; if the newer dylib
+# unwedges d3d9, the fix is an engine component bump.
+MVK142="$HIGHBALL_HOME/downloads/mvk142"
+if [ ! -f "$MVK142/libMoltenVK.dylib" ]; then
+  mkdir -p "$MVK142"
+  curl -fSL --retry 3 -o "$MVK142/mvk.tar" "https://github.com/KhronosGroup/MoltenVK/releases/download/v1.4.2/MoltenVK-macos.tar" \
+    && tar -xf "$MVK142/mvk.tar" -C "$MVK142" \
+    && cp "$(find "$MVK142" -name libMoltenVK.dylib -path "*macOS*" | head -1)" "$MVK142/libMoltenVK.dylib" \
+    || log "WARN: MoltenVK 1.4.2 fetch failed; mvk142 leg will just re-test baseline"
+fi
+ENGINE_ID=$("$HB" engine list | head -1 | cut -f1)
+FW="$HIGHBALL_HOME/engines/$ENGINE_ID/frameworks"
+DYLD_ORIG="$FW:$FW/GStreamer.framework/Versions/1.0/lib"
+setenv(){ "$HB" bottle set probe env "$1" >/dev/null 2>&1; }
+
 # d3d11 first: the artifact discriminator. If the runner cannot render ANY Metal-backed
 # API, every other verdict is noise about the VM, not about #21.
-leg d3d11-windowed-control direct3d11 0 800 600
-leg windowed-800   direct3d9 0 800 600
-leg fullscreen-1080 direct3d9 1 1920 1080
+leg baseline direct3d9 0 800 600
+
+setenv "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=1"
+leg syncsubmit direct3d9 0 800 600
+setenv "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS=0"
+
+if [ -f "$MVK142/libMoltenVK.dylib" ]; then
+  setenv "DYLD_FALLBACK_LIBRARY_PATH=$MVK142:$DYLD_ORIG"
+  leg mvk142 direct3d9 0 800 600
+  setenv "DYLD_FALLBACK_LIBRARY_PATH=$DYLD_ORIG"
+fi
+
+setenv "DXVK_LOG_LEVEL=debug"
+leg debuglog direct3d9 0 800 600
+setenv "DXVK_LOG_LEVEL=info"
 
 log "verdicts:"; cat "$OUT/VERDICTS.txt"
 # Exit 0 always: the probe reports, the workflow judges nothing — humans read artifacts.
