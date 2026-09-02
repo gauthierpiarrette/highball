@@ -106,6 +106,86 @@ final class RegressionTests: XCTestCase {
         XCTAssertEqual(WineRunner.dpiRegistry(for: 999).retinaMode, "y")
     }
 
+    // Cmd+V beeped instead of pasting in Steam: Wine's Mac driver leaves Command acting as Alt.
+    // Mapping Command to Ctrl without also mapping Option to Alt leaves no way to send Alt at all
+    // (winemac.drv warns about exactly that), so the four values must move together.
+    // Mac Driver values are REG_SZ "y"/"n". Writing DWORD 1 reads as absent and the mapping
+    // silently stays off — the first cut of this shipped that way.
+    func testCommandKeyMappingMovesAsASet() throws {
+        let on = WineRunner.keyboardRegistry(commandIsControl: true)
+        XCTAssertEqual(on.count, 4)
+        XCTAssertEqual(Set(on.map(\.name)),
+                       ["LeftCommandIsCtrl", "RightCommandIsCtrl", "LeftOptionIsAlt", "RightOptionIsAlt"])
+        XCTAssertTrue(on.allSatisfy { $0.data == "y" }, "Command→Ctrl is useless without Option→Alt")
+
+        let off = WineRunner.keyboardRegistry(commandIsControl: false)
+        XCTAssertTrue(off.allSatisfy { $0.data == "n" }, "off restores Wine's default mapping")
+        XCTAssertEqual(Set(off.map(\.name)), Set(on.map(\.name)),
+                       "turning it off must clear the same keys it set, not leave half behind")
+    }
+
+    // A bottle made before this setting existed decodes with commandIsControlSynced == nil, which
+    // is what makes the first launch after updating apply the mapping instead of waiting for Repair.
+    func testPreExistingBottleIsUnsyncedSoLaunchApplies() throws {
+        let json = #"{"formatVersion":1,"name":"old","engineID":"e"}"#
+        let s = try JSONDecoder().decode(BottleSettings.self, from: Data(json.utf8))
+        XCTAssertTrue(s.commandIsControl, "the default carries into bottles that predate it")
+        XCTAssertNil(s.commandIsControlSynced, "never mirrored → next launch applies it")
+        XCTAssertNotEqual(s.commandIsControl, s.commandIsControlSynced,
+                          "differing is the trigger syncKeyboardRegistry checks")
+    }
+
+    // New bottles get Mac-native copy/paste; the setting is what the registry write follows.
+    func testCommandIsControlDefaultsOn() throws {
+        let s = BottleSettings(name: "t", engineID: "e")
+        XCTAssertTrue(s.commandIsControl, "Mac users expect ⌘C/⌘V to work in Windows apps")
+    }
+
+    // The exact bug from review: commandIsControl encoded but never decoded, so a bottle saved with
+    // the mapping off came back on after every relaunch and the toggle could not be turned off.
+    func testCommandIsControlOffSurvivesSaveAndLoad() throws {
+        var s = BottleSettings(name: "rt", engineID: "eng")
+        s.commandIsControl = false
+        s.commandIsControlSynced = false
+        let reloaded = try JSONDecoder.highball.decode(BottleSettings.self,
+                                                       from: try JSONEncoder.highball.encode(s))
+        XCTAssertFalse(reloaded.commandIsControl, "off must still be off after a reload")
+        XCTAssertEqual(reloaded.commandIsControlSynced, false,
+                       "synced must round-trip too, or every launch re-mirrors the registry")
+    }
+
+    // A settings field that isn't in the hand-written init(from:) encodes but never decodes,
+    // so it silently reverts to its default on the next load. Generic on purpose: this is the
+    // tripwire for the next setting anyone adds, not just for commandIsControl.
+    func testEverySettingSurvivesSaveAndLoad() throws {
+        var s = BottleSettings(name: "rt", engineID: "eng")
+        s.renderer = .wined3d
+        s.rendererExplicit = true
+        s.windowsVersion = .win11
+        s.sync = .esync
+        s.metalHUD = true
+        s.advertiseAVX = true
+        s.dxvkAsync = false
+        s.fpsCap = 60
+        s.dpiScale = 192
+        s.dllOverrides = "version=n,b"
+        s.dllOverridesSynced = "version=n,b"
+        s.dxvkAppConfig = ["a.exe": ["k": "v"]]
+        s.commandIsControl = false
+        s.commandIsControlSynced = false
+        s.environment = ["K": "V"]
+        s.pins = [Pin(name: "p", path: #"C:\g.exe"#)]
+        s.recipes = ["r"]
+
+        // Every value differs from its default, so a field the decoder forgot comes back as the
+        // default and the two encodings diverge on exactly that key.
+        let written = try JSONEncoder.highball.encode(s)
+        let reloaded = try JSONDecoder.highball.decode(BottleSettings.self, from: written)
+        XCTAssertEqual(String(data: written, encoding: .utf8),
+                       String(data: try JSONEncoder.highball.encode(reloaded), encoding: .utf8),
+                       "a settings field is missing its decodeIfPresent line in BottleSettings.init(from:)")
+    }
+
     // Steam writes StateFlags 1026 while downloading; the game card must not offer Play.
     func testACFDownloadingNotReady() throws {
         let acf = """

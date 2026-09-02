@@ -173,6 +173,7 @@ public struct WineRunner: Sendable {
     @discardableResult
     public func start(_ executable: URL, arguments: [String] = [], renderer: Renderer? = nil, extraEnvironment: [String: String] = [:], workingDirectory: URL? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
         await syncDllOverridesRegistry()
+        await syncKeyboardRegistry()
         return try await run([executable.path] + arguments, renderer: renderer, extraEnvironment: extraEnvironment, label: executable.lastPathComponent, workingDirectory: workingDirectory, onOutput: onOutput)
     }
 
@@ -333,6 +334,44 @@ public struct WineRunner: Sendable {
     public func setServiceTimeout() async throws {
         try await regAdd(key: #"HKLM\System\CurrentControlSet\Control"#, name: "ServicesPipeTimeout",
                          type: "REG_SZ", data: String(Self.servicesPipeTimeoutMs))
+    }
+
+    /// Wine's Mac driver leaves the Command keys acting as Alt, so Cmd+C / Cmd+V reach Windows
+    /// apps as Alt+C / Alt+V — nothing pastes and macOS beeps. Mapping Command to Ctrl fixes
+    /// copy/paste everywhere (Steam's login and store pages are the common report).
+    ///
+    /// Option must be mapped to Alt in the same breath: with both Command keys taken, winemac.drv
+    /// itself warns "there is no way to send an Alt key to Windows applications", which would break
+    /// Alt-driven game bindings. The four values move together or not at all.
+    ///
+    /// Pure so the mapping is unit-tested without touching a prefix.
+    public static func keyboardRegistry(commandIsControl: Bool) -> [(name: String, data: String)] {
+        // Mac Driver settings are REG_SZ "y"/"n", not DWORD — a DWORD 1 is read as absent and the
+        // mapping silently stays off, which is exactly how this was first shipped and had to be fixed.
+        let on = commandIsControl ? "y" : "n"
+        return [
+            ("LeftCommandIsCtrl", on), ("RightCommandIsCtrl", on),
+            ("LeftOptionIsAlt", on), ("RightOptionIsAlt", on),
+        ]
+    }
+
+    /// Applies the Command→Ctrl mapping when it differs from what the prefix already has, so an
+    /// existing bottle picks it up on its next launch and the settings toggle takes effect without
+    /// a Repair. Same shape as syncDllOverridesRegistry.
+    public func syncKeyboardRegistry() async {
+        let current = bottle.settings.commandIsControl
+        guard current != bottle.settings.commandIsControlSynced else { return }
+        guard (try? await setKeyboardMapping(commandIsControl: current)) != nil else { return }
+        var copy = bottle
+        copy.settings.commandIsControlSynced = current
+        try? copy.save()
+    }
+
+    public func setKeyboardMapping(commandIsControl: Bool) async throws {
+        for v in Self.keyboardRegistry(commandIsControl: commandIsControl) {
+            try await regAdd(key: #"HKCU\Software\Wine\Mac Driver"#, name: v.name,
+                             type: "REG_SZ", data: v.data)
+        }
     }
 
     public func setGpuIdentity() async throws {

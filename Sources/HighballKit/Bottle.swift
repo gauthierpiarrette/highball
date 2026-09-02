@@ -206,6 +206,16 @@ public struct BottleSettings: Codable, Sendable {
     public var dxvkAsync: Bool = false
     /// Cap the frame rate (0 = uncapped). Applied per renderer (DXVK_FRAME_RATE / DXMT_CONFIG).
     public var fpsCap: Int = 0
+    /// Map the Mac Command keys to Windows Ctrl, so Cmd+C/Cmd+V/Cmd+A do what a Mac user expects
+    /// inside Windows apps. Wine's default leaves Command as Alt, which is why pasting into Steam
+    /// beeps instead of pasting. Option is mapped to Alt alongside it — without that, mapping both
+    /// Command keys leaves no way to send Alt at all (winemac.drv warns about exactly this).
+    public var commandIsControl: Bool = true
+    /// The commandIsControl value last mirrored into the prefix registry. Bottles created before
+    /// this setting existed carry nil, so the first launch after updating applies it — otherwise a
+    /// user would have to know to press Repair, which is exactly the discoverability problem this
+    /// setting exists to fix.
+    public var commandIsControlSynced: Bool?
     /// Windows UI scale as a DPI value (LogPixels): 96 = 100% (1x), up to 240 = 250%. Above 96 the
     /// Mac driver switches to native Retina pixels so the scaled UI stays crisp. Applied to the prefix
     /// registry on change. Supersedes the old on/off retinaMode (which was just 96 / 192).
@@ -255,6 +265,8 @@ public struct BottleSettings: Codable, Sendable {
         }
         dllOverrides = try c.decodeIfPresent(String.self, forKey: .dllOverrides) ?? ""
         dllOverridesSynced = try c.decodeIfPresent(String.self, forKey: .dllOverridesSynced)
+        commandIsControl = try c.decodeIfPresent(Bool.self, forKey: .commandIsControl) ?? true
+        commandIsControlSynced = try c.decodeIfPresent(Bool.self, forKey: .commandIsControlSynced)
         environment = try c.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
         pins = try c.decodeIfPresent([Pin].self, forKey: .pins) ?? []
         recipes = try c.decodeIfPresent([String].self, forKey: .recipes) ?? []
