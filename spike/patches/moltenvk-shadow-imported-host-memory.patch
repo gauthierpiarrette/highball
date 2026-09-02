@@ -1,0 +1,273 @@
+diff --git a/Docs/MoltenVK_Configuration_Parameters.md b/Docs/MoltenVK_Configuration_Parameters.md
+index fdb7b9f..12dec71 100644
+--- a/Docs/MoltenVK_Configuration_Parameters.md
++++ b/Docs/MoltenVK_Configuration_Parameters.md
+@@ -658,3 +658,22 @@ In the special case of `VK_SEMAPHORE_TYPE_TIMELINE` semaphores, **MoltenVK** wil
+ Makes MoltenVK treat all descriptors as if they had `VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT` set.
+ Versions of MoltenVK with this flag are less forgiving of applications that bind descriptors that point to
+ destroyed objects, so this option can be used to temporarily work around any breakage that may have caused.
++
++
++---------------------------------------
++#### MVK_CONFIG_SHADOW_IMPORTED_HOST_MEMORY
++
++##### Type: Boolean
++##### Default: `0`
++
++If enabled, host memory imported through `VK_EXT_external_memory_host` is backed by a private `MTLBuffer`
++that mirrors the imported pages, instead of a no-copy `MTLBuffer` created directly over them. The imported
++pages remain the host-visible memory returned by `vkMapMemory()`. **MoltenVK** copies them into the
++`MTLBuffer` on `vkFlushMappedMemoryRanges()`, on `vkUnmapMemory()` of coherent memory, and for all such
++allocations before every queue submission, and copies the `MTLBuffer` back into the pages on
++`vkInvalidateMappedMemoryRanges()` and on `vkMapMemory()` of coherent memory.
++
++This is a workaround for imported allocations that _Metal_ accepts as no-copy buffers but then fails to
++execute against, where every `MTLCommandBuffer` completes with `kIOGPUCommandBufferCallbackErrorOutOfMemory`
++and the device is lost. It costs a copy of all shadowed memory per queue submission, so it should only be
++enabled for applications that need it.
+diff --git a/Docs/Whats_New.md b/Docs/Whats_New.md
+index b8b4c0b..3db818f 100644
+--- a/Docs/Whats_New.md
++++ b/Docs/Whats_New.md
+@@ -18,6 +18,8 @@ MoltenVK 1.4.3
+ 
+ Released TBD
+ 
++- Add `MVK_CONFIG_SHADOW_IMPORTED_HOST_MEMORY` configuration parameter, to back host memory imported
++  through `VK_EXT_external_memory_host` with a private `MTLBuffer` when no-copy buffers over it fail at execution time.
+ - Add support for the following extensions:
+   - `VK_EXT_multi_draw`
+   - `VK_EXT_nested_command_buffer`
+diff --git a/MoltenVK/MoltenVK/API/mvk_private_api.h b/MoltenVK/MoltenVK/API/mvk_private_api.h
+index fdfa71a..9913d43 100644
+--- a/MoltenVK/MoltenVK/API/mvk_private_api.h
++++ b/MoltenVK/MoltenVK/API/mvk_private_api.h
+@@ -247,6 +247,7 @@ typedef struct {
+ 	const char* shaderDumpDir;                                                 /**< MVK_CONFIG_SHADER_DUMP_DIR */
+ 	VkBool32 shaderLogEstimatedGLSL;                                           /**< MVK_CONFIG_SHADER_LOG_ESTIMATED_GLSL */
+ 	VkBool32 liveCheckAllResources;                                            /**< MVK_CONFIG_LIVE_CHECK_ALL_RESOURCES */
++	VkBool32 shadowImportedHostMemory;                                         /**< MVK_CONFIG_SHADOW_IMPORTED_HOST_MEMORY */
+ } MVKConfiguration;
+ 
+ // Legacy support for renamed struct elements.
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
+index 534a414..3b294e8 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
+@@ -672,6 +672,15 @@ public:
+ 	/** Returns the list of live resources. */
+ 	MVKLiveResourceSet& getLiveResources() { return _liveResources; }
+ 
++	/** Registers device memory that mirrors imported host memory in a private MTLBuffer. */
++	void addShadowedDeviceMemory(MVKDeviceMemory* mvkMem);
++
++	/** Removes device memory registered with addShadowedDeviceMemory(). */
++	void removeShadowedDeviceMemory(MVKDeviceMemory* mvkMem);
++
++	/** Copies all shadowed imported host memory into its MTLBuffers, before a queue submission. */
++	void syncShadowedDeviceMemoryToDevice();
++
+     /** Returns the common resource factory for creating command resources. */
+     MVKCommandResourceFactory* getCommandResourceFactory() { return _commandResourceFactory; }
+ 
+@@ -1104,6 +1113,8 @@ protected:
+ 	MVKSmallVector<std::pair<MVKTimelineSemaphore*, uint64_t>> _awaitingTimelineSem4s;
+ 	MVKSmallVector<MVKVisibilityBuffer> _visibilityBuffers;
+ 	MVKLiveResourceSet _liveResources;
++	MVKSmallVector<MVKDeviceMemory*, 8> _shadowedDeviceMemory;
++	std::mutex _shadowedDeviceMemoryLock;
+ 	std::mutex _rezLock;
+ 	std::mutex _sem4Lock;
+     std::mutex _perfLock;
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
+index 5378262..eb6af25 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
+@@ -5647,6 +5647,21 @@ static uint32_t mvkGetEntryProperty(io_registry_entry_t entry, CFStringRef prope
+ 	return mtlDevs;		// retained
+ }
+ 
++void MVKDevice::addShadowedDeviceMemory(MVKDeviceMemory* mvkMem) {
++	lock_guard<mutex> lock(_shadowedDeviceMemoryLock);
++	_shadowedDeviceMemory.push_back(mvkMem);
++}
++
++void MVKDevice::removeShadowedDeviceMemory(MVKDeviceMemory* mvkMem) {
++	lock_guard<mutex> lock(_shadowedDeviceMemoryLock);
++	mvkRemoveFirstOccurance(_shadowedDeviceMemory, mvkMem);
++}
++
++void MVKDevice::syncShadowedDeviceMemoryToDevice() {
++	lock_guard<mutex> lock(_shadowedDeviceMemoryLock);
++	for (auto* mvkMem : _shadowedDeviceMemory) { mvkMem->syncShadowedHostMemoryToDevice(); }
++}
++
+ uint64_t mvkGetLocationID(id<MTLDevice> mtlDevice) {
+ 	uint64_t hash = 0;
+ 
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.h b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.h
+index b349d6e..3297d56 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.h
+@@ -99,6 +99,15 @@ public:
+ 	/** If this memory is host-visible, the specified memory range is flushed to the device. */
+ 	VkResult flushToDevice(VkDeviceSize offset, VkDeviceSize size);
+ 
++	/** Returns whether this memory mirrors imported host memory in a private MTLBuffer. */
++	bool isShadowingImportedHostMemory() { return _pShadowedHostMemory != nullptr; }
++
++	/** If shadowing imported host memory, copies the imported pages into the MTLBuffer. */
++	void syncShadowedHostMemoryToDevice(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
++
++	/** If shadowing imported host memory, copies the MTLBuffer back into the imported pages. */
++	void syncShadowedHostMemoryFromDevice(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
++
+ 	/**
+ 	 * If this memory is host-visible, pulls the specified memory range from the device.
+ 	 *
+@@ -185,6 +194,10 @@ protected:
+ 	MTLCPUCacheMode _mtlCPUCacheMode;
+ 	bool _isDedicated = false;
+ 	bool _isHostMemImported = false;
++	// When shadowing imported host memory, the imported pages stay the host-visible memory
++	// and _mtlBuffer is a private mirror of them. See MVK_CONFIG_SHADOW_IMPORTED_HOST_MEMORY.
++	void* _pShadowedHostMemory = nullptr;
++	NSUInteger _shadowedByteCount = 0;
+ 	VkExternalMemoryHandleTypeFlags _externalMemoryHandleType = 0u;
+ };
+ 
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm
+index e6e7786..db126ed 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm
+@@ -84,6 +84,8 @@
+ 	VkDeviceSize memSize = adjustMemorySize(size, offset);
+ 	if (memSize == 0 || !isMemoryHostAccessible()) { return VK_SUCCESS; }
+ 
++	syncShadowedHostMemoryToDevice(offset, memSize);
++
+ #if MVK_MACOS
+ 	if ( !isUnifiedMemoryGPU() && _mtlBuffer && _mtlStorageMode == MTLStorageModeManaged) {
+ 		[_mtlBuffer didModifyRange: NSMakeRange(offset, memSize)];
+@@ -105,6 +107,8 @@
+     VkDeviceSize memSize = adjustMemorySize(size, offset);
+ 	if (memSize == 0 || !isMemoryHostAccessible()) { return VK_SUCCESS; }
+ 
++	syncShadowedHostMemoryFromDevice(offset, memSize);
++
+ #if MVK_MACOS
+ 	if ( !isUnifiedMemoryGPU() && pBlitEnc && _mtlBuffer && _mtlStorageMode == MTLStorageModeManaged) {
+ 		if ( !pBlitEnc->mtlCmdBuffer) { pBlitEnc->mtlCmdBuffer = _device->getAnyQueue()->getMTLCommandBuffer(kMVKCommandUseInvalidateMappedMemoryRanges); }
+@@ -255,7 +259,16 @@
+ 		[buf makeAliasable];
+ 	} else if (_pHostMemory) {
+ 		auto rezOpts = getMTLResourceOptions();
+-		if (_isHostMemImported) {
++		if (_isHostMemImported && getMVKConfig().shadowImportedHostMemory) {
++			// Mirror the imported pages in a private MTLBuffer. The pages remain the host-visible
++			// memory and are synchronized with the buffer on flush, invalidate and queue submission.
++			buf = [getMTLDevice() newBufferWithBytes: _pHostMemory length: memLen options: rezOpts];	// retained
++			if (buf) {
++				_pShadowedHostMemory = _pHostMemory;
++				_shadowedByteCount = memLen;
++				_device->addShadowedDeviceMemory(this);
++			}
++		} else if (_isHostMemImported) {
+ 			buf = [getMTLDevice() newBufferWithBytesNoCopy: _pHostMemory length: memLen options: rezOpts deallocator: nil];	// retained
+ 		} else {
+ 			buf = [getMTLDevice() newBufferWithBytes: _pHostMemory length: memLen options: rezOpts];     // retained
+@@ -267,7 +280,7 @@
+ 	if (!buf) { return false; }
+ 	_device->makeResident(buf);
+ 	_device->getLiveResources().add(buf);
+-	_pMemory = isMemoryHostAccessible() ? buf.contents : nullptr;
++	_pMemory = _pShadowedHostMemory ? _pShadowedHostMemory : (isMemoryHostAccessible() ? buf.contents : nullptr);
+ 	_mtlBuffer = buf;
+ 
+ 	propagateDebugName();
+@@ -499,7 +512,30 @@
+ 	}
+ }
+ 
++void MVKDeviceMemory::syncShadowedHostMemoryToDevice(VkDeviceSize offset, VkDeviceSize size) {
++	if ( !_pShadowedHostMemory || !_mtlBuffer ) { return; }
++	if (offset >= _shadowedByteCount) { return; }
++	NSUInteger byteCount = (size == VK_WHOLE_SIZE) ? (_shadowedByteCount - offset) : (NSUInteger)std::min<VkDeviceSize>(size, _shadowedByteCount - offset);
++	memcpy((char*)_mtlBuffer.contents + offset, (char*)_pShadowedHostMemory + offset, byteCount);
++#if MVK_MACOS
++	if ( !isUnifiedMemoryGPU() && _mtlStorageMode == MTLStorageModeManaged) {
++		[_mtlBuffer didModifyRange: NSMakeRange(offset, byteCount)];
++	}
++#endif
++}
++
++void MVKDeviceMemory::syncShadowedHostMemoryFromDevice(VkDeviceSize offset, VkDeviceSize size) {
++	if ( !_pShadowedHostMemory || !_mtlBuffer ) { return; }
++	if (offset >= _shadowedByteCount) { return; }
++	NSUInteger byteCount = (size == VK_WHOLE_SIZE) ? (_shadowedByteCount - offset) : (NSUInteger)std::min<VkDeviceSize>(size, _shadowedByteCount - offset);
++	memcpy((char*)_pShadowedHostMemory + offset, (char*)_mtlBuffer.contents + offset, byteCount);
++}
++
+ MVKDeviceMemory::~MVKDeviceMemory() {
++	if (_pShadowedHostMemory) {
++		_device->removeShadowedDeviceMemory(this);
++		_pShadowedHostMemory = nullptr;
++	}
+ 	// Unbind any resources that are using me.
+ 	// Manually null the binding parameter to prevent them from trying to remove themselves from the array.
+ 	// This will leave texture buffer pointers dangling, but according to Vulkan, those are not supposed to be used again anyways.
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm b/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm
+index dec4b45..7bbcd20 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm
+@@ -84,6 +84,10 @@
+ 	// Submit regardless of config result, to ensure submission semaphores and fences are signalled.
+ 	// The submissions will ensure a misconfiguration will be safe to execute.
+ 	VkResult rslt = qSubmit->getConfigurationResult();
++
++	// Host writes to shadowed imported host memory must reach the MTLBuffers before the GPU runs.
++	if (getMVKConfig().shadowImportedHostMemory) { _device->syncShadowedDeviceMemoryToDevice(); }
++
+ 	if (_execQueue) {
+ 		std::unique_lock lock(_execQueueMutex);
+ 		_execQueueJobCount++;
+diff --git a/MoltenVK/MoltenVK/Utility/MVKConfigMembers.def b/MoltenVK/MoltenVK/Utility/MVKConfigMembers.def
+index 5f7e0a5..3ce7239 100644
+--- a/MoltenVK/MoltenVK/Utility/MVKConfigMembers.def
++++ b/MoltenVK/MoltenVK/Utility/MVKConfigMembers.def
+@@ -86,6 +86,7 @@ MVK_CONFIG_MEMBER(useMetalPrivateAPI,                     VkBool32,
+ MVK_CONFIG_MEMBER_STRING(shaderDumpDir,                   char*,                                    SHADER_DUMP_DIR)
+ MVK_CONFIG_MEMBER(shaderLogEstimatedGLSL,                 VkBool32,                                 SHADER_LOG_ESTIMATED_GLSL)
+ MVK_CONFIG_MEMBER(liveCheckAllResources,                  VkBool32,                                 LIVE_CHECK_ALL_RESOURCES)
++MVK_CONFIG_MEMBER(shadowImportedHostMemory,               VkBool32,                                 SHADOW_IMPORTED_HOST_MEMORY)
+ 
+ #undef MVK_CONFIG_MEMBER
+ #undef MVK_CONFIG_MEMBER_STRING
+@@ -101,5 +102,5 @@ MVK_CONFIG_MEMBER(liveCheckAllResources,                  VkBool32,
+  * Once  MVKConfiguration and the list above are in agreement, it may be necessary to modify
+  * this value if the internal padding has changed as a result of new MVKConfiguration members.
+  */
+-#define kMVKConfigurationInternalPaddingByteCount  4
++#define kMVKConfigurationInternalPaddingByteCount  8
+ 
+diff --git a/MoltenVK/MoltenVK/Utility/MVKEnvironment.h b/MoltenVK/MoltenVK/Utility/MVKEnvironment.h
+index e6d176c..e78aef6 100644
+--- a/MoltenVK/MoltenVK/Utility/MVKEnvironment.h
++++ b/MoltenVK/MoltenVK/Utility/MVKEnvironment.h
+@@ -350,3 +350,16 @@ void mvkSetConfig(MVKConfiguration& dstMVKConfig, const MVKConfiguration& srcMVK
+ #ifndef MVK_CONFIG_LIVE_CHECK_ALL_RESOURCES
+ #   define MVK_CONFIG_LIVE_CHECK_ALL_RESOURCES 0
+ #endif
++
++/*
++ * If set, host memory imported through VK_EXT_external_memory_host is backed by a private
++ * MTLBuffer that mirrors the imported pages, instead of a no-copy MTLBuffer created directly
++ * over them. The imported pages stay the host-visible memory; MoltenVK copies them into the
++ * MTLBuffer on flushes and before every queue submission, and copies the MTLBuffer back on
++ * invalidations and maps. This is a workaround for imported allocations that Metal accepts as
++ * no-copy buffers but then fails at execution time, at the cost of a copy of all shadowed memory
++ * per queue submission. Disabled by default.
++ */
++#ifndef MVK_CONFIG_SHADOW_IMPORTED_HOST_MEMORY
++#   define MVK_CONFIG_SHADOW_IMPORTED_HOST_MEMORY 0
++#endif
