@@ -699,6 +699,21 @@ extension RegressionTests {
         XCTAssertNil(EngineStore.defaultEngine(installed: [], bundledID: new.id))
     }
 
+    // An engine update only re-runs wineboot on each bottle when the Wine build changed. r1 is
+    // r0 plus a MoltenVK component; booting every prefix for it is pure risk (a bottle with a real
+    // .NET install wedged in wineboot's 32-bit step on both engines when this was tried).
+    func testPrefixRefreshOnlyWhenWineChanges() throws {
+        func manifest(_ wineSha: String?, id: String) throws -> EngineManifest {
+            let wine = wineSha.map { #","wine":{"kind":"engine","url":"https://x/w.tar.xz","sha256":"\#($0)","extract":{"into":"engine"}}"# } ?? ""
+            let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{"runtime":{"kind":"frameworks","url":"https://x/r.tar.xz","sha256":"r","extract":{"into":"frameworks"}}\#(wine)}}"#
+            return try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8))
+        }
+        let r0 = try manifest("aaa", id: "r0"), r1 = try manifest("aaa", id: "r1"), r2 = try manifest("bbb", id: "r2")
+        XCTAssertFalse(EngineManifest.needsPrefixRefresh(from: r0, to: r1), "same Wine: no wineboot")
+        XCTAssertTrue(EngineManifest.needsPrefixRefresh(from: r0, to: r2), "Wine changed: wineboot")
+        XCTAssertTrue(EngineManifest.needsPrefixRefresh(from: try manifest(nil, id: "x"), to: r1), "unknown: be safe, boot")
+    }
+
     // extract() with a single-file `into` replaces that file and nothing else in the directory.
     // The old code treated every target as a directory, so a file target would have removed
     // the whole frameworks tree on the way in.

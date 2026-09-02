@@ -68,6 +68,15 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
     }
 
     /// Components in a deterministic install order: required first, then optional.
+    /// Whether moving bottles from `old` to `new` needs `wineboot -u`: only when the Wine build
+    /// itself changed. A component-only update (a patched MoltenVK on the same Wine) leaves the
+    /// prefix as it is, and skipping the boot matters: a prefix with a real .NET install wedged
+    /// in wineboot's 32-bit step on both engines during the r1 rollout test.
+    public static func needsPrefixRefresh(from old: EngineManifest, to new: EngineManifest) -> Bool {
+        guard let a = old.components["wine"]?.sha256, let b = new.components["wine"]?.sha256 else { return true }
+        return a != b
+    }
+
     public var orderedComponents: [(name: String, component: Component)] {
         components.sorted { a, b in
             if a.value.isOptional != b.value.isOptional { return !a.value.isOptional }

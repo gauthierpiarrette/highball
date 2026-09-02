@@ -138,8 +138,8 @@ struct Bottle: AsyncParsableCommand {
             var b = try bs.get(name)
             switch setting {
             case "engine":
-                // Point the bottle at another installed engine; run `bottle repair` afterwards so
-                // the prefix's Windows environment matches it.
+                // Point the bottle at another installed engine. Run `bottle repair` afterwards only
+                // if the Wine build changed (a component-only engine, like r1's MoltenVK, needs none).
                 guard let eng = try? EngineStore().engine(value) else { fail("engine '\(value)' is not installed") }
                 b.settings.engineID = eng.id
             case "renderer":

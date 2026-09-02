@@ -283,12 +283,17 @@ final class AppState {
                 }
             }
             await MainActor.run { self.appendLog("engine \(fresh.id) installed") }
+            let refresh = EngineManifest.needsPrefixRefresh(from: old.manifest, to: fresh.manifest)
             for var bottle in try bottleStore.list() where bottle.settings.engineID != fresh.id {
                 let runnerOld = WineRunner(paths: paths, engine: old, bottle: bottle)
                 try? runnerOld.kill()
                 try? await Task.sleep(for: .seconds(2))
                 bottle.settings.engineID = fresh.id
                 try bottle.save()
+                guard refresh else {
+                    await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(fresh.id) (same Wine, no prefix refresh needed)") }
+                    continue
+                }
                 await MainActor.run { self.stage = String(format: L("Refreshing bottle '%@'"), bottle.name) }
                 let runner = WineRunner(paths: paths, engine: fresh, bottle: bottle)
                 let r = try await runner.wineboot()
