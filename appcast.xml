@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.21</title>
+      <description><![CDATA[Bottles stop for real; commands work while Steam is open; the Steam tile wakes a running client]]></description>
+      <pubDate>Thu, 03 Sep 2026 13:48:44 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.21/Highball-0.7.21.zip" sparkle:version="0.7.21" sparkle:shortVersionString="0.7.21" sparkle:edSignature="JJwNq0pJYHmaZOwQHHhemKq3vsQ6SCGyT6ujCx7qeey6yryYdWUQ8GpgSAfT/WRFW/FoFzGXW5AFTwoTAkx8AQ==" length="2766908" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.20</title>
       <description><![CDATA[Repair and engine updates no longer hang in bottles with the real .NET Framework]]></description>
       <pubDate>Thu, 03 Sep 2026 13:09:20 -0700</pubDate>
