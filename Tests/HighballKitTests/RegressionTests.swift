@@ -582,6 +582,53 @@ extension RegressionTests {
         XCTAssertEqual(try Data(contentsOf: wow64.appending(path: "mscoree.dll")), real)
     }
 
+    // Stopping a bottle used to be `wineserver -k` and nothing else, and clients parked in the
+    // Mac driver's run loop outlived it by a day (issue #48). The reaper identifies a prefix's
+    // processes by working directory (inside the prefix, or the prefix's server directory) and
+    // ends them. Tested on real processes: a sleep started inside a temp prefix is found and
+    // terminated; one started elsewhere is left alone; our own process is never a candidate.
+    func testProcessTableFindsAndEndsPrefixProcessesOnly() throws {
+        let prefix = FileManager.default.temporaryDirectory.appending(path: "hb-prefix-\(UUID().uuidString)")
+        let elsewhere = FileManager.default.temporaryDirectory.appending(path: "hb-elsewhere-\(UUID().uuidString)")
+        for d in [prefix.appending(path: "drive_c/windows"), elsewhere] {
+            try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        }
+        defer { try? FileManager.default.removeItem(at: prefix); try? FileManager.default.removeItem(at: elsewhere) }
+        func sleeper(in dir: URL) throws -> Process {
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sleep"); p.arguments = ["60"]
+            p.currentDirectoryURL = dir; try p.run(); return p
+        }
+        let inside = try sleeper(in: prefix.appending(path: "drive_c/windows"))
+        let outside = try sleeper(in: elsewhere)
+        defer { if outside.isRunning { outside.terminate() } }
+
+        let found = ProcessTable.processes(ofPrefix: prefix)
+        XCTAssertTrue(found.contains(inside.processIdentifier), "process working inside the prefix must be found")
+        XCTAssertFalse(found.contains(outside.processIdentifier), "process working elsewhere must not")
+        XCTAssertFalse(found.contains(getpid()), "never ourselves")
+
+        let hard = ProcessTable.terminate(found)
+        inside.waitUntilExit()
+        XCTAssertFalse(inside.isRunning)
+        XCTAssertTrue(hard.isEmpty, "sleep exits on SIGTERM, no SIGKILL needed: \(hard)")
+        XCTAssertTrue(ProcessTable.processes(ofPrefix: prefix).isEmpty)
+        XCTAssertTrue(outside.isRunning, "the unrelated process is untouched")
+
+        // The pure matcher: prefix root, anything below it, and the server directory count;
+        // a sibling directory that merely shares the name prefix does not.
+        XCTAssertTrue(ProcessTable.belongs(workingDirectory: "/b/Gaming", toPrefix: "/b/Gaming", serverDirectory: nil))
+        XCTAssertTrue(ProcessTable.belongs(workingDirectory: "/b/Gaming/drive_c", toPrefix: "/b/Gaming", serverDirectory: nil))
+        XCTAssertFalse(ProcessTable.belongs(workingDirectory: "/b/Gaming2/drive_c", toPrefix: "/b/Gaming", serverDirectory: nil))
+        XCTAssertTrue(ProcessTable.belongs(workingDirectory: "/tmp/.wine-501/server-1-2", toPrefix: "/b/Gaming", serverDirectory: "/tmp/.wine-501/server-1-2"))
+        XCTAssertFalse(ProcessTable.belongs(workingDirectory: "/tmp/.wine-501/server-1-3", toPrefix: "/b/Gaming", serverDirectory: "/tmp/.wine-501/server-1-2"))
+
+        // The server directory is derived from the prefix path's device and inode, the way
+        // Wine names it.
+        var st = stat(); XCTAssertEqual(stat(prefix.path, &st), 0)
+        XCTAssertEqual(ProcessTable.serverDirectory(forPrefix: prefix)?.lastPathComponent,
+                       "server-\(String(UInt64(st.st_dev), radix: 16))-\(String(st.st_ino, radix: 16))")
+    }
+
     func testRendererSuggestionCyclesAndNeverSuggestsItself() {
         for r in Renderer.allCases {
             XCTAssertNotEqual(Renderer.suggestion(after: r), r)

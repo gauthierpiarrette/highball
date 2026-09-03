@@ -292,9 +292,28 @@ public struct WineRunner: Sendable {
                              restoreMscoreeFirst: false)
     }
 
-    public func kill() throws {
+    /// Stops the bottle: asks the server to kill its clients, waits for the server to go, then
+    /// ends whatever is still attached to the prefix. Returns the process ids it had to end
+    /// itself, which is normally none (see `ProcessTable` for why it is not always none).
+    @discardableResult
+    public func kill() throws -> [pid_t] {
         let env = try bottle.environment(engine: engine, renderer: .wined3d)
-        try Shell.run(engine.wineserverBinary.path, ["-k"], env: env)
+        // `-k` fails when no server holds the lock, which is exactly the crashed-server case
+        // the reaper below exists for, so its failure must not end the stop early.
+        try? Shell.run(engine.wineserverBinary.path, ["-k"], env: env)
+        // `wineserver -w` blocks until the server has released its lock. Bounded: a wedged
+        // server must not turn a Stop into a hang, the reaper below covers that case too.
+        let waiter = Process()
+        waiter.executableURL = engine.wineserverBinary
+        waiter.arguments = ["-w"]
+        waiter.environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
+        try? waiter.run()
+        let deadline = Date().addingTimeInterval(10)
+        while waiter.isRunning && Date() < deadline { usleep(100_000) }
+        if waiter.isRunning { waiter.terminate() }
+        let leftovers = ProcessTable.processes(ofPrefix: bottle.url)
+        ProcessTable.terminate(leftovers)
+        return leftovers
     }
 
     // MARK: Registry helpers
