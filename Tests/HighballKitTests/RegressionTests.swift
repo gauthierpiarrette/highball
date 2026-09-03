@@ -642,18 +642,20 @@ extension RegressionTests {
         for mode in SyncMode.allCases { XCTAssertEqual(SyncMode(environment: mode.environment), mode) }
 
         // The kernel hides the environment of Apple platform binaries, so the child is an
-        // unsigned copy of sleep, which is what a Wine binary looks like to the kernel.
+        // ad-hoc signed copy of sleep, which is what a Wine binary looks like to the kernel.
         let dir = FileManager.default.temporaryDirectory.appending(path: "hb-env-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let sleeper = dir.appending(path: "sleeper")
         try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: sleeper)
-        let strip = Process(); strip.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-        strip.arguments = ["--remove-signature", sleeper.path]; try strip.run(); strip.waitUntilExit()
+        let resign = Process(); resign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        resign.arguments = ["--force", "--sign", "-", sleeper.path]; try resign.run(); resign.waitUntilExit()
         let p = Process()
         p.executableURL = sleeper; p.arguments = ["30"]
         p.environment = ["WINEMSYNC": "0", "WINEESYNC": "0", "HB_TEST_MARKER": "yes"]
         try p.run(); defer { p.terminate() }
+        usleep(200_000)
+        guard p.isRunning else { throw XCTSkip("the re-signed copy of sleep does not run on this host; the reader is exercised on real Wine servers instead") }
         let read = try XCTUnwrap(ProcessTable.commandLineAndEnvironment(of: p.processIdentifier))
         XCTAssertEqual(read.arguments, [sleeper.path, "30"])
         XCTAssertEqual(read.environment["HB_TEST_MARKER"], "yes")
