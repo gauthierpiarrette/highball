@@ -94,9 +94,14 @@ public struct WineRunner: Sendable {
         extraEnvironment: [String: String] = [:],
         label: String? = nil,
         workingDirectory: URL? = nil,
+        restoreMscoreeFirst: Bool = true,
         onOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> LaunchResult {
         try paths.ensure()
+        // A boot that died halfway would leave the bottle's real .NET shim set aside (see
+        // setAsideForeignMscoree); put it back before anything runs in this prefix. The boot
+        // itself is the one launch that must not, since it just set the file aside on purpose.
+        if restoreMscoreeFirst { Self.restoreMscoree(bottle: bottle) }
         // DXVK reads its options from the generated conf (async toggle + per-game profiles like
         // [csgo.exe], issue #21) — refresh it before the spawn. Every renderer but wined3d gets
         // DXVK's d3d9 attached, so every one of them needs the conf, not just .dxvk.
@@ -212,8 +217,79 @@ public struct WineRunner: Sendable {
 
     /// `force` adds -f: re-runs the inf installs even when the prefix looks current, which is
     /// how a prefix missing its 32-bit half gets a second chance (issue #37).
+    /// Suffix of a `mscoree.dll` set aside for the duration of a `wineboot` run.
+    public static let asideSuffix = ".highball-wineboot"
+
+    /// The bottle's two `mscoree.dll` copies and the engine builtin each would be on a Wine-made
+    /// prefix, as (bottle file, engine file) pairs.
+    static func mscoreePairs(engine: InstalledEngine, bottle: Bottle) -> [(URL, URL)] {
+        [("windows/system32/mscoree.dll", "lib/wine/x86_64-windows/mscoree.dll"),
+         ("windows/syswow64/mscoree.dll", "lib/wine/i386-windows/mscoree.dll")].map {
+            (bottle.driveC.appending(path: $0.0), engine.engineDir.appending(path: $0.1))
+        }
+    }
+
+    /// Whether the bottle carries Microsoft's .NET shim rather than Wine's `mscoree.dll`, which
+    /// is what the dotnet48 recipe leaves behind. A Wine-made prefix holds byte copies of the
+    /// engine builtins, so a size mismatch on either copy is the tell.
+    public static func hasForeignMscoree(engine: InstalledEngine, bottle: Bottle) -> Bool {
+        mscoreePairs(engine: engine, bottle: bottle).contains { pair in
+            guard let a = try? FileManager.default.attributesOfItem(atPath: pair.0.path)[.size] as? UInt64,
+                  let b = try? FileManager.default.attributesOfItem(atPath: pair.1.path)[.size] as? UInt64 else { return false }
+            return a != b
+        }
+    }
+
+    /// Moves a foreign `mscoree.dll` (both halves) aside for a boot; `restoreMscoree` puts it back.
+    ///
+    /// `wineboot -u` re-runs wine.inf's setup sections, which call `DllRegisterServer` on a fixed
+    /// list of DLLs, `mscoree.dll` among them. In a bottle where the dotnet48 recipe installed
+    /// Microsoft's .NET Framework that file is the real .NET shim, the registry marks it native,
+    /// and the shim's registration loads the CLR and never returns under wow64: wineboot waits
+    /// on the 32-bit rundll32 forever. Reproduced 2026-09-03 on the Gaming bottle (real .NET 4.8
+    /// + Steam): Repair and the engine-update wineboot hang at `do_register_dll ... mscoree.dll`,
+    /// on two engines, with and without leftover processes. Fresh bottles boot fine.
+    ///
+    /// The tools one would reach for first do not work. A `mscoree=b` override makes Wine's
+    /// mscoree register, which calls `mscorwks.DllRegisterServerInternal`; the real mscorwks
+    /// has no such export and Wine aborts the process into a debugger. A `mscoree=d` override is
+    /// honoured by the 64-bit half and ignored by 32-bit processes under wow64 (the trace shows
+    /// them loading the real file as native regardless). And wineboot's inf comes from ntdll's
+    /// own data directory, so a filtered wine.inf cannot be pointed at through `WINEDATADIR`.
+    ///
+    /// With the file absent, both halves fail to load it (the native-only override rules out a
+    /// builtin fallback), setupapi records one `could not load` and continues, and the boot
+    /// completes: 15 s where it used to hang. The inf's fake-DLL step drops Wine's mscoree into
+    /// the gap meanwhile, which is why the restore overwrites rather than checks. The real
+    /// installer already registered the runtime, so skipping that one entry loses nothing.
+    public static func setAsideForeignMscoree(engine: InstalledEngine, bottle: Bottle) throws -> Bool {
+        guard hasForeignMscoree(engine: engine, bottle: bottle) else { return false }
+        for (file, _) in mscoreePairs(engine: engine, bottle: bottle) where FileManager.default.fileExists(atPath: file.path) {
+            let aside = URL(fileURLWithPath: file.path + asideSuffix)
+            try? FileManager.default.removeItem(at: aside)
+            try FileManager.default.moveItem(at: file, to: aside)
+        }
+        return true
+    }
+
+    /// Puts back any `mscoree.dll` set aside by `setAsideForeignMscoree`, overwriting whatever the
+    /// boot left in its place. Safe to call when nothing is aside. Also run before every launch,
+    /// so a boot that died halfway (crash, force quit) cannot leave the bottle without its .NET.
+    public static func restoreMscoree(bottle: Bottle) {
+        for dir in ["windows/system32", "windows/syswow64"] {
+            let file = bottle.driveC.appending(path: "\(dir)/mscoree.dll")
+            let aside = URL(fileURLWithPath: file.path + asideSuffix)
+            guard FileManager.default.fileExists(atPath: aside.path) else { continue }
+            try? FileManager.default.removeItem(at: file)
+            try? FileManager.default.moveItem(at: aside, to: file)
+        }
+    }
+
     public func wineboot(force: Bool = false) async throws -> LaunchResult {
-        try await run(["wineboot", force ? "-fu" : "-u"], renderer: .wined3d, label: "wineboot")
+        let aside = try Self.setAsideForeignMscoree(engine: engine, bottle: bottle)
+        defer { if aside { Self.restoreMscoree(bottle: bottle) } }
+        return try await run(["wineboot", force ? "-fu" : "-u"], renderer: .wined3d, label: "wineboot",
+                             restoreMscoreeFirst: false)
     }
 
     public func kill() throws {
