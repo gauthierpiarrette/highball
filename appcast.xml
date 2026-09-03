@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.7.20</title>
+      <description><![CDATA[Repair and engine updates no longer hang in bottles with the real .NET Framework]]></description>
+      <pubDate>Thu, 03 Sep 2026 13:09:20 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.7.20/Highball-0.7.20.zip" sparkle:version="0.7.20" sparkle:shortVersionString="0.7.20" sparkle:edSignature="PMTt7OyopmTN0ci3e5Dkd/HIOTJ7+RgwvjLq92U+aAQq6GvbO+shYpH0ged/vLuFizBSvIsT1cvqY8RovAf2Cw==" length="2756239" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.7.19</title>
       <description><![CDATA[The Sims Legacy Collection renders; engine updates without reinstall]]></description>
       <pubDate>Wed, 02 Sep 2026 16:04:42 -0700</pubDate>
