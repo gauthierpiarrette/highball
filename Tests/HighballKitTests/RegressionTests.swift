@@ -527,6 +527,61 @@ extension RegressionTests {
 
     // The alert used to edit `selectedBottle`, which launchGame never sets, so accepting a
     // suggestion could rewrite an unrelated bottle. The cycle itself must stay total.
+    // A bottle with Microsoft's .NET Framework (dotnet48 recipe) hangs every `wineboot -u`:
+    // wine.inf's 32-bit setup registers mscoree.dll, the registry marks it native, and the real
+    // shim's DllRegisterServer never returns under wow64 (Repair and engine updates both hang,
+    // reproduced 2026-09-03; overrides and a filtered inf were tried and do not work, see
+    // WineRunner.setAsideForeignMscoree). The boot runs with the real file set aside and
+    // restores it afterwards, overwriting what the boot dropped in the gap. A bottle whose
+    // mscoree is the engine's own file is left alone, and a launch after a boot that died
+    // halfway restores the file before running anything.
+    func testWinebootSetsAsideForeignMscoreeAndRestoresIt() throws {
+        let manifest = try EngineManifest.load(from: URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "spike/engine-manifest.json"))
+        let root = FileManager.default.temporaryDirectory.appending(path: "hb-boot-\(UUID().uuidString)")
+        let bottleURL = FileManager.default.temporaryDirectory.appending(path: "hb-boot-bottle-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: bottleURL) }
+        let fm = FileManager.default
+        for dir in ["engine/lib/wine/x86_64-windows", "engine/lib/wine/i386-windows"] {
+            try fm.createDirectory(at: root.appending(path: dir), withIntermediateDirectories: true)
+            try Data(repeating: 0, count: 100).write(to: root.appending(path: "\(dir)/mscoree.dll"))
+        }
+        let sys32 = bottleURL.appending(path: "drive_c/windows/system32")
+        let wow64 = bottleURL.appending(path: "drive_c/windows/syswow64")
+        try fm.createDirectory(at: sys32, withIntermediateDirectories: true)
+        try fm.createDirectory(at: wow64, withIntermediateDirectories: true)
+        let engine = InstalledEngine(manifest: manifest, root: root)
+        let bottle = Bottle(url: bottleURL, settings: BottleSettings(name: "t", engineID: manifest.id))
+
+        // Wine's own files (same size as the engine's): nothing happens.
+        try Data(repeating: 0, count: 100).write(to: sys32.appending(path: "mscoree.dll"))
+        try Data(repeating: 0, count: 100).write(to: wow64.appending(path: "mscoree.dll"))
+        XCTAssertFalse(WineRunner.hasForeignMscoree(engine: engine, bottle: bottle))
+        XCTAssertFalse(try WineRunner.setAsideForeignMscoree(engine: engine, bottle: bottle))
+        XCTAssertTrue(fm.fileExists(atPath: wow64.appending(path: "mscoree.dll").path))
+
+        // Microsoft's shim (a different file) in the 32-bit half only: both copies go aside.
+        let real = Data(repeating: 7, count: 300)
+        try real.write(to: wow64.appending(path: "mscoree.dll"))
+        XCTAssertTrue(WineRunner.hasForeignMscoree(engine: engine, bottle: bottle))
+        XCTAssertTrue(try WineRunner.setAsideForeignMscoree(engine: engine, bottle: bottle))
+        XCTAssertFalse(fm.fileExists(atPath: wow64.appending(path: "mscoree.dll").path))
+        XCTAssertFalse(fm.fileExists(atPath: sys32.appending(path: "mscoree.dll").path))
+        XCTAssertTrue(fm.fileExists(atPath: wow64.appending(path: "mscoree.dll" + WineRunner.asideSuffix).path))
+
+        // The boot drops Wine's copy into the gap; the restore overwrites it with the real one.
+        try Data(repeating: 0, count: 100).write(to: wow64.appending(path: "mscoree.dll"))
+        WineRunner.restoreMscoree(bottle: bottle)
+        XCTAssertEqual(try Data(contentsOf: wow64.appending(path: "mscoree.dll")), real)
+        XCTAssertTrue(fm.fileExists(atPath: sys32.appending(path: "mscoree.dll").path))
+        XCTAssertFalse(fm.fileExists(atPath: wow64.appending(path: "mscoree.dll" + WineRunner.asideSuffix).path))
+
+        // Nothing aside: restore is a no-op and leaves the files alone.
+        WineRunner.restoreMscoree(bottle: bottle)
+        XCTAssertEqual(try Data(contentsOf: wow64.appending(path: "mscoree.dll")), real)
+    }
+
     func testRendererSuggestionCyclesAndNeverSuggestsItself() {
         for r in Renderer.allCases {
             XCTAssertNotEqual(Renderer.suggestion(after: r), r)
