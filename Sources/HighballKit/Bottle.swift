@@ -82,6 +82,23 @@ public enum WindowsVersion: String, Codable, CaseIterable, Sendable {
 
 public enum SyncMode: String, Codable, CaseIterable, Sendable {
     case none, esync, msync
+
+    /// The mode a Wine environment selects: msync wins, then esync, else none.
+    public init(environment env: [String: String]) {
+        if env["WINEMSYNC"] == "1" { self = .msync }
+        else if env["WINEESYNC"] == "1" { self = .esync }
+        else { self = .none }
+    }
+
+    /// The two variables that select this mode. Both are always set: Wine treats an unset
+    /// WINEMSYNC as on for msync-capable builds, so "off" has to be explicit.
+    public var environment: [String: String] {
+        switch self {
+        case .none: return ["WINEMSYNC": "0", "WINEESYNC": "0"]
+        case .esync: return ["WINEMSYNC": "0", "WINEESYNC": "1"]
+        case .msync: return ["WINEMSYNC": "1", "WINEESYNC": "0"]
+        }
+    }
 }
 
 /// A pinned program inside a bottle.

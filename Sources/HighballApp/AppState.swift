@@ -451,6 +451,14 @@ final class AppState {
                 cleanup: { [weak self] in self?.launchingPins.remove(pin.id) }) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             var extra = [String: String]()
+            // A Steam client left running by a game launch answers a new steam.exe by swallowing
+            // it (issue #33). Ask it to show its window instead, and leave the wineserver alone:
+            // a game may still be running under it.
+            if isSteamUI(pin), let shown = try await runner.showRunningSteam(onOutput: { line in Task { @MainActor in self.appendLog(line) } }) {
+                await MainActor.run { self.appendLog("Steam was already running; asked it to show its window") }
+                if shown.crashedEarly { /* the forward exits at once by design; not a crash */ }
+                return
+            }
             if isSteamUI(pin), bottle.settings.sync != SyncMode.none {
                 try? runner.kill()                      // restart the wineserver so sync=none takes effect
                 try? await Task.sleep(for: .seconds(2))
