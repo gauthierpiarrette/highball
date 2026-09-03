@@ -213,8 +213,8 @@ struct Bottle: AsyncParsableCommand {
         func run() async throws {
             let b = try BottleStore().get(name)
             let eng = try EngineStore().engine(b.settings.engineID)
-            try WineRunner(engine: eng, bottle: b).kill()
-            print("wineserver -k sent")
+            let ended = try WineRunner(engine: eng, bottle: b).kill()
+            print(ended.isEmpty ? "stopped \(name)" : "stopped \(name), ended \(ended.count) leftover process\(ended.count == 1 ? "" : "es") the server did not")
         }
     }
 }
