@@ -629,6 +629,61 @@ extension RegressionTests {
                        "server-\(String(UInt64(st.st_dev), radix: 16))-\(String(st.st_ino, radix: 16))")
     }
 
+    // Wine fixes the sync mode when a prefix's wineserver starts, and a client started with a
+    // different one dies at msync_init before doing anything (issue #32: `bottle set winver`
+    // reported ok while a Steam window, cold-started with sync off, was open). A launch now reads
+    // the running server's environment and adopts its mode. The reader is exercised on a real
+    // process with a known environment; the mode mapping and its inverse are pure.
+    func testSyncModeFollowsTheRunningServersEnvironment() throws {
+        XCTAssertEqual(SyncMode(environment: ["WINEMSYNC": "1", "WINEESYNC": "0"]), .msync)
+        XCTAssertEqual(SyncMode(environment: ["WINEMSYNC": "0", "WINEESYNC": "1"]), .esync)
+        XCTAssertEqual(SyncMode(environment: ["WINEMSYNC": "0", "WINEESYNC": "0"]), SyncMode.none)
+        XCTAssertEqual(SyncMode(environment: [:]), SyncMode.none, "unset means off for a launch we control")
+        for mode in SyncMode.allCases { XCTAssertEqual(SyncMode(environment: mode.environment), mode) }
+
+        // The kernel hides the environment of Apple platform binaries, so the child is an
+        // ad-hoc signed copy of sleep, which is what a Wine binary looks like to the kernel.
+        let dir = FileManager.default.temporaryDirectory.appending(path: "hb-env-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sleeper = dir.appending(path: "sleeper")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: sleeper)
+        let resign = Process(); resign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        resign.arguments = ["--force", "--sign", "-", sleeper.path]; try resign.run(); resign.waitUntilExit()
+        let p = Process()
+        p.executableURL = sleeper; p.arguments = ["30"]
+        p.environment = ["WINEMSYNC": "0", "WINEESYNC": "0", "HB_TEST_MARKER": "yes"]
+        try p.run(); defer { p.terminate() }
+        usleep(200_000)
+        guard p.isRunning else { throw XCTSkip("the re-signed copy of sleep does not run on this host; the reader is exercised on real Wine servers instead") }
+        let read = try XCTUnwrap(ProcessTable.commandLineAndEnvironment(of: p.processIdentifier))
+        XCTAssertEqual(read.arguments, [sleeper.path, "30"])
+        XCTAssertEqual(read.environment["HB_TEST_MARKER"], "yes")
+        XCTAssertEqual(SyncMode(environment: read.environment), SyncMode.none)
+
+        // A platform binary's environment is hidden: the reader must not invent one.
+        let platform = Process(); platform.executableURL = URL(fileURLWithPath: "/bin/sleep"); platform.arguments = ["30"]
+        platform.environment = ["WINEMSYNC": "1"]; try platform.run(); defer { platform.terminate() }
+        let hidden = try XCTUnwrap(ProcessTable.commandLineAndEnvironment(of: platform.processIdentifier))
+        XCTAssertNil(hidden.environment["WINEMSYNC"], "platform binaries hide their environment; adoption must treat that as unknown")
+
+        let prefix = FileManager.default.temporaryDirectory.appending(path: "hb-nosrv-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: prefix) }
+        XCTAssertNil(ProcessTable.liveServer(forPrefix: prefix), "no wineserver runs for a fresh temp prefix")
+        XCTAssertNil(ProcessTable.liveServerSync(forPrefix: prefix))
+    }
+
+    // The Steam tile must recognise a running client by its command line, with either path
+    // separator, and not mistake helpers for it (issue #33).
+    func testSteamExecutableIsRecognisedByCommandLine() {
+        XCTAssertTrue(WineRunner.isSteamExecutable(#"C:\Program Files (x86)\Steam\steam.exe"#))
+        XCTAssertTrue(WineRunner.isSteamExecutable("/x/drive_c/Program Files (x86)/Steam/Steam.exe"))
+        XCTAssertFalse(WineRunner.isSteamExecutable(#"C:\Program Files (x86)\Steam\bin\cef\cef.win64\steamwebhelper.exe"#))
+        XCTAssertFalse(WineRunner.isSteamExecutable(#"C:\windows\system32\services.exe"#))
+        XCTAssertFalse(WineRunner.isSteamExecutable("steam.exe.bak"))
+    }
+
     func testRendererSuggestionCyclesAndNeverSuggestsItself() {
         for r in Renderer.allCases {
             XCTAssertNotEqual(Renderer.suggestion(after: r), r)

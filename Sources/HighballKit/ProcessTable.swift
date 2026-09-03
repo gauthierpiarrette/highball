@@ -70,6 +70,55 @@ public enum ProcessTable {
         }
     }
 
+    /// Command line and environment of a process we own, from `KERN_PROCARGS2`. Nil when the
+    /// kernel refuses (not ours, restricted) or the process is gone. The environment comes back
+    /// empty for Apple platform binaries (`/bin/sleep`, `/bin/sh`); Wine's binaries are not
+    /// platform binaries, so theirs is readable.
+    public static func commandLineAndEnvironment(of pid: pid_t) -> (arguments: [String], environment: [String: String])? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
+        var buf = [UInt8](repeating: 0, count: size)
+        guard sysctl(&mib, 3, &buf, &size, nil, 0) == 0 else { return nil }
+        let argc = Int(buf.withUnsafeBytes { $0.load(as: Int32.self) })
+        let strings = buf[MemoryLayout<Int32>.size...].split(separator: 0, omittingEmptySubsequences: true)
+            .map { String(decoding: $0, as: UTF8.self) }
+        guard strings.count >= 1 + argc else { return nil }
+        // Layout: executable path, argv[0..argc), then the environment.
+        let arguments = Array(strings[1..<(1 + argc)])
+        var environment: [String: String] = [:]
+        for entry in strings.dropFirst(1 + argc) {
+            guard let eq = entry.firstIndex(of: "=") else { continue }
+            environment[String(entry[..<eq])] = String(entry[entry.index(after: eq)...])
+        }
+        return (arguments, environment)
+    }
+
+    /// The wineserver currently serving a prefix, if one runs: its working directory is the
+    /// prefix's server directory.
+    public static func liveServer(forPrefix prefix: URL) -> pid_t? {
+        guard let server = serverDirectory(forPrefix: prefix).map({ canonical($0.path) }) else { return nil }
+        let me = getpid()
+        return allPIDs().first { pid in
+            guard pid != me, let cwd = workingDirectory(of: pid) else { return false }
+            return canonical(cwd) == server
+        }
+    }
+
+    /// The sync mode a running wineserver was started with, read from its environment. Wine
+    /// fixes the mode when the server starts, and a client started with a different one dies at
+    /// `msync_init` ("Failed to open msync shared memory file", issue #32). Nil when no server
+    /// runs or its environment cannot be read.
+    public static func liveServerSync(forPrefix prefix: URL) -> SyncMode? {
+        guard let pid = liveServer(forPrefix: prefix),
+              let env = commandLineAndEnvironment(of: pid)?.environment,
+              // The kernel hides the environment of Apple platform binaries; Wine's server is not
+              // one, and Highball always sets both variables, so their absence means "unknown",
+              // never "off".
+              env["WINEMSYNC"] != nil || env["WINEESYNC"] != nil else { return nil }
+        return SyncMode(environment: env)
+    }
+
     /// Ends the given processes: SIGTERM, a grace period, then SIGKILL for whatever is left.
     /// Returns the ids that had to be killed the hard way.
     @discardableResult

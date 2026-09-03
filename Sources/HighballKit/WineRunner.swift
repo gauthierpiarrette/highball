@@ -106,7 +106,16 @@ public struct WineRunner: Sendable {
         // [csgo.exe], issue #21) — refresh it before the spawn. Every renderer but wined3d gets
         // DXVK's d3d9 attached, so every one of them needs the conf, not just .dxvk.
         if (renderer ?? bottle.settings.renderer) != .wined3d { try? bottle.writeDxvkConfig() }
-        let env = try bottle.environment(engine: engine, renderer: renderer, extra: extraEnvironment)
+        var env = try bottle.environment(engine: engine, renderer: renderer, extra: extraEnvironment)
+        // Wine fixes the sync mode when the prefix's wineserver starts; a process started with a
+        // different one dies at msync_init before doing anything (issue #32: a registry write
+        // "succeeding" in 0 s while a Steam window, cold-started with sync off, was open). So a
+        // launch that joins a running server takes that server's mode, whatever the bottle or
+        // the caller asked for; the bottle's setting applies to the next cold start. The header
+        // below records the adoption ("bottle asks ...").
+        if let live = ProcessTable.liveServerSync(forPrefix: bottle.url), live != SyncMode(environment: env) {
+            env.merge(live.environment) { $1 }
+        }
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
         let logURL = Self.uniqueLogURL(in: paths.logs, named: "\(stamp)-\(bottle.name)-\(label ?? args.first ?? "wine")")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
@@ -296,6 +305,33 @@ public struct WineRunner: Sendable {
     /// ends whatever is still attached to the prefix. Returns the process ids it had to end
     /// itself, which is normally none (see `ProcessTable` for why it is not always none).
     @discardableResult
+    /// Whether a Steam client already runs in this bottle, by its command line.
+    public func steamIsRunning() -> Bool {
+        ProcessTable.processes(ofPrefix: bottle.url).contains { pid in
+            guard let first = ProcessTable.commandLineAndEnvironment(of: pid)?.arguments.first else { return false }
+            return Self.isSteamExecutable(first)
+        }
+    }
+
+    /// Pure: does a command line's program name end in steam.exe (Windows or Unix separators).
+    public static func isSteamExecutable(_ argv0: String) -> Bool {
+        argv0.replacingOccurrences(of: "\\", with: "/").lowercased().hasSuffix("/steam.exe")
+    }
+
+    /// If a Steam client is already running in the bottle, asks it to show its window and
+    /// returns that launch; nil when no client runs (the caller then starts one).
+    ///
+    /// After a game launch (`steam -silent -applaunch`) the silent client stays up. Starting
+    /// steam.exe again then only forwards to that instance and exits: no window, no error,
+    /// a dead button (issue #33). `steam://open/main` forwarded the same way makes the running
+    /// instance open its window, without restarting the wineserver under a game that may still
+    /// be running. Verified 2026-09-03: silent instance, open/main, Steam window up in seconds.
+    public func showRunningSteam(onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult? {
+        guard steamIsRunning() else { return nil }
+        let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
+        return try await start(steam, arguments: ["steam://open/main"], onOutput: onOutput)
+    }
+
     public func kill() throws -> [pid_t] {
         let env = try bottle.environment(engine: engine, renderer: .wined3d)
         // `-k` fails when no server holds the lock, which is exactly the crashed-server case

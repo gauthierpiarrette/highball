@@ -328,7 +328,12 @@ struct Run: AsyncParsableCommand {
             if let renderer { p.renderer = renderer }
             p.arguments += arguments
             if p.path.lowercased().hasSuffix("steam/steam.exe") {
-                result = try await runner.startResumingKnownSteamCrash(pin: p, onOutput: out ?? { _ in }).result
+                if let shown = try await runner.showRunningSteam(onOutput: out) {
+                    print("Steam is already running in this bottle; asked it to show its window")
+                    result = shown
+                } else {
+                    result = try await runner.startResumingKnownSteamCrash(pin: p, onOutput: out ?? { _ in }).result
+                }
             } else {
                 result = try await runner.start(pin: p, onOutput: out)
             }
@@ -349,7 +354,15 @@ struct Run: AsyncParsableCommand {
             result = try await runner.run([program] + arguments, renderer: renderer, label: program, onOutput: out)
         }
         print("exit=\(result.exitStatus) after \(Int(result.duration))s — log: \(result.log.path)")
-        if result.crashedEarly { print("hint: exited within 10 s; try another renderer (--renderer dxmt|d3dmetal|dxvk|wined3d)") }
+        if result.crashedEarly {
+            // A sync-mode mismatch with the running wineserver kills the process before it does
+            // anything (issue #32); it has nothing to do with renderers, so say what it is.
+            if let log = try? String(contentsOf: result.log, encoding: .utf8), log.contains("msync_init") || log.contains("esync_init") {
+                print("hint: died joining the bottle's running wineserver with a different sync mode; stop the bottle (highball bottle kill \(b.name)) and retry")
+            } else {
+                print("hint: exited within 10 s; try another renderer (--renderer dxmt|d3dmetal|dxvk|wined3d)")
+            }
+        }
     }
 }
 
