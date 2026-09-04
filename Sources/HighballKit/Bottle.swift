@@ -195,7 +195,10 @@ public enum ArgumentLine {
 /// Persisted as `<bottle>/bottle.json` (older bottles: `gin.json`, still read as a fallback).
 public struct BottleSettings: Codable, Sendable {
     /// 2: dxvkAsync no longer defaults on. Bottles written at 1 are migrated off once on load.
-    public var formatVersion: Int = 2
+    public var formatVersion: Int = 3
+    /// Set by the decoder when it migrated the settings; BottleStore.list() persists such bottles
+    /// so the migration runs once. Not encoded.
+    public internal(set) var needsSave = false
     public var name: String
     public var engineID: String
     public var renderer: Renderer = .dxmt
@@ -296,6 +299,20 @@ public struct BottleSettings: Codable, Sendable {
         if formatVersion < 2 {
             dxvkAsync = false
             formatVersion = 2
+            needsSave = true
+        }
+        // Before 0.7.x the Steam recipe wrote WINEMSYNC=0/WINEESYNC=0 into the bottle-wide
+        // environment; since 2d3fd64 they belong to the Steam pin's own launch and the bottle
+        // runs msync for games. Bottles set up before that kept the two lines, which silently
+        // turned msync off for every game while the Synchronization picker said msync (found on
+        // the maintainer's own bottle, 2026-09-04). Drop exactly that stale pair once.
+        if formatVersion < 3 {
+            if environment["WINEMSYNC"] == "0", environment["WINEESYNC"] == "0" {
+                environment.removeValue(forKey: "WINEMSYNC")
+                environment.removeValue(forKey: "WINEESYNC")
+            }
+            formatVersion = 3
+            needsSave = true
         }
     }
 

@@ -11,7 +11,7 @@ final class RegressionTests: XCTestCase {
         let json = #"{"name":"b","engineID":"e","dxvkAsync":true,"formatVersion":1}"#
         let s = try JSONDecoder.highball.decode(BottleSettings.self, from: Data(json.utf8))
         XCTAssertFalse(s.dxvkAsync, "a bottle written before format 2 must be switched off")
-        XCTAssertEqual(s.formatVersion, 2, "and stamped, so the migration never runs twice")
+        XCTAssertEqual(s.formatVersion, 3, "and stamped, so the migration never runs twice")
     }
 
     /// But a user who turns it back on afterwards keeps it: the stamp is what makes it one-shot.
@@ -896,6 +896,27 @@ extension RegressionTests {
         XCTAssertEqual(withMissing.map(\.id), ["x64-a-r1", "x64-gone-r0"], "a bottle on an engine that is gone still sees its own row")
         XCTAssertEqual(withMissing.last?.missing, true)
         XCTAssertEqual(EngineStore.offeredEngines(installed: [r1], known: [], current: r1.id).count, 1, "current engine present: no extra row")
+    }
+
+    // A bottle set up by an old Steam recipe carries WINEMSYNC=0/WINEESYNC=0 in its bottle-wide
+    // environment, which silently turned msync off for every game. Format 3 drops exactly that
+    // pair once; a deliberate WINEMSYNC=1 or a single variable is left alone.
+    func testFormat3DropsTheStaleSyncPair() throws {
+        func decode(_ env: String, version: Int) throws -> BottleSettings {
+            let json = #"{"formatVersion":\#(version),"name":"g","engineID":"e","environment":\#(env)}"#
+            return try JSONDecoder().decode(BottleSettings.self, from: Data(json.utf8))
+        }
+        let stale = try decode(#"{"WINEMSYNC":"0","WINEESYNC":"0","MVK_SHADOW_IMPORT":"1"}"#, version: 2)
+        XCTAssertEqual(stale.environment, ["MVK_SHADOW_IMPORT": "1"])
+        XCTAssertEqual(stale.formatVersion, 3)
+        XCTAssertTrue(stale.needsSave)
+        let deliberate = try decode(#"{"WINEMSYNC":"1","WINEESYNC":"0"}"#, version: 2)
+        XCTAssertEqual(deliberate.environment, ["WINEMSYNC": "1", "WINEESYNC": "0"], "not the stale pair: untouched")
+        let single = try decode(#"{"WINEMSYNC":"0"}"#, version: 2)
+        XCTAssertEqual(single.environment, ["WINEMSYNC": "0"])
+        let current = try decode(#"{"WINEMSYNC":"0","WINEESYNC":"0"}"#, version: 3)
+        XCTAssertEqual(current.environment.count, 2, "already format 3: the user's own lines stay")
+        XCTAssertFalse(current.needsSave)
     }
 
     func testDefaultEnginePrefersBundledManifestID() throws {

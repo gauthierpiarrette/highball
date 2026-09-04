@@ -12,14 +12,14 @@ public struct BottleStore: Sendable {
                 // The folder is the bottle's identity (get/delete resolve by folder). A copied
                 // folder keeps the old internal name, which crashed the app and confused lookups
                 // (issue #13) — reconcile so "play copy" is simply a bottle called "play copy".
-                if b.settings.name != url.lastPathComponent {
+                if b.settings.name != url.lastPathComponent || b.settings.needsSave {
                     b.settings.name = url.lastPathComponent
                     // Reconcile in memory always, but persist only into a real directory: saving
                     // through a symlinked entry rewrites a bottle.json outside bottles/ as a side
                     // effect of merely listing. Skipping such entries entirely would be worse —
                     // a bottle deliberately linked to another disk would vanish from the list.
                     var st = stat()
-                    if lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR { try? b.save() }
+                    if lstat(url.path, &st) == 0, (st.st_mode & S_IFMT) == S_IFDIR { try? b.save(); b.settings.needsSave = false }
                 }
                 return b
             }
