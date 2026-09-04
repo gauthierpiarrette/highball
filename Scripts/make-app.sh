@@ -67,6 +67,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleURLName</key><string>Highball play link</string>
     <key>CFBundleURLSchemes</key><array><string>highball</string></array>
   </dict></array>
+  <key>NSLocalNetworkUsageDescription</key><string>Steam and some games look for other players and devices on your network. macOS asks the first time one does.</string>
   <key>NSMicrophoneUsageDescription</key><string>Windows games and apps running in a bottle need the microphone for voice chat and recording. macOS asks the first time one uses it.</string>
 </dict></plist>
 PLIST

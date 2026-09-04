@@ -212,7 +212,7 @@ struct LibraryTile: View {
         .buttonStyle(.plain)
         .animation(.spring(duration: 0.2), value: hovering)
         .onHover { hovering = $0 }
-        .help(entry?.notes ?? item.title)
+        .help(Self.tooltip(entry?.notes) ?? item.title)
         .contextMenu {
             if let appid = item.steamAppID, let running = state.session(forAppID: appid) {
                 Button(L("Stop")) { state.stopSession(running) }
@@ -309,5 +309,15 @@ struct CoverArt: View {
                 .font(.system(size: 34, weight: .bold, design: .rounded))
                 .foregroundStyle(.quaternary)
         }
+    }
+}
+
+extension LibraryTile {
+    /// A tooltip is a glance, not the whole entry: the first sentence of the notes, capped.
+    static func tooltip(_ notes: String?) -> String? {
+        guard let notes, !notes.isEmpty else { return nil }
+        let first = notes.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? notes
+        let sentence = first.trimmingCharacters(in: .whitespaces) + "."
+        return sentence.count <= 160 ? sentence : String(sentence.prefix(157)).trimmingCharacters(in: .whitespaces) + "…"
     }
 }
