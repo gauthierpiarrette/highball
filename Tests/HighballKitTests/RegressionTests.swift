@@ -919,6 +919,19 @@ extension RegressionTests {
         XCTAssertFalse(current.needsSave)
     }
 
+    // The verifier names the Direct3D implementation from Wine's +loaddll trace. The 2026-09-04
+    // engine that ignored every overlay would have shown "wined3d" on a dxmt run.
+    func testVerifierNamesTheDirect3DImplementationFromTheLoadTrace() {
+        let dxmt = #"0024:trace:loaddll:build_module Loaded L"Z:\Users\me\Library\Application Support\Highball\engines\x64-a-r1\renderers\dxmt\wine\x86_64-windows\d3d11.dll" at 000000006FC00000: builtin"#
+        let d9vk = #"0024:trace:loaddll:build_module Loaded L"Z:\Users\me\Library\Application Support\Highball\engines\x64-a-r1\frameworks\renderer\d9vk\wine\x86_64-windows\d3d9.dll" at 000000006FC00000: builtin"#
+        let own = #"0024:trace:loaddll:build_module Loaded L"C:\windows\system32\d3d11.dll" at 000000006FC00000: builtin"#
+        let other = #"0024:trace:loaddll:build_module Loaded L"C:\windows\system32\kernel32.dll" at 000000006FC00000: builtin"#
+        XCTAssertEqual(Verifier.servedImplementation(fromLog: [other, dxmt, own].joined(separator: "\n")), "dxmt", "the first Direct3D load names it")
+        XCTAssertEqual(Verifier.servedImplementation(fromLog: [other, d9vk].joined(separator: "\n")), "dxvk", "d9vk is DXVK's d3d9")
+        XCTAssertEqual(Verifier.servedImplementation(fromLog: [other, own].joined(separator: "\n")), "wined3d")
+        XCTAssertEqual(Verifier.servedImplementation(fromLog: other), "none")
+    }
+
     func testDefaultEnginePrefersBundledManifestID() throws {
         func engine(_ id: String) throws -> InstalledEngine {
             let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#
