@@ -919,17 +919,21 @@ extension RegressionTests {
         XCTAssertFalse(current.needsSave)
     }
 
-    // The verifier names the Direct3D implementation from Wine's +loaddll trace. The 2026-09-04
-    // engine that ignored every overlay would have shown "wined3d" on a dxmt run.
-    func testVerifierNamesTheDirect3DImplementationFromTheLoadTrace() {
-        let dxmt = #"0024:trace:loaddll:build_module Loaded L"Z:\Users\me\Library\Application Support\Highball\engines\x64-a-r1\renderers\dxmt\wine\x86_64-windows\d3d11.dll" at 000000006FC00000: builtin"#
-        let d9vk = #"0024:trace:loaddll:build_module Loaded L"Z:\Users\me\Library\Application Support\Highball\engines\x64-a-r1\frameworks\renderer\d9vk\wine\x86_64-windows\d3d9.dll" at 000000006FC00000: builtin"#
-        let own = #"0024:trace:loaddll:build_module Loaded L"C:\windows\system32\d3d11.dll" at 000000006FC00000: builtin"#
-        let other = #"0024:trace:loaddll:build_module Loaded L"C:\windows\system32\kernel32.dll" at 000000006FC00000: builtin"#
-        XCTAssertEqual(Verifier.servedImplementation(fromLog: [other, dxmt, own].joined(separator: "\n")), "dxmt", "the first Direct3D load names it")
-        XCTAssertEqual(Verifier.servedImplementation(fromLog: [other, d9vk].joined(separator: "\n")), "dxvk", "d9vk is DXVK's d3d9")
-        XCTAssertEqual(Verifier.servedImplementation(fromLog: [other, own].joined(separator: "\n")), "wined3d")
-        XCTAssertEqual(Verifier.servedImplementation(fromLog: other), "none")
+    // The verifier names the Direct3D implementation from the overlays' per-process logs written
+    // during the run; Steam's helpers do not count, and nothing written means Wine's own.
+    func testVerifierNamesTheDirect3DImplementationFromOverlayLogs() throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "hb-served-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let since = Date().addingTimeInterval(-5)
+        XCTAssertEqual(Verifier.servedImplementation(logsDirectory: dir, since: since), "wined3d", "no overlay log at all")
+        try "info:  Game: steamwebhelper.exe\ninfo:  DXVK-Kegworks: v1.10.4".write(to: dir.appending(path: "steamwebhelper_d3d11.log"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(Verifier.servedImplementation(logsDirectory: dir, since: since), "wined3d", "Steam's own helper is not the game")
+        try "info:  Game: portal2.exe\ninfo:  DXVK-Kegworks: v1.10.4-async".write(to: dir.appending(path: "portal2_d3d9.log"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(Verifier.servedImplementation(logsDirectory: dir, since: since), "dxvk")
+        try "info: dxmt v0.80\n".write(to: dir.appending(path: "game_d3d11.log"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(Verifier.servedImplementation(logsDirectory: dir, since: since), "dxmt", "a DXMT file outranks d9vk's d3d9 file for the same run")
+        XCTAssertEqual(Verifier.servedImplementation(logsDirectory: dir, since: Date().addingTimeInterval(60)), "wined3d", "files older than the run do not count")
+        try? FileManager.default.removeItem(at: dir)
     }
 
     // Log pruning: age beyond the newest N, then size, never the verifier's results.

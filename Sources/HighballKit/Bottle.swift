@@ -377,6 +377,10 @@ public struct Bottle: Sendable {
             // artifact that survives a game started by a launcher client Highball did not spawn —
             // the case where the game has no wine log of its own at all (issue #21).
             env["DXVK_LOG_PATH"] = Self.dxvkLogWindowsPath
+            // DXMT writes the same kind of per-process file when asked; it is the one artifact
+            // that says which Direct3D implementation actually served a process (Wine's load
+            // trace names overlay builtins by their Windows path, so it cannot tell).
+            env["DXMT_LOG_PATH"] = Self.dxvkLogWindowsPath
         }
         if settings.fpsCap > 0 {
             switch r {

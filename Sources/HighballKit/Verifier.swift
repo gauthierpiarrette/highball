@@ -17,9 +17,10 @@ public struct VerifyOutcome: Codable, Sendable {
     public var chip: String
     public var macos: String
     public var log: String
-    /// Which Direct3D implementation actually served the game, from Wine's DLL-load trace:
-    /// "dxmt", "dxvk", "d3dmetal", "wined3d" (Wine's own, i.e. no overlay applied), or "none"
-    /// when the game loaded no Direct3D at all. Optional so older result lines still decode.
+    /// Which Direct3D implementation actually served the game, from the per-process logs the
+    /// overlays write: "dxmt", "dxvk", or "wined3d" when neither wrote one during the run
+    /// (Wine's own Direct3D, or a game drawing with Vulkan or OpenGL directly). Optional so
+    /// older result lines still decode.
     public var served: String?
     /// False when a renderer overlay was asked for and Wine's own Direct3D served instead: the
     /// engine ignored the overlay (2026-09-04: a tree without WINEDLLPATH_PREPEND support passed
@@ -59,12 +60,12 @@ public struct Verifier {
         let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
         let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
         log?("[\(game.name)] launching via silent Steam (\(renderer.rawValue))…")
-        // +loaddll is what makes the verdict attributable: the game's Wine output lands in this
-        // log (children inherit stderr), and each Direct3D DLL's load line names the file that
-        // served it, overlay or Wine's own.
+        // DXMT at info level writes its per-process log like DXVK does; those files, and when
+        // they were written, are what attributes the verdict.
+        let runStart = Date()
         let launch = Task {
             try await runner.start(steam, arguments: ["-silent", "-applaunch", String(game.appid)], renderer: renderer,
-                                   extraEnvironment: ["WINEDEBUG": "fixme-all,+loaddll"])
+                                   extraEnvironment: ["DXMT_LOG_LEVEL": "info"])
         }
 
         // Wait up to 6 minutes for the game process (cold silent Steam needs ~2 min first).
@@ -84,19 +85,10 @@ public struct Verifier {
         // Tear down.
         try? WineRunner(paths: paths, engine: engine, bottle: bottle).kill()
         launch.cancel()
-        // The launch task returns when steam.exe exits, which kill() just arranged; bound the
-        // wait anyway so a client that lingers cannot hold the verifier.
-        let launchLog: URL? = await withTaskGroup(of: URL?.self) { group in
-            group.addTask { (try? await launch.value)?.log }
-            group.addTask { try? await Task.sleep(for: .seconds(30)); return nil }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
-        }
-        let served = launchLog.flatMap { try? String(contentsOf: $0, encoding: .utf8) }.map(Self.servedImplementation(fromLog:)) ?? "unknown"
+        let served = Self.servedImplementation(logsDirectory: bottle.driveC.appending(path: "highball/logs"), since: runStart)
         // Every renderer but wined3d routes Direct3D 9 through the d9vk overlay, so "dxvk" under a
         // dxmt run is still an overlay; only Wine's own implementation means the ask was ignored.
-        let overlayApplied: Bool? = (renderer == .wined3d || served == "unknown" || served == "none") ? nil : served != "wined3d"
+        let overlayApplied: Bool? = renderer == .wined3d ? nil : served != "wined3d"
 
         let meanLum = luminances.isEmpty ? 0 : luminances.reduce(0, +) / Double(luminances.count)
         let verdict: VerifyOutcome.Verdict =
@@ -117,26 +109,26 @@ public struct Verifier {
         return outcome
     }
 
-    /// Reads Wine's +loaddll trace for the Direct3D DLLs a process loaded and names the
-    /// implementation behind them by the file's location: Highball's overlay directories
-    /// (renderers/<name>/wine or the Template's renderer/<name>/wine) or Wine's own system32.
-    /// d3d9 through the d9vk overlay counts as dxvk. The first Direct3D load wins the name;
-    /// "none" when no Direct3D DLL loaded at all.
-    public static func servedImplementation(fromLog log: String) -> String {
-        for line in log.split(separator: "\n") {
-            guard line.contains("loaddll"), line.contains("Loaded L\""),
-                  let range = line.range(of: #"Loaded L"([^"]+\\+(d3d11|d3d9|d3d10core|d3d12|dxgi)\.dll)""#, options: .regularExpression)
-            else { continue }
-            // Wine's debugstr doubles backslashes ("C:\\windows\\system32\\d3d11.dll"); fold them
-            // so one set of patterns matches real output (a first version matched only the
-            // hand-written fixture and never attributed a real run).
-            let path = line[range].lowercased().replacingOccurrences(of: "\\\\", with: "\\")
-            if path.contains("\\dxmt\\") { return "dxmt" }
-            if path.contains("\\dxvk\\") || path.contains("\\d9vk\\") { return "dxvk" }
-            if path.contains("\\d3dmetal\\") { return "d3dmetal" }
-            if path.contains("\\windows\\system32\\") || path.contains("\\windows\\syswow64\\") { return "wined3d" }
+    /// Names the Direct3D implementation that served the run from the per-process logs the
+    /// overlays write into the bottle (DXVK and DXMT both do, under `highball/logs`), ignoring
+    /// Steam's own helpers. A file written during the run whose header names DXVK means dxvk,
+    /// one naming DXMT means dxmt; no such file means Wine's own Direct3D served (or the game
+    /// drew with Vulkan or OpenGL directly), which is reported as wined3d. Wine's load trace
+    /// cannot do this job: it names overlay builtins by their Windows path.
+    public static func servedImplementation(logsDirectory: URL, since: Date) -> String {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: logsDirectory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return "wined3d" }
+        var found: [String] = []
+        for f in files where f.pathExtension == "log" {
+            let name = f.lastPathComponent.lowercased()
+            guard name.contains("_d3d"), !name.hasPrefix("steam"), !name.hasPrefix("gameoverlayui") else { continue }
+            guard let modified = try? f.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, modified >= since else { continue }
+            guard let head = try? String(contentsOf: f, encoding: .utf8).prefix(2000).lowercased() else { continue }
+            if head.contains("dxmt") { found.append("dxmt") } else if head.contains("dxvk") { found.append("dxvk") }
         }
-        return "none"
+        if found.contains("dxmt") { return "dxmt" }
+        if found.contains("dxvk") { return "dxvk" }
+        return "wined3d"
     }
 
     func append(_ o: VerifyOutcome) throws {
