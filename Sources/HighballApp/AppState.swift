@@ -271,8 +271,11 @@ final class AppState {
         return m
     }
 
-    /// Installs the bundled engine next to the current one, points every bottle at it, refreshes
-    /// each bottle's Windows environment (wineboot), and removes the old engine directory.
+    /// Installs the bundled engine next to the current one. Bottles move to it only when the Wine
+    /// build is unchanged (a component-only update, like r1's MoltenVK): nothing to re-run, nothing
+    /// that can regress. When the Wine build differs, every bottle stays on its engine and the
+    /// old engine stays installed as long as any bottle runs on it; the owner switches a bottle
+    /// from its settings, one at a time, and can switch back. New bottles get the new engine.
     /// Licenses already accepted on the old engine carry over; the download cache makes an
     /// update cost only the components that actually changed.
     func updateEngine() {
@@ -290,31 +293,60 @@ final class AppState {
                 }
             }
             await MainActor.run { self.appendLog("engine \(fresh.id) installed") }
-            let refresh = EngineManifest.needsPrefixRefresh(from: old.manifest, to: fresh.manifest)
+            let sameWine = !EngineManifest.needsPrefixRefresh(from: old.manifest, to: fresh.manifest)
             for var bottle in try bottleStore.list() where bottle.settings.engineID != fresh.id {
+                guard sameWine else {
+                    await MainActor.run { self.appendLog("bottle '\(bottle.name)' stays on \(bottle.settings.engineID): the new engine has a different Wine build; switch it from the bottle's settings when you want") }
+                    continue
+                }
                 let runnerOld = WineRunner(paths: paths, engine: old, bottle: bottle)
                 try? runnerOld.kill()
                 try? await Task.sleep(for: .seconds(2))
                 bottle.settings.engineID = fresh.id
                 try bottle.save()
-                guard refresh else {
-                    await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(fresh.id) (same Wine, no prefix refresh needed)") }
-                    continue
-                }
-                await MainActor.run { self.stage = String(format: L("Refreshing bottle '%@'"), bottle.name) }
-                let runner = WineRunner(paths: paths, engine: fresh, bottle: bottle)
-                let r = try await runner.wineboot()
-                guard r.exitStatus == 0 else {
-                    throw HighballError.processFailed(command: "wineboot -u", status: r.exitStatus, output: "see \(r.log.path)")
-                }
-                try await BottleStore.ensureWoW64(runner: runner, bottle: bottle, log: r.log)
-                try? await runner.setGpuIdentity()
-                try? await runner.setServiceTimeout()
-                try? await runner.setKeyboardMapping(commandIsControl: bottle.settings.commandIsControl)
-                await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(fresh.id)") }
+                await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(fresh.id) (same Wine, no prefix refresh needed)") }
             }
-            if oldID != fresh.id { try? FileManager.default.removeItem(at: old.root) }
-            await MainActor.run { self.appendLog("old engine \(oldID) removed") }
+            let referenced = Set(try bottleStore.list().map(\.settings.engineID))
+            let installed = try engineStore.installedEngines()
+            for stale in EngineStore.unreferencedEngines(installed: installed, referencedIDs: referenced, defaultID: fresh.id) {
+                try? FileManager.default.removeItem(at: stale.root)
+                await MainActor.run { self.appendLog("old engine \(stale.id) removed (no bottle uses it)") }
+            }
+            if referenced.contains(oldID) {
+                await MainActor.run { self.appendLog("engine \(oldID) kept: bottles still run on it") }
+            }
+        }
+    }
+
+    /// Moves one bottle to another installed engine, on its owner's request. Re-runs the Windows
+    /// first boot only when the Wine build differs (the same rule as an engine update), then the
+    /// per-bottle setup that boot resets. Switching back is the same call the other way.
+    func moveBottle(_ bottle: Bottle, to target: InstalledEngine) {
+        guard bottle.settings.engineID != target.id, let current = engine(for: bottle) else { return }
+        let title = String(format: L("Moving '%@' to %@"), bottle.name, target.id)
+        runBusy(title, expected: L("a minute or two when the Windows setup re-runs"),
+                done: DoneState(title: L("Engine switched"), ctaTitle: nil, cta: nil)) { [self] in
+            var bottle = bottle
+            let runnerOld = WineRunner(paths: paths, engine: current, bottle: bottle)
+            try? runnerOld.kill()
+            try? await Task.sleep(for: .seconds(2))
+            bottle.settings.engineID = target.id
+            try bottle.save()
+            guard EngineManifest.needsPrefixRefresh(from: current.manifest, to: target.manifest) else {
+                await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(target.id) (same Wine, no prefix refresh needed)") }
+                return
+            }
+            await MainActor.run { self.stage = String(format: L("Refreshing bottle '%@'"), bottle.name) }
+            let runner = WineRunner(paths: paths, engine: target, bottle: bottle)
+            let r = try await runner.wineboot()
+            guard r.exitStatus == 0 else {
+                throw HighballError.processFailed(command: "wineboot -u", status: r.exitStatus, output: "see \(r.log.path)")
+            }
+            try await BottleStore.ensureWoW64(runner: runner, bottle: bottle, log: r.log)
+            try? await runner.setGpuIdentity()
+            try? await runner.setServiceTimeout()
+            try? await runner.setKeyboardMapping(commandIsControl: bottle.settings.commandIsControl)
+            await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(target.id)") }
         }
     }
 

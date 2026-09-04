@@ -372,6 +372,18 @@ struct BottleSettingsSheet: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section(L("Advanced")) {
+                    if state.engines.count > 1 {
+                        Picker(L("Engine"), selection: Binding(
+                            get: { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.engineID },
+                            set: { newID in
+                                guard let target = state.engines.first(where: { $0.id == newID }) else { return }
+                                state.moveBottle(state.bottles.first { $0.name == bottle.name } ?? bottle, to: target)
+                            })) {
+                            ForEach(state.engines, id: \.id) { e in Text(verbatim: e.id).tag(e.id) }
+                        }
+                        Text(L("Bottles never change engine on their own. Switching re-runs the Windows setup when the Wine build differs; switching back is the same step."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     TextField(L("DLL overrides"), text: binding(\.dllOverrides), prompt: Text(verbatim: "version=n,b;winmm=n,b"))
                         .font(.body.monospaced())
                     Text(L("Extra Wine DLL overrides for this bottle, semicolon separated. Mods like Cyber Engine Tweaks need version=n,b."))

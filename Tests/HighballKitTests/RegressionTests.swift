@@ -843,6 +843,23 @@ extension RegressionTests {
     // After an engine update the old and new engines coexist until the old one is removed;
     // sorted by id the old one comes first, so "first installed" would keep choosing it for
     // new bottles and the sidebar. The bundled manifest's id must win when it is installed.
+    // An engine update must never remove an engine a bottle still runs on, and never the default.
+    func testUnreferencedEnginesKeepsWhatBottlesUse() throws {
+        func engine(_ id: String) throws -> InstalledEngine {
+            let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#
+            let m = try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8))
+            return InstalledEngine(manifest: m, root: URL(fileURLWithPath: "/tmp/\(id)"))
+        }
+        let r0 = try engine("x64-sikarugir10.0_6-r0"), r1 = try engine("x64-sikarugir10.0_6-r1"), r2 = try engine("x64-sikarugir11.0_0-r0")
+        let all = [r0, r1, r2]
+        XCTAssertEqual(EngineStore.unreferencedEngines(installed: all, referencedIDs: [r1.id], defaultID: r2.id).map(\.id), [r0.id],
+                       "r1 is in use, r2 is the default: only r0 goes")
+        XCTAssertEqual(EngineStore.unreferencedEngines(installed: all, referencedIDs: [r0.id, r1.id], defaultID: r2.id).map(\.id), [],
+                       "every old engine still has a bottle: nothing is removed")
+        XCTAssertEqual(EngineStore.unreferencedEngines(installed: all, referencedIDs: [], defaultID: r2.id).map(\.id), [r0.id, r1.id])
+        XCTAssertEqual(EngineStore.unreferencedEngines(installed: all, referencedIDs: [], defaultID: nil).map(\.id), all.map(\.id))
+    }
+
     func testDefaultEnginePrefersBundledManifestID() throws {
         func engine(_ id: String) throws -> InstalledEngine {
             let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#

@@ -57,6 +57,13 @@ public struct EngineStore: Sendable {
             ?? installed.max { $0.id.compare($1.id, options: .numeric) == .orderedAscending }
     }
 
+    /// Engines nothing references any more: not the default and not the engine of any bottle.
+    /// An engine update never removes an engine a bottle still runs on; a bottle keeps its
+    /// engine until its owner switches it (per-bottle choice, not migration).
+    public static func unreferencedEngines(installed: [InstalledEngine], referencedIDs: Set<String>, defaultID: String?) -> [InstalledEngine] {
+        installed.filter { $0.id != defaultID && !referencedIDs.contains($0.id) }
+    }
+
     public func engine(_ id: String) throws -> InstalledEngine {
         let root = paths.engine(id)
         let m = try EngineManifest.load(from: root.appending(path: "manifest.json"))
