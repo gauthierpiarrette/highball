@@ -43,16 +43,24 @@ final class AppState {
     enum BusyStop {
         case cancelTask(label: String)
         case killBottle(Bottle, label: String)
+        /// A Windows step (installer, recipe) cannot stop cleanly: the bottle is ended and the
+        /// repair path runs right after, and the button says so (UX plan §3.3).
+        case killBottleThenRepair(Bottle, label: String)
         var label: String {
             switch self {
-            case .cancelTask(let l), .killBottle(_, let l): return l
+            case .cancelTask(let l), .killBottle(_, let l), .killBottleThenRepair(_, let l): return l
             }
         }
         var stoppedTitle: String {
             switch self {
             case .cancelTask: return L("Stopped. Nothing already downloaded is lost.")
             case .killBottle: return L("Stopped.")
+            case .killBottleThenRepair: return L("Stopped. Repairing the bottle so nothing half-installed stays behind.")
             }
+        }
+        var bottleToRepair: Bottle? {
+            if case .killBottleThenRepair(let b, _) = self { return b }
+            return nil
         }
     }
     var busyStop: BusyStop?
@@ -509,8 +517,12 @@ final class AppState {
                 }
             }
             cleanup?()
+            let repairAfterStop = stopRequested ? stop?.bottleToRepair : nil
             busy = false; busyStop = nil; busyProgress = nil; transferRate = nil; busyTask = nil
             refresh()
+            if let bottle = repairAfterStop, let fresh = bottles.first(where: { $0.name == bottle.name }) {
+                repairBottle(fresh)
+            }
         }
     }
 
@@ -522,7 +534,7 @@ final class AppState {
         switch stop {
         case .cancelTask:
             busyTask?.cancel()
-        case .killBottle(let bottle, _):
+        case .killBottle(let bottle, _), .killBottleThenRepair(let bottle, _):
             if let engine = engine(for: bottle) { try? WineRunner(paths: paths, engine: engine, bottle: bottle).kill() }
             busyTask?.cancel()
         }
@@ -587,7 +599,8 @@ final class AppState {
     func applyRecipe(_ id: String, to bottle: Bottle) {
         guard let engine = engine(for: bottle), let recipe = Self.recipe(id) else { return }
         runBusy("Installing \(recipe.title)",
-                done: DoneState(title: String(format: L("%@ installed"), recipe.title), ctaTitle: nil, cta: nil)) { [self] in
+                done: DoneState(title: String(format: L("%@ installed"), recipe.title), ctaTitle: nil, cta: nil),
+                stop: .killBottleThenRepair(bottle, label: L("Stop and repair"))) { [self] in
             var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
             let notes = try await runner.apply(recipe) { line in Task { @MainActor in self.appendLog(line) } }
             for n in notes { await MainActor.run { self.appendLog("note: \(n)") } }
@@ -915,7 +928,7 @@ final class AppState {
     /// Handle an .exe/.msi dropped on a bottle: run it (installer) inside the bottle.
     func runDropped(_ url: URL, in bottle: Bottle, andPin: Bool) {
         guard let engine = engine(for: bottle) else { return }
-        runBusy("Running \(url.lastPathComponent)") { [self] in
+        runBusy("Running \(url.lastPathComponent)", stop: .killBottleThenRepair(bottle, label: L("Stop and repair"))) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             let ext = url.pathExtension.lowercased()
             let isMSI = ext == "msi"
