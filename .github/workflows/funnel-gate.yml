@@ -1,0 +1,51 @@
+# The funnel gate on pull requests (UX plan, Phase 0.0). The nightly replays a fresh install
+# every day; this runs the same script only when a change touches the install funnel, so a
+# funnel-breaking PR cannot merge with the gate red while an unrelated PR pays nothing.
+# Make "funnel-gate" a required check in branch protection once it has been green once.
+name: funnel-gate
+on:
+  pull_request:
+    paths:
+      - Sources/HighballKit/EngineStore.swift
+      - Sources/HighballKit/BottleStore.swift
+      - Sources/HighballKit/WineRunner.swift
+      - Sources/HighballKit/Manifest.swift
+      - Sources/HighballKit/Paths.swift
+      - Sources/HighballKit/DownloadResume.swift
+      - spike/engine-manifest.json
+      - spike/engines/**
+      - Scripts/e2e-install.sh
+      - Scripts/make-app.sh
+      - .github/workflows/funnel-gate.yml
+      - .github/workflows/nightly-e2e.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: funnel-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    runs-on: macos-15        # pinned like the nightly; macos-latest re-points silently
+    timeout-minutes: 90      # cold install is 25 to 45 min here; a hang is a failure, not a wait
+    steps:
+      - uses: actions/checkout@v7
+      - name: rosetta (idempotent; image rotations have shipped without it)
+        run: sudo softwareupdate --install-rosetta --agree-to-license || true
+      - name: cache engine downloads (sha256-reverified on every reuse)
+        uses: actions/cache@v6
+        with:
+          path: ~/hb-e2e/downloads
+          key: engine-dl-${{ hashFiles('spike/engine-manifest.json') }}
+          restore-keys: engine-dl-
+      - name: fresh install from the built bundle's manifest
+        run: Scripts/e2e-install.sh
+      - name: teardown
+        if: always()
+        run: |
+          for ws in "$HOME"/hb-e2e/engines/*/engine/bin/wineserver; do
+            [ -x "$ws" ] && "$ws" -k 2>/dev/null || true
+          done
