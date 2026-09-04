@@ -34,6 +34,31 @@ final class AppState {
         var ctaTitle: String?
         var cta: (() -> Void)?
     }
+    // The activity strip (UX plan 0.5): what the busy operation can show beyond its title.
+    struct Transfer: Equatable { var received: Int64; var total: Int64? }
+    var busyProgress: Transfer?         // bytes of the current download, for the bar
+    var transferRate: Double?           // measured bytes per second, never a prediction
+    /// How a busy operation can be stopped, and what stopping does. A download stops cleanly
+    /// (the partial file stays); a launch stops by ending the bottle's processes.
+    enum BusyStop {
+        case cancelTask(label: String)
+        case killBottle(Bottle, label: String)
+        var label: String {
+            switch self {
+            case .cancelTask(let l), .killBottle(_, let l): return l
+            }
+        }
+        var stoppedTitle: String {
+            switch self {
+            case .cancelTask: return L("Stopped. Nothing already downloaded is lost.")
+            case .killBottle: return L("Stopped.")
+            }
+        }
+    }
+    var busyStop: BusyStop?
+    @ObservationIgnored private var busyTask: Task<Void, Never>?
+    @ObservationIgnored private var transferSamples: [ActivityText.Sample] = []
+    @ObservationIgnored private var stopRequested = false
     var requestCreateBottle = false     // engine-done CTA → ContentView opens the sheet
 
     // Onboarding
@@ -350,13 +375,10 @@ final class AppState {
         let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
         let title = String(format: L("Updating engine to %@"), manifest.id)
         runBusy(title, expected: L("usually a few minutes"),
-                done: DoneState(title: L("Engine updated"), ctaTitle: nil, cta: nil)) { [self] in
+                done: DoneState(title: L("Engine updated"), ctaTitle: nil, cta: nil),
+                stop: .cancelTask(label: L("Stop"))) { [self] in
             let fresh = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
-                Task { @MainActor in
-                    let mb = { (b: Int64) in String(format: "%.0f", Double(b) / 1_048_576) }
-                    if let total, total > 0 { self.stage = "Downloading \(name) — \(mb(received)) / \(mb(total)) MB" }
-                    else { self.stage = "Downloading \(name) — \(mb(received)) MB" }
-                }
+                Task { @MainActor in self.reportDownload(name, received: received, total: total) }
             }
             await MainActor.run { self.appendLog("engine \(fresh.id) installed") }
             let sameWine = !EngineManifest.needsPrefixRefresh(from: old.manifest, to: fresh.manifest)
@@ -450,15 +472,18 @@ final class AppState {
         if let h = ProgressParser.hint(for: line) { stageHint = h }
     }
 
-    private func runBusy(_ title: String, expected: String? = nil, showLogSheet: Bool = true,
-                         done: DoneState? = nil, cleanup: (() -> Void)? = nil,
+    /// Runs one long operation on the activity strip. The strip is the surface: the log sheet
+    /// opens only from its Details button (or `showLogSheet` for the rare case that needs it).
+    private func runBusy(_ title: String, expected: String? = nil, showLogSheet: Bool = false,
+                         done: DoneState? = nil, stop: BusyStop? = nil, cleanup: (() -> Void)? = nil,
                          _ work: @escaping () async throws -> Void) {
         // One busy operation at a time: a second call would reset the sheet's state under the
         // first and end it early when the second finishes (found in review, 2026-09-04).
         guard !busy else { return }
         busy = true; busyTitle = title; stage = ""; stageHint = ""; logLines = []; showLog = showLogSheet
         busyStartedAt = Date(); busyExpected = expected; lastOutputAt = nil; doneState = nil
-        Task {
+        busyStop = stop; busyProgress = nil; transferRate = nil; transferSamples = []; stopRequested = false
+        busyTask = Task {
             // On failure, dismiss the log sheet ourselves: SwiftUI defers the error alert
             // until the sheet closes, so a stuck sheet showed "Done" over a failed install
             // and hid the alert until the user clicked Close (issues #27/#28).
@@ -467,13 +492,48 @@ final class AppState {
                 doneState = done ?? DoneState(title: L("Done"), ctaTitle: nil, cta: nil)
             } catch {
                 showLog = false
-                // A retry is the same operation with the same closure; the sheet's own state
-                // resets when runBusy starts again.
-                fail(error, retry: { [weak self] in self?.runBusy(title, expected: expected, showLogSheet: showLogSheet, done: done, cleanup: cleanup, work) })
+                if stopRequested || error is CancellationError || (error as? URLError)?.code == .cancelled {
+                    // The user stopped it: a result, not a failure, and no alert.
+                    doneState = DoneState(title: stop?.stoppedTitle ?? L("Stopped."), ctaTitle: nil, cta: nil)
+                    appendLog("stopped by the user")
+                } else {
+                    // A retry is the same operation with the same closure; the sheet's own state
+                    // resets when runBusy starts again.
+                    fail(error, retry: { [weak self] in self?.runBusy(title, expected: expected, showLogSheet: showLogSheet, done: done, stop: stop, cleanup: cleanup, work) })
+                }
             }
             cleanup?()
-            busy = false
+            busy = false; busyStop = nil; busyProgress = nil; transferRate = nil; busyTask = nil
             refresh()
+        }
+    }
+
+    /// The strip's Stop button. What it does depends on the operation (see `BusyStop`); the
+    /// operation's own error path then reads as "stopped", never as a failure.
+    func stopBusy() {
+        guard busy, let stop = busyStop else { return }
+        stopRequested = true
+        switch stop {
+        case .cancelTask:
+            busyTask?.cancel()
+        case .killBottle(let bottle, _):
+            if let engine = engine(for: bottle) { try? WineRunner(paths: paths, engine: engine, bottle: bottle).kill() }
+            busyTask?.cancel()
+        }
+    }
+
+    /// Feeds the strip from a component download: a plain stage, moving bytes, a measured rate.
+    private func reportDownload(_ name: String, received: Int64, total: Int64?) {
+        let total = (total ?? 0) > 0 ? total : nil
+        if let last = transferSamples.last, received < last.bytes { transferSamples = [] }   // next component
+        transferSamples.append(.init(bytes: received, at: Date()))
+        if transferSamples.count > 40 { transferSamples.removeFirst(transferSamples.count - 40) }
+        transferRate = ActivityText.rate(transferSamples)
+        busyProgress = Transfer(received: received, total: total)
+        stage = String(format: L("Downloading %@"), name)
+        if let total, received >= total {
+            appendLog("downloaded \(name) — verifying and unpacking…")
+            busyProgress = nil; transferRate = nil; transferSamples = []
         }
     }
 
@@ -483,23 +543,16 @@ final class AppState {
         guard let manifestURL = Self.bundledManifest else {
             errorMessage = "No engine manifest found. Reinstall Highball."; return
         }
-        runBusy("Installing engine — about 500 MB of verified downloads",
+        runBusy(L("Downloading the Windows engine"),
                 expected: L("usually 5–15 minutes"),
                 done: DoneState(title: L("Engine ready"), ctaTitle: L("Create your first bottle"),
-                                cta: { [weak self] in self?.requestCreateBottle = true })) { [self] in
+                                cta: { [weak self] in self?.requestCreateBottle = true }),
+                stop: .cancelTask(label: L("Stop"))) { [self] in
             let manifest = try EngineManifest.load(from: manifestURL)
             var accepted: Set<String> = []
             if acceptGPTK { accepted.insert("apple-gptk-license-2023-08-17") }
             _ = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
-                Task { @MainActor in
-                    let mb = { (b: Int64) in String(format: "%.0f", Double(b) / 1_048_576) }
-                    if let total, total > 0 {
-                        self.stage = "Downloading \(name) — \(mb(received)) / \(mb(total)) MB"
-                        if received >= total { self.appendLog("downloaded \(name) — verifying and unpacking…") }
-                    } else {
-                        self.stage = "Downloading \(name) — \(mb(received)) MB"
-                    }
-                }
+                Task { @MainActor in self.reportDownload(name, received: received, total: total) }
             }
             await MainActor.run { self.appendLog("engine installed") }
         }
@@ -636,7 +689,7 @@ final class AppState {
             atPath: bottle.driveC.appending(path: "Program Files (x86)/Steam/bin/cef").path)
         runBusy(steamFirstBoot ? L("Starting Steam for the first time — it downloads and unpacks its own client") : "Running \(pin.name)",
                 expected: steamFirstBoot ? L("usually 15–25 minutes; long quiet stretches are normal") : nil,
-                showLogSheet: steamFirstBoot,
+                stop: .killBottle(bottle, label: L("Stop")),
                 cleanup: { [weak self] in self?.launchingPins.remove(pin.id) }) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             var extra = [String: String]()
@@ -771,8 +824,9 @@ final class AppState {
         // The busy sheet covers the start only: Steam's client outlives the game and its launch
         // call says nothing about it, so the game's own processes decide when "starting" ends
         // and a session begins, and the app is free while the game runs (UX plan 0.6).
-        runBusy("Starting \(game.name)", expected: L("a cold Steam client can take a couple of minutes"), showLogSheet: false,
-                done: DoneState(title: L("Running"), ctaTitle: nil, cta: nil)) { [self] in
+        runBusy("Starting \(game.name)", expected: L("a cold Steam client can take a couple of minutes"),
+                done: DoneState(title: L("Running"), ctaTitle: nil, cta: nil),
+                stop: .killBottle(bottle, label: L("Stop"))) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             // A running client would serve the launch with its own environment; when that is
             // not the game's, cold-start first (never under a running game, see SteamRestart).
@@ -1047,13 +1101,10 @@ final class AppState {
         let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
         let title = String(format: L("Downloading engine %@"), manifest.id)
         runBusy(title, expected: L("usually a few minutes"),
-                done: DoneState(title: L("Engine switched"), ctaTitle: nil, cta: nil)) { [self] in
+                done: DoneState(title: L("Engine switched"), ctaTitle: nil, cta: nil),
+                stop: .cancelTask(label: L("Stop"))) { [self] in
             let fresh = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
-                Task { @MainActor in
-                    let mb = { (b: Int64) in String(format: "%.0f", Double(b) / 1_048_576) }
-                    if let total, total > 0 { self.stage = "Downloading \(name) — \(mb(received)) / \(mb(total)) MB" }
-                    else { self.stage = "Downloading \(name) — \(mb(received)) MB" }
-                }
+                Task { @MainActor in self.reportDownload(name, received: received, total: total) }
             }
             await MainActor.run { self.appendLog("engine \(fresh.id) installed"); self.refresh() }
             try await performMove(bottle, to: fresh)

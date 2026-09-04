@@ -182,6 +182,9 @@ public struct EngineStore: Sendable {
                 lastError = nil
                 break
             } catch {
+                // A stop from the user is not a transient network failure: no retry, the
+                // partial file stays for the next attempt.
+                if error is CancellationError || (error as? URLError)?.code == .cancelled || Task.isCancelled { throw error }
                 lastError = error
                 if attempt < 3 { try? await Task.sleep(for: .seconds([2, 5][attempt - 1])) }
             }

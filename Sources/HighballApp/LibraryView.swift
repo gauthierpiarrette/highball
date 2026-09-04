@@ -39,10 +39,6 @@ struct LibraryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                if state.busy && !state.stage.isEmpty && !state.showLog {
-                    Label(state.stage, systemImage: "clock")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
                 filterBar
                 if !continueItems.isEmpty && search.isEmpty && sourceFilter == nil {
                     VStack(alignment: .leading, spacing: 12) {

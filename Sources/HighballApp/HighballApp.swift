@@ -267,6 +267,8 @@ struct ContentView: View {
                 }
             }
         }
+        // Everything that takes time lives on one strip at the bottom, never modal (UX plan 0.5).
+        .safeAreaInset(edge: .bottom, spacing: 0) { ActivityStrip() }
         .sheet(isPresented: $showCreate) { CreateBottleSheet() }
         .onChange(of: state.requestCreateBottle) { _, wants in
             if wants { showCreate = true; state.requestCreateBottle = false }
