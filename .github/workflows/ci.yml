@@ -20,6 +20,8 @@ jobs:
         run: swift build
       - name: Unit tests
         run: swift test
+      - name: Upgrade smoke (an existing install is still seen; headless)
+        run: Scripts/upgrade-smoke.sh
       - name: Validate recipes against the CLI (from highball-db)
         run: |
           git clone --depth 1 https://github.com/gauthierpiarrette/highball-db.git ../highball-db

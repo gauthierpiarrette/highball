@@ -27,6 +27,22 @@ then
   sleep 5
 fi
 
+# Upgrade regressions (the issue #21 class: 0.8.0 hid an existing user's environment) ship via
+# UI and state changes, and every first-run check starts from an empty home, so a release wants
+# a recent Scripts/upgrade-smoke.sh result too. Same rule as above: warn, don't block.
+if ! python3 - <<'PY' 2>/dev/null
+import json, sys, time
+d = json.load(open("private/upgrade-smoke/latest.json"))
+sys.exit(0 if d.get("passed") and time.time() - d.get("epoch", 0) < 14*86400 else 1)
+PY
+then
+  echo "" >&2
+  echo "WARNING: no passing upgrade-smoke result from the last 14 days." >&2
+  echo "         Run Scripts/upgrade-smoke.sh --screen — an existing install going invisible ships silently without it." >&2
+  echo "         Continuing in 5s…" >&2
+  sleep 5
+fi
+
 Scripts/make-app.sh release "$VERSION"
 ZIP="dist/Highball-$VERSION.zip"
 ditto -c -k --keepParent dist/Highball.app "$ZIP"
