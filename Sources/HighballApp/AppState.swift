@@ -137,6 +137,7 @@ final class AppState {
         libraryItems = LibraryIndex.build(bottles: bottles, steamByBottle: gamesByBottle,
                                           epicOwned: epicOwned, epicInstalls: epicInstalls,
                                           plays: libraryPlays)
+        if let deferred = deferredPlayLink { resolvePlayLink(deferred.request) }
     }
 
     /// The verified fix recipe for a library item, if the db has one (db entry id == recipe id).
@@ -745,14 +746,30 @@ final class AppState {
     /// A play request that arrived without this install's token: confirm before running.
     var pendingPlayLink: LibraryItem?
 
+    /// A play link whose game is not resolvable yet (Epic still loading), with the moment it
+    /// arrived, so a link that names a truly-absent game gives up after a grace period.
+    @ObservationIgnored private var deferredPlayLink: (request: PlayLink.Request, at: Date)?
+
     func open(url: URL) {
         guard let request = PlayLink.parse(url) else { return }
         refresh()
-        guard let item = libraryItems.first(where: { $0.id == request.target.libraryID }) else {
-            fail(HighballError.failed("That game is not in this Highball's library."))
+        resolvePlayLink(request)
+    }
+
+    private func resolvePlayLink(_ request: PlayLink.Request) {
+        if let item = libraryItems.first(where: { $0.id == request.target.libraryID }) {
+            deferredPlayLink = nil
+            if request.token == PlayLink.token(in: paths) { play(item) } else { pendingPlayLink = item }
             return
         }
-        if request.token == PlayLink.token(in: paths) { play(item) } else { pendingPlayLink = item }
+        // Not there yet. Epic's owned list arrives after refresh() on a cold launch; wait for the
+        // next rebuildLibrary. Give up after 20 s so a bad link does not linger forever.
+        if let first = deferredPlayLink, Date().timeIntervalSince(first.at) > 20 {
+            deferredPlayLink = nil
+            fail(HighballError.failed("That game is not in this Highball's library."))
+        } else if deferredPlayLink == nil {
+            deferredPlayLink = (request, Date())
+        }
     }
 
     /// Writes the game's Mac app into ~/Applications/Highball and reveals it.
