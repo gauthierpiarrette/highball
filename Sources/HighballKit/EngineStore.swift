@@ -121,6 +121,9 @@ public struct EngineStore: Sendable {
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
 
         for (name, component) in manifest.orderedComponents {
+            // A Stop between components, or during unpack, ends the install here rather than
+            // finishing with "Engine ready" behind the user's back.
+            try Task.checkCancellation()
             if component.isOptional {
                 if let acceptance = component.acceptance, !accepted.contains(acceptance) { continue }
                 if component.acceptance == nil, !includeOptional { continue }
@@ -187,6 +190,7 @@ public struct EngineStore: Sendable {
                 if error is CancellationError || (error as? URLError)?.code == .cancelled || Task.isCancelled { throw error }
                 lastError = error
                 if attempt < 3 { try? await Task.sleep(for: .seconds([2, 5][attempt - 1])) }
+                try Task.checkCancellation()   // a Stop during the backoff must not start another attempt
             }
         }
         if let lastError { throw lastError }

@@ -111,7 +111,7 @@ struct ActivityStrip: View {
             Spacer(minLength: 12)
             Button(L("Show")) { state.showSteam(in: bottle) }.controlSize(.small).disabled(state.busy)
             if !state.sessionRuns(in: bottle) {
-                Button(L("Quit")) { state.killBottle(bottle) }.controlSize(.small).disabled(state.busy)
+                Button(L("Quit")) { state.quitSteam(in: bottle) }.controlSize(.small).disabled(state.busy)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
