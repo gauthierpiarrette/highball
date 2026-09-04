@@ -330,10 +330,8 @@ public enum BugReport {
     /// `samplingLiveGames: false` skips the live-process sample (tests; callers that must not
     /// block for the ~5 s a sample takes).
     public static func url(version: String, paths: HighballPaths = HighballPaths(), samplingLiveGames: Bool = true) -> URL {
-        let chip = (try? Shell.capture("/usr/sbin/sysctl", ["-n", "machdep.cpu.brand_string"]))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "unknown chip"
-        let macos = (try? Shell.capture("/usr/bin/sw_vers", ["-productVersion"]))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "?"
+        let chip = Machine.chip()
+        let macos = Machine.macOSVersion()
         var logDigest = ""
         // A game frozen right now is the one moment its stack is capturable — grab it first.
         let samples = samplingLiveGames ? sampleRunningGames(paths: paths) : []

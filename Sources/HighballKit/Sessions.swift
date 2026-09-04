@@ -11,8 +11,11 @@ public struct GameSession: Identifiable, Sendable, Equatable {
     /// Substrings of the game's command line, in both path styles Wine reports.
     public let markers: [String]
     public let started: Date
-    public init(id: UUID = UUID(), title: String, bottleName: String, appid: Int?, markers: [String], started: Date = Date()) {
+    /// The renderer the launch used, for the post-play report.
+    public let renderer: String?
+    public init(id: UUID = UUID(), title: String, bottleName: String, appid: Int?, markers: [String], started: Date = Date(), renderer: String? = nil) {
         self.id = id; self.title = title; self.bottleName = bottleName; self.appid = appid; self.markers = markers; self.started = started
+        self.renderer = renderer
     }
 }
 
@@ -27,8 +30,10 @@ public struct SessionRecord: Codable, Sendable, Equatable {
     public var seconds: Int { Int(ended.timeIntervalSince(started)) }
     /// "ended" when the game went away on its own, "stopped" when Highball ended it.
     public var reason: String
-    public init(title: String, bottle: String, appid: Int?, started: Date, ended: Date, reason: String) {
+    public var renderer: String?
+    public init(title: String, bottle: String, appid: Int?, started: Date, ended: Date, reason: String, renderer: String? = nil) {
         self.title = title; self.bottle = bottle; self.appid = appid; self.started = started; self.ended = ended; self.reason = reason
+        self.renderer = renderer
     }
 }
 

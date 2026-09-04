@@ -9,7 +9,7 @@ struct ActivityStrip: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        if state.busy || state.doneState != nil || !state.runningSessions.isEmpty || !steamBottles.isEmpty {
+        if state.busy || state.doneState != nil || state.postPlay != nil || !state.runningSessions.isEmpty || !steamBottles.isEmpty {
             VStack(spacing: 0) {
                 Divider()
                 VStack(spacing: 0) {
@@ -18,6 +18,7 @@ struct ActivityStrip: View {
                     } else if let done = state.doneState {
                         doneRow(done)
                     }
+                    if let record = state.postPlay { postPlayRow(record) }
                     ForEach(state.runningSessions) { session in
                         sessionRow(session)
                     }
@@ -112,6 +113,24 @@ struct ActivityStrip: View {
             if !state.sessionRuns(in: bottle) {
                 Button(L("Quit")) { state.killBottle(bottle) }.controlSize(.small).disabled(state.busy)
             }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+
+    /// Asked after play, never before (UX plan §3.5). Both answers open a prefilled form in the
+    /// browser: a compatibility report for the database, or a problem report with the log.
+    private func postPlayRow(_ record: SessionRecord) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "questionmark.circle").foregroundStyle(.secondary)
+            Text(String(format: L("How did %@ go?"), record.title)).font(.callout.weight(.medium)).lineLimit(1)
+            Text(String(format: L("%d min"), record.seconds / 60)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            Button(L("It played fine")) { state.reportPlay(record) }.controlSize(.small)
+            Button(L("Had problems")) {
+                state.postPlay = nil
+                NSWorkspace.shared.open(BugReport.url(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"))
+            }.controlSize(.small)
+            Button(L("Not now")) { state.postPlay = nil }.controlSize(.small).buttonStyle(.link)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
     }

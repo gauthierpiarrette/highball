@@ -683,6 +683,18 @@ final class AppState {
     var runningSessions: [GameSession] = []
     /// The last session that ended, for the post-play prompt to come.
     var lastEndedSession: SessionRecord?
+    /// A finished session worth asking about: at least a minute of play (a shorter one is a
+    /// crash, and the early-exit alert already covers that). The strip asks once; Not now clears it.
+    var postPlay: SessionRecord?
+
+    /// Opens highball-db's report form prefilled from the session. The rating is theirs to give.
+    func reportPlay(_ record: SessionRecord) {
+        let engine = bottles.first { $0.name == record.bottle }?.settings.engineID ?? "?"
+        NSWorkspace.shared.open(PlayReport.url(title: record.title, appid: record.appid, renderer: record.renderer,
+                                               chip: Machine.chip(), macos: Machine.macOSVersion(), engine: engine,
+                                               minutes: record.seconds / 60))
+        postPlay = nil
+    }
     private var sessionWatchers: [UUID: Task<Void, Never>] = [:]
 
     func session(forAppID appid: Int) -> GameSession? { runningSessions.first { $0.appid == appid } }
@@ -710,9 +722,10 @@ final class AppState {
         sessionWatchers[session.id]?.cancel()
         sessionWatchers[session.id] = nil
         let record = SessionRecord(title: session.title, bottle: session.bottleName, appid: session.appid,
-                                   started: session.started, ended: Date(), reason: reason)
+                                   started: session.started, ended: Date(), reason: reason, renderer: session.renderer)
         SessionWatch.append(record, to: paths.logs)
         lastEndedSession = record
+        if record.seconds >= 60 { postPlay = record }
         appendLog("\(session.title) \(reason) after \(record.seconds / 60) min")
     }
 
@@ -892,7 +905,8 @@ final class AppState {
             while waited < 360 {
                 if SessionWatch.isAlive(markers: markers, ps: SessionWatch.currentProcessList()) {
                     await MainActor.run {
-                        self.beginSession(GameSession(title: game.name, bottleName: bottle.name, appid: game.appid, markers: markers))
+                        self.beginSession(GameSession(title: game.name, bottleName: bottle.name, appid: game.appid, markers: markers,
+                                                      renderer: (renderer ?? bottle.settings.renderer).rawValue))
                     }
                     return
                 }
