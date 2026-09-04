@@ -1,0 +1,89 @@
+{
+  "arch": "x86_64",
+  "baseEnv": {
+    "DYLD_FALLBACK_FRAMEWORK_PATH": "${frameworks}",
+    "DYLD_FALLBACK_LIBRARY_PATH": "${frameworks}:${frameworks}/GStreamer.framework/Versions/1.0/lib",
+    "GST_PLUGIN_PATH": "${frameworks}/GStreamer.framework/Versions/1.0/lib/gstreamer-1.0",
+    "WINEDEBUG": "fixme-all"
+  },
+  "components": {
+    "dxmt": {
+      "extract": {
+        "into": "renderers/dxmt/wine",
+        "subpath": "v0.80"
+      },
+      "kind": "renderer",
+      "license": "MIT",
+      "sha256": "8f260e36b5739e68f3bad613381441385c4dc7b85b78ba8de653d5a6a264529d",
+      "size": 18681669,
+      "url": "https://github.com/3Shain/dxmt/releases/download/v0.80/dxmt-v0.80-builtin.tar.gz"
+    },
+    "moltenvk": {
+      "extract": {
+        "into": "frameworks/libMoltenVK.dylib",
+        "subpath": "libMoltenVK.dylib"
+      },
+      "kind": "runtime",
+      "license": "Apache-2.0",
+      "note": "MoltenVK 1.4.1 rebuilt with Highball's shadow-import patch (spike/patches/moltenvk-shadow-import.patch, Scripts/build-moltenvk.sh). Replaces the Template's libMoltenVK.dylib. Off unless a launch sets MVK_SHADOW_IMPORT=1: with it, Wine's wow64 host-memory imports are backed by a private Metal buffer synced on every submit, which is what makes 32-bit native-Vulkan games (The Sims Legacy Collection) render instead of losing the device on every vkQueueSubmit.",
+      "order": 1,
+      "sha256": "fbed7b80d6dc2aeaba6fa7047c1fe64827d5004c28029fb43c2bc34f80c35228",
+      "size": 1674937,
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/moltenvk-1.4.1-shadow-import-1-x86_64.tar.gz",
+      "version": "1.4.1+shadow-import-1"
+    },
+    "runtime": {
+      "extract": {
+        "into": "frameworks",
+        "subpath": "Template-1.0.11.app/Contents/Frameworks"
+      },
+      "kind": "frameworks",
+      "license": "mixed (LGPL-2.1 GStreamer, Apache-2.0 MoltenVK, LGPL gnutls, ...)",
+      "sha256": "9fa15479e7ff6abd99c1d07be285fb95f41fc6991586502427152b1f7d6ccb8a",
+      "size": 84533420,
+      "url": "https://github.com/Sikarugir-App/Wrapper/releases/download/v1.0/Template-1.0.11.tar.xz"
+    },
+    "wine": {
+      "extract": {
+        "into": "engine",
+        "subpath": "engine"
+      },
+      "kind": "engine",
+      "license": "LGPL-2.1+",
+      "sha256": "ebc12e2178b242ed8305ee4f9a80f7abaf72ab70746a2e54b043424e75b534ce",
+      "size": 334821086,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/engine-wine-11.0-20260904T130339Z-username/engine-wine-11.0-20260904T130339Z-username.tar.gz",
+      "version": "wine-11.0 (CrossOver 26.3 tree) Highball build 2026-09-04b",
+      "note": "Built from CodeWeavers' crossover-sources-26.3.0.tar.gz (sha pinned in highball-engine/inputs.json) by highball-engine's build workflow, run 33874509599, with patches/0001-use-the-real-user-name.patch. Stripped; Wine Mono 10.4.1 and Gecko 2.47.4 included in share/wine."
+    },
+    "winetricks": {
+      "kind": "tool",
+      "license": "LGPL-2.1",
+      "note": "Pinned to upstream commit 5a59ea07 (20260125+dev, 2026-08-07) — the exact bytes 0.7.x verified with dotnet48. The old branch URL drifted and broke every fresh engine install (issues #27/#28); URLs here must be immutable.",
+      "sha256": "f35c29737ca08a583569e6a3752d52fbe23333c5acfad5f16c4177d25eaf3f4b",
+      "url": "https://raw.githubusercontent.com/Winetricks/winetricks/5a59ea07513b24093bd90fad943ecf9543cf05bc/src/winetricks"
+    }
+  },
+  "displayName": "Wine 11.0 (CrossOver 26.3 tree, Highball build) + DXMT 0.80 + D3DMetal 3.0 + MoltenVK 1.4.1 (shadow-import patch)",
+  "id": "x64-crossover26.3-r0",
+  "licenses": {
+    "apple-gptk-license-2023-08-17": {
+      "applies": [
+        "renderers/d3dmetal (bundled in the Sikarugir Template: D3DMetal.framework sha1 1405e5c6… identical to GPTK 3.0-3)"
+      ],
+      "summary": "Apple Game Porting Toolkit license: non-commercial use/distribution only; no modification; use scoped to developing, testing or evaluating games on Apple hardware.",
+      "text": "spike/d3dmetal-license.txt"
+    }
+  },
+  "minMacOS": "14.0",
+  "notes": [
+    "r2 candidate (2026-09-04): Highball's own build of the CrossOver 26.3 Wine tree. Same DXMT, DXVK, MoltenVK and Template runtime as r1; only the Wine component changes.",
+    "Verified so far on an M1 Pro, macOS 26.6.2: boots a bottle through Highball in about 20 s with its services registered, passes the render smoke matrix (DXMT and DXVK on D3D11, DXVK on D3D9 async on and off, DXMT on D3D9), Rockstar's installer completes and its service runs. The Rockstar launcher itself still fails to initialize here (open).",
+    "The tree's CrossOver hack naming the Windows user \"crossover\" is reverted in the build, so bottles keep C:\\users\\<macOS user> and can move between r1 and r2 without a second profile directory.",
+    "winemac.so exports macdrv_functions, so the DXMT and D3DMetal bridges work as on r1. This engine ships no winemetal.dll of its own; the DXMT overlay carries it.",
+    "Not the default. Offered in a bottle's Advanced settings and on the crash alert; the default stays r1 until the verified titles pass on it and opt-in use stays quiet."
+  ],
+  "requires": [
+    "rosetta2"
+  ]
+}
