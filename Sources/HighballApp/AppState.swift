@@ -544,10 +544,12 @@ final class AppState {
         case .killBottle(let bottle, _), .killBottleThenRepair(let bottle, _):
             guard let engine = engine(for: bottle) else { busyTask?.cancel(); return }
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
-            // kill waits on the wineserver: off the main thread, then end the busy work.
+            // kill waits on the wineserver: off the main thread, then end this busy work (the
+            // task captured now, not whatever runs when the kill returns).
+            let task = busyTask
             Task.detached {
                 try? runner.kill()
-                await MainActor.run { self.busyTask?.cancel() }
+                task?.cancel()
             }
         }
     }
@@ -784,7 +786,7 @@ final class AppState {
                 stop: .killBottle(bottle, label: L("Stop")),
                 cleanup: { [weak self] in self?.launchingPins.remove(pin.id) }) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
-            var extra = [String: String]()
+            var extraEnvironment = [String: String]()
             // A Steam client left running by a game launch answers a new steam.exe by swallowing
             // it (issue #33). Ask it to show its window instead, and leave the wineserver alone:
             // a game may still be running under it.
@@ -797,8 +799,9 @@ final class AppState {
             if isSteamUI(pin), bottle.settings.sync != SyncMode.none {
                 try? runner.kill()                      // restart the wineserver so sync=none takes effect
                 try? await Task.sleep(for: .seconds(2))
-                extra = ["WINEMSYNC": "0", "WINEESYNC": "0"]
+                extraEnvironment = ["WINEMSYNC": "0", "WINEESYNC": "0"]
             }
+            let extra = extraEnvironment
             // The process outlives "starting": busy covers the start only, then the Steam row
             // (a client) or a session (anything else) carries it, and the app stays free (0.6).
             let box = LaunchOutcome()
@@ -948,7 +951,7 @@ final class AppState {
             watchedLaunch(box) {
                 try await runner.start(steam, arguments: ["-silent", "-applaunch", String(game.appid)] + extraArgs, renderer: renderer, onOutput: log)
             }
-            let handedOff = try await awaitHandoff(box, program: game.name, timeout: 360) {
+            let handedOff = try await awaitHandoff(box, program: game.name, timeout: 360, exitEndsWait: false) {
                 SessionWatch.isAlive(markers: markers, ps: await Self.processList())
             } crashed: { result in
                 let current = renderer ?? bottle.settings.renderer
@@ -993,16 +996,20 @@ final class AppState {
     /// Polls until the launch hands off (`started`) or ends. A launch that ended is a result:
     /// its own error is thrown, an early crash goes to `crashed` unless the user stopped it.
     /// Returns true on a hand-off. `timeout` nil waits as long as the process lives.
-    private func awaitHandoff(_ box: LaunchOutcome, program: String, timeout: Int?,
+    /// `exitEndsWait` false keeps polling after a clean exit: `steam -applaunch` forwards to a
+    /// running client and exits within seconds while the game is still starting.
+    private func awaitHandoff(_ box: LaunchOutcome, program: String, timeout: Int?, exitEndsWait: Bool = true,
                               started: () async -> Bool, crashed: (LaunchResult) -> Void) async throws -> Bool {
         var waited = 0
+        var exited = false
         while true {
-            if let outcome = box.result {
+            if !exited, let outcome = box.result {
                 switch outcome {
                 case .failure(let error): throw error
                 case .success(let result):
-                    if result.crashedEarly, !stopRequested { crashed(result) }
-                    return false
+                    if result.crashedEarly, !stopRequested { crashed(result); return false }
+                    if exitEndsWait { return false }
+                    exited = true
                 }
             }
             if await started() { box.handedOff = true; return true }
