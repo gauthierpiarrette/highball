@@ -96,8 +96,8 @@ public struct Verifier {
             (!survived && alive < runSeconds ? .crashed :
             (meanLum < 0.02 ? .blackScreen : .renders))
 
-        let chip = (try? Shell.capture("/usr/sbin/sysctl", ["-n", "machdep.cpu.brand_string"]).trimmingCharacters(in: .whitespacesAndNewlines)) ?? "unknown"
-        let macos = (try? Shell.capture("/usr/bin/sw_vers", ["-productVersion"]).trimmingCharacters(in: .whitespacesAndNewlines)) ?? "unknown"
+        let chip = Machine.chip()
+        let macos = Machine.macOSVersion()
         let outcome = VerifyOutcome(appid: game.appid, title: game.name, renderer: renderer, verdict: verdict,
                                     secondsAlive: alive, meanLuminance: (meanLum * 1000).rounded() / 1000,
                                     date: ISO8601DateFormatter().string(from: Date()),
