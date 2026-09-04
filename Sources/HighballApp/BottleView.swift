@@ -405,7 +405,8 @@ struct BottleSettingsSheet: View {
                             HStack {
                                 Text(r.title)
                                 Spacer()
-                                if (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.recipes.contains(r.id) {
+                                let live = state.bottles.first { $0.name == bottle.name } ?? bottle
+                                if live.settings.recipes.contains(r.id) || r.isInstalled(in: live) {
                                     Label(L("Installed"), systemImage: "checkmark.circle.fill").foregroundStyle(.green).labelStyle(.titleAndIcon)
                                 } else {
                                     Button(L("Install")) {

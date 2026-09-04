@@ -973,6 +973,43 @@ extension RegressionTests {
         XCTAssertEqual(DownloadResume.decide(status: 416, partialBytes: 5), .failed)
     }
 
+    // Dependencies detect by artifacts, not by "our recipe ran" (plan Phase 0.3).
+    func testRegistryTextAndInstalledMarkers() throws {
+        let reg = """
+        WINE REGISTRY Version 2
+
+        [Software\\\\Microsoft\\\\NET Framework Setup\\\\NDP\\\\v4\\\\Full] 1788462370
+        #time=1dd3c551aef527e
+        "Install"=dword:00000001
+        "Release"=dword:00082348
+
+        [Software\\\\Microsoft\\\\VisualStudio\\\\14.0\\\\VC\\\\Runtimes\\\\x64] 1788462371
+        "Installed"=dword:00000001
+        "Version"="v14.44.35211.00"
+        """
+        XCTAssertEqual(RegistryText.value(in: reg, key: "Software\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full", name: "Release"), "dword:00082348")
+        XCTAssertEqual(RegistryText.value(in: reg, key: "Software\\\\Microsoft\\\\NET Framework Setup\\\\NDP\\\\v4\\\\Full", name: "Release"), "dword:00082348", "doubled backslashes accepted too")
+        XCTAssertEqual(RegistryText.value(in: reg, key: "Software\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64", name: "Version"), "\"v14.44.35211.00\"")
+        XCTAssertNil(RegistryText.value(in: reg, key: "Software\\Nothing", name: "Release"))
+        XCTAssertEqual(RegistryText.dword("dword:00082348"), 533320)
+
+        let dir = FileManager.default.temporaryDirectory.appending(path: "hb-markers-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir.appending(path: "drive_c/windows/system32"), withIntermediateDirectories: true)
+        try reg.write(to: dir.appending(path: "system.reg"), atomically: true, encoding: .utf8)
+        let bottle = Bottle(url: dir, settings: BottleSettings(name: "m", engineID: "e"))
+        var recipe = Recipe(id: "dotnet48", kind: .tweak, title: ".NET", requires: nil, renderer: nil, steps: [], knownIssues: nil, lastVerified: nil, blocked: nil, installedMarkers: nil)
+        XCTAssertFalse(recipe.isInstalled(in: bottle), "no markers: unknown, reported as not installed")
+        recipe.installedMarkers = [.init(file: nil, registry: "Software\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full", value: "Release", equals: nil, min: 528040)]
+        XCTAssertTrue(recipe.isInstalled(in: bottle), "4.8.1's Release 533320 satisfies the 4.8 minimum")
+        recipe.installedMarkers = [.init(file: nil, registry: "Software\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full", value: "Release", equals: nil, min: 600000)]
+        XCTAssertFalse(recipe.isInstalled(in: bottle))
+        recipe.installedMarkers = [.init(file: "windows/system32/marker.dll", registry: nil, value: nil, equals: nil, min: nil)]
+        XCTAssertFalse(recipe.isInstalled(in: bottle))
+        try Data().write(to: dir.appending(path: "drive_c/windows/system32/marker.dll"))
+        XCTAssertTrue(recipe.isInstalled(in: bottle))
+        try? FileManager.default.removeItem(at: dir)
+    }
+
     func testDefaultEnginePrefersBundledManifestID() throws {
         func engine(_ id: String) throws -> InstalledEngine {
             let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#

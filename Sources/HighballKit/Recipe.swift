@@ -197,6 +197,40 @@ public struct Recipe: Codable, Sendable, Identifiable {
     public var knownIssues: [KnownIssue]?
     public var lastVerified: Verification?
     public var blocked: Blocked?
+    /// What an installed runtime leaves behind, so the Dependencies panel can tell "installed"
+    /// from "our recipe ran": a file under drive_c, or a registry value in system.reg (exact
+    /// match or a minimum for dword values). Any one marker satisfied means installed. Data, so
+    /// a runtime a game's own prerequisite installed shows as installed too (plan Phase 0.3).
+    public var installedMarkers: [InstalledMarker]?
+
+    public struct InstalledMarker: Codable, Sendable {
+        /// Path under drive_c, e.g. "windows/system32/vcruntime140.dll".
+        public var file: String?
+        /// Registry key under HKLM as written in system.reg, e.g.
+        /// "Software\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64".
+        public var registry: String?
+        public var value: String?
+        /// Exact raw value text, e.g. "dword:00000001".
+        public var equals: String?
+        /// Minimum for a dword value, decimal.
+        public var min: Int?
+    }
+
+    /// True when any marker is present in the bottle. Recipes without markers report false; the
+    /// caller still knows whether the recipe ran.
+    public func isInstalled(in bottle: Bottle) -> Bool {
+        guard let markers = installedMarkers, !markers.isEmpty else { return false }
+        lazy var systemReg: String = (try? String(contentsOf: bottle.url.appending(path: "system.reg"), encoding: .utf8)) ?? ""
+        for m in markers {
+            if let f = m.file, FileManager.default.fileExists(atPath: bottle.driveC.appending(path: f).path) { return true }
+            if let key = m.registry, let name = m.value, let raw = RegistryText.value(in: systemReg, key: key, name: name) {
+                if let eq = m.equals { if raw.lowercased() == eq.lowercased() { return true } else { continue } }
+                if let min = m.min, let n = RegistryText.dword(raw), n >= min { return true }
+                if m.equals == nil, m.min == nil { return true }
+            }
+        }
+        return false
+    }
     public var flaky: Flaky?
 
     public static func load(from url: URL) throws -> Recipe {
