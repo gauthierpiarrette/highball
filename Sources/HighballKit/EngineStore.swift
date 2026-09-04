@@ -64,6 +64,15 @@ public struct EngineStore: Sendable {
         installed.filter { $0.id != defaultID && !referencedIDs.contains($0.id) }
     }
 
+    /// The engine to offer when a program fails on `currentID`: the default engine when the
+    /// bottle is not on it (the newer one, usually), else the newest other installed engine.
+    /// nil with a single engine installed.
+    public static func alternateEngine(for currentID: String, installed: [InstalledEngine], defaultID: String?) -> InstalledEngine? {
+        if let d = installed.first(where: { $0.id == defaultID }), d.id != currentID { return d }
+        return installed.filter { $0.id != currentID }
+            .max { $0.id.compare($1.id, options: .numeric) == .orderedAscending }
+    }
+
     public func engine(_ id: String) throws -> InstalledEngine {
         let root = paths.engine(id)
         let m = try EngineManifest.load(from: root.appending(path: "manifest.json"))

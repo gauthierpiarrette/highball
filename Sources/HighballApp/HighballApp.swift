@@ -304,18 +304,32 @@ struct ContentView: View {
                 }
             }
         } message: { Text(state.errorMessage ?? "") }
-        .alert(item: $state.crashSuggestion) { s in
-            Alert(title: Text("\(s.program) exited right away"),
-                  message: Text("That usually means the graphics backend doesn't suit it. Try \(s.renderer.rawValue.uppercased())? The log is at \(s.logPath)."),
-                  primaryButton: .default(Text("Use \(s.renderer.rawValue.uppercased())")) {
-                      if var bottle = state.bottles.first(where: { $0.name == s.bottleName }) {
-                          bottle.settings.renderer = s.renderer
-                          bottle.settings.rendererExplicit = true   // the user picked it; recipes must not clobber it (#29)
-                          state.update(bottle)
-                      }
-                  },
-                  secondaryButton: .cancel(Text(L("Keep current"))))
+        .alert(crashTitle, isPresented: Binding(get: { state.crashSuggestion != nil }, set: { if !$0 { state.crashSuggestion = nil } }),
+               presenting: state.crashSuggestion) { s in
+            Button("Use \(s.renderer.rawValue.uppercased())") {
+                if var bottle = state.bottles.first(where: { $0.name == s.bottleName }) {
+                    bottle.settings.renderer = s.renderer
+                    bottle.settings.rendererExplicit = true   // the user picked it; recipes must not clobber it (#29)
+                    state.update(bottle)
+                }
+            }
+            if let alt = s.alternateEngine {
+                Button(String(format: L("Try engine %@"), alt.id)) {
+                    if let bottle = state.bottles.first(where: { $0.name == s.bottleName }) { state.moveBottle(bottle, to: alt) }
+                }
+            }
+            Button(L("Keep current"), role: .cancel) {}
+        } message: { s in
+            if let alt = s.alternateEngine {
+                Text("That usually means the graphics backend doesn't suit it. Try \(s.renderer.rawValue.uppercased())? If that fails too, the bottle can move to engine \(alt.id) and back. The log is at \(s.logPath).")
+            } else {
+                Text("That usually means the graphics backend doesn't suit it. Try \(s.renderer.rawValue.uppercased())? The log is at \(s.logPath).")
+            }
         }
+    }
+    private var crashTitle: String {
+        guard let s = state.crashSuggestion else { return "" }
+        return "\(s.program) exited right away"
     }
 }
 

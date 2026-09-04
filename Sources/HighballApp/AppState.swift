@@ -52,6 +52,13 @@ final class AppState {
         let bottleName: String
         let renderer: Renderer
         let logPath: String
+        /// Another installed engine to offer as the second way out, when there is one.
+        var alternateEngine: InstalledEngine? = nil
+    }
+
+    /// The engine the crash alert offers next to the renderer suggestion, if another one is installed.
+    func alternateEngine(for bottle: Bottle) -> InstalledEngine? {
+        EngineStore.alternateEngine(for: bottle.settings.engineID, installed: engines, defaultID: defaultEngine?.id)
     }
 
     var errorMessage: String?
@@ -516,7 +523,8 @@ final class AppState {
                 await MainActor.run {
                     self.crashSuggestion = CrashSuggestion(program: pin.name, bottleName: bottle.name,
                                                            renderer: Renderer.suggestion(after: current),
-                                                           logPath: result.log.path)
+                                                           logPath: result.log.path,
+                                                           alternateEngine: self.alternateEngine(for: bottle))
                 }
             }
         }
@@ -614,7 +622,8 @@ final class AppState {
                 await MainActor.run {
                     self.crashSuggestion = CrashSuggestion(program: game.name, bottleName: bottle.name,
                                                            renderer: Renderer.suggestion(after: current),
-                                                           logPath: result.log.path)
+                                                           logPath: result.log.path,
+                                                           alternateEngine: self.alternateEngine(for: bottle))
                 }
             }
         }
@@ -749,7 +758,8 @@ final class AppState {
                 await MainActor.run {
                     self.crashSuggestion = CrashSuggestion(program: game.app_title, bottleName: bottle.name,
                                                            renderer: Renderer.suggestion(after: current),
-                                                           logPath: result.log.path)
+                                                           logPath: result.log.path,
+                                                           alternateEngine: self.alternateEngine(for: bottle))
                 }
             }
         }

@@ -860,6 +860,20 @@ extension RegressionTests {
         XCTAssertEqual(EngineStore.unreferencedEngines(installed: all, referencedIDs: [], defaultID: nil).map(\.id), all.map(\.id))
     }
 
+    // The crash alert's second way out: the default engine when the bottle is not on it, else the
+    // newest other engine, and nothing with a single engine installed.
+    func testAlternateEngineForCrashAlert() throws {
+        func engine(_ id: String) throws -> InstalledEngine {
+            let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#
+            let m = try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8))
+            return InstalledEngine(manifest: m, root: URL(fileURLWithPath: "/tmp/\(id)"))
+        }
+        let r1 = try engine("x64-sikarugir10.0_6-r1"), r2 = try engine("x64-sikarugir11.0_0-r0")
+        XCTAssertEqual(EngineStore.alternateEngine(for: r1.id, installed: [r1, r2], defaultID: r2.id)?.id, r2.id, "old bottle: offer the default")
+        XCTAssertEqual(EngineStore.alternateEngine(for: r2.id, installed: [r1, r2], defaultID: r2.id)?.id, r1.id, "on the default: offer the previous engine")
+        XCTAssertNil(EngineStore.alternateEngine(for: r1.id, installed: [r1], defaultID: r1.id), "single engine: nothing to offer")
+    }
+
     func testDefaultEnginePrefersBundledManifestID() throws {
         func engine(_ id: String) throws -> InstalledEngine {
             let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#
