@@ -77,6 +77,7 @@
   },
   "minMacOS": "14.0",
   "notes": [
+    "NOT BUNDLED (2026-09-04): under this tree Steam's browser process reaches DXMT's swapchain creation on a window owned by another process, which DXMT 0.80 and DXMT's public main both refuse (\"cross-process swapchain not supported yet\"), so no game launched from Steam starts under the DXMT renderer here. r1 does not reach that path. Until public DXMT supports it, or our build carries a fix, this engine stays a candidate in spike/engine-candidates and is not offered to users. DXVK on it renders (Portal 2, The Sims Legacy Collection, verifier with attribution).",
     "r2 candidate: Highball's own build of the CrossOver 26.3 Wine tree. Same DXMT, DXVK, MoltenVK and Template runtime as r1; only the Wine component changes.",
     "The tree needs three patches to behave like Sikarugir's engine: the Windows user follows the macOS user (CrossOver hack 12735 reverted), WINEDLLPATH_PREPEND is honoured so the renderer overlays apply at all, and wined3d's automatic renderer is OpenGL first as upstream. Builds before 2026-09-04 build 9 lacked the last two: overlays were silently ignored and everything ran on wined3d over Vulkan, so verdicts recorded on those builds do not count.",
     "winemac.so exports macdrv_functions, so the DXMT and D3DMetal bridges work as on r1. This engine ships no winemetal.dll of its own; the DXMT overlay carries it. Wine Mono and Gecko are included.",
