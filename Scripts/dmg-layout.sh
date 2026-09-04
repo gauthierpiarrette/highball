@@ -8,7 +8,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 test -d dist/Highball.app || { echo "dist/Highball.app missing; run Scripts/make-app.sh debug first" >&2; exit 1; }
-test ! -e /Volumes/Highball || { echo "a Highball volume is already mounted; eject it first" >&2; exit 1; }
+# A Highball volume left mounted by an earlier run aborted two releases; eject it instead.
+if [ -e /Volumes/Highball ]; then echo "ejecting a mounted Highball volume" >&2; hdiutil detach /Volumes/Highball -force >/dev/null 2>&1 || { echo "could not eject /Volumes/Highball" >&2; exit 1; }; fi
 
 # Geometry: keep in sync with make-dmg-background.swift (WIN_W x WIN_H is the content area).
 # Finder's AppleScript bounds include the title bar, measured at 32 pt on macOS 26; the

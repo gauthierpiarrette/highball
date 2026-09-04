@@ -5,7 +5,8 @@
 # Usage: Scripts/make-dmg.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
-test ! -e /Volumes/Highball || { echo "a Highball volume is already mounted; eject it first" >&2; exit 1; }
+# A Highball volume left mounted by an earlier run aborted two releases; eject it instead.
+if [ -e /Volumes/Highball ]; then echo "ejecting a mounted Highball volume" >&2; hdiutil detach /Volumes/Highball -force >/dev/null 2>&1 || { echo "could not eject /Volumes/Highball" >&2; exit 1; }; fi
 
 DMG=dist/Highball.dmg
 WORK=dist/dmg-work
