@@ -39,6 +39,15 @@ final class EnvironmentTests: XCTestCase {
         XCTAssertEqual(env["WINEMSYNC"], "0")
     }
 
+    // Wine's menu builder must never run: it writes shortcuts onto the macOS Desktop for every
+    // installer (three of them appeared during the CrossOver-tree engine's first tests). The
+    // user's own overrides still append after it.
+    func testMenuBuilderDisabledOnEveryRenderer() throws {
+        let (engine, bottle) = try fixtures()
+        let env = try bottle.environment(engine: engine, renderer: .wined3d)
+        XCTAssertEqual(env["WINEDLLOVERRIDES"], "winemenubuilder.exe=d", "present with no bottle overrides at all")
+    }
+
     func testPrefixAndDebugAlwaysSet() throws {
         let (engine, bottle) = try fixtures()
         let env = try bottle.environment(engine: engine, renderer: .wined3d)
@@ -52,7 +61,7 @@ final class EnvironmentTests: XCTestCase {
         var (engine, bottle) = try fixtures()
         bottle.settings.dllOverrides = "version=n,b"
         var env = try bottle.environment(engine: engine, renderer: .wined3d)
-        XCTAssertEqual(env["WINEDLLOVERRIDES"], "version=n,b")
+        XCTAssertEqual(env["WINEDLLOVERRIDES"], "version=n,b;winemenubuilder.exe=d", "the bottle's overrides sit in front of Highball's own")
 
         bottle.settings.environment["WINEDLLOVERRIDES+"] = "libglesv2=d"
         env = try bottle.environment(engine: engine, renderer: .wined3d)

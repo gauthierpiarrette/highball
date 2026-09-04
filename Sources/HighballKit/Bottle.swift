@@ -366,6 +366,12 @@ public struct Bottle: Sendable {
             default: break
             }
         }
+        // Wine's menu builder writes .lnk shortcuts and app bundles onto the macOS Desktop and
+        // into ~/Applications for every installer that asks. Sikarugir's engines leave the
+        // program out; the CrossOver-tree engine ships it, and three launcher installers put
+        // shortcuts on the Desktop during its first day of testing (2026-09-04). Off everywhere:
+        // a bottle's programs belong in Highball's library, not on the user's Desktop.
+        merge(&env, ["WINEDLLOVERRIDES+": "winemenubuilder.exe=d"])
         if !settings.dllOverrides.isEmpty { merge(&env, ["WINEDLLOVERRIDES+": settings.dllOverrides]) }
         merge(&env, settings.environment)
         merge(&env, try (renderer ?? settings.renderer).environment(engine: engine))
