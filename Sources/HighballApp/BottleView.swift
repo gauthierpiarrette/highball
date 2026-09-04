@@ -406,7 +406,7 @@ struct BottleSettingsSheet: View {
                                 Text(r.title)
                                 Spacer()
                                 let live = state.bottles.first { $0.name == bottle.name } ?? bottle
-                                if live.settings.recipes.contains(r.id) || r.isInstalled(in: live) {
+                                if live.settings.recipes.contains(r.id) || state.tweakIsInstalled(r, in: live) {
                                     Label(L("Installed"), systemImage: "checkmark.circle.fill").foregroundStyle(.green).labelStyle(.titleAndIcon)
                                 } else {
                                     Button(L("Install")) {

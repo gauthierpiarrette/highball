@@ -46,6 +46,8 @@ final class EnvironmentTests: XCTestCase {
         let (engine, bottle) = try fixtures()
         let env = try bottle.environment(engine: engine, renderer: .wined3d)
         XCTAssertEqual(env["WINEDLLOVERRIDES"], "winemenubuilder.exe=d", "present with no bottle overrides at all")
+        var b2 = bottle; b2.settings.dllOverrides = "winemenubuilder.exe=b"
+        XCTAssertEqual(try b2.environment(engine: engine, renderer: .wined3d)["WINEDLLOVERRIDES"], "winemenubuilder.exe=d;winemenubuilder.exe=b", "a user's own entry comes last and therefore wins")
     }
 
     func testPrefixAndDebugAlwaysSet() throws {
@@ -61,7 +63,7 @@ final class EnvironmentTests: XCTestCase {
         var (engine, bottle) = try fixtures()
         bottle.settings.dllOverrides = "version=n,b"
         var env = try bottle.environment(engine: engine, renderer: .wined3d)
-        XCTAssertEqual(env["WINEDLLOVERRIDES"], "version=n,b;winemenubuilder.exe=d", "the bottle's overrides sit in front of Highball's own")
+        XCTAssertEqual(env["WINEDLLOVERRIDES"], "winemenubuilder.exe=d;version=n,b", "Highball's default first, the bottle's overrides after it: Wine's last entry wins, so the user can re-enable anything")
 
         bottle.settings.environment["WINEDLLOVERRIDES+"] = "libglesv2=d"
         env = try bottle.environment(engine: engine, renderer: .wined3d)

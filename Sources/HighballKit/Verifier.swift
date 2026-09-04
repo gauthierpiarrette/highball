@@ -84,7 +84,15 @@ public struct Verifier {
         // Tear down.
         try? WineRunner(paths: paths, engine: engine, bottle: bottle).kill()
         launch.cancel()
-        let launchLog = (try? await launch.value)?.log
+        // The launch task returns when steam.exe exits, which kill() just arranged; bound the
+        // wait anyway so a client that lingers cannot hold the verifier.
+        let launchLog: URL? = await withTaskGroup(of: URL?.self) { group in
+            group.addTask { (try? await launch.value)?.log }
+            group.addTask { try? await Task.sleep(for: .seconds(30)); return nil }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
         let served = launchLog.flatMap { try? String(contentsOf: $0, encoding: .utf8) }.map(Self.servedImplementation(fromLog:)) ?? "unknown"
         // Every renderer but wined3d routes Direct3D 9 through the d9vk overlay, so "dxvk" under a
         // dxmt run is still an overlay; only Wine's own implementation means the ask was ignored.
@@ -117,9 +125,12 @@ public struct Verifier {
     public static func servedImplementation(fromLog log: String) -> String {
         for line in log.split(separator: "\n") {
             guard line.contains("loaddll"), line.contains("Loaded L\""),
-                  let range = line.range(of: #"Loaded L"([^"]+\\(d3d11|d3d9|d3d10core|d3d12|dxgi)\.dll)""#, options: .regularExpression)
+                  let range = line.range(of: #"Loaded L"([^"]+\\+(d3d11|d3d9|d3d10core|d3d12|dxgi)\.dll)""#, options: .regularExpression)
             else { continue }
-            let path = line[range].lowercased()
+            // Wine's debugstr doubles backslashes ("C:\\windows\\system32\\d3d11.dll"); fold them
+            // so one set of patterns matches real output (a first version matched only the
+            // hand-written fixture and never attributed a real run).
+            let path = line[range].lowercased().replacingOccurrences(of: "\\\\", with: "\\")
             if path.contains("\\dxmt\\") { return "dxmt" }
             if path.contains("\\dxvk\\") || path.contains("\\d9vk\\") { return "dxvk" }
             if path.contains("\\d3dmetal\\") { return "d3dmetal" }

@@ -16,6 +16,8 @@ HEAVEN_URL="https://assets.unigine.com/d/Unigine_Heaven-4.0.exe"
 HEAVEN_SHA="497865a09af205a7d2e8812bfc2dd54870216cc1e95541b63cef89a4433b0e5f"
 HOLD=45
 BOTTLE=rsmoke
+# ENGINE=<id> runs the matrix on that installed engine; default is the newest installed.
+ENGINE="${ENGINE:-}"
 
 swift build --product highball
 HB=.build/debug/highball
@@ -28,7 +30,7 @@ if [ ! -f "$DL" ] || [ "$(shasum -a 256 "$DL" | awk '{print $1}')" != "$HEAVEN_S
 fi
 
 "$HB" bottle delete "$BOTTLE" 2>/dev/null || true
-"$HB" bottle create "$BOTTLE"
+"$HB" bottle create "$BOTTLE" ${ENGINE:+--engine "$ENGINE"}
 "$HB" run "$BOTTLE" "$DL" -- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
 EXE="$HOME/Library/Application Support/Highball/bottles/$BOTTLE/drive_c/Program Files (x86)/Unigine/Heaven Benchmark 4.0/bin/Heaven.exe"
 test -f "$EXE" || { echo "Heaven install failed"; exit 1; }
@@ -89,7 +91,7 @@ run_case "dxmt-d3d9"       dxmt direct3d9  "-"
 "$HB" bottle kill "$BOTTLE" >/dev/null 2>&1 || true
 "$HB" bottle delete "$BOTTLE" || true
 
-ENGINE_ID=$("$HB" engine list | head -1 | cut -f1)
+ENGINE_ID="${ENGINE:-$(python3 -c "import json,os;print(json.load(open(os.path.expanduser(\"~/Library/Application Support/Highball/bottles/$BOTTLE/bottle.json\")))[\"engineID\"])" 2>/dev/null || "$HB" engine list | head -1 | cut -f1)}"
 mkdir -p private/render-smoke
 python3 - "$ENGINE_ID" "$ALL" "${RESULTS%,}" <<'PY'
 import json, sys, time

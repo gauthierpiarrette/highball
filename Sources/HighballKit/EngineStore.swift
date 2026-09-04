@@ -162,8 +162,10 @@ public struct EngineStore: Sendable {
         if FileManager.default.fileExists(atPath: dest.path), try sha256(of: dest) == component.sha256.lowercased() {
             return dest
         }
-        let partial = dest.appendingPathExtension("partial")
-        let etagFile = dest.appendingPathExtension("etag")
+        // Named by checksum so two installs sharing a basename (or an asset that changed under
+        // the same name) never append into each other's file.
+        let partial = dest.appendingPathExtension("\(component.sha256.prefix(12)).partial")
+        let etagFile = dest.appendingPathExtension("\(component.sha256.prefix(12)).etag")
         let expected = Int64(component.size ?? 0)
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = 60
@@ -189,6 +191,12 @@ public struct EngineStore: Sendable {
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: partial, to: dest)
         try? FileManager.default.removeItem(at: etagFile)
+        // Partials of other versions of the same file are dead weight once this one verified.
+        if let siblings = try? FileManager.default.contentsOfDirectory(at: paths.downloads, includingPropertiesForKeys: nil) {
+            for f in siblings where f.lastPathComponent.hasPrefix(dest.lastPathComponent + ".") && (f.pathExtension == "partial" || f.pathExtension == "etag") {
+                try? FileManager.default.removeItem(at: f)
+            }
+        }
         let actual = try sha256(of: dest)
         guard actual == component.sha256.lowercased() else {
             try? FileManager.default.removeItem(at: dest)
@@ -224,7 +232,8 @@ public struct EngineStore: Sendable {
         defer { try? handle.close() }
         try handle.seekToEnd()
         var written = decision == .append ? have : 0
-        let total = decision == .append ? have + http.expectedContentLength : http.expectedContentLength
+        // A chunked response reports -1; then the caller's manifest size drives the bar.
+        let total: Int64 = http.expectedContentLength < 0 ? 0 : (decision == .append ? have + http.expectedContentLength : http.expectedContentLength)
         var buffer = Data(); buffer.reserveCapacity(1 << 20)
         var lastReported: Int64 = written
         for try await byte in bytes {
@@ -375,6 +384,3 @@ public struct InstalledEngine: Sendable {
         return env
     }
 }
-
-/// URLSessionDownloadDelegate that streams byte progress (~every 2 MB) and moves the finished
-/// file into place before resuming its continuation. State is confined to the session's own

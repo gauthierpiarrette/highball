@@ -15,11 +15,11 @@ public enum LogPruner {
     static let keepAlways: Set<String> = ["verify-results.jsonl"]
 
     /// Deletes, in order: anything older than `keepDays` beyond the newest `keepNewest` files,
-    /// then the oldest of what remains until the total is at most `maxTotalBytes`. The newest
-    /// `keepNewest` files are never removed by the size rule either, so the log a user is about
-    /// to attach to a report still exists.
+    /// then the oldest of what remains until the total is at most `maxTotalBytes`. The size rule
+    /// spares only the newest `protectNewest` files, so a handful of huge traces cannot hide
+    /// behind the age rule's allowance; the log a user is about to attach still exists.
     public static func plan(_ entries: [Entry], now: Date = Date(), keepDays: Int = 14,
-                            maxTotalBytes: Int64 = 300 * 1024 * 1024, keepNewest: Int = 50) -> [URL] {
+                            maxTotalBytes: Int64 = 300 * 1024 * 1024, keepNewest: Int = 50, protectNewest: Int = 5) -> [URL] {
         let candidates = entries.filter { !keepAlways.contains($0.url.lastPathComponent) }
             .sorted { $0.modified > $1.modified }          // newest first
         var remove: [URL] = []
@@ -30,7 +30,7 @@ public enum LogPruner {
         }
         var total = kept.reduce(Int64(0)) { $0 + $1.size }
         for e in kept.reversed() where total > maxTotalBytes {   // oldest first
-            guard let idx = kept.firstIndex(of: e), idx >= keepNewest else { break }
+            guard let idx = kept.firstIndex(of: e), idx >= protectNewest else { break }
             remove.append(e.url); total -= e.size
         }
         return remove

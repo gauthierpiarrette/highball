@@ -16,12 +16,15 @@ public enum DownloadResume {
     }
 
     /// 206 with a partial on disk means append; 200 means the server sent the whole thing (no
-    /// range support, or the ETag changed), so start over; anything else is a failure. A 206
+    /// range support, or the ETag changed), so start over; 416 means the range was past the end
+    /// (a partial that is already complete, or an asset that shrank), so start over rather than
+    /// asking for the same impossible range on every retry; anything else is a failure. A 206
     /// without a partial cannot happen with our request and is treated as a restart.
     public static func decide(status: Int, partialBytes: Int64) -> Decision {
         switch status {
         case 206: return partialBytes > 0 ? .append : .restart
         case 200..<300: return .restart
+        case 416: return .restart
         default: return .failed
         }
     }

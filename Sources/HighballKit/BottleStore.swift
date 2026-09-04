@@ -100,10 +100,18 @@ public struct BottleStore: Sendable {
     /// Quiet self-heal before a launch: when the 32-bit half is missing, re-run the first boot
     /// (with the mscoree set-aside and the 32-bit seeding refreshPrefix carries) instead of
     /// letting the launch fail and sending the user to find "Repair bottle".
-    public static func preflight(runner: WineRunner, bottle: Bottle, log: ((String) -> Void)? = nil) async throws {
+    public static func preflight(runner: WineRunner, bottle: Bottle, log: ((String) -> Void)? = nil) async {
         guard needsPreflightRepair(bottle) else { return }
+        // A first boot under a running wineserver would fight it; a live bottle is left alone
+        // and the next launch from a stopped state repairs it. A failed repair is logged, not
+        // thrown: a 64-bit game that never needed the 32-bit half must still launch.
+        guard ProcessTable.processes(ofPrefix: bottle.url).isEmpty else {
+            log?("bottle '\(bottle.name)': 32-bit half missing; will repair at the next launch from a stopped bottle")
+            return
+        }
         log?("bottle '\(bottle.name)': 32-bit half missing, repairing before launch")
-        try await refreshPrefix(runner: runner, bottle: bottle)
+        do { try await refreshPrefix(runner: runner, bottle: bottle) }
+        catch { log?("bottle '\(bottle.name)': repair before launch failed (\(error)); launching anyway") }
     }
 
     /// Re-runs the Windows first boot on an existing bottle and the per-bottle setup that boot

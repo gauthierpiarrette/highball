@@ -256,6 +256,8 @@ public struct BottleSettings: Codable, Sendable {
     public var recipes: [String] = []
     public var created: Date = Date()
 
+    enum CodingKeys: String, CodingKey { case formatVersion, name, engineID, renderer, rendererExplicit, windowsVersion, sync, metalHUD, advertiseAVX, dxvkAsync, fpsCap, commandIsControl, commandIsControlSynced, dpiScale, dllOverrides, dxvkAppConfig, dllOverridesSynced, environment, pins, recipes, created }
+
     public init(name: String, engineID: String) {
         self.name = name
         self.engineID = engineID
@@ -388,8 +390,11 @@ public struct Bottle: Sendable {
         // program out; the CrossOver-tree engine ships it, and three launcher installers put
         // shortcuts on the Desktop during its first day of testing (2026-09-04). Off everywhere:
         // a bottle's programs belong in Highball's library, not on the user's Desktop.
-        merge(&env, ["WINEDLLOVERRIDES+": "winemenubuilder.exe=d"])
+        // merge prepends, and Wine's last entry for a DLL wins, so Highball's default goes in
+        // after the bottle's own overrides to end up first in the string: a user who lists
+        // winemenubuilder.exe themselves gets their way.
         if !settings.dllOverrides.isEmpty { merge(&env, ["WINEDLLOVERRIDES+": settings.dllOverrides]) }
+        merge(&env, ["WINEDLLOVERRIDES+": "winemenubuilder.exe=d"])
         merge(&env, settings.environment)
         merge(&env, try (renderer ?? settings.renderer).environment(engine: engine))
         merge(&env, extra)

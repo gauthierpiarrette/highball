@@ -535,6 +535,7 @@ final class AppState {
             // A Steam client left running by a game launch answers a new steam.exe by swallowing
             // it (issue #33). Ask it to show its window instead, and leave the wineserver alone:
             // a game may still be running under it.
+            await BottleStore.preflight(runner: runner, bottle: bottle) { line in Task { @MainActor in self.appendLog(line) } }
             if isSteamUI(pin), let shown = try await runner.showRunningSteam(onOutput: { line in Task { @MainActor in self.appendLog(line) } }) {
                 await MainActor.run { self.appendLog("Steam was already running; asked it to show its window") }
                 if shown.crashedEarly { /* the forward exits at once by design; not a crash */ }
@@ -558,7 +559,6 @@ final class AppState {
                 result = r
                 if resumed { await MainActor.run { self.appendLog("resumed after the known crash") } }
             } else {
-                try await BottleStore.preflight(runner: runner, bottle: bottle) { line in Task { @MainActor in self.appendLog(line) } }
                 result = try await runner.start(pin: pin, extraEnvironment: extra) { line in Task { @MainActor in self.appendLog(line) } }
             }
             if result.crashedEarly {
@@ -870,6 +870,18 @@ final class AppState {
         }
         var seen = Set<String>()
         return urls.compactMap { try? EngineManifest.load(from: $0) }.filter { seen.insert($0.id).inserted }
+    }
+
+    /// Installed-marker results per bottle, keyed by system.reg's modification time so the
+    /// registry text (12 MB on a busy bottle) is read once per change, not on every render.
+    private var installedTweaksCache: [String: (regModified: Date, ids: Set<String>)] = [:]
+    func tweakIsInstalled(_ recipe: HighballKit.Recipe, in bottle: Bottle) -> Bool {
+        let reg = bottle.url.appending(path: "system.reg")
+        let modified = (try? FileManager.default.attributesOfItem(atPath: reg.path)[.modificationDate] as? Date) ?? .distantPast
+        if let hit = installedTweaksCache[bottle.name], hit.regModified == modified { return hit.ids.contains(recipe.id) }
+        let ids = Set(Self.tweakRecipes().filter { $0.isInstalled(in: bottle) }.map(\.id))
+        installedTweaksCache[bottle.name] = (modified, ids)
+        return ids.contains(recipe.id)
     }
 
     /// What the bottle's Engine picker lists: installed engines, then known ones to download.

@@ -316,7 +316,7 @@ struct Run: AsyncParsableCommand {
         let b = try BottleStore().get(bottle)
         let eng = try EngineStore().engine(b.settings.engineID)
         let runner = WineRunner(engine: eng, bottle: b)
-            try await BottleStore.preflight(runner: runner, bottle: b) { print($0) }
+        await BottleStore.preflight(runner: runner, bottle: b) { print($0) }
         let echo: @Sendable (String) -> Void = { print($0) }
         let out: (@Sendable (String) -> Void)? = verbose ? echo : nil
         let result: LaunchResult

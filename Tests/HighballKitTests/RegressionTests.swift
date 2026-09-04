@@ -942,11 +942,14 @@ extension RegressionTests {
                        e("verify-results.jsonl", daysOld: 100, mb: 1), e("big-old", daysOld: 10, mb: 400), e("big-new", daysOld: 0.5, mb: 400)]
         let byAge = LogPruner.plan(entries, now: now, keepDays: 14, maxTotalBytes: 10_000 * 1_048_576, keepNewest: 2)
         XCTAssertEqual(Set(byAge.map(\.lastPathComponent)), ["old1", "old2"], "older than 14 days and not among the newest two")
-        let bySize = LogPruner.plan(entries, now: now, keepDays: 14, maxTotalBytes: 500 * 1_048_576, keepNewest: 2)
+        let bySize = LogPruner.plan(entries, now: now, keepDays: 14, maxTotalBytes: 500 * 1_048_576, keepNewest: 2, protectNewest: 2)
         XCTAssertTrue(bySize.map(\.lastPathComponent).contains("big-old"), "size rule removes the oldest big file")
         XCTAssertFalse(bySize.map(\.lastPathComponent).contains("big-new"), "the newest files are never removed for size")
         XCTAssertFalse(bySize.map(\.lastPathComponent).contains("verify-results.jsonl"))
         XCTAssertEqual(LogPruner.plan(entries, now: now, keepDays: 14, maxTotalBytes: 10_000 * 1_048_576, keepNewest: 10).count, 0, "everything within the newest ten stays")
+        let fewHuge = (0..<40).map { e("t\($0)", daysOld: Double($0), mb: 100) }
+        let bySizeFew = LogPruner.plan(fewHuge, now: now, keepDays: 14, maxTotalBytes: 300 * 1_048_576, keepNewest: 50)
+        XCTAssertEqual(bySizeFew.count, 35, "the size cap holds even with fewer files than the age rule's allowance; the newest five stay")
     }
 
     // Preflight: the 32-bit half check is a file test, so it is free on the happy path.
@@ -970,7 +973,7 @@ extension RegressionTests {
         XCTAssertEqual(DownloadResume.decide(status: 200, partialBytes: 1234), .restart, "the server ignored the range or the asset changed: start over")
         XCTAssertEqual(DownloadResume.decide(status: 206, partialBytes: 0), .restart)
         XCTAssertEqual(DownloadResume.decide(status: 404, partialBytes: 0), .failed)
-        XCTAssertEqual(DownloadResume.decide(status: 416, partialBytes: 5), .failed)
+        XCTAssertEqual(DownloadResume.decide(status: 416, partialBytes: 5), .restart, "a complete or stale partial must not wedge every retry")
     }
 
     // Dependencies detect by artifacts, not by "our recipe ran" (plan Phase 0.3).
@@ -992,6 +995,7 @@ extension RegressionTests {
         XCTAssertEqual(RegistryText.value(in: reg, key: "Software\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64", name: "Version"), "\"v14.44.35211.00\"")
         XCTAssertNil(RegistryText.value(in: reg, key: "Software\\Nothing", name: "Release"))
         XCTAssertEqual(RegistryText.dword("dword:00082348"), 533320)
+        XCTAssertEqual(RegistryText.value(in: reg, key: "SOFTWARE\\microsoft\\NET Framework Setup\\NDP\\v4\\Full", name: "release"), "dword:00082348", "the registry is case-insensitive")
 
         let dir = FileManager.default.temporaryDirectory.appending(path: "hb-markers-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir.appending(path: "drive_c/windows/system32"), withIntermediateDirectories: true)
@@ -1026,6 +1030,14 @@ extension RegressionTests {
         XCTAssertEqual(net.action, .retry); XCTAssertFalse(net.headline.lowercased().contains("connection dropped"), "a timeout is not a diagnosed cause")
         let plain = Recovery.describe(HighballError.failed("Steam is already running."))
         XCTAssertEqual(plain.headline, "Steam is already running."); XCTAssertNil(plain.actionTitle)
+    }
+
+    // The decoder's migration flag is transient and must not appear in bottle.json.
+    func testNeedsSaveIsNotEncoded() throws {
+        var s = BottleSettings(name: "b", engineID: "e"); s.needsSave = true
+        let json = String(decoding: try JSONEncoder().encode(s), as: UTF8.self)
+        XCTAssertFalse(json.contains("needsSave"))
+        XCTAssertTrue(json.contains("\"formatVersion\":3"))
     }
 
     func testDefaultEnginePrefersBundledManifestID() throws {

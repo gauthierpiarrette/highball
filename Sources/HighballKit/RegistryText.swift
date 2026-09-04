@@ -9,14 +9,17 @@ public enum RegistryText {
     /// `key` is written the way it appears in the file, with doubled backslashes, or with single
     /// backslashes, which are doubled here.
     public static func value(in text: String, key: String, name: String) -> String? {
-        let wanted = "[" + key.replacingOccurrences(of: "\\\\", with: "\\").replacingOccurrences(of: "\\", with: "\\\\") + "]"
+        // The registry is case-insensitive; installers write SOFTWARE and Software alike.
+        let wanted = ("[" + key.replacingOccurrences(of: "\\\\", with: "\\").replacingOccurrences(of: "\\", with: "\\\\") + "]").lowercased()
+        let wantedValue = ("\"" + name + "\"=").lowercased()
         var inKey = false
         for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
             if line.hasPrefix("[") {
-                inKey = line.hasPrefix(wanted + " ") || line == Substring(wanted)
+                let lower = line.lowercased()
+                inKey = lower.hasPrefix(wanted + " ") || lower == wanted
                 continue
             }
-            guard inKey, line.hasPrefix("\"" + name + "\"=") else { continue }
+            guard inKey, line.lowercased().hasPrefix(wantedValue) else { continue }
             return String(line.dropFirst(name.count + 3))
         }
         return nil
