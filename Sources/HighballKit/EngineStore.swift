@@ -149,28 +149,46 @@ public struct EngineStore: Sendable {
     }
 
     /// Downloads to `downloads/<basename>` and verifies SHA-256. Reuses a cached file if it verifies.
+    ///
+    /// Resumable and retried: the bytes land in `<basename>.partial` as they arrive, a retry asks
+    /// for the rest with `Range` and `If-Range` on the ETag the first response carried, and up to
+    /// three attempts with a short backoff run before the user sees anything. The checksum at the
+    /// end stays the integrity backstop, so a bad resume can never install; a checksum failure
+    /// discards the partial so the next attempt starts clean. A 60 s no-data timeout keeps a
+    /// stalled connection from hanging forever.
     public func download(_ component: EngineManifest.Component, name: String, progress: DownloadProgress? = nil) async throws -> URL {
         try paths.ensure()
         let dest = paths.downloads.appending(path: component.url.lastPathComponent)
         if FileManager.default.fileExists(atPath: dest.path), try sha256(of: dest) == component.sha256.lowercased() {
             return dest
         }
-        // Delegate-based download: real progress every ~2 MB (the app was showing a blank sheet
-        // for the whole 270 MB), and a 60 s no-data timeout so a stalled connection fails loudly
-        // instead of hanging forever (URLSession.shared's resource timeout is 7 days).
+        let partial = dest.appendingPathExtension("partial")
+        let etagFile = dest.appendingPathExtension("etag")
         let expected = Int64(component.size ?? 0)
-        let delegate = ProgressingDownload(dest: dest) { received, total in
-            progress?(name, received, total > 0 ? total : expected)
-        }
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = 60
         cfg.timeoutIntervalForResource = 3600
-        let session = URLSession(configuration: cfg, delegate: delegate, delegateQueue: nil)
+        let session = URLSession(configuration: cfg)
         defer { session.finishTasksAndInvalidate() }
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            delegate.continuation = cont
-            session.downloadTask(with: component.url).resume()
+
+        var lastError: Error?
+        for attempt in 1...3 {
+            do {
+                try await fetch(component.url, into: partial, etagFile: etagFile, session: session) { received, total in
+                    progress?(name, received, total > 0 ? total : expected)
+                }
+                lastError = nil
+                break
+            } catch {
+                lastError = error
+                if attempt < 3 { try? await Task.sleep(for: .seconds([2, 5][attempt - 1])) }
+            }
         }
+        if let lastError { throw lastError }
+
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.moveItem(at: partial, to: dest)
+        try? FileManager.default.removeItem(at: etagFile)
         let actual = try sha256(of: dest)
         guard actual == component.sha256.lowercased() else {
             try? FileManager.default.removeItem(at: dest)
@@ -178,6 +196,46 @@ public struct EngineStore: Sendable {
         }
         progress?(name, expected > 0 ? expected : 1, expected > 0 ? expected : 1)
         return dest
+    }
+
+    /// One attempt: append to `partial` from its current size when the server honours the range,
+    /// restart from zero when it does not (or the ETag changed). Streams to disk, reporting every
+    /// ~2 MB (the app once showed a blank sheet for a whole 270 MB download).
+    func fetch(_ url: URL, into partial: URL, etagFile: URL, session: URLSession,
+               onProgress: @escaping (Int64, Int64) -> Void) async throws {
+        let fm = FileManager.default
+        let have = (try? fm.attributesOfItem(atPath: partial.path)[.size] as? Int64) ?? 0
+        let etag = try? String(contentsOf: etagFile, encoding: .utf8)
+        var request = URLRequest(url: url)
+        if let range = DownloadResume.rangeHeaders(partialBytes: have, etag: etag) {
+            for (k, v) in range { request.setValue(v, forHTTPHeaderField: k) }
+        }
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else { throw HighballError.invalid("no HTTP response for \(url.absoluteString)") }
+        let decision = DownloadResume.decide(status: http.statusCode, partialBytes: have)
+        switch decision {
+        case .failed: throw HighballError.invalid("HTTP \(http.statusCode) for \(url.absoluteString)")
+        case .restart: try? fm.removeItem(at: partial)
+        case .append: break
+        }
+        if let newTag = http.value(forHTTPHeaderField: "ETag") { try? newTag.write(to: etagFile, atomically: true, encoding: .utf8) }
+        if !fm.fileExists(atPath: partial.path) { fm.createFile(atPath: partial.path, contents: nil) }
+        let handle = try FileHandle(forWritingTo: partial)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        var written = decision == .append ? have : 0
+        let total = decision == .append ? have + http.expectedContentLength : http.expectedContentLength
+        var buffer = Data(); buffer.reserveCapacity(1 << 20)
+        var lastReported: Int64 = written
+        for try await byte in bytes {
+            buffer.append(byte)
+            if buffer.count >= 1 << 20 {
+                try handle.write(contentsOf: buffer); written += Int64(buffer.count); buffer.removeAll(keepingCapacity: true)
+                if written - lastReported >= 2_000_000 { lastReported = written; onProgress(written, total) }
+            }
+        }
+        if !buffer.isEmpty { try handle.write(contentsOf: buffer); written += Int64(buffer.count) }
+        onProgress(written, total)
     }
 
     func extract(_ archive: URL, component: EngineManifest.Component, name: String, into root: URL) throws {
@@ -320,43 +378,3 @@ public struct InstalledEngine: Sendable {
 
 /// URLSessionDownloadDelegate that streams byte progress (~every 2 MB) and moves the finished
 /// file into place before resuming its continuation. State is confined to the session's own
-/// serial delegate queue, hence @unchecked Sendable.
-final class ProgressingDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
-    private let dest: URL
-    private let onProgress: @Sendable (Int64, Int64) -> Void
-    private var lastReported: Int64 = 0
-    private var moveError: Error?
-    var continuation: CheckedContinuation<Void, Error>?
-
-    init(dest: URL, onProgress: @escaping @Sendable (Int64, Int64) -> Void) {
-        self.dest = dest
-        self.onProgress = onProgress
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
-                    didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        if totalBytesWritten - lastReported >= 2_000_000 || totalBytesWritten == totalBytesExpectedToWrite {
-            lastReported = totalBytesWritten
-            onProgress(totalBytesWritten, totalBytesExpectedToWrite)
-        }
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        if let http = downloadTask.response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            moveError = HighballError.invalid("HTTP \(http.statusCode) for \(downloadTask.originalRequest?.url?.absoluteString ?? "download")")
-            return
-        }
-        do {
-            try? FileManager.default.removeItem(at: dest)
-            try FileManager.default.moveItem(at: location, to: dest)
-        } catch { moveError = error }
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        let cont = continuation
-        continuation = nil
-        if let error { cont?.resume(throwing: error) }
-        else if let moveError { cont?.resume(throwing: moveError) }
-        else { cont?.resume() }
-    }
-}

@@ -961,6 +961,18 @@ extension RegressionTests {
         try? FileManager.default.removeItem(at: dir)
     }
 
+    // Resumable downloads: the range request and the append-or-restart decision (Phase 0.1).
+    func testDownloadResumeDecisions() {
+        XCTAssertNil(DownloadResume.rangeHeaders(partialBytes: 0, etag: "\"abc\""), "nothing on disk: plain request")
+        XCTAssertEqual(DownloadResume.rangeHeaders(partialBytes: 1234, etag: "\"abc\""), ["Range": "bytes=1234-", "If-Range": "\"abc\""])
+        XCTAssertEqual(DownloadResume.rangeHeaders(partialBytes: 1234, etag: nil), ["Range": "bytes=1234-"])
+        XCTAssertEqual(DownloadResume.decide(status: 206, partialBytes: 1234), .append)
+        XCTAssertEqual(DownloadResume.decide(status: 200, partialBytes: 1234), .restart, "the server ignored the range or the asset changed: start over")
+        XCTAssertEqual(DownloadResume.decide(status: 206, partialBytes: 0), .restart)
+        XCTAssertEqual(DownloadResume.decide(status: 404, partialBytes: 0), .failed)
+        XCTAssertEqual(DownloadResume.decide(status: 416, partialBytes: 5), .failed)
+    }
+
     func testDefaultEnginePrefersBundledManifestID() throws {
         func engine(_ id: String) throws -> InstalledEngine {
             let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#
