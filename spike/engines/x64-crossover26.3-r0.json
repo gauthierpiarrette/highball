@@ -50,11 +50,11 @@
       },
       "kind": "engine",
       "license": "LGPL-2.1+",
-      "sha256": "ebc12e2178b242ed8305ee4f9a80f7abaf72ab70746a2e54b043424e75b534ce",
-      "size": 334821086,
-      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/engine-wine-11.0-20260904T130339Z-username/engine-wine-11.0-20260904T130339Z-username.tar.gz",
-      "version": "wine-11.0 (CrossOver 26.3 tree) Highball build 2026-09-04b",
-      "note": "Built from CodeWeavers' crossover-sources-26.3.0.tar.gz (sha pinned in highball-engine/inputs.json) by highball-engine's build workflow, run 33874509599, with patches/0001-use-the-real-user-name.patch. Stripped; Wine Mono 10.4.1 and Gecko 2.47.4 included in share/wine."
+      "sha256": "68d82773096e107439b5ac22afe0f67c8c29799d4ffe2b67a54ae054d95b600f",
+      "size": 334821737,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/engine-wine-11.0-20260904T134906Z-overlays/engine-wine-11.0-20260904T134906Z-overlays.tar.gz",
+      "version": "wine-11.0 (CrossOver 26.3 tree) Highball build 2026-09-04c",
+      "note": "Built from CodeWeavers' crossover-sources-26.3.0.tar.gz (sha pinned in highball-engine/inputs.json) by highball-engine's build workflow, run 33879170889, with patches 0001 (real user name), 0002 (wined3d OpenGL first) and 0003 (WINEDLLPATH_PREPEND). Stripped; Wine Mono 10.4.1 and Gecko 2.47.4 included."
     },
     "winetricks": {
       "kind": "tool",
@@ -77,10 +77,9 @@
   },
   "minMacOS": "14.0",
   "notes": [
-    "r2 candidate (2026-09-04): Highball's own build of the CrossOver 26.3 Wine tree. Same DXMT, DXVK, MoltenVK and Template runtime as r1; only the Wine component changes.",
-    "Verified so far on an M1 Pro, macOS 26.6.2: boots a bottle through Highball in about 20 s with its services registered, passes the render smoke matrix (DXMT and DXVK on D3D11, DXVK on D3D9 async on and off, DXMT on D3D9), Rockstar's installer completes and its service runs. The Rockstar launcher itself still fails to initialize here (open).",
-    "The tree's CrossOver hack naming the Windows user \"crossover\" is reverted in the build, so bottles keep C:\\users\\<macOS user> and can move between r1 and r2 without a second profile directory.",
-    "winemac.so exports macdrv_functions, so the DXMT and D3DMetal bridges work as on r1. This engine ships no winemetal.dll of its own; the DXMT overlay carries it.",
+    "r2 candidate: Highball's own build of the CrossOver 26.3 Wine tree. Same DXMT, DXVK, MoltenVK and Template runtime as r1; only the Wine component changes.",
+    "The tree needs three patches to behave like Sikarugir's engine: the Windows user follows the macOS user (CrossOver hack 12735 reverted), WINEDLLPATH_PREPEND is honoured so the renderer overlays apply at all, and wined3d's automatic renderer is OpenGL first as upstream. Builds before 2026-09-04 build 9 lacked the last two: overlays were silently ignored and everything ran on wined3d over Vulkan, so verdicts recorded on those builds do not count.",
+    "winemac.so exports macdrv_functions, so the DXMT and D3DMetal bridges work as on r1. This engine ships no winemetal.dll of its own; the DXMT overlay carries it. Wine Mono and Gecko are included.",
     "Not the default. Offered in a bottle's Advanced settings and on the crash alert; the default stays r1 until the verified titles pass on it and opt-in use stays quiet."
   ],
   "requires": [
