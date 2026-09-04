@@ -1010,6 +1010,24 @@ extension RegressionTests {
         try? FileManager.default.removeItem(at: dir)
     }
 
+    // Failures reach the user as a sentence, a meaning and at most one button (plan §3.6).
+    func testRecoveryMapping() {
+        let mismatch = Recovery.describe(HighballError.checksumMismatch(file: "engine.tar.gz", expected: "a", actual: "b"))
+        XCTAssertEqual(mismatch.action, .retry); XCTAssertEqual(mismatch.actionTitle, "Download again")
+        XCTAssertFalse(mismatch.headline.contains("engine.tar.gz"), "no file names on the primary surface")
+        let boot = Recovery.describe(HighballError.processFailed(command: "wineboot -u", status: 1, output: "see /tmp/x.log"))
+        XCTAssertEqual(boot.action, .repairBottle)
+        XCTAssertFalse(boot.headline.contains("1") || boot.meaning.contains("/tmp"), "no exit codes or paths")
+        let installer = Recovery.describe(HighballError.processFailed(command: "VC_redist.x64.exe /install", status: 3010, output: ""))
+        XCTAssertEqual(installer.action, .retry); XCTAssertTrue(installer.headline.hasPrefix("VC_redist.x64.exe"))
+        let wow = Recovery.describe(HighballError.invalid("Windows 32-bit support couldn't be set up in this bottle"))
+        XCTAssertEqual(wow.action, .repairBottle)
+        let net = Recovery.describe(URLError(.timedOut))
+        XCTAssertEqual(net.action, .retry); XCTAssertFalse(net.headline.lowercased().contains("connection dropped"), "a timeout is not a diagnosed cause")
+        let plain = Recovery.describe(HighballError.failed("Steam is already running."))
+        XCTAssertEqual(plain.headline, "Steam is already running."); XCTAssertNil(plain.actionTitle)
+    }
+
     func testDefaultEnginePrefersBundledManifestID() throws {
         func engine(_ id: String) throws -> InstalledEngine {
             let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#

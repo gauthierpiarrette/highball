@@ -292,18 +292,37 @@ struct ContentView: View {
         // A partial delete succeeded — the bottle is gone and the name is free — so framing it as
         // a failure, with an invitation to file a bug, misreads what happened. Same alert, honest
         // title, and no Report button for something that is not a problem to report.
-        .alert(state.errorIsPartialSuccess ? L("Some files couldn't be removed") : L("Something went wrong"),
+        .alert(state.errorIsPartialSuccess ? L("Some files couldn't be removed") : (state.errorRecovery.map { L($0.headline) } ?? L("Something went wrong")),
                isPresented: .init(
             get: { state.errorMessage != nil },
             set: { if !$0 { state.errorMessage = nil } })) {
-            Button("OK") { state.errorMessage = nil }
+            // One button that does the next thing, when the failure has one (UX plan §3.6).
+            if let r = state.errorRecovery, let title = r.actionTitle, !state.errorIsPartialSuccess {
+                Button(L(title)) {
+                    let retry = state.errorRetry, bottle = state.errorBottle
+                    state.errorMessage = nil
+                    switch r.action {
+                    case .retry: retry?()
+                    case .repairBottle: if let bottle { state.repairBottle(bottle) } else { retry?() }
+                    case .none: break
+                    }
+                }
+            }
+            Button(L("Details…")) { state.showErrorDetails = true; state.errorMessage = nil }
             if !state.errorIsPartialSuccess {
                 Button(L("Report this problem…")) {
                     state.errorMessage = nil
                     NSWorkspace.shared.open(BugReport.url(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"))
                 }
             }
-        } message: { Text(state.errorMessage ?? "") }
+            Button("OK", role: .cancel) { state.errorMessage = nil }
+        } message: {
+            // The meaning, in words; exit codes, paths and raw output live behind Details.
+            Text(state.errorIsPartialSuccess ? (state.errorMessage ?? "") : (state.errorRecovery?.meaning ?? ""))
+        }
+        .sheet(isPresented: Binding(get: { state.showErrorDetails }, set: { state.showErrorDetails = $0 })) {
+            ErrorDetailsSheet(text: state.errorDetailsText)
+        }
         .alert(crashTitle, isPresented: Binding(get: { state.crashSuggestion != nil }, set: { if !$0 { state.crashSuggestion = nil } }),
                presenting: state.crashSuggestion) { s in
             Button("Use \(s.renderer.rawValue.uppercased())") {
@@ -433,5 +452,27 @@ struct LogSheet: View {
             .frame(width: 620)
         }
         .padding(16)
+    }
+}
+
+/// The raw description of a failure: what a report needs, kept off the primary surface.
+struct ErrorDetailsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let text: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L("Details")).font(.title3.bold())
+            ScrollView {
+                Text(verbatim: text).font(.body.monospaced()).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack {
+                Button(L("Copy")) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
+                Spacer()
+                Button(L("Done")) { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 520, minHeight: 320)
     }
 }

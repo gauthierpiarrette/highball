@@ -61,6 +61,26 @@ final class AppState {
     }
 
     var errorMessage: String?
+    /// The recovery the error alert shows (headline, meaning, one button) and what its button
+    /// runs. Set together with errorMessage, which keeps the raw text for the details view.
+    var errorRecovery: Recovery?
+    var errorRetry: (() -> Void)?
+    var errorBottle: Bottle?
+    var showErrorDetails = false
+
+    /// The one place failures are put in front of the user: the recovery sentences on the alert,
+    /// the raw description behind Details, and the retry the button runs when the recovery
+    /// says so. `bottle` lets a Repair recovery know what to repair.
+    func fail(_ error: Error, retry: (() -> Void)? = nil, bottle: Bottle? = nil) {
+        errorIsPartialSuccess = false
+        errorRecovery = Recovery.describe(error)
+        errorRetry = retry
+        errorBottle = bottle
+        errorMessage = Self.message(for: error)
+        errorDetailsText = errorMessage ?? ""
+    }
+    /// The raw description of the last failure, for the Details sheet.
+    var errorDetailsText = ""
     /// True when errorMessage describes an operation that SUCCEEDED with something left over,
     /// so the alert can say so instead of calling it a failure.
     var errorIsPartialSuccess = false
@@ -191,7 +211,7 @@ final class AppState {
         panel.message = String(format: L("Choose a cover image for %@"), item.title)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try coverStore.setCover(for: item.id, from: url); coverVersion += 1 }
-        catch { errorIsPartialSuccess = false; errorMessage = Self.message(for: error) }
+        catch { fail(error) }
     }
 
     func resetCover(for item: LibraryItem) {
@@ -413,7 +433,12 @@ final class AppState {
             do {
                 try await work()
                 doneState = done ?? DoneState(title: L("Done"), ctaTitle: nil, cta: nil)
-            } catch { showLog = false; errorIsPartialSuccess = false; errorMessage = Self.message(for: error) }
+            } catch {
+                showLog = false
+                // A retry is the same operation with the same closure; the sheet's own state
+                // resets when runBusy starts again.
+                fail(error, retry: { [weak self] in self?.runBusy(title, expected: expected, showLogSheet: showLogSheet, done: done, cleanup: cleanup, work) })
+            }
             cleanup?()
             busy = false
             refresh()
@@ -450,7 +475,7 @@ final class AppState {
 
     func acceptGPTK(engine: InstalledEngine) {
         do { _ = try engineStore.accept(license: "apple-gptk-license-2023-08-17", engine: engine); refresh() }
-        catch { errorIsPartialSuccess = false; errorMessage = Self.message(for: error) }
+        catch { fail(error) }
     }
 
     func createBottle(name: String, recipeID: String?) {
@@ -549,7 +574,7 @@ final class AppState {
     }
 
     func update(_ bottle: Bottle) {
-        do { try bottleStore.update(bottle); refresh() } catch { errorIsPartialSuccess = false; errorMessage = Self.message(for: error) }
+        do { try bottleStore.update(bottle); refresh() } catch { fail(error, bottle: bottle) }
     }
 
     func deleteBottle(_ name: String) {
