@@ -7,12 +7,38 @@ struct SettingsView: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        TabView {
-            EnvironmentsPane().tabItem { Label(L("Environments"), systemImage: "cylinder.split.1x2") }
-            EnginePane().tabItem { Label(L("Engine"), systemImage: "gearshape.2") }
-            TroubleshootingPane().tabItem { Label(L("Troubleshooting"), systemImage: "wrench.and.screwdriver") }
+        @Bindable var state = state
+        VStack(spacing: 0) {
+            TabView {
+                EnvironmentsPane().tabItem { Label(L("Environments"), systemImage: "cylinder.split.1x2") }
+                EnginePane().tabItem { Label(L("Engine"), systemImage: "gearshape.2") }
+                TroubleshootingPane().tabItem { Label(L("Troubleshooting"), systemImage: "wrench.and.screwdriver") }
+            }
+            // The strip lives on the main window; a compact echo here so a repair or a new
+            // environment started from Settings is not silent (review #14).
+            if state.busy {
+                Divider()
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text(state.busyTitle).font(.callout).lineLimit(1)
+                    if !state.stage.isEmpty { Text(state.stage).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    Spacer()
+                    if let stop = state.busyStop { Button(stop.label) { state.stopBusy() }.controlSize(.small) }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 8)
+            } else if let done = state.doneState {
+                Divider()
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(HB.good)
+                    Text(done.title).font(.callout).lineLimit(1)
+                    Spacer()
+                    Button(L("Dismiss")) { state.doneState = nil }.controlSize(.small)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 8)
+            }
         }
-        .frame(minWidth: 760, minHeight: 520)
+        .frame(minWidth: 820, minHeight: 560)
+        .sheet(isPresented: $state.showGPTKLicense) { GPTKLicenseSheet() }
     }
 }
 
@@ -73,7 +99,7 @@ struct EnvironmentsPane: View {
                     BottleView(bottle: bottle)
                         .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("Done")) { openName = nil } } }
                 }
-                .frame(minWidth: 820, minHeight: 620)
+                .frame(minWidth: 780, minHeight: 560)
             }
         }
         .sheet(isPresented: $showCreate) { CreateBottleSheet() }

@@ -129,7 +129,7 @@ struct LibraryView: View {
             HStack(alignment: .top, spacing: 14) {
                 sourceCard(symbol: "gamecontroller.fill", accent: true, title: L("Steam"),
                            text: L("Install Steam and sign in. Your Steam library shows up here. Its first start takes 15 to 25 minutes."),
-                           button: L("Install Steam")) { state.installSteam() }
+                           button: state.defaultBottle.map(state.steamInstalled) == true ? L("Open Steam") : L("Install Steam")) { state.installSteam() }
                 sourceCard(symbol: "bag.fill", accent: false, title: L("Epic Games"),
                            text: L("Connect your Epic account. Your games install straight into Highball."),
                            button: L("Connect Epic")) { state.showEpicSignIn = true }

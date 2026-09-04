@@ -53,7 +53,7 @@ struct BottleView: View {
                 launchersSection
                 if !customPins.isEmpty { programsSection }
                 HStack(spacing: 6) {
-                    Button { state.chooseProgramToRun() } label: {
+                    Button { state.chooseProgramToRun(in: bottle.name) } label: {
                         Label(L("Run a Windows program…"), systemImage: "folder")
                     }.buttonStyle(.link)
                     Text(L("— or drop any .exe or .msi on this window")).font(.caption).foregroundStyle(.secondary)
@@ -303,6 +303,7 @@ struct BottleSettingsSheet: View {
                                 .font(.caption).foregroundStyle(.secondary)
                             Button(L("Review license…")) {
                                 Task { @MainActor in
+                                    state.licenseEngine = engine
                                     state.loadGPTKLicense()
                                     state.showGPTKLicense = true
                                 }

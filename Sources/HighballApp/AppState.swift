@@ -268,12 +268,12 @@ final class AppState {
     /// The environment a dropped program runs in: the page it was dropped on, else the default.
     var pendingRunBottle: String?
 
-    func chooseProgramToRun() {
+    func chooseProgramToRun(in bottle: String? = nil) {
         let panel = NSOpenPanel()
         panel.title = L("Choose a Windows program")
         panel.allowedContentTypes = [.exe, .msi, .bat].compactMap { $0 }
         panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url { pendingRun = url }
+        if panel.runModal() == .OK, let url = panel.url { pendingRunBottle = bottle; pendingRun = url }
     }
 
     let paths = HighballPaths()
@@ -626,7 +626,9 @@ final class AppState {
 
     /// The environment new games go into: the one named Games, else the first.
     var defaultBottle: Bottle? {
-        bottles.first { $0.name == Self.defaultEnvironmentName } ?? bottles.first
+        bottles.first { $0.name == Self.defaultEnvironmentName }
+            ?? bottles.first { steamInstalled(in: $0) }
+            ?? bottles.first
     }
 
     /// Makes the default environment for a Mac that has the engine but no bottle yet.
