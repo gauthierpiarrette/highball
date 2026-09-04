@@ -57,11 +57,13 @@ public struct EngineStore: Sendable {
             ?? installed.max { $0.id.compare($1.id, options: .numeric) == .orderedAscending }
     }
 
-    /// Engines nothing references any more: not the default and not the engine of any bottle.
+    /// Engines nothing references any more: not the default, not the engine of any bottle, and
+    /// not one the app still offers (`keep`: the bundled manifests, so an engine someone
+    /// downloaded for rollback survives the next update even with no bottle on it right now).
     /// An engine update never removes an engine a bottle still runs on; a bottle keeps its
     /// engine until its owner switches it (per-bottle choice, not migration).
-    public static func unreferencedEngines(installed: [InstalledEngine], referencedIDs: Set<String>, defaultID: String?) -> [InstalledEngine] {
-        installed.filter { $0.id != defaultID && !referencedIDs.contains($0.id) }
+    public static func unreferencedEngines(installed: [InstalledEngine], referencedIDs: Set<String>, defaultID: String?, keep: Set<String> = []) -> [InstalledEngine] {
+        installed.filter { $0.id != defaultID && !referencedIDs.contains($0.id) && !keep.contains($0.id) }
     }
 
     /// The engine to offer when a program fails on `currentID`: the default engine when the
@@ -75,20 +77,24 @@ public struct EngineStore: Sendable {
 
     /// One row per engine the app can put a bottle on: every installed engine, then every
     /// bundled manifest that is not installed yet (it downloads when chosen). Newest first
-    /// within each group, by numeric-aware id order.
+    /// within each group, by numeric-aware id order. When the bottle's own engine is in
+    /// neither list (its directory is gone), it is appended as a `missing` row so the picker
+    /// still shows what the bottle is on instead of a blank selection.
     public struct OfferedEngine: Equatable, Sendable {
         public let id: String
-        public let displayName: String
         public let installed: Bool
-        public init(id: String, displayName: String, installed: Bool) { self.id = id; self.displayName = displayName; self.installed = installed }
+        public let missing: Bool
+        public init(id: String, installed: Bool, missing: Bool = false) { self.id = id; self.installed = installed; self.missing = missing }
     }
-    public static func offeredEngines(installed: [InstalledEngine], known: [EngineManifest]) -> [OfferedEngine] {
+    public static func offeredEngines(installed: [InstalledEngine], known: [EngineManifest], current: String? = nil) -> [OfferedEngine] {
         let newestFirst: (String, String) -> Bool = { $0.compare($1, options: .numeric) == .orderedDescending }
-        let have = installed.sorted { newestFirst($0.id, $1.id) }.map { OfferedEngine(id: $0.id, displayName: $0.displayName, installed: true) }
+        let have = installed.sorted { newestFirst($0.id, $1.id) }.map { OfferedEngine(id: $0.id, installed: true) }
         let ids = Set(have.map(\.id))
         let more = known.filter { !ids.contains($0.id) }.sorted { newestFirst($0.id, $1.id) }
-            .map { OfferedEngine(id: $0.id, displayName: $0.displayName, installed: false) }
-        return have + more
+            .map { OfferedEngine(id: $0.id, installed: false) }
+        var rows = have + more
+        if let current, !rows.contains(where: { $0.id == current }) { rows.append(OfferedEngine(id: current, installed: false, missing: true)) }
+        return rows
     }
 
     public func engine(_ id: String) throws -> InstalledEngine {

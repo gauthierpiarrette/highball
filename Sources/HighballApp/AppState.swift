@@ -44,8 +44,7 @@ final class AppState {
 
     // Crash follow-up
     var crashSuggestion: CrashSuggestion?
-    struct CrashSuggestion: Identifiable {
-        let id = UUID()
+    struct CrashSuggestion {
         let program: String
         /// The bottle that was actually launched. The alert used to edit `selectedBottle`, which
         /// `launchGame` never sets — so accepting could rewrite an unrelated bottle, or none.
@@ -257,8 +256,9 @@ final class AppState {
     }
 
     /// The engine new bottles get and the sidebar shows: the one the bundled manifest names when
-    /// it is installed, else the first installed. Without this, an engine update would leave
-    /// two engines side by side and `engines.first` (alphabetical) would keep picking the old one.
+    /// it is installed, else the newest installed (numeric-aware id order). Without this, an
+    /// engine update would leave two engines side by side and `engines.first` would keep
+    /// picking the old one.
     var defaultEngine: InstalledEngine? {
         EngineStore.defaultEngine(installed: engines, bundledID: Self.bundledManifestID)
     }
@@ -315,7 +315,8 @@ final class AppState {
             }
             let referenced = Set(try bottleStore.list().map(\.settings.engineID))
             let installed = try engineStore.installedEngines()
-            for stale in EngineStore.unreferencedEngines(installed: installed, referencedIDs: referenced, defaultID: fresh.id) {
+            let offered = Set(Self.knownManifests.map(\.id))
+            for stale in EngineStore.unreferencedEngines(installed: installed, referencedIDs: referenced, defaultID: fresh.id, keep: offered) {
                 try? FileManager.default.removeItem(at: stale.root)
                 await MainActor.run { self.appendLog("old engine \(stale.id) removed (no bottle uses it)") }
             }
@@ -329,32 +330,38 @@ final class AppState {
     /// first boot only when the Wine build differs (the same rule as an engine update), then the
     /// per-bottle setup that boot resets. Switching back is the same call the other way.
     func moveBottle(_ bottle: Bottle, to target: InstalledEngine) {
-        guard bottle.settings.engineID != target.id, let current = engine(for: bottle) else { return }
+        guard bottle.settings.engineID != target.id, !busy else { return }
         let title = String(format: L("Moving '%@' to %@"), bottle.name, target.id)
         runBusy(title, expected: L("a minute or two when the Windows setup re-runs"),
                 done: DoneState(title: L("Engine switched"), ctaTitle: nil, cta: nil)) { [self] in
-            var bottle = bottle
-            let runnerOld = WineRunner(paths: paths, engine: current, bottle: bottle)
+            try await performMove(bottle, to: target)
+        }
+    }
+
+    /// The move itself, shared by the two entry points and run inside their single busy sheet.
+    /// The bottle is re-read from disk right before the write: the caller's copy may be minutes
+    /// old (an engine download ran in between) and saving it would revert edits made meanwhile.
+    /// The source engine is resolved strictly: when its directory is gone, nothing is known
+    /// about the Wine that built the prefix, so the prefix is refreshed.
+    private func performMove(_ stale: Bottle, to target: InstalledEngine) async throws {
+        guard var bottle = try? bottleStore.get(stale.name) else { throw HighballError.invalid("bottle '\(stale.name)' no longer exists") }
+        guard bottle.settings.engineID != target.id else { return }
+        let source = try? engineStore.engine(bottle.settings.engineID)
+        if let source {
+            let runnerOld = WineRunner(paths: paths, engine: source, bottle: bottle)
             try? runnerOld.kill()
             try? await Task.sleep(for: .seconds(2))
-            bottle.settings.engineID = target.id
-            try bottle.save()
-            guard EngineManifest.needsPrefixRefresh(from: current.manifest, to: target.manifest) else {
-                await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(target.id) (same Wine, no prefix refresh needed)") }
-                return
-            }
-            await MainActor.run { self.stage = String(format: L("Refreshing bottle '%@'"), bottle.name) }
-            let runner = WineRunner(paths: paths, engine: target, bottle: bottle)
-            let r = try await runner.wineboot()
-            guard r.exitStatus == 0 else {
-                throw HighballError.processFailed(command: "wineboot -u", status: r.exitStatus, output: "see \(r.log.path)")
-            }
-            try await BottleStore.ensureWoW64(runner: runner, bottle: bottle, log: r.log)
-            try? await runner.setGpuIdentity()
-            try? await runner.setServiceTimeout()
-            try? await runner.setKeyboardMapping(commandIsControl: bottle.settings.commandIsControl)
-            await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(target.id)") }
         }
+        bottle.settings.engineID = target.id
+        try bottle.save()
+        guard EngineManifest.needsPrefixRefresh(from: source?.manifest, to: target.manifest) else {
+            await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(target.id) (same Wine, no prefix refresh needed)") }
+            return
+        }
+        await MainActor.run { self.stage = String(format: L("Refreshing bottle '%@'"), bottle.name) }
+        let runner = WineRunner(paths: paths, engine: target, bottle: bottle)
+        try await BottleStore.refreshPrefix(runner: runner, bottle: bottle)
+        await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(target.id)") }
     }
 
     /// What to put in front of the user when something throws. Interpolating an NSError dumps
@@ -387,6 +394,9 @@ final class AppState {
     private func runBusy(_ title: String, expected: String? = nil, showLogSheet: Bool = true,
                          done: DoneState? = nil, cleanup: (() -> Void)? = nil,
                          _ work: @escaping () async throws -> Void) {
+        // One busy operation at a time: a second call would reset the sheet's state under the
+        // first and end it early when the second finishes (found in review, 2026-09-04).
+        guard !busy else { return }
         busy = true; busyTitle = title; stage = ""; stageHint = ""; logLines = []; showLog = showLogSheet
         busyStartedAt = Date(); busyExpected = expected; lastOutputAt = nil; doneState = nil
         Task {
@@ -672,15 +682,9 @@ final class AppState {
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             try? runner.kill()
             try? await Task.sleep(for: .seconds(2))
-            let r = try await runner.wineboot()
-            guard r.exitStatus == 0 else {
-                throw HighballError.processFailed(command: "wineboot -u", status: r.exitStatus, output: "see \(r.log.path)")
-            }
-            // Repair is the escape hatch for a bottle whose 32-bit half never got built (#37).
-            try await BottleStore.ensureWoW64(runner: runner, bottle: bottle, log: r.log)
-            try? await runner.setGpuIdentity()
-            try? await runner.setServiceTimeout()
-            try? await runner.setKeyboardMapping(commandIsControl: bottle.settings.commandIsControl)
+            // Repair is the escape hatch for a bottle whose 32-bit half never got built (#37);
+            // refreshPrefix carries that check.
+            try await BottleStore.refreshPrefix(runner: runner, bottle: bottle)
             await MainActor.run { self.appendLog("bottle repaired — Windows environment refreshed") }
         }
     }
@@ -836,19 +840,20 @@ final class AppState {
     }
 
     /// What the bottle's Engine picker lists: installed engines, then known ones to download.
-    var offeredEngines: [EngineStore.OfferedEngine] {
-        EngineStore.offeredEngines(installed: engines, known: Self.knownManifests)
+    func offeredEngines(for bottle: Bottle) -> [EngineStore.OfferedEngine] {
+        EngineStore.offeredEngines(installed: engines, known: Self.knownManifests, current: bottle.settings.engineID)
     }
 
     /// Moves a bottle to an engine by id, installing it first when it is only known from a
     /// bundled manifest. Licenses accepted on any installed engine carry over.
     func moveBottle(_ bottle: Bottle, toEngineID id: String) {
+        guard !busy else { return }
         if let installed = engines.first(where: { $0.id == id }) { moveBottle(bottle, to: installed); return }
         guard let manifest = Self.knownManifests.first(where: { $0.id == id }) else { return }
         let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
         let title = String(format: L("Downloading engine %@"), manifest.id)
         runBusy(title, expected: L("usually a few minutes"),
-                done: DoneState(title: L("Engine installed"), ctaTitle: nil, cta: nil)) { [self] in
+                done: DoneState(title: L("Engine switched"), ctaTitle: nil, cta: nil)) { [self] in
             let fresh = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
                 Task { @MainActor in
                     let mb = { (b: Int64) in String(format: "%.0f", Double(b) / 1_048_576) }
@@ -856,11 +861,8 @@ final class AppState {
                     else { self.stage = "Downloading \(name) — \(mb(received)) MB" }
                 }
             }
-            await MainActor.run {
-                self.appendLog("engine \(fresh.id) installed")
-                self.refresh()
-                self.moveBottle(bottle, to: fresh)
-            }
+            await MainActor.run { self.appendLog("engine \(fresh.id) installed"); self.refresh() }
+            try await performMove(bottle, to: fresh)
         }
     }
 

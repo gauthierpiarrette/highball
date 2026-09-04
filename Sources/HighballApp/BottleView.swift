@@ -372,17 +372,21 @@ struct BottleSettingsSheet: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section(L("Advanced")) {
-                    let offered = state.offeredEngines
+                    let offered = state.offeredEngines(for: state.bottles.first { $0.name == bottle.name } ?? bottle)
                     if offered.count > 1 {
                         Picker(L("Engine"), selection: Binding(
                             get: { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.engineID },
                             set: { newID in
-                                state.moveBottle(state.bottles.first { $0.name == bottle.name } ?? bottle, toEngineID: newID)
+                                let current = state.bottles.first { $0.name == bottle.name } ?? bottle
+                                guard newID != current.settings.engineID else { return }
+                                dismiss()   // the move runs in the busy sheet; two sheets on one window do not stack
+                                state.moveBottle(current, toEngineID: newID)
                             })) {
                             ForEach(offered, id: \.id) { e in
-                                Text(verbatim: e.installed ? e.id : "\(e.id) (\(L("download")))").tag(e.id)
+                                Text(verbatim: e.missing ? "\(e.id) (\(L("missing")))" : e.installed ? e.id : "\(e.id) (\(L("download")))").tag(e.id)
                             }
                         }
+                        .disabled(state.busy)
                         Text(L("Bottles never change engine on their own. Switching re-runs the Windows setup when the Wine build differs; switching back is the same step. An engine marked download is fetched first."))
                             .font(.caption).foregroundStyle(.secondary)
                     }

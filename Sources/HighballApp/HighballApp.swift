@@ -236,7 +236,7 @@ struct ContentView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .disabled(state.busy)
-                                    .help(L("Installs the newer engine this version of Highball ships, moves every bottle to it and refreshes their Windows environment. Only changed components are downloaded."))
+                                    .help(L("Installs the newer engine this version of Highball ships. Bottles on the same Wine build move to it; the others stay on their engine until you switch them in the bottle's settings. Only changed components are downloaded."))
                                 }
                             }
                         }

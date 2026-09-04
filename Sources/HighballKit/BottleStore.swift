@@ -91,6 +91,21 @@ public struct BottleStore: Sendable {
         return bottle
     }
 
+    /// Re-runs the Windows first boot on an existing bottle and the per-bottle setup that boot
+    /// resets: the 32-bit half check (#37), the GPU identity, the service timeout and the
+    /// keyboard mapping. Repair, an engine switch and the CLI's repair all go through here;
+    /// bottle creation keeps its own sequence because it also discards a half-built bottle.
+    public static func refreshPrefix(runner: WineRunner, bottle: Bottle) async throws {
+        let r = try await runner.wineboot()
+        guard r.exitStatus == 0 else {
+            throw HighballError.processFailed(command: "wineboot -u", status: r.exitStatus, output: "see \(r.log.path)")
+        }
+        try await ensureWoW64(runner: runner, bottle: bottle, log: r.log)
+        try? await runner.setGpuIdentity()
+        try? await runner.setServiceTimeout()
+        try? await runner.setKeyboardMapping(commandIsControl: bottle.settings.commandIsControl)
+    }
+
     /// The 32-bit half of a prefix, and whether it is actually there.
     ///
     /// Wine populates `syswow64` by launching a 32-bit rundll32 for the inf's Wow64Install

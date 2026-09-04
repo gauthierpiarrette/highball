@@ -77,6 +77,13 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
         return a != b
     }
 
+    /// Same rule when the bottle's current engine cannot be resolved (its directory is gone):
+    /// nothing is known about the Wine that built the prefix, so it is refreshed.
+    public static func needsPrefixRefresh(from old: EngineManifest?, to new: EngineManifest) -> Bool {
+        guard let old else { return true }
+        return needsPrefixRefresh(from: old, to: new)
+    }
+
     public var orderedComponents: [(name: String, component: Component)] {
         components.sorted { a, b in
             if a.value.isOptional != b.value.isOptional { return !a.value.isOptional }

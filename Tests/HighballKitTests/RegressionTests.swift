@@ -858,6 +858,8 @@ extension RegressionTests {
                        "every old engine still has a bottle: nothing is removed")
         XCTAssertEqual(EngineStore.unreferencedEngines(installed: all, referencedIDs: [], defaultID: r2.id).map(\.id), [r0.id, r1.id])
         XCTAssertEqual(EngineStore.unreferencedEngines(installed: all, referencedIDs: [], defaultID: nil).map(\.id), all.map(\.id))
+        XCTAssertEqual(EngineStore.unreferencedEngines(installed: all, referencedIDs: [], defaultID: r2.id, keep: [r1.id]).map(\.id), [r0.id],
+                       "an engine the app still offers (bundled manifest) is kept for rollback even with no bottle on it")
     }
 
     // The crash alert's second way out: the default engine when the bottle is not on it, else the
@@ -872,6 +874,9 @@ extension RegressionTests {
         XCTAssertEqual(EngineStore.alternateEngine(for: r1.id, installed: [r1, r2], defaultID: r2.id)?.id, r2.id, "old bottle: offer the default")
         XCTAssertEqual(EngineStore.alternateEngine(for: r2.id, installed: [r1, r2], defaultID: r2.id)?.id, r1.id, "on the default: offer the previous engine")
         XCTAssertNil(EngineStore.alternateEngine(for: r1.id, installed: [r1], defaultID: r1.id), "single engine: nothing to offer")
+        let r9 = try engine("x64-sikarugir10.0_6-r9"), r10 = try engine("x64-sikarugir10.0_6-r10")
+        XCTAssertEqual(EngineStore.alternateEngine(for: r2.id, installed: [r9, r2, r10], defaultID: r2.id)?.id, r10.id,
+                       "on the default with two others: the newest by numeric order, r10 over r9")
     }
 
     // The Engine picker lists installed engines first, then known manifests to download, newest first.
@@ -887,6 +892,10 @@ extension RegressionTests {
         XCTAssertEqual(offered.map(\.id), ["x64-a-r1", "x64-a-r0", "x64-a-r10", "x64-a-r2"])
         XCTAssertEqual(offered.map(\.installed), [true, true, false, false])
         XCTAssertEqual(EngineStore.offeredEngines(installed: [r1], known: [try manifest("x64-a-r1")]).count, 1, "the installed default is not listed twice")
+        let withMissing = EngineStore.offeredEngines(installed: [r1], known: [], current: "x64-gone-r0")
+        XCTAssertEqual(withMissing.map(\.id), ["x64-a-r1", "x64-gone-r0"], "a bottle on an engine that is gone still sees its own row")
+        XCTAssertEqual(withMissing.last?.missing, true)
+        XCTAssertEqual(EngineStore.offeredEngines(installed: [r1], known: [], current: r1.id).count, 1, "current engine present: no extra row")
     }
 
     func testDefaultEnginePrefersBundledManifestID() throws {
@@ -918,6 +927,8 @@ extension RegressionTests {
         XCTAssertFalse(EngineManifest.needsPrefixRefresh(from: r0, to: r1), "same Wine: no wineboot")
         XCTAssertTrue(EngineManifest.needsPrefixRefresh(from: r0, to: r2), "Wine changed: wineboot")
         XCTAssertTrue(EngineManifest.needsPrefixRefresh(from: try manifest(nil, id: "x"), to: r1), "unknown: be safe, boot")
+        XCTAssertTrue(EngineManifest.needsPrefixRefresh(from: nil, to: r1), "source engine gone: boot")
+        XCTAssertFalse(EngineManifest.needsPrefixRefresh(from: Optional(r0), to: r1), "the optional overload keeps the same-Wine rule")
     }
 
     // A Play that auto-applies a recipe with environment or renderer steps must restart the

@@ -11,7 +11,8 @@ enum L10n {
     static let fr: [String: String] = [
         // Sidebar & shell
         "Update engine": "Mettre à jour le moteur",
-        "Installs the newer engine this version of Highball ships, moves every bottle to it and refreshes their Windows environment. Only changed components are downloaded.": "Installe le moteur plus récent livré avec cette version de Highball, y déplace chaque bouteille et rafraîchit leur environnement Windows. Seuls les composants modifiés sont téléchargés.",
+        "Installs the newer engine this version of Highball ships. Bottles on the same Wine build move to it; the others stay on their engine until you switch them in the bottle's settings. Only changed components are downloaded.": "Installe le moteur plus récent livré avec cette version de Highball. Les bouteilles sur la même version de Wine y passent ; les autres gardent leur moteur jusqu'à ce que vous le changiez dans les réglages de la bouteille. Seuls les composants modifiés sont téléchargés.",
+        "missing": "absent",
         "Updating engine to %@": "Mise à jour du moteur vers %@",
         "usually a few minutes": "généralement quelques minutes",
         "Engine updated": "Moteur mis à jour",
@@ -177,6 +178,13 @@ enum L10n {
         "Details": "Détails",
         "Run and add to Programs": "Lancer et ajouter aux programmes",
         "Keep current": "Garder l’actuel",
+        "download": "téléchargement",
+        "Try engine %@": "Essayer le moteur %@",
+        "Moving '%@' to %@": "Déplacement de '%@' vers %@",
+        "a minute or two when the Windows setup re-runs": "une minute ou deux si la configuration Windows est relancée",
+        "Engine switched": "Moteur changé",
+        "Downloading engine %@": "Téléchargement du moteur %@",
+        "Bottles never change engine on their own. Switching re-runs the Windows setup when the Wine build differs; switching back is the same step. An engine marked download is fetched first.": "Une bouteille ne change jamais de moteur toute seule. Changer relance la configuration Windows si la version de Wine diffère ; revenir en arrière est la même étape. Un moteur marqué téléchargement est d'abord récupéré.",
         "Accept & enable D3DMetal": "Accepter et activer D3DMetal",
         "Non-commercial use only · no modification · Apple hardware only":
             "Usage non commercial uniquement · aucune modification · matériel Apple uniquement",
