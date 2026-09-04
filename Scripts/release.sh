@@ -43,6 +43,22 @@ then
   sleep 5
 fi
 
+# Game regressions (a launcher going silent, a map load freezing) ship via engine, app and OS
+# changes alike, so a release wants a recent Scripts/game-smoke.sh result: every verified title
+# installed here launched, showed its window and kept drawing. Same rule: warn, don't block.
+if ! python3 - <<'PY'
+import json, sys, time
+d = json.load(open("private/game-smoke/latest.json"))
+sys.exit(0 if d.get("passed") and time.time() - d.get("epoch", 0) < 14*86400 else 1)
+PY
+then
+  echo "" >&2
+  echo "WARNING: no passing game-smoke result from the last 14 days." >&2
+  echo "         Run Scripts/game-smoke.sh: a verified game going silent ships unnoticed without it." >&2
+  echo "         Continuing in 5s…" >&2
+  sleep 5
+fi
+
 Scripts/make-app.sh release "$VERSION"
 ZIP="dist/Highball-$VERSION.zip"
 ditto -c -k --keepParent dist/Highball.app "$ZIP"

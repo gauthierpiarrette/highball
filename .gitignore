@@ -11,3 +11,4 @@ private/
 *.o
 *.d
 *.swiftdeps
+Scripts/winlist
