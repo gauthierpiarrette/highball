@@ -86,8 +86,20 @@ public struct GameDBEntry: Codable, Sendable {
     /// must not change behaviour for users where the game already works (14.x fullscreen is
     /// fine); nil means the args apply everywhere.
     public var launchArgsMinMacOS: String?
+    /// `renderer` applies at or above this macOS version ("15.0"); below it `rendererBelow`
+    /// applies instead (nil there means the bottle's own setting). DXMT wants macOS 15 or newer
+    /// and paints nothing on 14, so a verdict taken on a newer OS must not send an older Mac to
+    /// a black screen. Data, not code: the row decides.
+    public var rendererMinMacOS: String?
+    public var rendererBelow: Renderer?
 
     public var isBlocked: Bool { status == "blocked-anticheat" }
+
+    /// The renderer the row recommends on the given OS version, nil for "the bottle's own".
+    public func effectiveRenderer(osMajor: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion) -> Renderer? {
+        guard let gate = rendererMinMacOS, let want = Int(gate.split(separator: ".").first ?? "") else { return renderer }
+        return osMajor >= want ? renderer : rendererBelow
+    }
 
     /// The launch args that apply on the given OS version. Pure for testability.
     public func effectiveLaunchArgs(osMajor: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion) -> [String] {

@@ -854,7 +854,7 @@ final class AppState {
         }
         let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
         let entry = gameDB[game.appid]
-        let renderer = entry?.renderer
+        let renderer = entry?.effectiveRenderer()
         // Per-game launch args ride the db (e.g. windowed for legacy CS:GO on macOS 26, #21).
         let extraArgs = entry?.effectiveLaunchArgs() ?? []
         let markers = SessionWatch.markers(installdir: game.installdir)

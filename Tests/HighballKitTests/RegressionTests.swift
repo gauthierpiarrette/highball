@@ -1352,4 +1352,17 @@ extension RegressionTests {
             from: Data(#"{"name":"o","engineID":"e"}"#.utf8))
         XCTAssertEqual(decoded?.rendererExplicit, false)
     }
+
+    func testRendererGateByMacOSVersion() throws {
+        var e = try JSONDecoder().decode(GameDBEntry.self, from: Data("""
+        {"id":"x","title":"X","steam_appid":1,"status":"verified-local","renderer":"dxmt","rendererMinMacOS":"15.0","rendererBelow":"dxvk"}
+        """.utf8))
+        XCTAssertEqual(e.effectiveRenderer(osMajor: 26), .dxmt)
+        XCTAssertEqual(e.effectiveRenderer(osMajor: 15), .dxmt)
+        XCTAssertEqual(e.effectiveRenderer(osMajor: 14), .dxvk)
+        e.rendererBelow = nil
+        XCTAssertNil(e.effectiveRenderer(osMajor: 14), "no fallback named: the bottle's own setting")
+        e.rendererMinMacOS = nil
+        XCTAssertEqual(e.effectiveRenderer(osMajor: 14), .dxmt, "no gate: the renderer applies everywhere")
+    }
 }

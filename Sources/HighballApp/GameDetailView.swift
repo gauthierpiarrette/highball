@@ -32,7 +32,7 @@ struct GameDetailView: View {
                             .overlay(Capsule().stroke(color.opacity(0.8), lineWidth: 1))
                             .foregroundStyle(color)
                     }
-                    if let r = entry?.renderer {
+                    if let r = entry?.effectiveRenderer() {
                         Text(r.rawValue.uppercased())
                             .font(.system(size: 10.5, weight: .medium).monospaced())
                             .foregroundStyle(.secondary)
