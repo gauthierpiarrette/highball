@@ -742,6 +742,11 @@ final class AppState {
         runBusy("Starting \(game.name)", expected: L("a cold Steam client can take a couple of minutes"), showLogSheet: false,
                 done: DoneState(title: L("Running"), ctaTitle: nil, cta: nil)) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
+            // A running client would serve the launch with its own environment; when that is
+            // not the game's, cold-start first (never under a running game, see SteamRestart).
+            if let why = try await runner.restartSteamIfMismatched(renderer: renderer) {
+                await MainActor.run { self.appendLog("Restarting Steam before \(game.name): \(why).") }
+            }
             let launch = Task {
                 try await runner.start(steam, arguments: ["-silent", "-applaunch", String(game.appid)] + extraArgs, renderer: renderer) { line in
                     Task { @MainActor in self.appendLog(line) }
