@@ -27,8 +27,9 @@ so you can check whether your game runs before downloading a byte.
 
 ### [Download Highball for Apple Silicon (.dmg)](https://github.com/gauthierpiarrette/highball/releases/latest/download/Highball.dmg)
 
-macOS 14+, notarized. Drag it to Applications and open it. The app walks you through the
-rest: engine download, your first bottle, Steam.
+macOS 14+, notarized. Drag it to Applications, open it and press Get started: Highball
+installs Rosetta if needed, downloads the engine and prepares a Windows environment, then asks
+where your games are (Steam, Epic, or a Windows program you have).
 
 Or with Homebrew:
 
@@ -38,8 +39,8 @@ brew install --cask gauthierpiarrette/highball/highball
 
 Not sure it'll run your game? **[Check the compatibility database →](https://gethighball.com/database/)**
 
-> **Beta, working end to end:** engine install → bottle → Steam login → game, with
-> per-bottle renderer switching and msync-accelerated launches. Auto-updating. Not a paid
+> **Beta, working end to end:** one-button setup → Steam login → game, with the graphics
+> mode picked per game from the database and msync-accelerated launches. Auto-updating. Not a paid
 > tool and not a thin wrapper: engines are assembled from pinned, SHA-256-verified upstream
 > builds, and the compatibility data is public and free for anyone to reuse.
 
@@ -71,15 +72,16 @@ and Epic works through Legendary. Each case is tracked in the recipe's `knownIss
 Requires Apple Silicon and macOS 14+, and prompts for Rosetta 2 if needed.
 
 First run takes a while: the engine download is a few hundred MB, and Steam's first launch
-unpacks its own ~235 MB client. Under Rosetta that can take 15–25 minutes and may look
-frozen. Let it finish. If it stalls, relaunch and it resumes.
+unpacks its own ~235 MB client. Under Rosetta that can take 15 to 25 minutes; the strip at the
+bottom of the window shows the step, the elapsed time and the range it usually takes. Let it
+finish. If it stalls, relaunch and it resumes.
 
 Everything lives in `~/Library/Application Support/Highball/`. Nothing touches `/usr` or
 `/Library`; deleting that folder is a full uninstall.
 
 ⌘C / ⌘V / ⌘A work inside Windows apps — the Command keys are mapped to Ctrl, and Option to
-Alt so Alt-based game bindings keep working. Turn it off per bottle in settings for Wine's
-default, where Command acts as Alt.
+Alt so Alt-based game bindings keep working. Turn it off per environment (Settings, then
+Environments) for Wine's default, where Command acts as Alt.
 
 <details><summary>Prefer the terminal? The CLI does everything the app does.</summary>
 
