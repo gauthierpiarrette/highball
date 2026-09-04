@@ -97,24 +97,65 @@ struct LibraryView: View {
     @ViewBuilder private var emptyState: some View {
         VStack(alignment: .leading, spacing: 10) {
             if state.bottles.isEmpty {
-                Text(L("No bottles yet. A bottle is a private Windows environment for your games."))
+                // An engine without an environment: an older install, or a stopped first run.
+                Text(L("One more step: Highball prepares a Windows environment for your games."))
                     .foregroundStyle(.secondary)
-                Button(L("Create your first bottle")) { state.requestCreateBottle = true }
-                    .buttonStyle(.borderedProminent)
+                Button(L("Prepare it now")) { state.makeDefaultEnvironment() }
+                    .buttonStyle(.borderedProminent).tint(HB.amber).disabled(state.busy)
             } else if state.libraryItems.isEmpty {
-                Text(L("No games yet. Install Steam in a bottle, or connect your Epic account."))
-                    .foregroundStyle(.secondary)
-                HStack(spacing: 10) {
-                    if let bottle = state.bottles.first(where: { $0.name == state.selectedBottle }) ?? state.bottles.first {
-                        Button(L("Install Steam")) { state.applyRecipe("steam", to: bottle) }
-                    }
-                    Button(L("Connect Epic account…")) { state.showEpicSignIn = true }
-                }
+                whereAreYourGames
             } else {
                 Text(L("Nothing matches these filters.")).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 24)
+    }
+
+    /// Where your games are is a question anyone can answer (UX plan §3.2); Steam is not
+    /// installed unasked, and a GOG or standalone user never waits for its first boot.
+    private var whereAreYourGames: some View {
+        VStack(alignment: .center, spacing: 22) {
+            VStack(spacing: 6) {
+                Text(L("Where are your games?")).font(.title.weight(.semibold))
+                Text(L("Pick one to start. You can add the others any time.")).foregroundStyle(.secondary)
+            }
+            HStack(alignment: .top, spacing: 14) {
+                sourceCard(symbol: "gamecontroller.fill", accent: true, title: L("Steam"),
+                           text: L("Install Steam and sign in. Your Steam library shows up here. Its first start takes 15 to 25 minutes."),
+                           button: L("Install Steam")) { state.installSteam() }
+                sourceCard(symbol: "bag.fill", accent: false, title: L("Epic Games"),
+                           text: L("Connect your Epic account. Your games install straight into Highball."),
+                           button: L("Connect Epic")) { state.showEpicSignIn = true }
+                sourceCard(symbol: "folder.fill", accent: false, title: L("A Windows program I have"),
+                           text: L("An installer or game from your Mac. Or drop it onto this window."),
+                           button: L("Choose a file…")) { state.chooseProgramToRun() }
+            }
+            Text(L("Battle.net, GOG Galaxy, the EA app, Ubisoft Connect and Rockstar are on the environment's page."))
+                .font(.caption).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 40)
+    }
+
+    private func sourceCard(symbol: String, accent: Bool, title: String, text: String, button: String, action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: symbol).font(.title3)
+                .frame(width: 42, height: 42)
+                .background(Circle().fill(accent ? HB.amber : Color.white.opacity(0.08)))
+                .foregroundStyle(accent ? Color.black : Color.secondary)
+            Text(title).font(.headline)
+            Text(text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            if accent {
+                Button(button, action: action).buttonStyle(.borderedProminent).tint(HB.amber).disabled(state.busy)
+            } else {
+                Button(button, action: action).buttonStyle(.bordered).disabled(state.busy)
+            }
+        }
+        .padding(18)
+        .frame(width: 250, height: 230, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(HB.card))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(accent ? HB.amber.opacity(0.5) : HB.cardStroke))
     }
 }
 

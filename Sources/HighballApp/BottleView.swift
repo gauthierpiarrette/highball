@@ -437,7 +437,6 @@ struct BottleSettingsSheet: View {
 
 struct OnboardingView: View {
     @Environment(AppState.self) private var state
-    @State private var acceptGPTK = false
 
     var body: some View {
         ZStack {
@@ -450,45 +449,24 @@ struct OnboardingView: View {
                     Image(systemName: "wineglass.fill").font(.system(size: 52)).foregroundStyle(.tint)
                 }
                 Text("Highball").font(.system(size: 36, weight: .heavy, design: .rounded))
-                Text(L("Run Windows games on your Mac. Highball downloads a verified Wine engine (~500 MB) from public upstream releases — nothing is hosted by Highball itself."))
-                    .multilineTextAlignment(.center).frame(maxWidth: 440).foregroundStyle(.secondary)
-
-                if !state.rosettaInstalled {
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label(L("Rosetta 2 is required"), systemImage: "exclamationmark.triangle")
-                            Text("softwareupdate --install-rosetta --agree-to-license").font(.caption.monospaced())
-                        }
-                    }.frame(maxWidth: 440)
-                }
-
-                Toggle(isOn: $acceptGPTK) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L("Enable D3DMetal (DirectX 12 support)"))
-                        HStack(spacing: 4) {
-                            Text(L("Requires accepting")).font(.caption).foregroundStyle(.secondary)
-                            Button(L("Apple’s Game Porting Toolkit license")) {
-                                Task { @MainActor in
-                                    state.loadGPTKLicense()
-                                    state.showGPTKLicense = true
-                                }
-                            }.buttonStyle(.link).font(.caption)
-                        }
-                    }
-                }
-                .toggleStyle(.checkbox)
-                .frame(maxWidth: 440, alignment: .leading)
-
+                Text(L("Play Windows games on your Mac."))
+                    .font(.title3).foregroundStyle(.secondary)
                 Button {
-                    state.installDefaultEngine(acceptGPTK: acceptGPTK)
+                    state.getStarted()
                 } label: {
-                    Text(state.busy ? L("Installing…") : L("Install engine")).frame(minWidth: 190)
+                    Text(state.busy ? L("Setting up…") : L("Get started")).frame(minWidth: 190)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(state.busy || !state.rosettaInstalled)
-
-                Text(L("Wine LGPL · DXMT MIT · DXVK Zlib · engine builds by Gcenx / Sikarugir — consider sponsoring them."))
+                .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
+                .disabled(state.busy)
+                .padding(.top, 6)
+                Text(state.rosettaInstalled
+                     ? L("Nothing to choose. The download takes a few minutes on most connections.")
+                     : L("Nothing to choose. Highball installs Rosetta for you, then the download takes a few minutes."))
+                    .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 440)
+                Spacer().frame(height: 30)
+                Text(L("Highball downloads a Wine engine from public upstream releases. Nothing is hosted by us."))
+                    .font(.caption).foregroundStyle(.tertiary)
+                Text(L("Wine LGPL · DXMT MIT · DXVK Zlib · engine builds by Gcenx and Sikarugir"))
                     .font(.caption2).foregroundStyle(.tertiary)
             }
             .padding(40)

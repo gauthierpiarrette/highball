@@ -281,6 +281,21 @@ struct ContentView: View {
         }
         .sheet(isPresented: $state.showLog) { LogSheet() }
         .sheet(isPresented: $state.showGPTKLicense) { GPTKLicenseSheet() }
+        // Asked at the first game that needs it, never at install (UX plan §3.5). Nothing
+        // downloads: D3DMetal is already inside the engine and accepting flips a flag.
+        .alert(String(format: L("%@ needs Apple's DirectX 12 support"), state.pendingD3DMetal?.item.title ?? ""),
+               isPresented: .init(get: { state.pendingD3DMetal != nil }, set: { if !$0 { state.pendingD3DMetal = nil } }),
+               presenting: state.pendingD3DMetal) { pending in
+            Button(L("Turn it on and play")) { state.enableD3DMetalAndPlay() }
+            Button(L("Read Apple's licence")) {
+                state.pendingD3DMetal = nil
+                state.loadGPTKLicense(); state.showGPTKLicense = true
+            }
+            Button(L("Not now"), role: .cancel) { state.pendingD3DMetal = nil }
+        } message: { pending in
+            let entry = pending.item.steamAppID.flatMap { state.gameDB[$0] }
+            Text(GamePageCopy.d3dMetalAsk(title: pending.item.title, entry: entry))
+        }
         .sheet(isPresented: $state.showEpicSignIn) { EpicSignInSheet() }
         // A partial delete succeeded — the bottle is gone and the name is free — so framing it as
         // a failure, with an invitation to file a bug, misreads what happened. Same alert, honest

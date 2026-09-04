@@ -158,6 +158,12 @@ final class AppState {
     func play(_ item: LibraryItem) {
         guard let bottleName = item.bottleName,
               let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
+        if let appid = item.steamAppID, gameDB[appid]?.effectiveRenderer() == .d3dmetal,
+           let engine = engine(for: bottle), engine.rendererDir("d3dmetal") == nil,
+           engine.manifest.components["d3dmetal"] != nil {
+            pendingD3DMetal = (item, bottle, engine)
+            return
+        }
         if let recipe = fixRecipe(for: item), !bottle.settings.recipes.contains(recipe.id),
            let engine = engine(for: bottle) {
             if recipe.isAutoApplicable {
@@ -560,23 +566,94 @@ final class AppState {
 
     // MARK: Actions
 
-    func installDefaultEngine(acceptGPTK: Bool) {
+    /// The name of the environment Highball makes for everyone; bottles stay a power feature.
+    static let defaultEnvironmentName = "Games"
+
+    /// First launch, one button (UX plan §3.2): Rosetta if the Mac lacks it, the engine
+    /// download, then one Windows environment, all on the strip with Stop. No licence question
+    /// here: D3DMetal is asked for at the first game that needs it.
+    func getStarted() {
         guard let manifestURL = Self.bundledManifest else {
             errorMessage = "No engine manifest found. Reinstall Highball."; return
         }
-        runBusy(L("Downloading the Windows engine"),
+        runBusy(L("Setting up Highball"),
                 expected: L("usually 5–15 minutes"),
-                done: DoneState(title: L("Engine ready"), ctaTitle: L("Create your first bottle"),
-                                cta: { [weak self] in self?.requestCreateBottle = true }),
+                done: DoneState(title: L("Highball is ready"), ctaTitle: nil, cta: nil),
                 stop: .cancelTask(label: L("Stop"))) { [self] in
-            let manifest = try EngineManifest.load(from: manifestURL)
-            var accepted: Set<String> = []
-            if acceptGPTK { accepted.insert("apple-gptk-license-2023-08-17") }
-            _ = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
-                Task { @MainActor in self.reportDownload(name, received: received, total: total) }
+            if !rosettaInstalled {
+                await MainActor.run { self.stage = L("Installing Rosetta, Apple's compatibility layer") }
+                try await Self.installRosetta()
+                await MainActor.run { self.rosettaInstalled = true; self.appendLog("Rosetta installed") }
             }
-            await MainActor.run { self.appendLog("engine installed") }
+            if engines.isEmpty {
+                let manifest = try EngineManifest.load(from: manifestURL)
+                _ = try await engineStore.install(manifest, accepted: []) { name, received, total in
+                    Task { @MainActor in self.reportDownload(name, received: received, total: total) }
+                }
+                await MainActor.run { self.appendLog("engine installed"); self.refresh() }
+            }
+            if bottles.isEmpty, let engine = defaultEngine {
+                await MainActor.run { self.stage = L("Preparing your Windows environment"); self.busyExpected = L("about 90 seconds") }
+                _ = try await bottleStore.create(name: Self.defaultEnvironmentName, engine: engine)
+                await MainActor.run { self.appendLog("environment ready"); self.selectedBottle = Self.defaultEnvironmentName; self.pane = .library }
+            }
         }
+    }
+
+    /// `softwareupdate` installs Rosetta for a normal user on Apple silicon; when it cannot,
+    /// the error names the one command that does, so the recovery card can show it.
+    static func installRosetta() async throws {
+        let out = try await Task.detached { () -> (Int32, String) in
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/sbin/softwareupdate")
+            p.arguments = ["--install-rosetta", "--agree-to-license"]
+            let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+            try p.run(); p.waitUntilExit()
+            return (p.terminationStatus, String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
+        }.value
+        let installed = FileManager.default.fileExists(atPath: "/Library/Apple/usr/share/rosetta/rosetta")
+        guard out.0 == 0 || installed else {
+            throw HighballError.failed("Rosetta did not install. In Terminal, run: softwareupdate --install-rosetta --agree-to-license, then press Get started again. (\(out.1.trimmingCharacters(in: .whitespacesAndNewlines).suffix(200)))")
+        }
+    }
+
+    /// The environment new games go into: the one named Games, else the first.
+    var defaultBottle: Bottle? {
+        bottles.first { $0.name == Self.defaultEnvironmentName } ?? bottles.first
+    }
+
+    /// Makes the default environment for a Mac that has the engine but no bottle yet.
+    func makeDefaultEnvironment() {
+        guard let engine = defaultEngine else { return }
+        runBusy(L("Preparing your Windows environment"), expected: L("about 90 seconds"),
+                done: DoneState(title: L("Highball is ready"), ctaTitle: nil, cta: nil)) { [self] in
+            _ = try await bottleStore.create(name: Self.defaultEnvironmentName, engine: engine)
+            await MainActor.run { self.selectedBottle = Self.defaultEnvironmentName; self.pane = .library }
+        }
+    }
+
+    /// Installs Steam into the default environment and opens its window (the "Where are your
+    /// games?" card). Steam's own first start follows, on the strip.
+    func installSteam() {
+        guard let bottle = defaultBottle else { makeDefaultEnvironment(); return }
+        let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
+        applyRecipe("steam", to: bottle, then: DoneState(
+            title: L("Steam is installed"), ctaTitle: L("Open Steam"),
+            cta: { [weak self] in
+                guard let self, let fresh = self.bottles.first(where: { $0.name == bottle.name }) else { return }
+                self.launch(pin: Pin(name: "Steam", path: Pin.storagePath(for: steam, driveC: fresh.driveC)), in: fresh)
+            }))
+    }
+
+    /// A game the row says needs D3DMetal, on an engine where it is not enabled yet: Play asks
+    /// once, in context, with the consequence from the row (UX plan §3.5, canvas "Asked in
+    /// context"). Nothing downloads; the files are in the engine and accepting flips the flag.
+    var pendingD3DMetal: (item: LibraryItem, bottle: Bottle, engine: InstalledEngine)?
+
+    func enableD3DMetalAndPlay() {
+        guard let (item, bottle, engine) = pendingD3DMetal else { return }
+        pendingD3DMetal = nil
+        acceptGPTK(engine: engine)
+        if let fresh = bottles.first(where: { $0.name == bottle.name }) { launch(item, in: fresh) }
     }
 
     func acceptGPTK(engine: InstalledEngine) {

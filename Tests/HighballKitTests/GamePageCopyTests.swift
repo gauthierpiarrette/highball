@@ -59,3 +59,12 @@ final class GamePageCopyTests: XCTestCase {
         XCTAssertTrue(done[2].done); XCTAssertNil(done[2].cost)
     }
 }
+
+extension GamePageCopyTests {
+    func testD3DMetalAskConsequenceComesFromTheRow() throws {
+        let only = try entry(#"{"id":"x","title":"X","steam_appid":1,"status":"verified-local","renderer":"d3dmetal"}"#)
+        XCTAssertTrue(GamePageCopy.d3dMetalAsk(title: "X", entry: only).contains("will not start"))
+        let alt = try entry(#"{"id":"x","title":"X","steam_appid":1,"status":"verified-local","renderer":"d3dmetal","rendererResults":{"dxvk":{"verdict":"works","detail":"slower"}}}"#)
+        XCTAssertTrue(GamePageCopy.d3dMetalAsk(title: "X", entry: alt).contains("but slower"))
+    }
+}

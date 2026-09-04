@@ -129,3 +129,15 @@ public enum GamePageCopy {
         }
     }
 }
+
+extension GamePageCopy {
+    /// The consequence sentence of the D3DMetal ask, from the row: "will not start" only when
+    /// no other renderer is recorded as working, "runs faster with it" when one is.
+    public static func d3dMetalAsk(title: String, entry: GameDBEntry?) -> String {
+        let other = entry?.rendererResults?.contains { key, r in key != "d3dmetal" && r.verdict == "works" } ?? false
+        let consequence = other
+            ? "Without it, \(title) still runs on the other graphics mode that was verified, but slower."
+            : "Without it, \(title) will not start: it needs DirectX 12, and the other graphics modes only cover DirectX 11."
+        return "Highball already includes it. Turning it on means accepting Apple's licence, which allows non-commercial use. \(consequence) Nothing to download and nothing sent to Apple."
+    }
+}
