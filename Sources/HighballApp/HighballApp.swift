@@ -345,18 +345,24 @@ struct ContentView: View {
                     if let bottle = state.bottles.first(where: { $0.name == s.bottleName }) { state.moveBottle(bottle, to: alt) }
                 }
             }
+            Button(L("Show the log")) { NSWorkspace.shared.open(URL(fileURLWithPath: s.logPath)) }
             Button(L("Keep current"), role: .cancel) {}
         } message: { s in
-            if let alt = s.alternateEngine {
-                Text("That usually means the graphics backend doesn't suit it. Try \(s.renderer.rawValue.uppercased())? If that fails too, the bottle can move to engine \(alt.id) and back. The log is at \(s.logPath).")
-            } else {
-                Text("That usually means the graphics backend doesn't suit it. Try \(s.renderer.rawValue.uppercased())? The log is at \(s.logPath).")
-            }
+            // What was detected, then what it usually means, then the one next thing. No path
+            // on this surface: the log is one click away (UX plan §3.6).
+            let seen = String(format: L("It was running with %@ and quit after %d seconds without an error the app could read."),
+                              s.current.rawValue.uppercased(), s.seconds)
+            let next = s.alternateEngine.map { alt in
+                String(format: L("That usually means the graphics mode doesn't suit it on this Mac. Highball can switch this bottle to %@, or move it to engine %@."),
+                       s.renderer.rawValue.uppercased(), alt.id)
+            } ?? String(format: L("That usually means the graphics mode doesn't suit it on this Mac. Highball can switch this bottle to %@."),
+                        s.renderer.rawValue.uppercased())
+            Text(seen + " " + next)
         }
     }
     private var crashTitle: String {
         guard let s = state.crashSuggestion else { return "" }
-        return "\(s.program) exited right away"
+        return s.seconds < 2 ? String(format: L("%@ quit right away"), s.program) : String(format: L("%@ quit after %d seconds"), s.program, s.seconds)
     }
 }
 

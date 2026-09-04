@@ -74,8 +74,13 @@ final class AppState {
         /// The bottle that was actually launched. The alert used to edit `selectedBottle`, which
         /// `launchGame` never sets — so accepting could rewrite an unrelated bottle, or none.
         let bottleName: String
+        /// The renderer to offer next.
         let renderer: Renderer
         let logPath: String
+        /// The renderer the program actually ran under, and how long it lived: the facts the
+        /// alert can state as detected.
+        var current: Renderer
+        var seconds: Int
         /// Another installed engine to offer as the second way out, when there is one.
         var alternateEngine: InstalledEngine? = nil
     }
@@ -759,7 +764,7 @@ final class AppState {
                 await MainActor.run {
                     self.crashSuggestion = CrashSuggestion(program: pin.name, bottleName: bottle.name,
                                                            renderer: Renderer.suggestion(after: current),
-                                                           logPath: result.log.path,
+                                                           logPath: result.log.path, current: current, seconds: Int(result.duration),
                                                            alternateEngine: self.alternateEngine(for: bottle))
                 }
             }
@@ -885,7 +890,7 @@ final class AppState {
                     await MainActor.run {
                         self.crashSuggestion = CrashSuggestion(program: game.name, bottleName: bottle.name,
                                                                renderer: Renderer.suggestion(after: current),
-                                                               logPath: result.log.path,
+                                                               logPath: result.log.path, current: current, seconds: Int(result.duration),
                                                                alternateEngine: self.alternateEngine(for: bottle))
                     }
                     return
@@ -1030,7 +1035,7 @@ final class AppState {
                 await MainActor.run {
                     self.crashSuggestion = CrashSuggestion(program: game.app_title, bottleName: bottle.name,
                                                            renderer: Renderer.suggestion(after: current),
-                                                           logPath: result.log.path,
+                                                           logPath: result.log.path, current: current, seconds: Int(result.duration),
                                                            alternateEngine: self.alternateEngine(for: bottle))
                 }
             }
