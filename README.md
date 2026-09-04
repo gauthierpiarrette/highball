@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/Apple%20Silicon-macOS%2014%2B-lightgrey" alt="Apple Silicon, macOS 14+">
 </p>
 
-<p align="center"><img src=".github/assets/app.png" width="760" alt="Highball's Library: one cover grid across Steam and Epic with source badges, verified verdicts from the open database, and a Continue Playing shelf"></p>
+<p align="center"><img src=".github/assets/app.png" width="760" alt="Highball's Library: one cover grid with source badges and verified verdicts from the open database"></p>
 
 Highball is a native macOS app (and CLI) that sets up Wine, DXMT, D3DMetal and DXVK for
 you, installs Steam or connects your Epic library, and tells you honestly what runs, what
