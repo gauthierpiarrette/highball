@@ -29,8 +29,10 @@ struct LibraryView: View {
         }
     }
 
+    /// Only once the grid needs it: with a handful of games the row would repeat every tile.
     private var continueItems: [LibraryItem] {
-        state.libraryItems
+        guard state.libraryItems.count > 6 else { return [] }
+        return state.libraryItems
             .filter { $0.lastPlayed != nil && $0.installed }
             .sorted { ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast) }
             .prefix(10).map { $0 }

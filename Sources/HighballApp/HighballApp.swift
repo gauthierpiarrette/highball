@@ -9,7 +9,7 @@ struct HighballApp: App {
     @State private var state = AppState()
 
     var body: some Scene {
-        Settings { SettingsView().environment(state) }
+        Settings { SettingsView().environment(state).preferredColorScheme(.dark) }
         WindowGroup("Highball") {
             ContentView()
                 .environment(state)
