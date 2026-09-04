@@ -50,9 +50,9 @@
       },
       "kind": "engine",
       "license": "LGPL-2.1+",
-      "sha256": "68d82773096e107439b5ac22afe0f67c8c29799d4ffe2b67a54ae054d95b600f",
-      "size": 334821737,
-      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/engine-wine-11.0-20260904T134906Z-overlays/engine-wine-11.0-20260904T134906Z-overlays.tar.gz",
+      "sha256": "cff761bfb1abc4b7e73dd229071560486847d8636140f126f7a9d34ad0d7e813",
+      "size": 334856497,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/engine-wine-11.0-20260904T153322Z-winemetal/engine-wine-11.0-20260904T153322Z-winemetal.tar.gz",
       "version": "wine-11.0 (CrossOver 26.3 tree) Highball build 2026-09-04c",
       "note": "Built from CodeWeavers' crossover-sources-26.3.0.tar.gz (sha pinned in highball-engine/inputs.json) by highball-engine's build workflow, run 33879170889, with patches 0001 (real user name), 0002 (wined3d OpenGL first) and 0003 (WINEDLLPATH_PREPEND). Stripped; Wine Mono 10.4.1 and Gecko 2.47.4 included."
     },
@@ -81,7 +81,8 @@
     "r2 candidate: Highball's own build of the CrossOver 26.3 Wine tree. Same DXMT, DXVK, MoltenVK and Template runtime as r1; only the Wine component changes.",
     "The tree needs three patches to behave like Sikarugir's engine: the Windows user follows the macOS user (CrossOver hack 12735 reverted), WINEDLLPATH_PREPEND is honoured so the renderer overlays apply at all, and wined3d's automatic renderer is OpenGL first as upstream. Builds before 2026-09-04 build 9 lacked the last two: overlays were silently ignored and everything ran on wined3d over Vulkan, so verdicts recorded on those builds do not count.",
     "winemac.so exports macdrv_functions, so the DXMT and D3DMetal bridges work as on r1. This engine ships no winemetal.dll of its own; the DXMT overlay carries it. Wine Mono and Gecko are included.",
-    "Not the default. Offered in a bottle's Advanced settings and on the crash alert; the default stays r1 until the verified titles pass on it and opt-in use stays quiet."
+    "Not the default. Offered in a bottle's Advanced settings and on the crash alert; the default stays r1 until the verified titles pass on it and opt-in use stays quiet.",
+    "Build 11 (2026-09-04, engine-wine-11.0-20260904T153322Z-winemetal) also ships winemetal.dll as a built-in in lib/wine, so a fresh prefix gets its placeholder and the DXMT overlay's winemetal loads; earlier builds needed the file copied in by hand."
   ],
   "requires": [
     "rosetta2"
