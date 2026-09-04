@@ -203,6 +203,7 @@ final class AppState {
 
     private func launch(_ item: LibraryItem, in bottle: Bottle) {
         recordPlay(item)
+        if !FunnelLog.records(in: paths.logs).contains(where: { $0.event == .firstLaunch }) { funnel(.firstLaunch) }
         switch item.source {
         case .steam:
             guard let game = (gamesByBottle[bottle.name] ?? []).first(where: { $0.appid == item.steamAppID }) else { return }
@@ -508,6 +509,12 @@ final class AppState {
                 doneState = d.silent ? nil : d
             } catch {
                 showLog = false
+                if title == L("Setting up Highball"), !stopRequested {
+                    let bytes = busyProgress.map { " at \($0.received / 1_048_576) MB" } ?? ""
+                    if let u = error as? URLError { funnel(.downloadFailed, detail: "URLError \(u.code.rawValue)\(bytes)") }
+                    else if case HighballError.checksumMismatch = error { funnel(.downloadFailed, detail: "checksum mismatch") }
+                    else if busyProgress == nil, engines.isEmpty { funnel(.extractFailed, detail: String(describing: type(of: error))) }
+                }
                 if stopRequested || error is CancellationError || (error as? URLError)?.code == .cancelled {
                     // The user stopped it: a result, not a failure, and no alert.
                     doneState = DoneState(title: stop?.stoppedTitle ?? L("Stopped."), ctaTitle: nil, cta: nil)
@@ -576,6 +583,7 @@ final class AppState {
         guard let manifestURL = Self.bundledManifest else {
             errorMessage = "No engine manifest found. Reinstall Highball."; return
         }
+        funnel(.installStarted)
         runBusy(L("Setting up Highball"),
                 expected: L("usually 5–15 minutes"),
                 done: DoneState(title: L("Highball is ready"), ctaTitle: nil, cta: nil),
@@ -590,12 +598,12 @@ final class AppState {
                 _ = try await engineStore.install(manifest, accepted: []) { name, received, total in
                     Task { @MainActor in self.reportDownload(name, received: received, total: total) }
                 }
-                await MainActor.run { self.appendLog("engine installed"); self.refresh() }
+                await MainActor.run { self.appendLog("engine installed"); self.funnel(.installCompleted); self.refresh() }
             }
             if bottles.isEmpty, let engine = defaultEngine {
                 await MainActor.run { self.stage = L("Preparing your Windows environment"); self.busyExpected = L("about 90 seconds") }
                 _ = try await bottleStore.create(name: Self.defaultEnvironmentName, engine: engine)
-                await MainActor.run { self.appendLog("environment ready"); self.selectedBottle = Self.defaultEnvironmentName; self.pane = .library }
+                await MainActor.run { self.appendLog("environment ready"); self.funnel(.environmentCreated); self.selectedBottle = Self.defaultEnvironmentName; self.pane = .library }
             }
         }
     }
@@ -725,6 +733,27 @@ final class AppState {
         } catch { fail(error) }
     }
 
+    // MARK: Install funnel (UX plan 0.7)
+
+    /// Local only. Nothing leaves the Mac unless the person reads the aggregate and sends it.
+    func funnel(_ event: FunnelLog.Event, detail: String? = nil) {
+        FunnelLog.append(.init(event: event, detail: detail), to: paths.logs)
+    }
+    /// The strip's one-time offer after the first game session of a minute or more.
+    var funnelOffer = false
+    private var funnelAsked: Bool {
+        get { UserDefaults.standard.bool(forKey: "funnelAsked") }
+        set { UserDefaults.standard.set(newValue, forKey: "funnelAsked") }
+    }
+    func declineFunnel() { funnelAsked = true; funnelOffer = false }
+    /// Shows the aggregate as an issue draft in the browser; the person reads it there first.
+    func sendFunnel() {
+        funnelAsked = true; funnelOffer = false
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        let text = FunnelLog.aggregate(FunnelLog.records(in: paths.logs), appVersion: version, macos: Machine.macOSVersion(), chip: machineChip)
+        NSWorkspace.shared.open(FunnelLog.url(aggregate: text))
+    }
+
     // MARK: Steam clients (UX plan §3.3, issue #33)
 
     /// Bottles with a Steam client running right now. A client left behind by a game launch is
@@ -782,6 +811,7 @@ final class AppState {
     private func beginSession(_ session: GameSession) {
         runningSessions.append(session)
         appendLog("\(session.title) is running")
+        if !FunnelLog.records(in: paths.logs).contains(where: { $0.event == .firstGameProcess }) { funnel(.firstGameProcess) }
         sessionWatchers[session.id] = Task.detached { [weak self] in
             // A game that is gone for two consecutive checks has ended; one miss can be a
             // process table read racing a restart (some games relaunch themselves once).
@@ -806,7 +836,13 @@ final class AppState {
                                    started: session.started, ended: Date(), reason: reason, renderer: session.renderer)
         SessionWatch.append(record, to: paths.logs)
         lastEndedSession = record
-        if record.seconds >= 60 { postPlay = record }
+        let firstSession = !FunnelLog.records(in: paths.logs).contains { $0.event == .sessionEnded }
+        funnel(.sessionEnded, detail: "\(record.seconds) s, \(reason)")
+        if record.seconds >= 60 {
+            postPlay = record
+            // The consent question comes after the first successful game, never before (0.7).
+            if !funnelAsked, firstSession { funnelOffer = true }
+        }
         appendLog("\(session.title) \(reason) after \(record.seconds / 60) min")
     }
 

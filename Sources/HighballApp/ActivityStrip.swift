@@ -9,7 +9,7 @@ struct ActivityStrip: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        if state.busy || state.doneState != nil || state.postPlay != nil || !state.runningSessions.isEmpty || !steamBottles.isEmpty {
+        if state.busy || state.doneState != nil || state.postPlay != nil || state.funnelOffer || !state.runningSessions.isEmpty || !steamBottles.isEmpty {
             VStack(spacing: 0) {
                 Divider()
                 VStack(spacing: 0) {
@@ -19,6 +19,7 @@ struct ActivityStrip: View {
                         doneRow(done)
                     }
                     if let record = state.postPlay { postPlayRow(record) }
+                    if state.funnelOffer, state.postPlay == nil { funnelRow }
                     ForEach(state.runningSessions) { session in
                         sessionRow(session)
                     }
@@ -136,6 +137,22 @@ struct ActivityStrip: View {
                 }
             }.controlSize(.small)
             Button(L("Not now")) { state.postPlay = nil }.controlSize(.small).buttonStyle(.link)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+
+    /// Opt-in install statistics (UX plan 0.7): asked once, after the first game, and the text
+    /// is shown before anything leaves the Mac. Aggregate counts, no game names.
+    private var funnelRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "chart.bar").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(L("Help count how often installs and first launches succeed?")).font(.callout.weight(.medium))
+                Text(L("A few counts from this Mac, no game names; you read the text before it is sent.")).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 12)
+            Button(L("Show me")) { state.sendFunnel() }.controlSize(.small)
+            Button(L("No thanks")) { state.declineFunnel() }.controlSize(.small).buttonStyle(.link)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
     }
