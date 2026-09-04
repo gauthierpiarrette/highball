@@ -91,6 +91,21 @@ public struct BottleStore: Sendable {
         return bottle
     }
 
+    /// True when the prefix's 32-bit half is missing, the state issue #37 users found only when an
+    /// installer died with "could not load kernel32.dll". Checked before every launch.
+    public static func needsPreflightRepair(_ bottle: Bottle) -> Bool {
+        !FileManager.default.fileExists(atPath: woW64Kernel32(in: bottle).path)
+    }
+
+    /// Quiet self-heal before a launch: when the 32-bit half is missing, re-run the first boot
+    /// (with the mscoree set-aside and the 32-bit seeding refreshPrefix carries) instead of
+    /// letting the launch fail and sending the user to find "Repair bottle".
+    public static func preflight(runner: WineRunner, bottle: Bottle, log: ((String) -> Void)? = nil) async throws {
+        guard needsPreflightRepair(bottle) else { return }
+        log?("bottle '\(bottle.name)': 32-bit half missing, repairing before launch")
+        try await refreshPrefix(runner: runner, bottle: bottle)
+    }
+
     /// Re-runs the Windows first boot on an existing bottle and the per-bottle setup that boot
     /// resets: the 32-bit half check (#37), the GPU identity, the service timeout and the
     /// keyboard mapping. Repair, an engine switch and the CLI's repair all go through here;

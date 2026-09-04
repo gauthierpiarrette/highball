@@ -932,6 +932,35 @@ extension RegressionTests {
         XCTAssertEqual(Verifier.servedImplementation(fromLog: other), "none")
     }
 
+    // Log pruning: age beyond the newest N, then size, never the verifier's results.
+    func testLogPrunerPolicy() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func e(_ name: String, daysOld: Double, mb: Int64) -> LogPruner.Entry {
+            LogPruner.Entry(url: URL(fileURLWithPath: "/logs/\(name)"), size: mb * 1_048_576, modified: now.addingTimeInterval(-daysOld * 86_400))
+        }
+        let entries = [e("old1", daysOld: 30, mb: 1), e("old2", daysOld: 20, mb: 1), e("fresh", daysOld: 1, mb: 1),
+                       e("verify-results.jsonl", daysOld: 100, mb: 1), e("big-old", daysOld: 10, mb: 400), e("big-new", daysOld: 0.5, mb: 400)]
+        let byAge = LogPruner.plan(entries, now: now, keepDays: 14, maxTotalBytes: 10_000 * 1_048_576, keepNewest: 2)
+        XCTAssertEqual(Set(byAge.map(\.lastPathComponent)), ["old1", "old2"], "older than 14 days and not among the newest two")
+        let bySize = LogPruner.plan(entries, now: now, keepDays: 14, maxTotalBytes: 500 * 1_048_576, keepNewest: 2)
+        XCTAssertTrue(bySize.map(\.lastPathComponent).contains("big-old"), "size rule removes the oldest big file")
+        XCTAssertFalse(bySize.map(\.lastPathComponent).contains("big-new"), "the newest files are never removed for size")
+        XCTAssertFalse(bySize.map(\.lastPathComponent).contains("verify-results.jsonl"))
+        XCTAssertEqual(LogPruner.plan(entries, now: now, keepDays: 14, maxTotalBytes: 10_000 * 1_048_576, keepNewest: 10).count, 0, "everything within the newest ten stays")
+    }
+
+    // Preflight: the 32-bit half check is a file test, so it is free on the happy path.
+    func testPreflightNeedsRepairOnlyWithoutSyswow64() throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "hb-preflight-\(UUID().uuidString)")
+        let bottle = Bottle(url: dir, settings: BottleSettings(name: "p", engineID: "e"))
+        XCTAssertTrue(BottleStore.needsPreflightRepair(bottle))
+        let k32 = dir.appending(path: "drive_c/windows/syswow64/kernel32.dll")
+        try FileManager.default.createDirectory(at: k32.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: k32)
+        XCTAssertFalse(BottleStore.needsPreflightRepair(bottle))
+        try? FileManager.default.removeItem(at: dir)
+    }
+
     func testDefaultEnginePrefersBundledManifestID() throws {
         func engine(_ id: String) throws -> InstalledEngine {
             let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#

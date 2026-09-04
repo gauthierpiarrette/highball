@@ -225,7 +225,14 @@ final class AppState {
     var engineStore: EngineStore { EngineStore(paths: paths) }
     var bottleStore: BottleStore { BottleStore(paths: paths) }
 
+    private var prunedLogsThisRun = false
+
     func refresh() {
+        if !prunedLogsThisRun {
+            prunedLogsThisRun = true
+            let n = LogPruner.prune(directory: paths.logs)
+            if n > 0 { appendLog("pruned \(n) old log file(s)") }
+        }
         engines = (try? engineStore.installedEngines()) ?? []
         bottles = (try? bottleStore.list()) ?? []
         damagedBottles = (try? bottleStore.damaged()) ?? []
@@ -526,6 +533,7 @@ final class AppState {
                 result = r
                 if resumed { await MainActor.run { self.appendLog("resumed after the known crash") } }
             } else {
+                try await BottleStore.preflight(runner: runner, bottle: bottle) { line in Task { @MainActor in self.appendLog(line) } }
                 result = try await runner.start(pin: pin, extraEnvironment: extra) { line in Task { @MainActor in self.appendLog(line) } }
             }
             if result.crashedEarly {
