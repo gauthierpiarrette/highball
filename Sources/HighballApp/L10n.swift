@@ -408,5 +408,8 @@ enum L10n {
         "No engine is installed yet. Reinstall Highball, or restart it to finish setup.": "Aucun moteur n'est encore installé. Réinstallez Highball, ou relancez-le pour terminer la configuration.",
         "Highball is already busy. Wait for the current step to finish, then try again — its progress is on the strip at the bottom of the window.": "Highball est déjà occupé. Attendez la fin de l'étape en cours, puis réessayez — sa progression est affichée en bas de la fenêtre.",
         "No engine is installed yet. Restart Highball to finish setup.": "Aucun moteur n'est encore installé. Relancez Highball pour terminer la configuration.",
+        "An environment needs attention — Highball can't read its settings, so its games aren't showing.": "Un environnement nécessite votre attention — Highball ne peut pas lire ses réglages, donc ses jeux n'apparaissent pas.",
+        "Some environments need attention — Highball can't read their settings, so their games aren't showing.": "Certains environnements nécessitent votre attention — Highball ne peut pas lire leurs réglages, donc leurs jeux n'apparaissent pas.",
+        "Open Troubleshooting": "Ouvrir le dépannage",
     ]
 }

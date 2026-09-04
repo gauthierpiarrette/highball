@@ -11,6 +11,7 @@ typealias LibraryItem = HighballKit.LibraryItem
 
 struct LibraryView: View {
     @Environment(AppState.self) private var state
+    @Environment(\.openSettings) private var openSettings
     @State private var search = ""
     @State private var sourceFilter: LibrarySource?
     @State private var installedOnly = false
@@ -102,6 +103,15 @@ struct LibraryView: View {
                 if state.busy {
                     Text(L("Highball is preparing your Windows environment. Your games will appear here."))
                         .foregroundStyle(.secondary)
+                } else if !state.damagedBottles.isEmpty {
+                    // A present-but-unreadable environment must never look like a brand-new install:
+                    // the games are likely still on disk, so point at recovery, not "prepare one".
+                    Text(state.damagedBottles.count == 1
+                         ? L("An environment needs attention — Highball can't read its settings, so its games aren't showing.")
+                         : L("Some environments need attention — Highball can't read their settings, so their games aren't showing."))
+                        .foregroundStyle(.secondary)
+                    Button(L("Open Troubleshooting")) { state.settingsTab = .troubleshooting; openSettings() }
+                        .buttonStyle(.borderedProminent).tint(HB.amber)
                 } else {
                     // An engine without an environment: an older install, or a stopped first run.
                     Text(L("One more step: Highball prepares a Windows environment for your games."))

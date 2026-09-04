@@ -3,6 +3,9 @@ import Foundation
 import HighballKit
 import Observation
 
+/// The three Settings tabs, so a deep link can select one.
+enum SettingsTab: Hashable { case environments, engine, troubleshooting }
+
 @Observable @MainActor
 final class AppState {
     var engines: [InstalledEngine] = []
@@ -13,6 +16,9 @@ final class AppState {
     /// Bottles with a delete in flight. Their rows show it and refuse a second click.
     var deletingBottles: Set<String> = []
     var selectedBottle: String?
+    /// Which Settings tab to show. A deep link (the library's "Open Troubleshooting") sets it
+    /// before opening the window; the TabView binds its selection to it.
+    var settingsTab: SettingsTab = .environments
     var gamesByBottle: [String: [SteamGame]] = [:]
     var gameDB = GameDB(directories: [])
 

@@ -9,10 +9,13 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var state = state
         VStack(spacing: 0) {
-            TabView {
+            TabView(selection: $state.settingsTab) {
                 EnvironmentsPane().tabItem { Label(L("Environments"), systemImage: "cylinder.split.1x2") }
+                    .tag(SettingsTab.environments)
                 EnginePane().tabItem { Label(L("Engine"), systemImage: "gearshape.2") }
+                    .tag(SettingsTab.engine)
                 TroubleshootingPane().tabItem { Label(L("Troubleshooting"), systemImage: "wrench.and.screwdriver") }
+                    .tag(SettingsTab.troubleshooting)
             }
             // The strip lives on the main window; a compact echo here so a repair or a new
             // environment started from Settings is not silent (review #14).
