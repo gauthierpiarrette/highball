@@ -132,8 +132,8 @@ struct ContentView: View {
                                 Button(L("Connect Epic account…")) { state.showEpicSignIn = true }
                                 Divider()
                                 ForEach(BottleView.launcherMeta.filter { $0.id != "steam" }, id: \.id) { meta in
-                                    Button(String(format: L("Install %@"), meta.short)) {
-                                        if let b = state.defaultBottle { state.applyRecipe(meta.id, to: b) }
+                                    Button(String(format: state.launcherInstalled(meta.id) ? L("Open %@") : L("Install %@"), meta.short)) {
+                                        state.openOrInstallLauncher(meta.id, short: meta.short)
                                     }
                                 }
                                 Divider()

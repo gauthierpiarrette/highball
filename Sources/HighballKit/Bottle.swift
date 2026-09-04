@@ -67,12 +67,17 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
     /// The backend to offer after `current` failed on launch, cycling through the Metal-backed
     /// options. Direct3D 9 no longer constrains this: `withD9VK` attaches DXVK's d3d9 to every
     /// renderer, so switching backend can't drop D3D9 support the way it could before 0.7.17.
-    public static func suggestion(after current: Renderer) -> Renderer {
+    public static func suggestion(after current: Renderer, d3dmetalAvailable: Bool = true) -> Renderer {
+        let next: Renderer
         switch current {
-        case .dxmt: return .d3dmetal
-        case .d3dmetal: return .dxvk
-        case .dxvk, .wined3d: return .dxmt
+        case .dxmt: next = .d3dmetal
+        case .d3dmetal: next = .dxvk
+        case .dxvk, .wined3d: next = .dxmt
         }
+        // Never suggest D3DMetal on an engine that does not ship it (or has not accepted the
+        // licence): setting it would make every launch in the environment fail (review #2).
+        if next == .d3dmetal && !d3dmetalAvailable { return current == .dxmt ? .dxvk : .dxmt }
+        return next
     }
 }
 

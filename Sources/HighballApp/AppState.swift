@@ -159,7 +159,8 @@ final class AppState {
     func play(_ item: LibraryItem, renderer: Renderer? = nil) {
         guard let bottleName = item.bottleName,
               let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
-        if renderer == nil, let appid = item.steamAppID, gameDB[appid]?.effectiveRenderer() == .d3dmetal,
+        if renderer == nil, !bottle.settings.rendererExplicit,
+           let appid = item.steamAppID, gameDB[appid]?.effectiveRenderer() == .d3dmetal,
            let engine = engine(for: bottle), engine.ships("d3dmetal"), engine.rendererDir("d3dmetal") == nil {
             pendingD3DMetal = (item, bottle, engine)
             return
@@ -583,7 +584,7 @@ final class AppState {
     /// here: D3DMetal is asked for at the first game that needs it.
     func getStarted() {
         guard let manifestURL = Self.bundledManifest else {
-            errorMessage = "No engine manifest found. Reinstall Highball."; return
+            fail(HighballError.failed("No engine manifest is bundled. Reinstall Highball.")); return
         }
         runBusy(L("Setting up Highball"),
                 expected: L("usually 5–15 minutes"),
@@ -643,6 +644,21 @@ final class AppState {
 
     /// Installs Steam into the default environment and opens its window (the "Where are your
     /// games?" card). Steam's own first start follows, on the strip.
+    /// Opens a launcher's window if it is installed in the default environment, else installs it.
+    /// The launcher's pin is named by its short label (see BottleView.launcherMeta / recipes).
+    func openOrInstallLauncher(_ id: String, short: String) {
+        guard let bottle = defaultBottle else { makeDefaultEnvironment(); return }
+        let fresh = bottles.first { $0.name == bottle.name } ?? bottle
+        if fresh.settings.recipes.contains(id),
+           let pin = fresh.settings.pins.first(where: { $0.name.lowercased().hasPrefix(short.lowercased().prefix(5)) }) {
+            launch(pin: pin, in: fresh)
+        } else {
+            applyRecipe(id, to: fresh)
+        }
+    }
+
+    func launcherInstalled(_ id: String) -> Bool { defaultBottle?.settings.recipes.contains(id) ?? false }
+
     func installSteam() {
         guard let bottle = defaultBottle else { makeDefaultEnvironment(); return }
         let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
@@ -671,7 +687,7 @@ final class AppState {
         guard let (item, _, engine) = pendingD3DMetal else { return }
         pendingD3DMetal = nil
         acceptGPTK(engine: engine)
-        play(item)   // through play, so a fix recipe still applies
+        play(item, renderer: .d3dmetal)   // through play, so a fix recipe still applies
     }
 
     /// The other graphics mode the row recorded as working, when the person declines D3DMetal.
@@ -869,7 +885,10 @@ final class AppState {
     /// Ends the game's own processes and leaves Steam and the server running, so the next
     /// Play needs no cold start.
     func stopSession(_ session: GameSession) {
-        guard let bottle = bottles.first(where: { $0.name == session.bottleName }) else { return }
+        guard let bottle = bottles.first(where: { $0.name == session.bottleName }) else {
+            // The environment was deleted while the game "ran": end the record, no ghost prompt.
+            endSession(session, reason: "stopped"); postPlay = nil; return
+        }
         let prefix = bottle.url, markers = session.markers
         // terminate waits out a grace period: off the main thread, then the record.
         Task.detached {
@@ -883,6 +902,12 @@ final class AppState {
     func quitSteam(in bottle: Bottle) {
         guard let engine = engine(for: bottle) else { return }
         let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
+        // A game may be running under Steam even when Highball did not start it (launched from
+        // Steam's own window); killing the wineserver would take it down. Refuse then.
+        guard !runner.steamGameIsRunning() else {
+            fail(HighballError.failed("A game is still running in this environment. Quit it first, then quit Steam."))
+            return
+        }
         steamClients.remove(bottle.name)
         Task.detached { try? runner.kill() }
     }
@@ -890,7 +915,7 @@ final class AppState {
     func launch(pin: Pin, in bottle: Bottle) {
         guard let engine = engine(for: bottle) else { return }
         guard !launchingPins.contains(pin.id) else {
-            errorMessage = "\(pin.name) is already starting or running. If its window never appeared, use Stop all processes on the bottle, then try again."
+            fail(HighballError.failed("\(pin.name) is already starting or running. If its window never appeared, stop the environment's processes in Settings, then try again."))
             return
         }
         // runBusy refuses a second operation silently; the pin must not be marked as launching then.
@@ -955,7 +980,7 @@ final class AppState {
             } crashed: { result in
                 let current = pin.renderer ?? bottle.settings.renderer
                 self.crashSuggestion = CrashSuggestion(program: pin.name, bottleName: bottle.name,
-                                                       renderer: Renderer.suggestion(after: current),
+                                                       renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil),
                                                        logPath: result.log.path, current: current, seconds: Int(result.duration),
                                                        alternateEngine: self.alternateEngine(for: bottle))
             }
@@ -1080,7 +1105,7 @@ final class AppState {
             } crashed: { result in
                 let current = renderer ?? bottle.settings.renderer
                 self.crashSuggestion = CrashSuggestion(program: game.name, bottleName: bottle.name,
-                                                       renderer: Renderer.suggestion(after: current),
+                                                       renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil),
                                                        logPath: result.log.path, current: current, seconds: Int(result.duration),
                                                        alternateEngine: self.alternateEngine(for: bottle))
             }
@@ -1274,7 +1299,7 @@ final class AppState {
             } crashed: { result in
                 let current = renderer ?? bottle.settings.renderer
                 self.crashSuggestion = CrashSuggestion(program: game.app_title, bottleName: bottle.name,
-                                                       renderer: Renderer.suggestion(after: current),
+                                                       renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil),
                                                        logPath: result.log.path, current: current, seconds: Int(result.duration),
                                                        alternateEngine: self.alternateEngine(for: bottle))
             }

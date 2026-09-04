@@ -5,8 +5,10 @@ import HighballKit
 /// honest list of what Play will do, and every identifier behind one Advanced triangle.
 struct GameDetailView: View {
     @Environment(AppState.self) private var state
-    let item: LibraryItem
+    let passedItem: LibraryItem
     @State private var showBottleSettings = false
+    /// The live row: after an install, a delete or a rename, the passed-in copy goes stale.
+    private var item: LibraryItem { state.libraryItems.first { $0.id == passedItem.id } ?? passedItem }
     @State private var showWhy = false
     @State private var showAdvanced = false
 
@@ -122,9 +124,12 @@ struct GameDetailView: View {
             } else if item.source == .epic {
                 Button(L("Install")) { state.install(item) }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                     .disabled(state.busy)
-                Text(L("Installs into your Highball environment.")).font(.callout).foregroundStyle(.secondary)
+                Text(String(format: L("Installs into %@."), state.defaultBottle?.name ?? L("your environment"))).font(.callout).foregroundStyle(.secondary)
+            } else if item.source == .steam {
+                Text(L("Not downloaded yet. Install it from the Steam window.")).font(.callout).foregroundStyle(.secondary)
+                if let b = bottle ?? state.defaultBottle { Button(L("Open Steam")) { state.showSteam(in: b) }.controlSize(.large) }
             } else {
-                Text(L("Not installed in any environment.")).font(.callout).foregroundStyle(.secondary)
+                Text(L("Not installed.")).font(.callout).foregroundStyle(.secondary)
             }
         }
     }

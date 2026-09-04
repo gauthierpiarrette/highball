@@ -76,7 +76,7 @@ struct LibraryView: View {
         }
         .background(BottleBackdrop())
         .searchable(text: $search, prompt: L("Search your games"))
-        .navigationDestination(for: LibraryItem.self) { GameDetailView(item: $0) }
+        .navigationDestination(for: LibraryItem.self) { GameDetailView(passedItem: $0) }
     }
 
     private func entry(for item: LibraryItem) -> GameDBEntry? {
