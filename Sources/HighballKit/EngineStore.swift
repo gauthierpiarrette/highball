@@ -48,10 +48,13 @@ public struct EngineStore: Sendable {
     }
 
     /// The engine to use by default: the one the bundled manifest names when it is installed,
-    /// else the first installed (alphabetical). After an engine update two engines can coexist
-    /// briefly, and "first" would be the old one.
+    /// else the newest installed. Newest is the highest id under numeric-aware ordering, so
+    /// `…-r10` beats `…-r9` and `…-r2`. After an engine update two engines coexist, and the
+    /// CLI, which has no bundled manifest, created bottles on the old one while the app used
+    /// the new one (found 2026-09-04: a bottle created from the CLI ran r0 next to the app's r1).
     public static func defaultEngine(installed: [InstalledEngine], bundledID: String?) -> InstalledEngine? {
-        installed.first { $0.id == bundledID } ?? installed.first
+        installed.first { $0.id == bundledID }
+            ?? installed.max { $0.id.compare($1.id, options: .numeric) == .orderedAscending }
     }
 
     public func engine(_ id: String) throws -> InstalledEngine {

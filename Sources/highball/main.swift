@@ -89,13 +89,13 @@ struct Bottle: AsyncParsableCommand {
 
     struct Create: AsyncParsableCommand {
         @Argument var name: String
-        @Option(help: "Engine id (default: first installed).") var engine: String?
+        @Option(help: "Engine id (default: newest installed).") var engine: String?
         @Option(help: "Renderer: wined3d|dxmt|d3dmetal|dxvk (explicit choice; recipes won't override it)") var renderer: HighballKit.Renderer?
         @Option(help: "Apply this recipe after creation (id or path).") var recipe: String?
 
         func run() async throws {
             let store = EngineStore()
-            let eng = try engine.map { try store.engine($0) } ?? store.installedEngines().first
+            let eng = try engine.map { try store.engine($0) } ?? EngineStore.defaultEngine(installed: store.installedEngines(), bundledID: nil)
             guard let eng else { fail("no engine installed") }
             print("creating bottle '\(name)' with \(eng.id) (wineboot takes ~90 s the first time)…")
             var bottle = try await BottleStore().create(name: name, engine: eng, renderer: renderer ?? .dxmt)

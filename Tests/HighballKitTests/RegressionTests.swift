@@ -851,9 +851,12 @@ extension RegressionTests {
         }
         let old = try engine("x64-sikarugir10.0_6-r0"), new = try engine("x64-sikarugir10.0_6-r1")
         XCTAssertEqual(EngineStore.defaultEngine(installed: [old, new], bundledID: new.id)?.id, new.id)
-        XCTAssertEqual(EngineStore.defaultEngine(installed: [old, new], bundledID: nil)?.id, old.id, "no manifest: first installed")
+        XCTAssertEqual(EngineStore.defaultEngine(installed: [old, new], bundledID: nil)?.id, new.id, "no manifest (the CLI): newest installed, not the alphabetically first")
+        XCTAssertEqual(EngineStore.defaultEngine(installed: [new, old], bundledID: nil)?.id, new.id, "order of discovery must not matter")
         XCTAssertEqual(EngineStore.defaultEngine(installed: [old], bundledID: new.id)?.id, old.id, "update not installed yet: keep using the old one")
         XCTAssertNil(EngineStore.defaultEngine(installed: [], bundledID: new.id))
+        let r9 = try engine("x64-sikarugir10.0_6-r9"), r10 = try engine("x64-sikarugir10.0_6-r10")
+        XCTAssertEqual(EngineStore.defaultEngine(installed: [r10, r9], bundledID: nil)?.id, r10.id, "numeric-aware: r10 is newer than r9 although it sorts first as a string")
     }
 
     // An engine update only re-runs wineboot on each bottle when the Wine build changed. r1 is
