@@ -9,7 +9,7 @@ struct ActivityStrip: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        if state.busy || state.doneState != nil || !state.runningSessions.isEmpty {
+        if state.busy || state.doneState != nil || !state.runningSessions.isEmpty || !steamBottles.isEmpty {
             VStack(spacing: 0) {
                 Divider()
                 VStack(spacing: 0) {
@@ -19,8 +19,10 @@ struct ActivityStrip: View {
                         doneRow(done)
                     }
                     ForEach(state.runningSessions) { session in
-                        if state.busy || state.doneState != nil || session.id != state.runningSessions.first?.id { Divider().opacity(0.5) }
                         sessionRow(session)
+                    }
+                    ForEach(steamBottles, id: \.name) { bottle in
+                        steamRow(bottle)
                     }
                 }
             }
@@ -28,6 +30,9 @@ struct ActivityStrip: View {
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
+
+    /// Bottles whose Steam client runs, in sidebar order.
+    private var steamBottles: [Bottle] { state.bottles.filter { state.steamClients.contains($0.name) } }
 
     // MARK: Rows
 
@@ -91,6 +96,22 @@ struct ActivityStrip: View {
             }
             Button(L("Details")) { state.showLog = true }.controlSize(.small).buttonStyle(.link)
             Button(L("Dismiss")) { state.doneState = nil }.controlSize(.small)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+
+    /// A Steam client with no window of its own in the app: Show brings its window forward,
+    /// Quit ends it (hidden while a known game runs in that bottle, since it would go too).
+    private func steamRow(_ bottle: Bottle) -> some View {
+        HStack(spacing: 10) {
+            Circle().fill(Color.secondary).frame(width: 8, height: 8).padding(.horizontal, 4)
+            Text(state.bottles.count > 1 ? String(format: L("Steam is running in %@"), bottle.name) : L("Steam is running"))
+                .font(.callout.weight(.medium)).lineLimit(1)
+            Spacer(minLength: 12)
+            Button(L("Show")) { state.showSteam(in: bottle) }.controlSize(.small).disabled(state.busy)
+            if !state.sessionRuns(in: bottle) {
+                Button(L("Quit")) { state.killBottle(bottle) }.controlSize(.small).disabled(state.busy)
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
     }

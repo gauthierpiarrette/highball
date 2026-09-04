@@ -25,6 +25,15 @@ public enum SteamRestart {
 }
 
 extension WineRunner {
+    /// Whether a Steam client runs in the prefix, by its command line. Static so the app can
+    /// poll every bottle without resolving engines.
+    public static func steamIsRunning(inPrefix prefix: URL) -> Bool {
+        ProcessTable.processes(ofPrefix: prefix).contains { pid in
+            guard let first = ProcessTable.commandLineAndEnvironment(of: pid)?.arguments.first else { return false }
+            return isSteamExecutable(first)
+        }
+    }
+
     /// The environment of the bottle's running Steam client, nil when none runs (or the
     /// kernel would not show it, which it does for Wine's processes).
     public func runningSteamEnvironment() -> [String: String]? {

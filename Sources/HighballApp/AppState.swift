@@ -322,6 +322,7 @@ final class AppState {
         gamesByBottle = Dictionary(bottles.map { ($0.name, SteamLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
         if installWatcher == nil { installWatcher = DirectoryWatcher { [weak self] in self?.refreshInstalledGames() } }
         installWatcher?.watch(bottles.flatMap(installDirectories))
+        startSteamClientWatch()
         libraryPlays = libraryStore.load()
         rebuildLibrary()
         epicRefresh()
@@ -625,6 +626,37 @@ final class AppState {
             NSWorkspace.shared.activateFileViewerSelecting([app])
         } catch { fail(error) }
     }
+
+    // MARK: Steam clients (UX plan §3.3, issue #33)
+
+    /// Bottles with a Steam client running right now. A client left behind by a game launch is
+    /// invisible otherwise, and a new steam.exe only forwards to it (#33); the strip shows it
+    /// with Show and Quit.
+    var steamClients: Set<String> = []
+    @ObservationIgnored private var steamClientWatch: Task<Void, Never>?
+
+    private func startSteamClientWatch() {
+        guard steamClientWatch == nil else { return }
+        steamClientWatch = Task.detached(priority: .utility) { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let bottles = await MainActor.run { [self] in self.bottles }
+                let running = Set(bottles.filter { WineRunner.steamIsRunning(inPrefix: $0.url) }.map(\.name))
+                await MainActor.run { [self] in if self.steamClients != running { self.steamClients = running } }
+                try? await Task.sleep(for: .seconds(8))
+            }
+        }
+    }
+
+    /// Brings the bottle's Steam window forward (the running client is asked to show it; with
+    /// none running this is a normal Steam start).
+    func showSteam(in bottle: Bottle) {
+        let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
+        launch(pin: Pin(name: "Steam", path: Pin.storagePath(for: steam, driveC: bottle.driveC)), in: bottle)
+    }
+
+    /// Whether a game the app knows about runs in the bottle: Quit on the Steam row hides then.
+    func sessionRuns(in bottle: Bottle) -> Bool { runningSessions.contains { $0.bottleName == bottle.name } }
 
     // MARK: Sessions (UX plan 0.6)
 

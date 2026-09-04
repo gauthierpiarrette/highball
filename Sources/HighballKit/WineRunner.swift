@@ -306,12 +306,7 @@ public struct WineRunner: Sendable {
     /// itself, which is normally none (see `ProcessTable` for why it is not always none).
     @discardableResult
     /// Whether a Steam client already runs in this bottle, by its command line.
-    public func steamIsRunning() -> Bool {
-        ProcessTable.processes(ofPrefix: bottle.url).contains { pid in
-            guard let first = ProcessTable.commandLineAndEnvironment(of: pid)?.arguments.first else { return false }
-            return Self.isSteamExecutable(first)
-        }
-    }
+    public func steamIsRunning() -> Bool { Self.steamIsRunning(inPrefix: bottle.url) }
 
     /// Pure: does a command line's program name end in steam.exe (Windows or Unix separators).
     public static func isSteamExecutable(_ argv0: String) -> Bool {
