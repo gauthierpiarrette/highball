@@ -58,7 +58,7 @@ final class AppState {
             switch self {
             case .cancelTask: return L("Stopped. Nothing already downloaded is lost.")
             case .killBottle: return L("Stopped.")
-            case .killBottleThenRepair: return L("Stopped. Repairing the bottle so nothing half-installed stays behind.")
+            case .killBottleThenRepair: return L("Stopped. Repairing the environment so nothing half-installed stays behind.")
             }
         }
         var bottleToRepair: Bottle? {
@@ -129,8 +129,6 @@ final class AppState {
 
     /// Which primary surface the detail column shows. `selectedBottle` keeps backing every
     /// bottle action and the File-menu commands; it just stopped being the router.
-    enum Pane: Hashable { case library, bottles }
-    var pane: Pane = .library
     var libraryItems: [LibraryItem] = []
     var libraryPlays: [String: LibraryStore.PlayRecord] = [:]
     var libraryStore: LibraryStore { LibraryStore(paths: paths) }
@@ -603,7 +601,7 @@ final class AppState {
             if bottles.isEmpty, let engine = defaultEngine {
                 await MainActor.run { self.stage = L("Preparing your Windows environment"); self.busyExpected = L("about 90 seconds") }
                 _ = try await bottleStore.create(name: Self.defaultEnvironmentName, engine: engine)
-                await MainActor.run { self.appendLog("environment ready"); self.funnel(.environmentCreated); self.selectedBottle = Self.defaultEnvironmentName; self.pane = .library }
+                await MainActor.run { self.appendLog("environment ready"); self.funnel(.environmentCreated); self.selectedBottle = Self.defaultEnvironmentName }
             }
         }
     }
@@ -637,7 +635,7 @@ final class AppState {
         runBusy(L("Preparing your Windows environment"), expected: L("about 90 seconds"),
                 done: DoneState(title: L("Highball is ready"), ctaTitle: nil, cta: nil)) { [self] in
             _ = try await bottleStore.create(name: Self.defaultEnvironmentName, engine: engine)
-            await MainActor.run { self.selectedBottle = Self.defaultEnvironmentName; self.pane = .library }
+            await MainActor.run { self.selectedBottle = Self.defaultEnvironmentName }
         }
     }
 
@@ -716,7 +714,7 @@ final class AppState {
                 let notes = try await runner.apply(recipe) { line in Task { @MainActor in self.appendLog(line) } }
                 for n in notes { await MainActor.run { self.appendLog("note: \(n)") } }
             }
-            await MainActor.run { self.selectedBottle = name; self.pane = .bottles }
+            await MainActor.run { self.selectedBottle = name }
         }
     }
 
@@ -1004,7 +1002,7 @@ final class AppState {
         // was in fact succeeding.
         guard !deletingBottles.contains(name) else { return }
         deletingBottles.insert(name)
-        runBusy("Deleting '\(name)'", showLogSheet: false,
+        runBusy(String(format: L("Deleting the %@ environment"), name), showLogSheet: false,
                 cleanup: { [weak self] in self?.deletingBottles.remove(name) }) { [self] in
             let store = bottleStore
             let killer = killerFor(name)
@@ -1188,7 +1186,7 @@ final class AppState {
         }
         // .msi / .bat: an installer, which cannot stop cleanly, so it stays a blocking op.
         guard let engine = engine(for: bottle) else { return }
-        runBusy("Running \(url.lastPathComponent)", stop: .killBottleThenRepair(bottle, label: L("Stop and repair"))) { [self] in
+        runBusy(String(format: L("Running %@"), url.lastPathComponent), stop: .killBottleThenRepair(bottle, label: L("Stop and repair"))) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             let args = ext == "msi" ? ["msiexec", "/i", url.path] : [url.path]
             _ = try await runner.run(args, renderer: .wined3d, label: url.lastPathComponent,
@@ -1221,7 +1219,7 @@ final class AppState {
             // Repair is the escape hatch for a bottle whose 32-bit half never got built (#37);
             // refreshPrefix carries that check.
             try await BottleStore.refreshPrefix(runner: runner, bottle: bottle)
-            await MainActor.run { self.appendLog("bottle repaired — Windows environment refreshed") }
+            await MainActor.run { self.appendLog("environment repaired — Windows first boot refreshed") }
         }
     }
 

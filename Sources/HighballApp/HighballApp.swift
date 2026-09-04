@@ -27,9 +27,9 @@ struct HighballApp: App {
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .newItem) {
-                Button(L("Run Windows Program…")) { state.chooseProgramToRun() }
+                Button(L("A Windows program I have…")) { state.chooseProgramToRun() }
                     .keyboardShortcut("o")
-                    .disabled(state.selectedBottle == nil)
+                    .disabled(state.busy || state.bottles.isEmpty)
             }
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: delegate.updaterController.updater)
@@ -108,8 +108,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct ContentView: View {
     @Environment(AppState.self) private var state
-    @State private var showCreate = false
-    @State private var pendingDelete: String?
 
     /// Where a dropped or chosen program runs: the environment page it came from, else the default.
     private var runTarget: Bottle? {
@@ -151,7 +149,6 @@ struct ContentView: View {
         }
         // Everything that takes time lives on one strip at the bottom, never modal (UX plan 0.5).
         .safeAreaInset(edge: .bottom, spacing: 0) { ActivityStrip() }
-        .sheet(isPresented: $showCreate) { CreateBottleSheet() }
         // A Windows program dropped anywhere on the window, or picked from Add games and ⌘O,
         // runs in the environment it was dropped on, else the default one.
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
@@ -162,7 +159,7 @@ struct ContentView: View {
                     Task { @MainActor in state.pendingRunBottle = nil; state.pendingRun = url }
                 } else {
                     Task { @MainActor in
-                        state.errorMessage = String(format: L("'%@' isn't a Windows program. You can drop .exe, .msi or .bat files here."), url.lastPathComponent)
+                        state.fail(HighballError.failed(String(format: L("'%@' isn't a Windows program. You can drop .exe, .msi or .bat files here."), url.lastPathComponent)))
                     }
                 }
             }
@@ -174,12 +171,6 @@ struct ContentView: View {
             Button(L("Run")) { if let u = state.pendingRun, let b = runTarget { state.runDropped(u, in: b, andPin: false) }; state.pendingRun = nil }
             Button(L("Run and add to Programs")) { if let u = state.pendingRun, let b = runTarget { state.runDropped(u, in: b, andPin: true) }; state.pendingRun = nil }
             Button(L("Cancel"), role: .cancel) { state.pendingRun = nil }
-        }
-        .confirmationDialog("Delete bottle \"\(pendingDelete ?? "")\"? This removes its Windows drive and everything installed in it.",
-                            isPresented: .init(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-                            titleVisibility: .visible) {
-            Button(L("Delete"), role: .destructive) { if let n = pendingDelete { state.deleteBottle(n) }; pendingDelete = nil }
-            Button(L("Cancel"), role: .cancel) { pendingDelete = nil }
         }
         .sheet(isPresented: $state.showLog) { LogSheet() }
         .sheet(isPresented: $state.showGPTKLicense) { GPTKLicenseSheet() }

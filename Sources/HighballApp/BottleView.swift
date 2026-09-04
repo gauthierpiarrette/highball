@@ -70,10 +70,10 @@ struct BottleView: View {
         .toolbar {
             ToolbarItemGroup {
                 if state.busy { ProgressView().controlSize(.small) }
-                Button { showSettings = true } label: { Label(L("Bottle settings"), systemImage: "slider.horizontal.3") }
+                Button { showSettings = true } label: { Label(L("Environment settings"), systemImage: "slider.horizontal.3") }
                     .help(L("Renderer, synchronization, Windows version…"))
                 Menu {
-                    Button(L("Open C: drive")) { NSWorkspace.shared.open(bottle.driveC) }
+                    Button(L("Show the Windows drive")) { NSWorkspace.shared.open(bottle.driveC) }
                     Button(L("Stop all processes")) { state.killBottle(bottle) }
                 } label: { Label(L("More"), systemImage: "ellipsis.circle") }
             }
@@ -150,7 +150,7 @@ struct BottleView: View {
                     .contextMenu {
                         Button(L("Program settings…")) { editingPin = pin }
                         Menu(L("Renderer override")) {
-                            Button(L("Bottle default")) { state.setPinRenderer(nil, pin: pin, in: bottle) }
+                            Button(L("Environment default")) { state.setPinRenderer(nil, pin: pin, in: bottle) }
                             ForEach(Renderer.allCases, id: \.self) { r in
                                 Button(r.rawValue.uppercased()) { state.setPinRenderer(r, pin: pin, in: bottle) }
                             }
@@ -351,7 +351,7 @@ struct BottleSettingsSheet: View {
                     Toggle(L("Use ⌘C / ⌘V inside Windows apps"), isOn: binding(\.commandIsControl))
                     Text(L("Maps the Command keys to Ctrl, so Mac copy and paste work in Steam and games. Option becomes Alt so Alt-based bindings keep working. Off = Wine's default, where Command acts as Alt."))
                         .font(.caption).foregroundStyle(.secondary)
-                    Text(L("Games run with the bottle’s sync (msync is fastest). Opening the Steam window restarts Windows processes with sync off — its interface needs it."))
+                    Text(L("Games run with the environment’s sync (msync is fastest). Opening the Steam window restarts Windows processes with sync off — its interface needs it."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section(L("Advanced")) {
@@ -370,15 +370,15 @@ struct BottleSettingsSheet: View {
                             }
                         }
                         .disabled(state.busy)
-                        Text(L("Bottles never change engine on their own. Switching re-runs the Windows setup when the Wine build differs; switching back is the same step. An engine marked download is fetched first."))
+                        Text(L("Environments never change engine on their own. Switching re-runs the Windows setup when the Wine build differs; switching back is the same step. An engine marked download is fetched first."))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     TextField(L("DLL overrides"), text: binding(\.dllOverrides), prompt: Text(verbatim: "version=n,b;winmm=n,b"))
                         .font(.body.monospaced())
-                    Text(L("Extra Wine DLL overrides for this bottle, semicolon separated. Mods like Cyber Engine Tweaks need version=n,b."))
+                    Text(L("Extra Wine DLL overrides for this environment, semicolon separated. Mods like Cyber Engine Tweaks need version=n,b."))
                         .font(.caption).foregroundStyle(.secondary)
                     EnvEditor(bottle: bottle)
-                    Text(L("Environment variables, one KEY=VALUE per line. Applied to everything launched in this bottle."))
+                    Text(L("Environment variables, one KEY=VALUE per line. Applied to everything launched in this environment."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 let tweaks = AppState.tweakRecipes()
@@ -403,13 +403,13 @@ struct BottleSettingsSheet: View {
                     }
                 }
                 Section {
-                    Button(L("Delete bottle…"), role: .destructive) { confirmDelete = true }
+                    Button(L("Delete environment…"), role: .destructive) { confirmDelete = true }
                 }
             }
             .formStyle(.grouped)
         }
         .frame(width: 560, height: 560)
-        .confirmationDialog(L("Delete this bottle? Its Windows drive and everything installed in it are removed."),
+        .confirmationDialog(L("Delete this environment? Its Windows drive and everything installed in it are removed."),
                             isPresented: $confirmDelete, titleVisibility: .visible) {
             Button(L("Delete"), role: .destructive) { dismiss(); state.deleteBottle(bottle.name) }
             Button(L("Cancel"), role: .cancel) {}
@@ -569,7 +569,7 @@ struct PinSettingsSheet: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Picker(L("Renderer"), selection: $pin.renderer) {
-                Text(L("Bottle default")).tag(Renderer?.none)
+                Text(L("Environment default")).tag(Renderer?.none)
                 ForEach(Renderer.allCases, id: \.self) { r in
                     Text(r.rawValue.uppercased()).tag(Renderer?.some(r))
                 }
