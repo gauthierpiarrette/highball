@@ -247,6 +247,36 @@ final class AppState {
 
     private var prunedLogsThisRun = false
 
+    /// Re-reads the launchers' install records when they change (a download starting or
+    /// finishing in an open Steam window), so the library follows without a relaunch.
+    @ObservationIgnored private var installWatcher: DirectoryWatcher?
+
+    /// The directories whose entries change when a game is installed or removed: Steam's
+    /// steamapps (appmanifest files) and the folder Epic installs land in.
+    private func installDirectories(of bottle: Bottle) -> [URL] {
+        var dirs = [bottle.driveC.appending(path: "Games")]
+        if let root = SteamLibrary.steamRoot(of: bottle) { dirs.append(root.appending(path: "steamapps")) }
+        return dirs
+    }
+
+    /// The cheap part of `refresh`: installed games only. Runs on every install-record change,
+    /// so it must not spawn per call beyond legendary's install list, and never touches the
+    /// directories it watches.
+    func refreshInstalledGames() {
+        let games = Dictionary(bottles.map { ($0.name, SteamLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
+        if games != gamesByBottle { gamesByBottle = games; rebuildLibrary() }
+        guard epicSignedIn, !epicFetchInFlight else { return }
+        Task.detached { [store = epicStore] in
+            let installed = (try? store.installedGames()) ?? []
+            await MainActor.run { [weak self] in
+                let installs = Dictionary(uniqueKeysWithValues: installed.compactMap { g in g.install_path.map { (g.app_name, $0) } })
+                guard let self, installs != self.epicInstalls else { return }
+                self.epicInstalls = installs
+                self.rebuildLibrary()
+            }
+        }
+    }
+
     func refresh() {
         if !prunedLogsThisRun {
             prunedLogsThisRun = true
@@ -265,6 +295,8 @@ final class AppState {
         if selectedBottle == nil { selectedBottle = bottles.first?.name }
         // Never trap on duplicate names (a Finder-duplicated bottle crashed the app at launch — issue #13).
         gamesByBottle = Dictionary(bottles.map { ($0.name, SteamLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
+        if installWatcher == nil { installWatcher = DirectoryWatcher { [weak self] in self?.refreshInstalledGames() } }
+        installWatcher?.watch(bottles.flatMap(installDirectories))
         libraryPlays = libraryStore.load()
         rebuildLibrary()
         epicRefresh()
