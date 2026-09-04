@@ -78,6 +78,8 @@ public struct GameDBEntry: Codable, Sendable {
     public var provenance: String?
     public var notes: String?
     public var anticheat: AnticheatInfo?
+    /// The date of the last local verification, "YYYY-MM-DD".
+    public var lastVerified: String?
     /// Extra arguments appended to the game's launch (Steam forwards -applaunch trailing args
     /// to the game). Data, not code: game-specific knowledge stays in the db (issue #21's
     /// windowed workaround for legacy CS:GO's macOS 26 fullscreen freeze is the first user).
@@ -92,6 +94,26 @@ public struct GameDBEntry: Codable, Sendable {
     /// a black screen. Data, not code: the row decides.
     public var rendererMinMacOS: String?
     public var rendererBelow: Renderer?
+    /// The machine and build the verdict was taken on, for the game page's sentence: "Verified
+    /// on an M1 Pro. About 70 frames per second on macOS 26.6.2". Free-text `provenance` stays
+    /// for the site; this is the structured part the app can compare with the reader's Mac.
+    public struct VerifiedOn: Codable, Sendable, Equatable {
+        public var chip: String?       // "Apple M1 Pro"
+        public var macos: String?      // "26.6.2"
+        public var engine: String?     // engine id
+        public var fps: String?        // "about 70", "60 to 82"; words, never a computed number
+        public init(chip: String? = nil, macos: String? = nil, engine: String? = nil, fps: String? = nil) {
+            self.chip = chip; self.macos = macos; self.engine = engine; self.fps = fps
+        }
+    }
+    public var verified: VerifiedOn?
+    /// Per-renderer outcomes ("works", "fails", ...) with a detail sentence, the data nobody
+    /// else publishes; the game page shows them under "Why these settings?".
+    public struct RendererResult: Codable, Sendable, Equatable {
+        public var verdict: String
+        public var detail: String?
+    }
+    public var rendererResults: [String: RendererResult]?
 
     public var isBlocked: Bool { status == "blocked-anticheat" }
 

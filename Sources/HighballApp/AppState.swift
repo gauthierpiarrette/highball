@@ -149,9 +149,6 @@ final class AppState {
         return recipe
     }
 
-    /// A heavy fix waiting on the user's word before Play continues (installer/winetricks
-    /// class — honest prompt with the time cost instead of a silent 30-minute surprise).
-    var pendingHeavyFix: (item: LibraryItem, recipe: HighballKit.Recipe)?
 
     /// The "never pick a bottle first" guarantee: every Play in the library resolves the
     /// item's own bottle and dispatches by source. Play also means "make it work the way
@@ -183,28 +180,18 @@ final class AppState {
                 }
                 return
             }
-            pendingHeavyFix = (item, recipe)
-            return  // Play continues via confirmHeavyFix or skipHeavyFix
+            // A heavy fix is a step, not a question (UX plan §3.5): the page listed it with its
+            // cost, Play runs it on the strip with Stop available, and the done row offers Play
+            // as the next thing rather than firing a launch long after anyone stopped watching.
+            applyRecipe(recipe.id, to: bottle, then: DoneState(
+                title: String(format: L("%@ installed"), recipe.title),
+                ctaTitle: String(format: L("Play %@"), item.title),
+                cta: { [weak self] in
+                    guard let self, let fresh = self.bottles.first(where: { $0.name == bottleName }) else { return }
+                    self.launch(item, in: fresh)
+                }))
+            return
         }
-        launch(item, in: bottle)
-    }
-
-    /// User confirmed the heavy fix: apply it (busy sheet shows progress), then launch.
-    func confirmHeavyFix() {
-        guard let (item, recipe) = pendingHeavyFix else { return }
-        pendingHeavyFix = nil
-        guard let bottleName = item.bottleName,
-              let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
-        applyRecipe(recipe.id, to: bottle)
-        // The user presses Play again after the install — auto-chaining a launch onto a
-        // 30-minute install would fire it long after they stopped watching.
-    }
-
-    func skipHeavyFix() {
-        guard let (item, _) = pendingHeavyFix else { return }
-        pendingHeavyFix = nil
-        guard let bottleName = item.bottleName,
-              let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
         launch(item, in: bottle)
     }
 
@@ -283,6 +270,8 @@ final class AppState {
     }
 
     let paths = HighballPaths()
+    /// This Mac's chip, read once: the game page compares it with the chip a verdict was taken on.
+    let machineChip = Machine.chip()
     var engineStore: EngineStore { EngineStore(paths: paths) }
     var bottleStore: BottleStore { BottleStore(paths: paths) }
 
@@ -610,10 +599,10 @@ final class AppState {
         }
     }
 
-    func applyRecipe(_ id: String, to bottle: Bottle) {
+    func applyRecipe(_ id: String, to bottle: Bottle, then done: DoneState? = nil) {
         guard let engine = engine(for: bottle), let recipe = Self.recipe(id) else { return }
         runBusy("Installing \(recipe.title)",
-                done: DoneState(title: String(format: L("%@ installed"), recipe.title), ctaTitle: nil, cta: nil),
+                done: done ?? DoneState(title: String(format: L("%@ installed"), recipe.title), ctaTitle: nil, cta: nil),
                 stop: .killBottleThenRepair(bottle, label: L("Stop and repair"))) { [self] in
             var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
             let notes = try await runner.apply(recipe) { line in Task { @MainActor in self.appendLog(line) } }
