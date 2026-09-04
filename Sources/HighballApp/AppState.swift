@@ -644,12 +644,20 @@ final class AppState {
     func installSteam() {
         guard let bottle = defaultBottle else { makeDefaultEnvironment(); return }
         let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
+        if steamInstalled(in: bottle) {   // already there: open it, never run the installer again
+            launch(pin: Pin(name: "Steam", path: Pin.storagePath(for: steam, driveC: bottle.driveC)), in: bottle)
+            return
+        }
         applyRecipe("steam", to: bottle, then: DoneState(
             title: L("Steam is installed"), ctaTitle: L("Open Steam"),
             cta: { [weak self] in
                 guard let self, let fresh = self.bottles.first(where: { $0.name == bottle.name }) else { return }
                 self.launch(pin: Pin(name: "Steam", path: Pin.storagePath(for: steam, driveC: fresh.driveC)), in: fresh)
             }))
+    }
+
+    func steamInstalled(in bottle: Bottle) -> Bool {
+        FileManager.default.fileExists(atPath: bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe").path)
     }
 
     /// A game the row says needs D3DMetal, on an engine where it is not enabled yet: Play asks

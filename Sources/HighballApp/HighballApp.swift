@@ -123,7 +123,7 @@ struct ContentView: View {
                     .toolbar {
                         ToolbarItem(placement: .primaryAction) {
                             Menu {
-                                Button(L("Install Steam")) { state.installSteam() }
+                                Button(state.defaultBottle.map(state.steamInstalled) == true ? L("Open Steam") : L("Install Steam")) { state.installSteam() }
                                 Button(L("Connect Epic account…")) { state.showEpicSignIn = true }
                                 Divider()
                                 ForEach(BottleView.launcherMeta.filter { $0.id != "steam" }, id: \.id) { meta in

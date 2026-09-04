@@ -137,7 +137,7 @@ struct LibraryView: View {
                            text: L("An installer or game from your Mac. Or drop it onto this window."),
                            button: L("Choose a file…")) { state.chooseProgramToRun() }
             }
-            Text(L("Battle.net, GOG Galaxy, the EA app, Ubisoft Connect and Rockstar are on the environment's page."))
+            Text(L("Battle.net, GOG Galaxy, the EA app, Ubisoft Connect and Rockstar are under Add games."))
                 .font(.caption).foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
