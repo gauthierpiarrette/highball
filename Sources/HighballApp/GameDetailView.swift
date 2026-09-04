@@ -185,47 +185,58 @@ struct GameDetailView: View {
     }
 
     private var advanced: some View {
-        DisclosureGroup(isExpanded: $showAdvanced) {
-            VStack(alignment: .leading, spacing: 8) {
-                if let bottle {
-                    row(L("Environment"), bottle.name + (engineName.map { " · \($0)" } ?? ""))
-                    row(L("Graphics mode"), GamePageCopy.plainName(bottle.settings.renderer) + (bottle.settings.rendererExplicit ? L(" (set by you)") : ""))
-                    row(L("Engine"), bottle.settings.engineID)
-                    if let r = entry?.effectiveRenderer() { row(L("Verified with"), GamePageCopy.plainName(r)) }
+        VStack(alignment: .leading, spacing: 14) {
+            DisclosureGroup(isExpanded: $showAdvanced) {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let bottle {
+                        HStack(alignment: .top, spacing: 12) {
+                            Text(L("Graphics mode")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 4)
+                            GraphicsModePicker(bottle: bottle)
+                        }
+                        row(L("Engine"), (state.engine(for: bottle)?.displayName).map { "\($0) · \(bottle.settings.engineID)" } ?? bottle.settings.engineID)
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(L("Environment")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+                            Text(bottle.name).font(.callout)
+                            Button(L("Environment settings…")) { showBottleSettings = true }.controlSize(.small)
+                        }
+                        if !item.otherBottles.isEmpty {
+                            row(L("Also installed in"), item.otherBottles.joined(separator: ", "))
+                        }
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(L("Files")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+                            Button(L("Show the Windows drive")) { NSWorkspace.shared.open(bottle.driveC) }.controlSize(.small)
+                            if PlayLink.target(for: item) != nil {
+                                Button(L("Make a Mac app…")) { state.makeMacApp(for: item) }.controlSize(.small)
+                                    .help(L("A small app in ~/Applications/Highball that starts this game without opening Highball first."))
+                            }
+                        }
+                        if let fixRecipe, item.installed {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(L("Fix")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+                                Button(fixApplied ? String(format: L("Re-apply the %@ fix"), fixRecipe.title) : String(format: L("Apply the %@ fix now"), fixRecipe.title)) {
+                                    state.applyRecipe(fixRecipe.id, to: bottle)
+                                }
+                                .controlSize(.small).disabled(state.busy)
+                            }
+                        }
+                    }
                 }
+                .padding(.top, 10)
+            } label: {
+                HStack(spacing: 8) {
+                    Text(L("Advanced")).font(.callout.weight(.medium))
+                    Text(L("graphics mode · engine · environment · files")).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                }
+            }
+            Divider()
+            VStack(alignment: .leading, spacing: 8) {
+                row(L("Source"), item.source == .steam ? "Steam" : item.source == .epic ? "Epic Games" : L("Windows program"))
                 if item.sizeOnDisk > 0 {
                     row(L("Size on disk"), ByteCountFormatter.string(fromByteCount: item.sizeOnDisk, countStyle: .file))
                 }
                 if let played = item.lastPlayed {
                     row(L("Last played"), played.formatted(date: .abbreviated, time: .shortened))
                 }
-                if !item.otherBottles.isEmpty {
-                    row(L("Also installed in"), item.otherBottles.joined(separator: ", "))
-                }
-                HStack(spacing: 8) {
-                    if bottle != nil {
-                        Button(L("Environment settings…")) { showBottleSettings = true }
-                        Button(L("Show the Windows drive")) { if let b = bottle { NSWorkspace.shared.open(b.driveC) } }
-                        if PlayLink.target(for: item) != nil {
-                            Button(L("Make a Mac app…")) { state.makeMacApp(for: item) }
-                                .help(L("A small app in ~/Applications/Highball that starts this game without opening Highball first."))
-                        }
-                    }
-                    if let fixRecipe, let bottle, item.installed {
-                        Button(fixApplied ? String(format: L("Re-apply the %@ fix"), fixRecipe.title) : String(format: L("Apply the %@ fix now"), fixRecipe.title)) {
-                            state.applyRecipe(fixRecipe.id, to: bottle)
-                        }
-                        .disabled(state.busy)
-                    }
-                }
-                .controlSize(.small)
-                .padding(.top, 4)
-            }
-            .padding(.top, 8)
-        } label: {
-            HStack(spacing: 8) {
-                Text(L("Advanced")).font(.callout.weight(.medium))
-                Text(L("graphics mode · engine · environment · files")).font(.caption.monospaced()).foregroundStyle(.tertiary)
             }
         }
         .padding(.top, 6)

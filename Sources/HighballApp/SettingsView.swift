@@ -19,63 +19,47 @@ struct SettingsView: View {
 /// One environment by default, more only when two games need settings that conflict.
 struct EnvironmentsPane: View {
     @Environment(AppState.self) private var state
+    @State private var selectedName: String?
     @State private var openName: String?
     @State private var pendingDelete: String?
     @State private var showCreate = false
+
+    private var selected: Bottle? {
+        state.bottles.first { $0.name == selectedName } ?? state.defaultBottle
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(L("Highball keeps your games in one Windows environment and looks after it. A second one is only for a game whose settings conflict with the others."))
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            List {
-                ForEach(state.bottles, id: \.name) { bottle in
-                    HStack(spacing: 12) {
-                        Image(systemName: "cylinder.split.1x2").foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 8) {
-                                Text(bottle.name).font(.headline)
-                                if bottle.name == AppState.defaultEnvironmentName {
-                                    Text(L("DEFAULT")).font(.system(size: 9, weight: .bold)).padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(Capsule().fill(HB.good.opacity(0.2))).foregroundStyle(HB.good)
-                                }
-                                if state.deletingBottles.contains(bottle.name) {
-                                    Text(L("deleting…")).font(.caption).foregroundStyle(.secondary)
-                                }
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(state.bottles, id: \.name) { bottle in
+                        environmentCard(bottle)
+                    }
+                    ForEach(state.damagedBottles) { damaged in
+                        HStack(spacing: 12) {
+                            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(damaged.name).font(.headline)
+                                Text(damaged.reason).font(.caption).foregroundStyle(.secondary)
                             }
-                            Text("\(state.engine(for: bottle)?.displayName ?? bottle.settings.engineID) · \(GamePageCopy.plainName(bottle.settings.renderer)) · \((state.gamesByBottle[bottle.name] ?? []).count) " + L("titles"))
-                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            Spacer()
+                            Button(L("Delete…"), role: .destructive) { pendingDelete = damaged.name }.controlSize(.small)
                         }
-                        Spacer()
-                        Button(L("Open")) { openName = bottle.name }.controlSize(.small)
-                    }
-                    .padding(.vertical, 4)
-                    .contextMenu {
-                        Button(L("Open")) { openName = bottle.name }
-                        Button(L("Stop all processes")) { state.killBottle(bottle) }
-                        Button(L("Duplicate")) { state.duplicateBottle(bottle) }
-                        Button(L("Repair (re-run the Windows first boot)")) { state.repairBottle(bottle) }
-                        Divider()
-                        Button(L("Delete…"), role: .destructive) { pendingDelete = bottle.name }
-                            .disabled(state.deletingBottles.contains(bottle.name))
-                    }
-                }
-                ForEach(state.damagedBottles) { damaged in
-                    HStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(damaged.name).font(.headline)
-                            Text(damaged.reason).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button(L("Delete…"), role: .destructive) { pendingDelete = damaged.name }.controlSize(.small)
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 10).fill(HB.card))
                     }
                 }
             }
-            .frame(minHeight: 220)
+            .frame(maxHeight: 170)
+            if let bottle = selected { details(bottle) }
+            Spacer(minLength: 0)
             HStack(spacing: 10) {
                 Button(L("New environment…")) { showCreate = true }.disabled(state.busy)
-                if let b = state.defaultBottle {
+                if let b = selected {
                     Button(L("Repair")) { state.repairBottle(b) }.disabled(state.busy)
+                    Button(L("Full page…")) { openName = b.name }
                 }
                 Spacer()
                 Text(L("Repair re-runs the Windows first boot. Games and Steam stay where they are."))
@@ -98,6 +82,78 @@ struct EnvironmentsPane: View {
                             titleVisibility: .visible) {
             Button(L("Delete"), role: .destructive) { if let n = pendingDelete { state.deleteBottle(n) }; pendingDelete = nil }
             Button(L("Cancel"), role: .cancel) { pendingDelete = nil }
+        }
+    }
+
+    private func sizeText(_ bottle: Bottle) -> String {
+        let bytes = state.libraryItems.filter { $0.bottleName == bottle.name }.reduce(Int64(0)) { $0 + $1.sizeOnDisk }
+        return bytes > 0 ? ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) : ""
+    }
+
+    private func environmentCard(_ bottle: Bottle) -> some View {
+        let isSelected = selected?.name == bottle.name
+        let titles = state.libraryItems.filter { $0.bottleName == bottle.name }.count
+        return Button {
+            selectedName = bottle.name
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "cylinder.split.1x2").foregroundStyle(isSelected ? HB.amber : .secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(bottle.name).font(.headline)
+                        if bottle.name == AppState.defaultEnvironmentName {
+                            Text(L("DEFAULT")).font(.system(size: 9, weight: .bold)).padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(Capsule().fill(HB.good.opacity(0.2))).foregroundStyle(HB.good)
+                        }
+                        if state.deletingBottles.contains(bottle.name) {
+                            Text(L("deleting…")).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text([state.engine(for: bottle)?.displayName ?? bottle.settings.engineID,
+                          String(format: L("%d titles"), titles),
+                          sizeText(bottle)].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(RoundedRectangle(cornerRadius: 10).fill(HB.card))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(isSelected ? HB.amber.opacity(0.6) : HB.cardStroke))
+        .contextMenu {
+            Button(L("Full page…")) { openName = bottle.name }
+            Button(L("Stop all processes")) { state.killBottle(bottle) }
+            Button(L("Duplicate")) { state.duplicateBottle(bottle) }
+            Button(L("Repair (re-run the Windows first boot)")) { state.repairBottle(bottle) }
+            Divider()
+            Button(L("Delete…"), role: .destructive) { pendingDelete = bottle.name }
+                .disabled(state.deletingBottles.contains(bottle.name))
+        }
+    }
+
+    private func details(_ bottle: Bottle) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            row(L("Graphics mode")) { GraphicsModePicker(bottle: bottle) }
+            Divider().padding(.vertical, 8)
+            row(L("Windows components")) { WindowsComponentsRow(bottle: bottle) }
+            Divider().padding(.vertical, 8)
+            row(L("Files")) {
+                Button(L("Show the Windows drive")) { NSWorkspace.shared.open(bottle.driveC) }
+                    .buttonStyle(.link)
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 10).fill(HB.card))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(HB.cardStroke))
+    }
+
+    private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Text(label).font(.callout).frame(width: 150, alignment: .leading).padding(.top, 2)
+            content()
+            Spacer(minLength: 0)
         }
     }
 }
