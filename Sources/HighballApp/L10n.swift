@@ -403,5 +403,10 @@ enum L10n {
         "a large download; you can leave it running": "un gros téléchargement ; vous pouvez le laisser tourner",
         "your environment": "votre environnement",
         "Use %@": "Utiliser %@",
+        "Working…": "En cours…",
+        "An environment is an isolated Windows install. First boot takes about 90 seconds; installing Steam adds a download and a slow one-time client update.": "Un environnement est une installation Windows isolée. Le premier démarrage prend environ 90 secondes ; installer Steam ajoute un téléchargement et une lente mise à jour unique du client.",
+        "No engine is installed yet. Reinstall Highball, or restart it to finish setup.": "Aucun moteur n'est encore installé. Réinstallez Highball, ou relancez-le pour terminer la configuration.",
+        "Highball is already busy. Wait for the current step to finish, then try again — its progress is on the strip at the bottom of the window.": "Highball est déjà occupé. Attendez la fin de l'étape en cours, puis réessayez — sa progression est affichée en bas de la fenêtre.",
+        "No engine is installed yet. Restart Highball to finish setup.": "Aucun moteur n'est encore installé. Relancez Highball pour terminer la configuration.",
     ]
 }

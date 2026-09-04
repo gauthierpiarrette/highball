@@ -271,23 +271,23 @@ struct CreateBottleSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(L("New bottle")).font(.title2.bold())
+            Text(L("New environment")).font(.title2.bold())
             TextField(L("Name"), text: $name).textFieldStyle(.roundedBorder).frame(width: 260)
             if let problem = nameProblem, !name.trimmingCharacters(in: .whitespaces).isEmpty {
                 Text(L(problem)).font(.caption).foregroundStyle(.orange).frame(maxWidth: 380, alignment: .leading)
             }
             Toggle(L("Install Steam in it (recommended)"), isOn: $installSteam)
-            Text(L("A bottle is an isolated Windows environment. First boot takes about 90 seconds; the Steam install adds a download and a slow one-time client update."))
+            Text(L("An environment is an isolated Windows install. First boot takes about 90 seconds; installing Steam adds a download and a slow one-time client update."))
                 .font(.callout).foregroundStyle(.secondary).frame(maxWidth: 380, alignment: .leading)
             HStack {
                 Spacer()
                 Button(L("Cancel")) { dismiss() }
-                Button(L("Create")) {
+                Button(state.busy ? L("Working…") : L("Create")) {
                     dismiss()
                     state.createBottle(name: name, recipeID: installSteam ? "steam" : nil)
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(nameProblem != nil)
+                .disabled(nameProblem != nil || state.busy)
             }
         }
         .padding(24)

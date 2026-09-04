@@ -632,7 +632,10 @@ final class AppState {
 
     /// Makes the default environment for a Mac that has the engine but no bottle yet.
     func makeDefaultEnvironment() {
-        guard let engine = defaultEngine else { return }
+        guard let engine = defaultEngine else {
+            fail(HighballError.failed("No engine is installed yet. Restart Highball to finish setup.")); return
+        }
+        guard !busy else { return }   // already preparing; the strip shows it
         runBusy(L("Preparing your Windows environment"), expected: L("about 90 seconds"),
                 done: DoneState(title: L("Highball is ready"), ctaTitle: nil, cta: nil)) { [self] in
             _ = try await bottleStore.create(name: Self.defaultEnvironmentName, engine: engine)
@@ -704,7 +707,12 @@ final class AppState {
     }
 
     func createBottle(name: String, recipeID: String?) {
-        guard let engine = defaultEngine else { return }
+        guard let engine = defaultEngine else {
+            fail(HighballError.failed("No engine is installed yet. Reinstall Highball, or restart it to finish setup.")); return
+        }
+        guard !busy else {
+            fail(HighballError.failed("Highball is already busy. Wait for the current step to finish, then try again — its progress is on the strip at the bottom of the window.")); return
+        }
         runBusy(String(format: L("Creating the %@ environment — first boot takes about 90 seconds"), name),
                 done: DoneState(title: String(format: L("The %@ environment is ready"), name), ctaTitle: nil, cta: nil),
                 stop: .cancelTask(label: L("Stop"))) { [self] in
