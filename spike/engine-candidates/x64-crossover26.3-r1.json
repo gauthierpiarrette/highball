@@ -14,9 +14,9 @@
       },
       "kind": "renderer",
       "license": "MIT (Highball branch of DXMT: SwapDeviceContextState, cross-process opt-in)",
-      "sha256": "1065f7b8b41f48cf01c4871fce70a83559c475cffb291d779a59d1947cdd2feb",
-      "size": 18909433,
-      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/dxmt-highball-20260904T183338Z-96cdcf2/dxmt-highball-20260904T183338Z-96cdcf2.tar.gz"
+      "sha256": "0b86f0c793e99ae88bb4ff5f8575403ad138598a44a90248c71d6bc3ec18923b",
+      "size": 18922634,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/dxmt-highball-20260904T194518Z-7421db2/dxmt-highball-20260904T194518Z-7421db2.tar.gz"
     },
     "moltenvk": {
       "extract": {
@@ -83,7 +83,7 @@
     "winemac.so exports macdrv_functions, so the DXMT and D3DMetal bridges work as on r1. This engine ships no winemetal.dll of its own; the DXMT overlay carries it. Wine Mono and Gecko are included.",
     "Not the default. Offered in a bottle's Advanced settings and on the crash alert; the default stays r1 until the verified titles pass on it and opt-in use stays quiet.",
     "Build 11 (2026-09-04, engine-wine-11.0-20260904T153322Z-winemetal) also ships winemetal.dll as a built-in in lib/wine, so a fresh prefix gets its placeholder and the DXMT overlay's winemetal loads; earlier builds needed the file copied in by hand.",
-    "r1 (2026-09-04): wine engine-wine-11.0-20260904T180928Z-manual with patch 0004 (overlay window for foreign client surfaces) and DXMT dxmt-highball-20260904T183338Z-96cdcf2 from Highball's branch. Set DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1 in the bottle environment to let a browser's GPU process present into the browser window."
+    "r1 (2026-09-04): wine engine-wine-11.0-20260904T180928Z-manual with patch 0004 (overlay window for foreign client surfaces) and DXMT dxmt-highball-20260904T194518Z-7421db2 from Highball's branch. Set DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1 in the bottle environment to let a browser's GPU process present into the browser window."
   ],
   "requires": [
     "rosetta2"
