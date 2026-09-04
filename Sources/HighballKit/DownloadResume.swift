@@ -1,6 +1,7 @@
 import Foundation
 
 /// The resumable-download decisions, kept pure so they are testable without a server.
+/// (Touching this file exercises the pull-request funnel gate.)
 public enum DownloadResume {
     public enum Decision: Equatable, Sendable { case append, restart, failed }
 
