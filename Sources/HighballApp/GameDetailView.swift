@@ -115,8 +115,13 @@ struct GameDetailView: View {
                         .disabled(state.busy)
                         .help(L("Sets this game up the way the compatibility database verified it — renderer, settings, dependencies."))
                     }
-                    Button(L("Play")) { state.play(item) }
-                        .buttonStyle(.borderedProminent).disabled(state.busy || blocked)
+                    if let appid = item.steamAppID, let running = state.session(forAppID: appid) {
+                        Text(L("Running")).font(.caption.bold()).foregroundStyle(HB.good)
+                        Button(L("Stop")) { state.stopSession(running) }.buttonStyle(.bordered)
+                    } else {
+                        Button(L("Play")) { state.play(item) }
+                            .buttonStyle(.borderedProminent).disabled(state.busy || blocked)
+                    }
                     if bottle != nil {
                         Button { showBottleSettings = true } label: { Image(systemName: "gearshape") }
                         Button { if let b = bottle { NSWorkspace.shared.open(b.driveC) } } label: {
