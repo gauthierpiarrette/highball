@@ -793,7 +793,7 @@ final class AppState {
                 }
                 return try await runner.start(pin: pin, extraEnvironment: extra) { line in Task { @MainActor in self.appendLog(line) } }
             }
-            let markers = SessionWatch.markers(executable: bottle.resolve(windowsPath: pin.path))
+            let markers = SessionWatch.markers(executable: pin.executableURL(driveC: bottle.driveC))
             var waited = 0
             while true {
                 if let result = await Self.finished(launch) {
