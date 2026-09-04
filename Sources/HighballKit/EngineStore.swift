@@ -73,6 +73,24 @@ public struct EngineStore: Sendable {
             .max { $0.id.compare($1.id, options: .numeric) == .orderedAscending }
     }
 
+    /// One row per engine the app can put a bottle on: every installed engine, then every
+    /// bundled manifest that is not installed yet (it downloads when chosen). Newest first
+    /// within each group, by numeric-aware id order.
+    public struct OfferedEngine: Equatable, Sendable {
+        public let id: String
+        public let displayName: String
+        public let installed: Bool
+        public init(id: String, displayName: String, installed: Bool) { self.id = id; self.displayName = displayName; self.installed = installed }
+    }
+    public static func offeredEngines(installed: [InstalledEngine], known: [EngineManifest]) -> [OfferedEngine] {
+        let newestFirst: (String, String) -> Bool = { $0.compare($1, options: .numeric) == .orderedDescending }
+        let have = installed.sorted { newestFirst($0.id, $1.id) }.map { OfferedEngine(id: $0.id, displayName: $0.displayName, installed: true) }
+        let ids = Set(have.map(\.id))
+        let more = known.filter { !ids.contains($0.id) }.sorted { newestFirst($0.id, $1.id) }
+            .map { OfferedEngine(id: $0.id, displayName: $0.displayName, installed: false) }
+        return have + more
+    }
+
     public func engine(_ id: String) throws -> InstalledEngine {
         let root = paths.engine(id)
         let m = try EngineManifest.load(from: root.appending(path: "manifest.json"))

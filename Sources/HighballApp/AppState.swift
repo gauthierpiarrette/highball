@@ -818,6 +818,52 @@ final class AppState {
             ?? repoRoot?.appending(path: "spike/engine-manifest.json")
     }
 
+    /// Every engine manifest the app ships: the default one plus `engines/*.json` (previous
+    /// engines kept for rollback, candidates offered in Advanced). A bottle can move to any of
+    /// them; one that is not installed downloads first.
+    static var knownManifests: [EngineManifest] {
+        var urls: [URL] = []
+        if let m = bundledManifest { urls.append(m) }
+        if let dir = Bundle.main.resourceURL?.appending(path: "engines"),
+           let more = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+            urls += more.filter { $0.pathExtension == "json" }
+        } else if let dir = repoRoot?.appending(path: "spike/engines"),
+                  let more = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+            urls += more.filter { $0.pathExtension == "json" }
+        }
+        var seen = Set<String>()
+        return urls.compactMap { try? EngineManifest.load(from: $0) }.filter { seen.insert($0.id).inserted }
+    }
+
+    /// What the bottle's Engine picker lists: installed engines, then known ones to download.
+    var offeredEngines: [EngineStore.OfferedEngine] {
+        EngineStore.offeredEngines(installed: engines, known: Self.knownManifests)
+    }
+
+    /// Moves a bottle to an engine by id, installing it first when it is only known from a
+    /// bundled manifest. Licenses accepted on any installed engine carry over.
+    func moveBottle(_ bottle: Bottle, toEngineID id: String) {
+        if let installed = engines.first(where: { $0.id == id }) { moveBottle(bottle, to: installed); return }
+        guard let manifest = Self.knownManifests.first(where: { $0.id == id }) else { return }
+        let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
+        let title = String(format: L("Downloading engine %@"), manifest.id)
+        runBusy(title, expected: L("usually a few minutes"),
+                done: DoneState(title: L("Engine installed"), ctaTitle: nil, cta: nil)) { [self] in
+            let fresh = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
+                Task { @MainActor in
+                    let mb = { (b: Int64) in String(format: "%.0f", Double(b) / 1_048_576) }
+                    if let total, total > 0 { self.stage = "Downloading \(name) — \(mb(received)) / \(mb(total)) MB" }
+                    else { self.stage = "Downloading \(name) — \(mb(received)) MB" }
+                }
+            }
+            await MainActor.run {
+                self.appendLog("engine \(fresh.id) installed")
+                self.refresh()
+                self.moveBottle(bottle, to: fresh)
+            }
+        }
+    }
+
     /// All bundled dependency ("tweak") recipes, for the Dependencies section in bottle settings.
     static func tweakRecipes() -> [HighballKit.Recipe] {
         var dirs: [URL] = []

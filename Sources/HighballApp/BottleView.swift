@@ -372,16 +372,18 @@ struct BottleSettingsSheet: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section(L("Advanced")) {
-                    if state.engines.count > 1 {
+                    let offered = state.offeredEngines
+                    if offered.count > 1 {
                         Picker(L("Engine"), selection: Binding(
                             get: { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.engineID },
                             set: { newID in
-                                guard let target = state.engines.first(where: { $0.id == newID }) else { return }
-                                state.moveBottle(state.bottles.first { $0.name == bottle.name } ?? bottle, to: target)
+                                state.moveBottle(state.bottles.first { $0.name == bottle.name } ?? bottle, toEngineID: newID)
                             })) {
-                            ForEach(state.engines, id: \.id) { e in Text(verbatim: e.id).tag(e.id) }
+                            ForEach(offered, id: \.id) { e in
+                                Text(verbatim: e.installed ? e.id : "\(e.id) (\(L("download")))").tag(e.id)
+                            }
                         }
-                        Text(L("Bottles never change engine on their own. Switching re-runs the Windows setup when the Wine build differs; switching back is the same step."))
+                        Text(L("Bottles never change engine on their own. Switching re-runs the Windows setup when the Wine build differs; switching back is the same step. An engine marked download is fetched first."))
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     TextField(L("DLL overrides"), text: binding(\.dllOverrides), prompt: Text(verbatim: "version=n,b;winmm=n,b"))

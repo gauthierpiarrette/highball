@@ -21,6 +21,8 @@ cp -R "$SPARKLE_FW" "$APP/Contents/Frameworks/"
 
 # Resources: engine manifest, GPTK license, recipes and DB entries (from highball-db).
 cp spike/engine-manifest.json "$APP/Contents/Resources/engine-manifest.json"
+# Other engines the app can offer (previous ones for rollback, candidates for Advanced).
+if ls spike/engines/*.json >/dev/null 2>&1; then mkdir -p "$APP/Contents/Resources/engines"; cp spike/engines/*.json "$APP/Contents/Resources/engines/"; fi
 cp spike/d3dmetal-license.txt "$APP/Contents/Resources/d3dmetal-license.txt"
 RECIPES="../highball-db/recipes"
 if [ ! -d "$RECIPES" ]; then

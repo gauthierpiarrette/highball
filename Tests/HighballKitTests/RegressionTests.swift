@@ -874,6 +874,21 @@ extension RegressionTests {
         XCTAssertNil(EngineStore.alternateEngine(for: r1.id, installed: [r1], defaultID: r1.id), "single engine: nothing to offer")
     }
 
+    // The Engine picker lists installed engines first, then known manifests to download, newest first.
+    func testOfferedEnginesListsInstalledThenDownloadable() throws {
+        func manifest(_ id: String) throws -> EngineManifest {
+            let json = #"{"id":"\#(id)","displayName":"e \#(id)","arch":"x86_64","minMacOS":"14.0","components":{}}"#
+            return try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8))
+        }
+        let r1 = InstalledEngine(manifest: try manifest("x64-a-r1"), root: URL(fileURLWithPath: "/tmp/r1"))
+        let r0 = InstalledEngine(manifest: try manifest("x64-a-r0"), root: URL(fileURLWithPath: "/tmp/r0"))
+        let known = [try manifest("x64-a-r1"), try manifest("x64-a-r2"), try manifest("x64-a-r10")]
+        let offered = EngineStore.offeredEngines(installed: [r0, r1], known: known)
+        XCTAssertEqual(offered.map(\.id), ["x64-a-r1", "x64-a-r0", "x64-a-r10", "x64-a-r2"])
+        XCTAssertEqual(offered.map(\.installed), [true, true, false, false])
+        XCTAssertEqual(EngineStore.offeredEngines(installed: [r1], known: [try manifest("x64-a-r1")]).count, 1, "the installed default is not listed twice")
+    }
+
     func testDefaultEnginePrefersBundledManifestID() throws {
         func engine(_ id: String) throws -> InstalledEngine {
             let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#
