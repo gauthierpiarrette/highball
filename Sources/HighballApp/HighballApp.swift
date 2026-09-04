@@ -9,6 +9,7 @@ struct HighballApp: App {
     @State private var state = AppState()
 
     var body: some Scene {
+        Settings { SettingsView().environment(state) }
         WindowGroup("Highball") {
             ContentView()
                 .environment(state)
@@ -116,155 +117,31 @@ struct ContentView: View {
             if state.needsOnboarding {
                 OnboardingView()
             } else {
-                NavigationSplitView {
-                    List {
-                        Section {
-                            HStack(spacing: 9) {
-                                if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "png"), let img = NSImage(contentsOf: url) {
-                                    Image(nsImage: img).resizable().frame(width: 34, height: 34)
-                                }
-                                VStack(alignment: .leading, spacing: 0) {
-                                    Text("Highball").font(.system(size: 16, weight: .heavy, design: .rounded))
-                                    Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")")
-                                        .font(.caption2.monospaced()).foregroundStyle(.tertiary)
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
-                        // One Library (Phase 2): the primary surface, above the bottles.
-                        Section {
-                            let onLibrary = state.pane == .library
-                            Button {
-                                state.pane = .library
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Image(systemName: onLibrary ? "square.grid.2x2.fill" : "square.grid.2x2")
-                                        .foregroundStyle(onLibrary ? HB.amber : Color.secondary)
-                                        .frame(width: 18)
-                                    Text(L("Library")).fontWeight(onLibrary ? .semibold : .regular)
-                                    Spacer()
-                                    Text("\(state.libraryItems.count)")
-                                        .font(.caption2.monospaced()).foregroundStyle(.tertiary)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.vertical, 5).padding(.horizontal, 7)
-                            .background(RoundedRectangle(cornerRadius: 7)
-                                .fill(onLibrary ? HB.amber.opacity(0.16) : .clear))
-                            .overlay(RoundedRectangle(cornerRadius: 7)
-                                .stroke(onLibrary ? HB.amber.opacity(0.35) : .clear))
-                            .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
-                        }
-                        Section(L("Bottles")) {
-                            ForEach(state.bottles, id: \.name) { bottle in
-                                let selected = state.selectedBottle == bottle.name && state.pane == .bottles
-                                Button {
-                                    state.selectedBottle = bottle.name
-                                    state.pane = .bottles
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "wineglass\(selected ? ".fill" : "")")
-                                            .foregroundStyle(selected ? HB.amber : Color.secondary)
-                                            .frame(width: 18)
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(bottle.name)
-                                                .fontWeight(selected ? .semibold : .regular)
-                                            // A large prefix takes a while to purge, and the row
-                                            // used to sit there looking idle and clickable.
-                                            if state.deletingBottles.contains(bottle.name) {
-                                                Text(L("deleting…"))
-                                                    .font(.caption).foregroundStyle(.secondary)
-                                            }
-                                        }
-                                        Spacer()
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .padding(.vertical, 5).padding(.horizontal, 7)
-                                .background(RoundedRectangle(cornerRadius: 7)
-                                    .fill(selected ? HB.amber.opacity(0.16) : .clear))
-                                .overlay(RoundedRectangle(cornerRadius: 7)
-                                    .stroke(selected ? HB.amber.opacity(0.35) : .clear))
-                                .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
-                                .contextMenu {
-                                    Button(L("Stop all processes")) { state.killBottle(bottle) }
-                                    Button(L("Duplicate bottle")) { state.duplicateBottle(bottle) }
-                                    Button(L("Repair bottle (re-run first boot)")) { state.repairBottle(bottle) }
-                                    Divider()
-                                    Button(L("Delete bottle…"), role: .destructive) { pendingDelete = bottle.name }
-                                        .disabled(state.deletingBottles.contains(bottle.name))
-                                }
-                            }
-                            // A folder under bottles/ that isn't a loadable bottle still needs
-                            // somewhere to be acted on. Before #38 it was simply invisible, which
-                            // left its files stranded and its name unusable.
-                            ForEach(state.damagedBottles) { damaged in
-                                Button { pendingDelete = damaged.name } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "exclamationmark.triangle.fill")
-                                            .foregroundStyle(.orange)
-                                            .frame(width: 18)
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(damaged.name)
-                                            Text(L("damaged — click to delete"))
-                                                .font(.caption).foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .help(damaged.reason)
-                                .padding(.vertical, 5).padding(.horizontal, 7)
-                                .listRowInsets(EdgeInsets(top: 1, leading: 6, bottom: 1, trailing: 6))
-                            }
-                        }
-                        if let engine = state.defaultEngine {
-                            Section(L("Engine")) {
-                                Label {
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(engine.displayName).font(.caption)
-                                        Text(engine.id).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-                                    }
-                                } icon: { Image(systemName: "gearshape.2").foregroundStyle(.secondary) }
-                                if let update = state.engineUpdate {
-                                    Button {
-                                        state.updateEngine()
-                                    } label: {
-                                        Label {
-                                            VStack(alignment: .leading, spacing: 1) {
-                                                Text(L("Update engine")).font(.caption)
-                                                Text(update.id).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-                                            }
-                                        } icon: { Image(systemName: "arrow.down.circle").foregroundStyle(.tint) }
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(state.busy)
-                                    .help(L("Installs the newer engine this version of Highball ships. Bottles on the same Wine build move to it; the others stay on their engine until you switch them in the bottle's settings. Only changed components are downloaded."))
-                                }
-                            }
-                        }
-                    }
-                    .navigationSplitViewColumnWidth(min: 200, ideal: 230)
+                // One library, full width (UX plan Phase 1): no sidebar, no bottles in the way.
+                // Environments and the engine live in Settings (⌘,).
+                NavigationStack { LibraryView() }
                     .toolbar {
-                        Button { showCreate = true } label: { Label(L("New Bottle"), systemImage: "plus") }
-                    }
-                } detail: {
-                    switch state.pane {
-                    case .library:
-                        NavigationStack { LibraryView() }
-                    case .bottles:
-                        if let name = state.selectedBottle,
-                           let bottle = state.bottles.first(where: { $0.name == name }) {
-                            BottleView(bottle: bottle)
-                        } else {
-                            ContentUnavailableView(L("No bottle selected"), systemImage: "wineglass",
-                                                   description: Text(L("Create a bottle to install Steam and play.")))
+                        ToolbarItem(placement: .primaryAction) {
+                            Menu {
+                                Button(L("Install Steam")) { state.installSteam() }
+                                Button(L("Connect Epic account…")) { state.showEpicSignIn = true }
+                                Divider()
+                                ForEach(BottleView.launcherMeta.filter { $0.id != "steam" }, id: \.id) { meta in
+                                    Button(String(format: L("Install %@"), meta.short)) {
+                                        if let b = state.defaultBottle { state.applyRecipe(meta.id, to: b) }
+                                    }
+                                }
+                                Divider()
+                                Button(L("A Windows program I have…")) { state.chooseProgramToRun() }
+                            } label: {
+                                Label(L("Add games"), systemImage: "plus")
+                            }
+                            .disabled(state.busy || state.bottles.isEmpty)
+                        }
+                        ToolbarItem(placement: .automatic) {
+                            SettingsLink { Label(L("Settings"), systemImage: "gearshape") }
                         }
                     }
-                }
             }
         }
         // Everything that takes time lives on one strip at the bottom, never modal (UX plan 0.5).
