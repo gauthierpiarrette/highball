@@ -101,7 +101,7 @@ struct EnvironmentsPane: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
                         Text(bottle.name).font(.headline)
-                        if bottle.name == AppState.defaultEnvironmentName {
+                        if bottle.name == state.defaultBottle?.name {
                             Text(L("DEFAULT")).font(.system(size: 9, weight: .bold)).padding(.horizontal, 6).padding(.vertical, 2)
                                 .background(Capsule().fill(HB.good.opacity(0.2))).foregroundStyle(HB.good)
                         }
