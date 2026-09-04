@@ -14,7 +14,7 @@ public enum GamePageCopy {
         let mine = shortChip(myChip)
         guard let entry else {
             return Verdict(headline: "Nobody has tested this on an \(mine) yet.",
-                           detail: "Play, and Highball will ask how it went when you finish.")
+                           detail: "Nothing in the compatibility database for it yet. You would be the first to report it.")
         }
         switch entry.status {
         case "blocked-anticheat":

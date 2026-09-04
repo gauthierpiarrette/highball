@@ -223,10 +223,16 @@ struct GameDetailView: View {
                 }
                 .padding(.top, 10)
             } label: {
-                HStack(spacing: 8) {
-                    Text(L("Advanced")).font(.callout.weight(.medium))
-                    Text(L("graphics mode · engine · environment · files")).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                // The whole row toggles, not only the chevron.
+                Button { withAnimation(.easeInOut(duration: 0.15)) { showAdvanced.toggle() } } label: {
+                    HStack(spacing: 8) {
+                        Text(L("Advanced")).font(.callout.weight(.medium))
+                        Text(L("graphics mode · engine · environment · files")).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
             Divider()
             VStack(alignment: .leading, spacing: 8) {
