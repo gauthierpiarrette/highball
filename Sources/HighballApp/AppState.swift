@@ -33,6 +33,9 @@ final class AppState {
         var title: String
         var ctaTitle: String?
         var cta: (() -> Void)?
+        /// No done row: a session or the Steam row took over from the busy operation.
+        var silent = false
+        static let handedOff = DoneState(title: "", ctaTitle: nil, cta: nil, silent: true)
     }
     // The activity strip (UX plan 0.5): what the busy operation can show beyond its title.
     struct Transfer: Equatable { var received: Int64; var total: Int64? }
@@ -503,7 +506,8 @@ final class AppState {
             // and hid the alert until the user clicked Close (issues #27/#28).
             do {
                 try await work()
-                doneState = done ?? DoneState(title: L("Done"), ctaTitle: nil, cta: nil)
+                let d = done ?? DoneState(title: L("Done"), ctaTitle: nil, cta: nil)
+                doneState = d.silent ? nil : d
             } catch {
                 showLog = false
                 if stopRequested || error is CancellationError || (error as? URLError)?.code == .cancelled {
@@ -750,8 +754,10 @@ final class AppState {
         // expectations instead of launching silently into what reads as a hang.
         let steamFirstBoot = isSteamUI(pin) && !FileManager.default.fileExists(
             atPath: bottle.driveC.appending(path: "Program Files (x86)/Steam/bin/cef").path)
-        runBusy(steamFirstBoot ? L("Starting Steam for the first time — it downloads and unpacks its own client") : "Running \(pin.name)",
+        let cef = bottle.driveC.appending(path: "Program Files (x86)/Steam/bin/cef")
+        runBusy(steamFirstBoot ? L("Starting Steam for the first time — it downloads and unpacks its own client") : "Starting \(pin.name)",
                 expected: steamFirstBoot ? L("usually 15–25 minutes; long quiet stretches are normal") : nil,
+                done: .handedOff,
                 stop: .killBottle(bottle, label: L("Stop")),
                 cleanup: { [weak self] in self?.launchingPins.remove(pin.id) }) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
@@ -770,29 +776,53 @@ final class AppState {
                 try? await Task.sleep(for: .seconds(2))
                 extra = ["WINEMSYNC": "0", "WINEESYNC": "0"]
             }
-            let result: LaunchResult
-            if isSteamUI(pin) {
-                let (r, resumed) = try await runner.startResumingKnownSteamCrash(pin: pin, extraEnvironment: extra) { line in
-                    Task { @MainActor in
-                        self.appendLog(line)
-                        if line.contains("relaunching so it resumes") {
-                            self.stage = L("Steam crashed at a known spot — relaunching to resume the update")
+            // The process outlives "starting": busy covers the start only, then the Steam row
+            // (a client) or a session (anything else) carries it, and the app stays free (0.6).
+            let launch = Task<LaunchResult, Error> {
+                if isSteamUI(pin) {
+                    let (r, resumed) = try await runner.startResumingKnownSteamCrash(pin: pin, extraEnvironment: extra) { line in
+                        Task { @MainActor in
+                            self.appendLog(line)
+                            if line.contains("relaunching so it resumes") {
+                                self.stage = L("Steam crashed at a known spot — relaunching to resume the update")
+                            }
                         }
                     }
+                    if resumed { await MainActor.run { self.appendLog("resumed after the known crash") } }
+                    return r
                 }
-                result = r
-                if resumed { await MainActor.run { self.appendLog("resumed after the known crash") } }
-            } else {
-                result = try await runner.start(pin: pin, extraEnvironment: extra) { line in Task { @MainActor in self.appendLog(line) } }
+                return try await runner.start(pin: pin, extraEnvironment: extra) { line in Task { @MainActor in self.appendLog(line) } }
             }
-            if result.crashedEarly {
-                let current = pin.renderer ?? bottle.settings.renderer
-                await MainActor.run {
-                    self.crashSuggestion = CrashSuggestion(program: pin.name, bottleName: bottle.name,
-                                                           renderer: Renderer.suggestion(after: current),
-                                                           logPath: result.log.path, current: current, seconds: Int(result.duration),
-                                                           alternateEngine: self.alternateEngine(for: bottle))
+            let markers = SessionWatch.markers(executable: bottle.resolve(windowsPath: pin.path))
+            var waited = 0
+            while true {
+                if let result = await Self.finished(launch) {
+                    if result.crashedEarly {
+                        let current = pin.renderer ?? bottle.settings.renderer
+                        await MainActor.run {
+                            self.crashSuggestion = CrashSuggestion(program: pin.name, bottleName: bottle.name,
+                                                                   renderer: Renderer.suggestion(after: current),
+                                                                   logPath: result.log.path, current: current, seconds: Int(result.duration),
+                                                                   alternateEngine: self.alternateEngine(for: bottle))
+                        }
+                    }
+                    return
                 }
+                if isSteamUI(pin) {
+                    // A first boot is "started" once the client is unpacked and running; the
+                    // Steam row shows it from then on.
+                    if runner.steamIsRunning(), FileManager.default.fileExists(atPath: cef.path) { return }
+                } else if waited >= 6, SessionWatch.isAlive(markers: markers, ps: SessionWatch.currentProcessList()) {
+                    await MainActor.run {
+                        self.beginSession(GameSession(title: pin.name, bottleName: bottle.name, appid: nil, markers: markers,
+                                                      renderer: (pin.renderer ?? bottle.settings.renderer).rawValue))
+                    }
+                    return
+                }
+                if !isSteamUI(pin), waited >= 360 {
+                    throw HighballError.failed("\(pin.name) never started: no process of its own appeared in six minutes. Its log is in Details.")
+                }
+                try await Task.sleep(for: .seconds(2)); waited += 2
             }
         }
     }
@@ -888,7 +918,7 @@ final class AppState {
         // call says nothing about it, so the game's own processes decide when "starting" ends
         // and a session begins, and the app is free while the game runs (UX plan 0.6).
         runBusy("Starting \(game.name)", expected: L("a cold Steam client can take a couple of minutes"),
-                done: DoneState(title: L("Running"), ctaTitle: nil, cta: nil),
+                done: .handedOff,
                 stop: .killBottle(bottle, label: L("Stop"))) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             // A running client would serve the launch with its own environment; when that is
@@ -1047,25 +1077,43 @@ final class AppState {
     // renderer nil = the bottle's own renderer (the old hardcoded .dxvk default ignored it).
     func epicPlay(_ game: EpicStore.Game, in bottle: Bottle, renderer: Renderer? = nil) {
         guard let engine = engine(for: bottle) else { return }
-        runBusy("Running \(game.app_title)", showLogSheet: false) { [self] in
+        runBusy("Starting \(game.app_title)", done: .handedOff, stop: .killBottle(bottle, label: L("Stop"))) { [self] in
             let store = epicStore
             // Fresh single-use token, fetched off the main thread right before launch.
             let info = try await Task.detached { try store.launchInfo(game.app_name) }.value
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
-            let result = try await runner.start(info.executable, arguments: info.arguments,
-                                                renderer: renderer, extraEnvironment: info.environment,
-                                                workingDirectory: info.workingDirectory) { line in
-                Task { @MainActor in self.appendLog(line) }
-            }
-            if result.crashedEarly {
-                let current = renderer ?? bottle.settings.renderer
-                await MainActor.run {
-                    self.crashSuggestion = CrashSuggestion(program: game.app_title, bottleName: bottle.name,
-                                                           renderer: Renderer.suggestion(after: current),
-                                                           logPath: result.log.path, current: current, seconds: Int(result.duration),
-                                                           alternateEngine: self.alternateEngine(for: bottle))
+            let launch = Task {
+                try await runner.start(info.executable, arguments: info.arguments,
+                                       renderer: renderer, extraEnvironment: info.environment,
+                                       workingDirectory: info.workingDirectory) { line in
+                    Task { @MainActor in self.appendLog(line) }
                 }
             }
+            let markers = SessionWatch.markers(executable: info.executable)
+            var waited = 0
+            while waited < 360 {
+                if let result = await Self.finished(launch) {
+                    if result.crashedEarly {
+                        let current = renderer ?? bottle.settings.renderer
+                        await MainActor.run {
+                            self.crashSuggestion = CrashSuggestion(program: game.app_title, bottleName: bottle.name,
+                                                                   renderer: Renderer.suggestion(after: current),
+                                                                   logPath: result.log.path, current: current, seconds: Int(result.duration),
+                                                                   alternateEngine: self.alternateEngine(for: bottle))
+                        }
+                    }
+                    return
+                }
+                if waited >= 6, SessionWatch.isAlive(markers: markers, ps: SessionWatch.currentProcessList()) {
+                    await MainActor.run {
+                        self.beginSession(GameSession(title: game.app_title, bottleName: bottle.name, appid: nil, markers: markers,
+                                                      renderer: (renderer ?? bottle.settings.renderer).rawValue))
+                    }
+                    return
+                }
+                try await Task.sleep(for: .seconds(2)); waited += 2
+            }
+            throw HighballError.failed("\(game.app_title) never started: no process of its own appeared in six minutes. Its log is in Details.")
         }
     }
 

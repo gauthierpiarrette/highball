@@ -128,7 +128,12 @@ struct ActivityStrip: View {
             Button(L("It played fine")) { state.reportPlay(record) }.controlSize(.small)
             Button(L("Had problems")) {
                 state.postPlay = nil
-                NSWorkspace.shared.open(BugReport.url(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"))
+                let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+                // The report samples live games for a few seconds; never on the main thread.
+                Task.detached {
+                    let url = BugReport.url(version: version)
+                    await MainActor.run { NSWorkspace.shared.open(url) }
+                }
             }.controlSize(.small)
             Button(L("Not now")) { state.postPlay = nil }.controlSize(.small).buttonStyle(.link)
         }

@@ -44,6 +44,12 @@ public enum SessionWatch {
         ["steamapps/common/\(installdir)/", "steamapps\\common\\\(installdir)\\"]
     }
 
+    /// The marker of a program launched by path (a pin, an Epic game): its file name, which
+    /// its Wine process carries in its command line whatever the separators.
+    public static func markers(executable: URL) -> [String] {
+        [executable.lastPathComponent]
+    }
+
     /// True when any process listing line carries one of the markers. `ps` is the text of
     /// `ps axww`; kept as a parameter so the rule is testable without processes.
     public static func isAlive(markers: [String], ps: String) -> Bool {
