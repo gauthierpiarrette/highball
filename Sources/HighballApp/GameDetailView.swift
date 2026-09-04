@@ -122,6 +122,10 @@ struct GameDetailView: View {
                         Button(L("Play")) { state.play(item) }
                             .buttonStyle(.borderedProminent).disabled(state.busy || blocked)
                     }
+                    if bottle != nil, PlayLink.target(for: item) != nil {
+                        Button { state.makeMacApp(for: item) } label: { Image(systemName: "macwindow.badge.plus") }
+                            .help(L("Make a Mac app for this game in ~/Applications/Highball: open it from the Dock, Spotlight or Launchpad to play without opening Highball first."))
+                    }
                     if bottle != nil {
                         Button { showBottleSettings = true } label: { Image(systemName: "gearshape") }
                         Button { if let b = bottle { NSWorkspace.shared.open(b.driveC) } } label: {

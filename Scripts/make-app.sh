@@ -62,6 +62,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>SUPublicEDKey</key><string>${ED_PUBLIC_KEY}</string>
   <key>SUEnableInstallerLauncherService</key><false/>
   <key>NSHumanReadableCopyright</key><string>GPL-3.0 — no paid tier, ever.</string>
+  <key>CFBundleURLTypes</key>
+  <array><dict>
+    <key>CFBundleURLName</key><string>Highball play link</string>
+    <key>CFBundleURLSchemes</key><array><string>highball</string></array>
+  </dict></array>
   <key>NSMicrophoneUsageDescription</key><string>Windows games and apps running in a bottle need the microphone for voice chat and recording. macOS asks the first time one uses it.</string>
 </dict></plist>
 PLIST

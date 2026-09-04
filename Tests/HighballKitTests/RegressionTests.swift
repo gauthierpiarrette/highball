@@ -1057,6 +1057,28 @@ extension RegressionTests {
         XCTAssertEqual(r.seconds, 754)
     }
 
+    // Play links accept typed ids only and round-trip; the stub's files are plain and predictable.
+    func testPlayLinkParsingAndStubFiles() throws {
+        let u = PlayLink.url(for: .steam(appid: 620), token: "abc")
+        XCTAssertEqual(u.absoluteString, "highball://play/steam/620?t=abc")
+        XCTAssertEqual(PlayLink.parse(u), PlayLink.Request(target: .steam(appid: 620), token: "abc"))
+        let pinID = UUID()
+        let p = PlayLink.url(for: .pin(bottle: "Gaming", id: pinID), token: "abc")
+        XCTAssertEqual(PlayLink.parse(p)?.target, .pin(bottle: "Gaming", id: pinID))
+        XCTAssertEqual(PlayLink.parse(PlayLink.url(for: .epic(appName: "Duck"), token: "x"))?.target.libraryID, "epic:Duck")
+        XCTAssertNil(PlayLink.parse(URL(string: "highball://play/steam/notanumber")!))
+        XCTAssertNil(PlayLink.parse(URL(string: "highball://play/exe/C:/x.exe")!), "no paths, ever")
+        XCTAssertNil(PlayLink.parse(URL(string: "highball://install/steam/620")!), "only play exists")
+        XCTAssertNil(PlayLink.parse(URL(string: "http://play/steam/620")!))
+        XCTAssertEqual(PlayLink.parse(URL(string: "highball://play/steam/620")!)?.token, nil, "no token: the app confirms")
+
+        XCTAssertEqual(MacAppStub.appName(for: "Half-Life: Alyx"), "Half-Life Alyx")
+        XCTAssertEqual(MacAppStub.appName(for: "  "), "Highball game")
+        XCTAssertEqual(MacAppStub.bundleID(for: "steam:620"), "app.highball.stub.steam-620")
+        XCTAssertTrue(MacAppStub.launchScript(url: u).contains("/usr/bin/open \"highball://play/steam/620?t=abc\""))
+        XCTAssertTrue(MacAppStub.infoPlist(appName: "Portal 2", bundleID: "x").contains("<key>LSUIElement</key><true/>"), "no Dock icon of its own, no window")
+    }
+
     func testDefaultEnginePrefersBundledManifestID() throws {
         func engine(_ id: String) throws -> InstalledEngine {
             let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#

@@ -16,6 +16,12 @@ struct HighballApp: App {
                 .preferredColorScheme(.dark)
                 .frame(minWidth: 820, minHeight: 560)
                 .onAppear { state.refresh(); state.sweepTrash(); delegate.appState = state }
+                .onOpenURL { url in state.open(url: url) }
+                .alert(String(format: L("Open %@ in Highball?"), state.pendingPlayLink?.title ?? ""),
+                       isPresented: Binding(get: { state.pendingPlayLink != nil }, set: { if !$0 { state.pendingPlayLink = nil } })) {
+                    Button(L("Play")) { if let item = state.pendingPlayLink { state.pendingPlayLink = nil; state.play(item) } }
+                    Button(L("Cancel"), role: .cancel) { state.pendingPlayLink = nil }
+                } message: { Text(L("This link did not come from one of your Highball apps, so it asks first.")) }
         }
         .windowResizability(.contentSize)
         .commands {

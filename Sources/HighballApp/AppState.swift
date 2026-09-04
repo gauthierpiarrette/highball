@@ -514,6 +514,33 @@ final class AppState {
     /// wineserver under the live session (issue #13's crash sequence), so it's refused instead.
     private var launchingPins: Set<UUID> = []
 
+    // MARK: Play from outside the app (UX plan §3.9)
+
+    /// A play request that arrived without this install's token: confirm before running.
+    var pendingPlayLink: LibraryItem?
+
+    func open(url: URL) {
+        guard let request = PlayLink.parse(url) else { return }
+        refresh()
+        guard let item = libraryItems.first(where: { $0.id == request.target.libraryID }) else {
+            fail(HighballError.failed("That game is not in this Highball's library."))
+            return
+        }
+        if request.token == PlayLink.token(in: paths) { play(item) } else { pendingPlayLink = item }
+    }
+
+    /// Writes the game's Mac app into ~/Applications/Highball and reveals it.
+    func makeMacApp(for item: LibraryItem) {
+        guard let target = PlayLink.target(for: item) else { return }
+        let url = PlayLink.url(for: target, token: PlayLink.token(in: paths))
+        let cover = coverStore.coverURL(for: item.id) ?? item.artworkTall
+        do {
+            let app = try MacAppStub.write(title: item.title, libraryID: item.id, url: url, cover: cover)
+            appendLog("made \(app.lastPathComponent) in ~/Applications/Highball")
+            NSWorkspace.shared.activateFileViewerSelecting([app])
+        } catch { fail(error) }
+    }
+
     // MARK: Sessions (UX plan 0.6)
 
     /// Games running right now, from their processes. The library shows them and offers Stop;

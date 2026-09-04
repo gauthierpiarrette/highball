@@ -221,6 +221,9 @@ struct LibraryTile: View {
             if let appid = item.steamAppID, let running = state.session(forAppID: appid) {
                 Button(L("Stop")) { state.stopSession(running) }
             } else if playable { Button(L("Play")) { state.play(item) } }
+            if playable, PlayLink.target(for: item) != nil {
+                Button(L("Make a Mac app…")) { state.makeMacApp(for: item) }
+            }
             Button(L("Choose cover image…")) { state.chooseCover(for: item) }
             if state.coverStore.coverURL(for: item.id) != nil {
                 Button(L("Reset cover")) { state.resetCover(for: item) }
