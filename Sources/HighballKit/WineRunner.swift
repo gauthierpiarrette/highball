@@ -142,7 +142,8 @@ public struct WineRunner: Sendable {
         // The exit code used to be computed and thrown away: a failed install produced a log
         // shape-identical to a successful one, so user-submitted reports were undiagnosable
         // (issue #36 cost two research passes to answer). It is now a footer, written below.
-        let status: Int32 = await withCheckedContinuation { cont in
+        let status: Int32 = await withTaskCancellationHandler {
+          await withCheckedContinuation { cont in
             process.terminationHandler = { p in cont.resume(returning: p.terminationStatus) }
             // Drain on a background thread. The drain is the log handle's SOLE owner: it closes it
             // only after EOF. Closing from the main flow raced the last writes — FileHandle's
@@ -165,6 +166,11 @@ public struct WineRunner: Sendable {
                 if !buffer.isEmpty { onOutput?(String(decoding: buffer, as: UTF8.self)) }
                 try? logHandle.close()
             }
+          }
+        } onCancel: {
+            // The busy op was stopped: end the process so the wait returns instead of hanging
+            // on a wineboot/installer that ignores its parent (review #12).
+            process.terminate()
         }
         let duration = Date().timeIntervalSince(start)
         // Footer with the exit code. Written here, not in the drain: the drain blocks on

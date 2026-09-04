@@ -223,10 +223,7 @@ final class AppState {
     func install(_ item: LibraryItem) {
         guard item.source == .epic,
               let game = epicOwned.first(where: { $0.app_name == item.epicAppName }) else { return }
-        let target = item.bottleName.flatMap { name in bottles.first { $0.name == name } }
-            ?? selectedBottle.flatMap { name in bottles.first { $0.name == name } }
-            ?? bottles.first
-        guard let target else { return }
+        guard let target = item.bottleName.flatMap({ name in bottles.first { $0.name == name } }) ?? defaultBottle else { return }
         epicInstall(game, in: target)
     }
 
@@ -707,8 +704,9 @@ final class AppState {
 
     func createBottle(name: String, recipeID: String?) {
         guard let engine = defaultEngine else { return }
-        runBusy("Creating bottle '\(name)' — first boot takes about 90 seconds",
-                done: DoneState(title: String(format: L("Bottle '%@' is ready"), name), ctaTitle: nil, cta: nil)) { [self] in
+        runBusy(String(format: L("Creating the %@ environment — first boot takes about 90 seconds"), name),
+                done: DoneState(title: String(format: L("The %@ environment is ready"), name), ctaTitle: nil, cta: nil),
+                stop: .cancelTask(label: L("Stop"))) { [self] in
             let bottle = try await bottleStore.create(name: name, engine: engine)
             await MainActor.run { self.appendLog("bottle created") }
             if let recipeID, let recipe = Self.recipe(recipeID) {
@@ -1171,32 +1169,35 @@ final class AppState {
 
     /// Handle an .exe/.msi dropped on a bottle: run it (installer) inside the bottle.
     func runDropped(_ url: URL, in bottle: Bottle, andPin: Bool) {
+        guard engine(for: bottle) != nil else { return }
+        let ext = url.pathExtension.lowercased()
+        if ext == "exe" {
+            // A game runs as a session: the app stays free, Stop and the post-play question
+            // work, and the window hands off like any other launch (review #4).
+            let pin = Pin(name: url.deletingPathExtension().lastPathComponent,
+                          path: Pin.storagePath(for: url, driveC: bottle.driveC))
+            if andPin {
+                var copy = bottle; copy.settings.pins.append(pin); update(copy)
+                launch(pin: pin, in: bottles.first { $0.name == bottle.name } ?? copy)
+            } else {
+                launch(pin: pin, in: bottle)
+            }
+            return
+        }
+        // .msi / .bat: an installer, which cannot stop cleanly, so it stays a blocking op.
         guard let engine = engine(for: bottle) else { return }
         runBusy("Running \(url.lastPathComponent)", stop: .killBottleThenRepair(bottle, label: L("Stop and repair"))) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
-            let ext = url.pathExtension.lowercased()
-            let isMSI = ext == "msi"
-            let args = isMSI ? ["msiexec", "/i", url.path] : [url.path]
-            // Installers get the boring reliable backend; a game exe gets the bottle's
-            // real renderer and runs from its own folder so relative asset paths work.
-            let renderer: Renderer? = (ext == "exe") ? nil : .wined3d
-            _ = try await runner.run(args, renderer: renderer, label: url.lastPathComponent,
+            let args = ext == "msi" ? ["msiexec", "/i", url.path] : [url.path]
+            _ = try await runner.run(args, renderer: .wined3d, label: url.lastPathComponent,
                                      workingDirectory: url.deletingLastPathComponent()) { line in
                 Task { @MainActor in self.appendLog(line) }
-            }
-            if andPin {
-                await MainActor.run {
-                    var copy = bottle
-                    copy.settings.pins.append(Pin(name: url.deletingPathExtension().lastPathComponent,
-                                                  path: Pin.storagePath(for: url, driveC: bottle.driveC)))
-                    self.update(copy)
-                }
             }
         }
     }
 
     func duplicateBottle(_ bottle: Bottle) {
-        runBusy("Duplicating '\(bottle.name)'", showLogSheet: false) { [self] in
+        runBusy(String(format: L("Duplicating the %@ environment"), bottle.name)) { [self] in
             killBottle(bottle)   // flush registry files before copying
             try? await Task.sleep(for: .seconds(1))
             let store = bottleStore, name = bottle.name
@@ -1207,8 +1208,11 @@ final class AppState {
     }
 
     func repairBottle(_ bottle: Bottle) {
+        _repairBottle(bottle, stop: .killBottle(bottle, label: L("Stop")))
+    }
+    private func _repairBottle(_ bottle: Bottle, stop: BusyStop?) {
         guard let engine = engine(for: bottle) else { return }
-        runBusy("Repairing '\(bottle.name)' — re-running the Windows first boot") { [self] in
+        runBusy(String(format: L("Repairing the %@ environment — re-running the Windows first boot"), bottle.name), stop: stop) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             try? runner.kill()
             try? await Task.sleep(for: .seconds(2))
@@ -1251,7 +1255,7 @@ final class AppState {
     }
 
     func epicSignIn(code: String) {
-        runBusy("Connecting your Epic account", showLogSheet: false) { [self] in
+        runBusy(L("Connecting your Epic account"), stop: .cancelTask(label: L("Stop"))) { [self] in
             let store = epicStore
             _ = try await store.ensureInstalled()
             try await Task.detached { try store.authenticate(code: code) }.value
@@ -1260,7 +1264,8 @@ final class AppState {
     }
 
     func epicInstall(_ game: EpicStore.Game, in bottle: Bottle) {
-        runBusy("Installing \(game.app_title)") { [self] in
+        runBusy("Installing \(game.app_title)", expected: L("a large download; you can leave it running"),
+                stop: .cancelTask(label: L("Stop"))) { [self] in
             let store = epicStore
             let status = try await Task.detached {
                 try store.install(game.app_name, into: bottle) { line in
