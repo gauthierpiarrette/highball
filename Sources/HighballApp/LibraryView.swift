@@ -97,11 +97,16 @@ struct LibraryView: View {
     @ViewBuilder private var emptyState: some View {
         VStack(alignment: .leading, spacing: 10) {
             if state.bottles.isEmpty {
-                // An engine without an environment: an older install, or a stopped first run.
-                Text(L("One more step: Highball prepares a Windows environment for your games."))
-                    .foregroundStyle(.secondary)
-                Button(L("Prepare it now")) { state.makeDefaultEnvironment() }
-                    .buttonStyle(.borderedProminent).tint(HB.amber).disabled(state.busy)
+                if state.busy {
+                    Text(L("Highball is preparing your Windows environment. Your games will appear here."))
+                        .foregroundStyle(.secondary)
+                } else {
+                    // An engine without an environment: an older install, or a stopped first run.
+                    Text(L("One more step: Highball prepares a Windows environment for your games."))
+                        .foregroundStyle(.secondary)
+                    Button(L("Prepare it now")) { state.makeDefaultEnvironment() }
+                        .buttonStyle(.borderedProminent).tint(HB.amber)
+                }
             } else if state.libraryItems.isEmpty {
                 whereAreYourGames
             } else {

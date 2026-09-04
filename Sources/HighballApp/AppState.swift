@@ -566,7 +566,7 @@ final class AppState {
         busyProgress = Transfer(received: received, total: total)
         stage = String(format: L("Downloading %@"), name)
         if let total, received >= total {
-            appendLog("downloaded \(name) — verifying and unpacking…")
+            appendLog("downloaded \(name), verifying and unpacking…")
             busyProgress = nil; transferRate = nil; transferSamples = []
         }
     }
