@@ -1044,6 +1044,19 @@ extension RegressionTests {
         XCTAssertTrue(json.contains("\"formatVersion\":3"))
     }
 
+    // Sessions are detected from processes, in both path spellings Wine reports (plan 0.6).
+    func testSessionMarkersAndLiveness() {
+        let m = SessionWatch.markers(installdir: "Portal 2")
+        let unix = "1234 ?? 0:01.00 Z:\\Program Files (x86)\\Steam\\steamapps\\common\\Portal 2\\portal2.exe -novid"
+        let win = "1234 ?? 0:01.00 /Users/me/Library/Application Support/Highball/bottles/Gaming/drive_c/Program Files (x86)/Steam/steamapps/common/Portal 2/portal2.exe"
+        XCTAssertTrue(SessionWatch.isAlive(markers: m, ps: unix))
+        XCTAssertTrue(SessionWatch.isAlive(markers: m, ps: win))
+        XCTAssertFalse(SessionWatch.isAlive(markers: m, ps: "1 ?? 0:00.00 steam.exe -silent"))
+        XCTAssertFalse(SessionWatch.isAlive(markers: m, ps: "steamapps/common/Portal 2 Fan Mod/x.exe"), "the trailing separator keeps a sibling folder out")
+        let r = SessionRecord(title: "Portal 2", bottle: "Gaming", appid: 620, started: Date(timeIntervalSince1970: 0), ended: Date(timeIntervalSince1970: 754), reason: "ended")
+        XCTAssertEqual(r.seconds, 754)
+    }
+
     func testDefaultEnginePrefersBundledManifestID() throws {
         func engine(_ id: String) throws -> InstalledEngine {
             let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#

@@ -178,6 +178,15 @@ struct LibraryTile: View {
                     SourceBadge(source: item.source)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .padding(6)
+                    if let appid = item.steamAppID, state.session(forAppID: appid) != nil {
+                        Text(L("Running"))
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(HB.good.opacity(0.9), in: Capsule())
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                            .padding(6)
+                    }
                     if !item.installed {
                         Image(systemName: "arrow.down.circle.fill")
                             .foregroundStyle(.white.opacity(0.85))
@@ -209,7 +218,9 @@ struct LibraryTile: View {
         .onHover { hovering = $0 }
         .help(entry?.notes ?? item.title)
         .contextMenu {
-            if playable { Button(L("Play")) { state.play(item) } }
+            if let appid = item.steamAppID, let running = state.session(forAppID: appid) {
+                Button(L("Stop")) { state.stopSession(running) }
+            } else if playable { Button(L("Play")) { state.play(item) } }
             Button(L("Choose cover image…")) { state.chooseCover(for: item) }
             if state.coverStore.coverURL(for: item.id) != nil {
                 Button(L("Reset cover")) { state.resetCover(for: item) }
