@@ -70,8 +70,18 @@ public struct BottleStore: Sendable {
         try bottle.save()
         let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
         let result = try await runner.wineboot()
+        // A boot that failed, or one the user stopped, must not leave a half-made bottle that
+        // the next attempt mistakes for a finished one ("already exists", or a library that
+        // says ready over an environment that never booted).
         guard result.exitStatus == 0 else {
+            try? runner.kill()
+            _ = try? discard(url, name: name)
             throw HighballError.processFailed(command: "wineboot -u", status: result.exitStatus, output: "see \(result.log.path)")
+        }
+        if Task.isCancelled {
+            try? runner.kill()
+            _ = try? discard(url, name: name)
+            throw CancellationError()
         }
         do {
             try await Self.ensureWoW64(runner: runner, bottle: bottle, log: result.log)

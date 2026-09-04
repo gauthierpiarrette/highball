@@ -363,6 +363,14 @@ public struct InstalledEngine: Sendable {
     }
 
     /// Renderer overlay directory: Gin's own `renderers/<name>` wins over the Template's `frameworks/renderer/<name>`.
+    /// Whether the engine carries a renderer at all, licence aside: D3DMetal ships inside the
+    /// runtime template and `rendererDir` hides it until the licence is accepted.
+    public func ships(_ name: String) -> Bool {
+        let own = renderersDir.appending(path: name, directoryHint: .isDirectory).appending(path: "wine")
+        let template = frameworksDir.appending(path: "renderer/\(name)", directoryHint: .isDirectory).appending(path: "wine")
+        return FileManager.default.fileExists(atPath: own.path) || FileManager.default.fileExists(atPath: template.path)
+    }
+
     public func rendererDir(_ name: String) -> URL? {
         if let gate = EngineManifest.gatedRenderers[name], !(manifest.acceptedLicenses ?? []).contains(gate) { return nil }
         let own = renderersDir.appending(path: name, directoryHint: .isDirectory)

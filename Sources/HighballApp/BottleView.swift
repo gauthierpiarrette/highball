@@ -85,7 +85,7 @@ struct BottleView: View {
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 guard let url else { return }
                 if ["exe", "msi", "bat"].contains(url.pathExtension.lowercased()) {
-                    Task { @MainActor in state.pendingRun = url }
+                    Task { @MainActor in state.pendingRunBottle = bottle.name; state.pendingRun = url }
                 } else {
                     // Silently ignoring a drop reads as "nothing happened" (Reddit report) — say why.
                     Task { @MainActor in
@@ -94,13 +94,6 @@ struct BottleView: View {
                 }
             }
             return true
-        }
-        .confirmationDialog("Run \(state.pendingRun?.lastPathComponent ?? "") in this bottle?",
-                            isPresented: .init(get: { state.pendingRun != nil }, set: { if !$0 { state.pendingRun = nil } }),
-                            titleVisibility: .visible) {
-            Button(L("Run")) { if let u = state.pendingRun { state.runDropped(u, in: bottle, andPin: false) }; state.pendingRun = nil }
-            Button(L("Run and add to Programs")) { if let u = state.pendingRun { state.runDropped(u, in: bottle, andPin: true) }; state.pendingRun = nil }
-            Button(L("Cancel"), role: .cancel) { state.pendingRun = nil }
         }
     }
 
@@ -494,7 +487,7 @@ struct GPTKLicenseSheet: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button(L("Close")) { dismiss() }
-                if let engine = state.engines.first, engine.rendererDir("d3dmetal") == nil {
+                if let engine = state.licenseEngine ?? state.defaultEngine ?? state.engines.first, engine.rendererDir("d3dmetal") == nil {
                     Button(L("Accept & enable D3DMetal")) {
                         state.acceptGPTK(engine: engine)
                         dismiss()

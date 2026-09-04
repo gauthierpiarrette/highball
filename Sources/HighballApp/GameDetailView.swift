@@ -24,7 +24,8 @@ struct GameDetailView: View {
     }
     private var verdict: GamePageCopy.Verdict { GamePageCopy.verdict(entry, myChip: state.machineChip) }
     private var willDo: [GamePageCopy.WillDo] {
-        GamePageCopy.willDo(entry, recipe: fixRecipe, applied: fixApplied, bottleRenderer: bottle?.settings.renderer ?? .dxvk)
+        GamePageCopy.willDo(entry, recipe: fixRecipe, applied: fixApplied, bottleRenderer: bottle?.settings.renderer ?? .dxvk,
+                            explicit: bottle?.settings.rendererExplicit ?? false)
     }
     private var engineName: String? { bottle.flatMap { state.engine(for: $0) }?.displayName }
 

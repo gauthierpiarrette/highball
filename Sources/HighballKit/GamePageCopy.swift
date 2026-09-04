@@ -56,9 +56,12 @@ public enum GamePageCopy {
     /// What Play applies, in order, from the row and the fix recipe. `applied` means the recipe
     /// already ran in this environment, so its steps read as done.
     public static func willDo(_ entry: GameDBEntry?, recipe: Recipe?, applied: Bool,
-                              bottleRenderer: Renderer, osMajor: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion) -> [WillDo] {
+                              bottleRenderer: Renderer, explicit: Bool = false,
+                              osMajor: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion) -> [WillDo] {
         var items: [WillDo] = []
-        if let wanted = entry?.effectiveRenderer(osMajor: osMajor) {
+        if explicit {
+            items.append(WillDo(text: "Use \(plainName(bottleRenderer)), the environment's setting (set by you)"))
+        } else if let wanted = entry?.effectiveRenderer(osMajor: osMajor) {
             items.append(WillDo(text: wanted == bottleRenderer
                                 ? "Use \(plainName(wanted)), the way it was verified"
                                 : "Use \(plainName(wanted)) for this game, the way it was verified, instead of the environment's \(wanted == bottleRenderer ? "" : plainName(bottleRenderer))"))
@@ -134,10 +137,18 @@ extension GamePageCopy {
     /// The consequence sentence of the D3DMetal ask, from the row: "will not start" only when
     /// no other renderer is recorded as working, "runs faster with it" when one is.
     public static func d3dMetalAsk(title: String, entry: GameDBEntry?) -> String {
-        let other = entry?.rendererResults?.contains { key, r in key != "d3dmetal" && r.verdict == "works" } ?? false
-        let consequence = other
-            ? "Without it, \(title) still runs on the other graphics mode that was verified, but slower."
-            : "Without it, \(title) will not start: it needs DirectX 12, and the other graphics modes only cover DirectX 11."
+        let consequence = otherWorkingRenderer(entry).map {
+            "Without it, \(title) still runs on \(plainName($0)), which was recorded as working, but slower."
+        } ?? "The database records no other graphics mode as working for \(title), so without it Highball has nothing else to try."
         return "Highball already includes it. Turning it on means accepting Apple's licence, which allows non-commercial use. \(consequence) Nothing to download and nothing sent to Apple."
+    }
+
+    /// A graphics mode other than D3DMetal that the row recorded as working, if any.
+    public static func otherWorkingRenderer(_ entry: GameDBEntry?) -> Renderer? {
+        guard let results = entry?.rendererResults else { return nil }
+        for key in ["dxmt", "dxvk", "wined3d"] where results[key]?.verdict == "works" {
+            if let r = Renderer(rawValue: key) { return r }
+        }
+        return nil
     }
 }

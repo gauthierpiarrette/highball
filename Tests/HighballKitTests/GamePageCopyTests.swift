@@ -63,8 +63,13 @@ final class GamePageCopyTests: XCTestCase {
 extension GamePageCopyTests {
     func testD3DMetalAskConsequenceComesFromTheRow() throws {
         let only = try entry(#"{"id":"x","title":"X","steam_appid":1,"status":"verified-local","renderer":"d3dmetal"}"#)
-        XCTAssertTrue(GamePageCopy.d3dMetalAsk(title: "X", entry: only).contains("will not start"))
+        XCTAssertTrue(GamePageCopy.d3dMetalAsk(title: "X", entry: only).contains("no other graphics mode"))
+        XCTAssertNil(GamePageCopy.otherWorkingRenderer(only))
         let alt = try entry(#"{"id":"x","title":"X","steam_appid":1,"status":"verified-local","renderer":"d3dmetal","rendererResults":{"dxvk":{"verdict":"works","detail":"slower"}}}"#)
         XCTAssertTrue(GamePageCopy.d3dMetalAsk(title: "X", entry: alt).contains("but slower"))
+        XCTAssertEqual(GamePageCopy.otherWorkingRenderer(alt), .dxvk)
+        let e = try entry(#"{"id":"x","title":"X","steam_appid":1,"status":"verified-local","renderer":"dxmt"}"#)
+        XCTAssertEqual(GamePageCopy.willDo(e, recipe: nil, applied: false, bottleRenderer: .dxvk, explicit: true, osMajor: 26).first?.text,
+                       "Use DXVK (Vulkan on Metal), the environment's setting (set by you)")
     }
 }

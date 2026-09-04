@@ -111,6 +111,11 @@ struct ContentView: View {
     @State private var showCreate = false
     @State private var pendingDelete: String?
 
+    /// Where a dropped or chosen program runs: the environment page it came from, else the default.
+    private var runTarget: Bottle? {
+        state.bottles.first { $0.name == state.pendingRunBottle } ?? state.defaultBottle
+    }
+
     var body: some View {
         @Bindable var state = state
         Group {
@@ -147,8 +152,28 @@ struct ContentView: View {
         // Everything that takes time lives on one strip at the bottom, never modal (UX plan 0.5).
         .safeAreaInset(edge: .bottom, spacing: 0) { ActivityStrip() }
         .sheet(isPresented: $showCreate) { CreateBottleSheet() }
-        .onChange(of: state.requestCreateBottle) { _, wants in
-            if wants { showCreate = true; state.requestCreateBottle = false }
+        // A Windows program dropped anywhere on the window, or picked from Add games and ⌘O,
+        // runs in the environment it was dropped on, else the default one.
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            guard let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                if ["exe", "msi", "bat"].contains(url.pathExtension.lowercased()) {
+                    Task { @MainActor in state.pendingRunBottle = nil; state.pendingRun = url }
+                } else {
+                    Task { @MainActor in
+                        state.errorMessage = String(format: L("'%@' isn't a Windows program. You can drop .exe, .msi or .bat files here."), url.lastPathComponent)
+                    }
+                }
+            }
+            return true
+        }
+        .confirmationDialog(String(format: L("Run %@ in %@?"), state.pendingRun?.lastPathComponent ?? "", runTarget?.name ?? ""),
+                            isPresented: .init(get: { state.pendingRun != nil }, set: { if !$0 { state.pendingRun = nil; state.pendingRunBottle = nil } }),
+                            titleVisibility: .visible) {
+            Button(L("Run")) { if let u = state.pendingRun, let b = runTarget { state.runDropped(u, in: b, andPin: false) }; state.pendingRun = nil }
+            Button(L("Run and add to Programs")) { if let u = state.pendingRun, let b = runTarget { state.runDropped(u, in: b, andPin: true) }; state.pendingRun = nil }
+            Button(L("Cancel"), role: .cancel) { state.pendingRun = nil }
         }
         .confirmationDialog("Delete bottle \"\(pendingDelete ?? "")\"? This removes its Windows drive and everything installed in it.",
                             isPresented: .init(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -164,7 +189,11 @@ struct ContentView: View {
                isPresented: .init(get: { state.pendingD3DMetal != nil }, set: { if !$0 { state.pendingD3DMetal = nil } }),
                presenting: state.pendingD3DMetal) { pending in
             Button(L("Turn it on and play")) { state.enableD3DMetalAndPlay() }
+            if let other = GamePageCopy.otherWorkingRenderer(pending.item.steamAppID.flatMap { state.gameDB[$0] }) {
+                Button(String(format: L("Play with %@"), GamePageCopy.plainName(other))) { state.playPendingD3DMetal(with: other) }
+            }
             Button(L("Read Apple's licence")) {
+                state.licenseEngine = pending.engine
                 state.pendingD3DMetal = nil
                 state.loadGPTKLicense(); state.showGPTKLicense = true
             }

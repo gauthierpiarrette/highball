@@ -104,6 +104,7 @@ struct EnvironmentsPane: View {
 
 struct EnginePane: View {
     @Environment(AppState.self) private var state
+    @State private var showLicense = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -116,9 +117,9 @@ struct EnginePane: View {
                         Text(engine.id).font(.caption.monospaced()).foregroundStyle(.secondary)
                         Text(String(format: L("Graphics layers: %@"), ["dxmt", "dxvk", "d3dmetal"].filter { engine.rendererDir($0) != nil }.map { GamePageCopy.plainName(Renderer(rawValue: $0) ?? .dxvk) }.joined(separator: ", ")))
                             .font(.caption).foregroundStyle(.secondary)
-                        if engine.rendererDir("d3dmetal") == nil, engine.manifest.components["d3dmetal"] != nil {
+                        if engine.ships("d3dmetal"), engine.rendererDir("d3dmetal") == nil {
                             Button(L("Read Apple's licence and turn on DirectX 12 support…")) {
-                                state.loadGPTKLicense(); state.showGPTKLicense = true
+                                state.licenseEngine = engine; state.loadGPTKLicense(); showLicense = true
                             }.buttonStyle(.link).font(.caption)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
@@ -143,11 +144,13 @@ struct EnginePane: View {
             Spacer()
         }
         .padding(20)
+        .sheet(isPresented: $showLicense) { GPTKLicenseSheet() }
     }
 }
 
 struct TroubleshootingPane: View {
     @Environment(AppState.self) private var state
+    @State private var showLog = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -162,7 +165,7 @@ struct TroubleshootingPane: View {
                         await MainActor.run { NSWorkspace.shared.open(url) }
                     }
                 }
-                Button(L("Show the activity log")) { state.showLog = true }
+                Button(L("Show the activity log")) { showLog = true }
             }
             if let b = state.defaultBottle {
                 Divider()
@@ -173,5 +176,6 @@ struct TroubleshootingPane: View {
             Spacer()
         }
         .padding(20)
+        .sheet(isPresented: $showLog) { LogSheet() }
     }
 }

@@ -70,7 +70,6 @@ final class AppState {
     @ObservationIgnored private var busyTask: Task<Void, Never>?
     @ObservationIgnored private var transferSamples: [ActivityText.Sample] = []
     @ObservationIgnored private var stopRequested = false
-    var requestCreateBottle = false     // engine-done CTA → ContentView opens the sheet
 
     // Onboarding
     var rosettaInstalled = true
@@ -155,12 +154,13 @@ final class AppState {
     /// the db verified it": an unapplied fix recipe whose steps are all harmless (config
     /// files, renderer — no wine processes, no installs) is applied silently first; one
     /// with heavy steps asks, with the cost stated.
-    func play(_ item: LibraryItem) {
+    /// `renderer` forces one graphics mode for this launch (the D3DMetal ask's "play with the
+    /// other mode"); nil lets the row and the environment decide.
+    func play(_ item: LibraryItem, renderer: Renderer? = nil) {
         guard let bottleName = item.bottleName,
               let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
-        if let appid = item.steamAppID, gameDB[appid]?.effectiveRenderer() == .d3dmetal,
-           let engine = engine(for: bottle), engine.rendererDir("d3dmetal") == nil,
-           engine.manifest.components["d3dmetal"] != nil {
+        if renderer == nil, let appid = item.steamAppID, gameDB[appid]?.effectiveRenderer() == .d3dmetal,
+           let engine = engine(for: bottle), engine.ships("d3dmetal"), engine.rendererDir("d3dmetal") == nil {
             pendingD3DMetal = (item, bottle, engine)
             return
         }
@@ -182,7 +182,7 @@ final class AppState {
                     }
                     refresh()
                     let fresh = bottles.first { $0.name == bottleName } ?? runner.bottle
-                    launch(item, in: fresh)
+                    launch(item, in: fresh, renderer: renderer)
                 }
                 return
             }
@@ -198,19 +198,19 @@ final class AppState {
                 }))
             return
         }
-        launch(item, in: bottle)
+        launch(item, in: bottle, renderer: renderer)
     }
 
-    private func launch(_ item: LibraryItem, in bottle: Bottle) {
+    private func launch(_ item: LibraryItem, in bottle: Bottle, renderer: Renderer? = nil) {
         recordPlay(item)
         if !FunnelLog.records(in: paths.logs).contains(where: { $0.event == .firstLaunch }) { funnel(.firstLaunch) }
         switch item.source {
         case .steam:
             guard let game = (gamesByBottle[bottle.name] ?? []).first(where: { $0.appid == item.steamAppID }) else { return }
-            launchGame(game, in: bottle)
+            launchGame(game, in: bottle, renderer: renderer)
         case .epic:
             guard let game = epicOwned.first(where: { $0.app_name == item.epicAppName }) else { return }
-            epicPlay(game, in: bottle)
+            epicPlay(game, in: bottle, renderer: renderer)
         case .pin:
             guard let pin = bottle.settings.pins.first(where: { $0.id == item.pinID }) else { return }
             launch(pin: pin, in: bottle)
@@ -267,6 +267,8 @@ final class AppState {
 
     /// A Windows program awaiting the run/pin choice (from drag-drop, the File menu, or the button).
     var pendingRun: URL?
+    /// The environment a dropped program runs in: the page it was dropped on, else the default.
+    var pendingRunBottle: String?
 
     func chooseProgramToRun() {
         let panel = NSOpenPanel()
@@ -583,11 +585,11 @@ final class AppState {
         guard let manifestURL = Self.bundledManifest else {
             errorMessage = "No engine manifest found. Reinstall Highball."; return
         }
-        funnel(.installStarted)
         runBusy(L("Setting up Highball"),
                 expected: L("usually 5–15 minutes"),
                 done: DoneState(title: L("Highball is ready"), ctaTitle: nil, cta: nil),
                 stop: .cancelTask(label: L("Stop"))) { [self] in
+            funnel(.installStarted)
             if !rosettaInstalled {
                 await MainActor.run { self.stage = L("Installing Rosetta, Apple's compatibility layer") }
                 try await Self.installRosetta()
@@ -666,11 +668,21 @@ final class AppState {
     var pendingD3DMetal: (item: LibraryItem, bottle: Bottle, engine: InstalledEngine)?
 
     func enableD3DMetalAndPlay() {
-        guard let (item, bottle, engine) = pendingD3DMetal else { return }
+        guard let (item, _, engine) = pendingD3DMetal else { return }
         pendingD3DMetal = nil
         acceptGPTK(engine: engine)
-        if let fresh = bottles.first(where: { $0.name == bottle.name }) { launch(item, in: fresh) }
+        play(item)   // through play, so a fix recipe still applies
     }
+
+    /// The other graphics mode the row recorded as working, when the person declines D3DMetal.
+    func playPendingD3DMetal(with renderer: Renderer) {
+        guard let (item, _, _) = pendingD3DMetal else { return }
+        pendingD3DMetal = nil
+        play(item, renderer: renderer)
+    }
+
+    /// The engine the licence sheet enables D3DMetal on: the one the ask was about.
+    var licenseEngine: InstalledEngine?
 
     func acceptGPTK(engine: InstalledEngine) {
         do { _ = try engineStore.accept(license: "apple-gptk-license-2023-08-17", engine: engine); refresh() }
@@ -844,12 +856,12 @@ final class AppState {
                                    started: session.started, ended: Date(), reason: reason, renderer: session.renderer)
         SessionWatch.append(record, to: paths.logs)
         lastEndedSession = record
-        let firstSession = !FunnelLog.records(in: paths.logs).contains { $0.event == .sessionEnded }
         funnel(.sessionEnded, detail: "\(record.seconds) s, \(reason)")
         if record.seconds >= 60 {
             postPlay = record
-            // The consent question comes after the first successful game, never before (0.7).
-            if !funnelAsked, firstSession { funnelOffer = true }
+            // The consent question comes after the first game that ran for a minute, never
+            // before (0.7); asked once, whatever the answer.
+            if !funnelAsked { funnelOffer = true }
         }
         appendLog("\(session.title) \(reason) after \(record.seconds / 60) min")
     }
@@ -1032,7 +1044,7 @@ final class AppState {
     }
 
     /// Launch a Steam game by appid through the bottle's Steam client.
-    func launchGame(_ game: SteamGame, in bottle: Bottle) {
+    func launchGame(_ game: SteamGame, in bottle: Bottle, renderer preferred: Renderer? = nil) {
         guard let engine = engine(for: bottle) else { return }
         if let running = session(forAppID: game.appid) {
             fail(HighballError.failed("\(running.title) is already running."))
@@ -1040,7 +1052,9 @@ final class AppState {
         }
         let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
         let entry = gameDB[game.appid]
-        let renderer = entry?.effectiveRenderer()
+        // A mode the user set on the environment is respected, as the page promises; the row's
+        // verified mode applies otherwise, and a forced mode (the D3DMetal ask) beats both.
+        let renderer = preferred ?? (bottle.settings.rendererExplicit ? nil : entry?.effectiveRenderer())
         // Per-game launch args ride the db (e.g. windowed for legacy CS:GO on macOS 26, #21).
         let extraArgs = entry?.effectiveLaunchArgs() ?? []
         let markers = SessionWatch.markers(installdir: game.installdir)
