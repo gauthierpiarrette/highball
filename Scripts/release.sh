@@ -153,13 +153,36 @@ xcrun stapler staple "$DMG"
 git tag "v$VERSION"
 git push origin HEAD "v$VERSION"
 
-if [ -n "$NOTES_FILE" ]; then
-  gh release create "v$VERSION" "$ZIP" "$DMG" --latest --title "Highball $VERSION" --notes-file "$NOTES_FILE"
-else
-  gh release create "v$VERSION" "$ZIP" "$DMG" --latest --title "Highball $VERSION" --notes "$SUMMARY"
-fi
+# Publishing is one GitHub call that can fail on a network blip after the tag is already pushed
+# (0.8.2: a read error on the final PATCH left a tag with no release and no appcast). Retry, and if
+# a previous attempt left the release behind, finish it instead of failing: upload the assets again
+# and make sure it is published.
+publish() {
+  if gh release view "v$VERSION" >/dev/null 2>&1; then
+    gh release upload "v$VERSION" "$ZIP" "$DMG" --clobber
+    gh release edit "v$VERSION" --draft=false --latest --title "Highball $VERSION"
+  elif [ -n "$NOTES_FILE" ]; then
+    gh release create "v$VERSION" "$ZIP" "$DMG" --latest --title "Highball $VERSION" --notes-file "$NOTES_FILE"
+  else
+    gh release create "v$VERSION" "$ZIP" "$DMG" --latest --title "Highball $VERSION" --notes "$SUMMARY"
+  fi
+}
+for attempt in 1 2 3 4; do
+  if publish; then break; fi
+  [ "$attempt" = 4 ] && { echo "release publish failed four times; the tag v$VERSION is pushed, run again to finish" >&2; exit 1; }
+  echo "publish attempt $attempt failed, retrying in 15s…" >&2; sleep 15
+done
+# The assets exist only once the release is published; do not point the appcast at them before.
+gh release view "v$VERSION" --json isDraft --jq '.isDraft' | grep -q false
 
 git add appcast.xml && git commit -m "release: v$VERSION appcast" && git push
+
+# GitHub's asset CDN lags the upload by a few seconds: wait until the zip downloads at full size.
+for i in $(seq 1 24); do
+  got=$(curl -sL -o /dev/null -w '%{size_download}' "$DOWNLOAD_URL" || echo 0)
+  [ "$got" = "$(stat -f %z "$ZIP")" ] && break
+  sleep 5
+done
 
 # Post-publish gate: download the published assets back and verify them exactly as users do.
 # Any failure aborts loudly (set -e) — a release is not done until this passes.
