@@ -10,13 +10,18 @@ public enum PlayLink {
         case steam(appid: Int)
         case epic(appName: String)
         case pin(bottle: String, id: UUID)
+        /// A launcher (Steam, Epic, …) by recipe id: `highball://open/launcher/steam`. Opens it,
+        /// installing it first if needed (issue #53: Mac icons for launchers too).
+        case launcher(id: String)
 
-        /// The library item id this target maps to ("steam:620", "epic:Duck", "pin:Gaming:<uuid>").
+        /// The library item id this target maps to ("steam:620", "epic:Duck", "pin:Gaming:<uuid>");
+        /// a launcher has no library item and maps to "launcher:<id>".
         public var libraryID: String {
             switch self {
             case let .steam(appid): return "steam:\(appid)"
             case let .epic(name): return "epic:\(name)"
             case let .pin(bottle, id): return "pin:\(bottle):\(id.uuidString)"
+            case let .launcher(id): return "launcher:\(id)"
             }
         }
     }
@@ -27,12 +32,18 @@ public enum PlayLink {
     }
 
     /// Parses `highball://play/steam/620?t=<token>`, `highball://play/epic/<name>?t=...`,
-    /// `highball://play/pin/<bottle>/<uuid>?t=...`. Anything else is nil: no other action
-    /// exists behind the scheme.
+    /// `highball://play/pin/<bottle>/<uuid>?t=...` and `highball://open/launcher/<id>?t=...`.
+    /// Anything else is nil: no other action exists behind the scheme.
     public static func parse(_ url: URL) -> Request? {
-        guard url.scheme?.lowercased() == scheme, url.host?.lowercased() == "play" else { return nil }
+        guard url.scheme?.lowercased() == scheme else { return nil }
         let parts = url.pathComponents.filter { $0 != "/" }
         let token = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "t" }?.value
+        if url.host?.lowercased() == "open" {
+            guard parts.count == 2, parts[0] == "launcher", !parts[1].isEmpty,
+                  parts[1].range(of: "^[a-z0-9-]+$", options: .regularExpression) != nil else { return nil }
+            return Request(target: .launcher(id: parts[1]), token: token)
+        }
+        guard url.host?.lowercased() == "play" else { return nil }
         switch parts.first {
         case "steam":
             guard parts.count == 2, let appid = Int(parts[1]), appid > 0 else { return nil }
@@ -55,6 +66,7 @@ public enum PlayLink {
         case let .steam(appid): c.path = "/steam/\(appid)"
         case let .epic(name): c.path = "/epic/\(name)"
         case let .pin(bottle, id): c.path = "/pin/\(bottle)/\(id.uuidString)"
+        case let .launcher(id): c.host = "open"; c.path = "/launcher/\(id)"
         }
         c.queryItems = [URLQueryItem(name: "t", value: token)]
         return c.url!

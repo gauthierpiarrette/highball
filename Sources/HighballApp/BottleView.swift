@@ -113,6 +113,7 @@ struct BottleView: View {
                             else { state.applyRecipe(meta.id, to: bottle) }
                         }
                         .contextMenu {
+                            Button(L("Make a Mac app…")) { state.makeMacApp(forLauncher: meta.id, short: meta.short) }
                             if installed, let pin {
                                 Button(L("Open")) { state.launch(pin: pin, in: bottle) }
                                 Button(L("Program settings…")) { editingPin = pin }

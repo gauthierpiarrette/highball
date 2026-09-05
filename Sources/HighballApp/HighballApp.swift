@@ -14,6 +14,9 @@ struct HighballApp: App {
         // with only Settings open cannot come back as Settings alone (issue #58).
         WindowGroup("Highball", id: "main") {
             ContentView()
+                // One library window handles every play link; without this SwiftUI opens a new
+                // window per link, one per Mac-app stub started (issue #53).
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                 .environment(state)
                 .tint(HB.amber)
                 .preferredColorScheme(.dark)
@@ -99,8 +102,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Works as a bare SwiftPM executable during development: give it a real UI presence.
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
+        // A bundled app is activated by macOS on its own; forcing it here would also drag
+        // Highball in front of a game a Mac-app stub just started with `open -g` (issue #53).
+        if Bundle.main.bundleURL.pathExtension != "app" {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+        }
         if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "png"),
            let icon = NSImage(contentsOf: iconURL) {
             NSApp.applicationIconImage = icon

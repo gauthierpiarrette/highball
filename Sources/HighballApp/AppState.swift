@@ -770,6 +770,15 @@ final class AppState {
     func open(url: URL) {
         guard let request = PlayLink.parse(url) else { return }
         refresh()
+        if case let .launcher(id) = request.target {
+            // A launcher stub (issue #53). Only a link carrying this install's token opens it:
+            // a web page cannot start an install through the scheme.
+            guard request.token == PlayLink.token(in: paths) else {
+                fail(HighballError.failed(L("That launcher link did not come from one of your Highball apps."))); return
+            }
+            openOrInstallLauncher(id, short: BottleView.launcherMeta.first { $0.id == id }?.short ?? id)
+            return
+        }
         resolvePlayLink(request)
     }
 
@@ -796,6 +805,18 @@ final class AppState {
         let cover = coverStore.coverURL(for: item.id) ?? item.artworkTall
         do {
             let app = try MacAppStub.write(title: item.title, libraryID: item.id, url: url, cover: cover)
+            appendLog("made \(app.lastPathComponent) in ~/Applications/Highball")
+            NSWorkspace.shared.activateFileViewerSelecting([app])
+        } catch { fail(error) }
+    }
+
+    /// A Mac app for a launcher (Steam, Epic, …) that opens it, installing it first if needed
+    /// (issue #53). Highball's own icon stands in for a cover.
+    func makeMacApp(forLauncher id: String, short: String) {
+        let url = PlayLink.url(for: .launcher(id: id), token: PlayLink.token(in: paths))
+        let icon = Bundle.main.url(forResource: "AppIcon", withExtension: "png")
+        do {
+            let app = try MacAppStub.write(title: short, libraryID: "launcher:\(id)", url: url, cover: icon)
             appendLog("made \(app.lastPathComponent) in ~/Applications/Highball")
             NSWorkspace.shared.activateFileViewerSelecting([app])
         } catch { fail(error) }
@@ -838,8 +859,31 @@ final class AppState {
                 let bottles = await MainActor.run { [self] in self.bottles }
                 let running = Set(bottles.filter { WineRunner.steamIsRunning(inPrefix: $0.url) }.map(\.name))
                 await MainActor.run { [self] in if self.steamClients != running { self.steamClients = running } }
+                // A first start that deadlocked after its bootstrap (issue #9) is restarted once.
+                for bottle in bottles where running.contains(bottle.name) {
+                    guard let root = SteamLibrary.steamRoot(of: bottle), SteamFirstStart.isHung(steamRoot: root) else { continue }
+                    await MainActor.run { [self] in self.restartHungFirstStart(bottle) }
+                }
                 try? await Task.sleep(for: .seconds(8))
             }
+        }
+    }
+
+    /// Bottles whose stuck first start was already restarted this run: once is the deal, a
+    /// second hang is something to report, not to loop on.
+    @ObservationIgnored private var firstStartRestarted: Set<String> = []
+
+    /// Steam's first start deadlocked after its bootstrap (issue #9): stop it and start it again,
+    /// which is what fixes it; say so in the strip so the wait has a name.
+    func restartHungFirstStart(_ bottle: Bottle) {
+        guard !firstStartRestarted.contains(bottle.name), !busy else { return }
+        firstStartRestarted.insert(bottle.name)
+        appendLog("Steam's first start in \(bottle.name) got stuck after its update; restarting it once")
+        stage = L("Steam's first start got stuck; restarting it")
+        killBottle(bottle)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self, let fresh = self.bottles.first(where: { $0.name == bottle.name }) else { return }
+            self.showSteam(in: fresh)
         }
     }
 

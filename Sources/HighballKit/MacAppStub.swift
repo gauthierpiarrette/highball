@@ -37,9 +37,10 @@ public enum MacAppStub {
     }
 
     /// The launcher: opens the play URL and exits. `open` hands the URL to Highball whether it
-    /// is running or not.
+    /// is running or not; `-g` keeps Highball in the background so the game, not the library,
+    /// is what comes to the front (issue #53).
     public static func launchScript(url: URL) -> String {
-        "#!/bin/sh\nexec /usr/bin/open \"\(url.absoluteString)\"\n"
+        "#!/bin/sh\nexec /usr/bin/open -g \"\(url.absoluteString)\"\n"
     }
 
     public static func bundleID(for libraryID: String) -> String {
