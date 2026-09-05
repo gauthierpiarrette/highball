@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.8.2</title>
+      <description><![CDATA[Fixes launch opening only the Settings window when it was left open at quit (#58); the main window always comes back]]></description>
+      <pubDate>Sat, 05 Sep 2026 06:20:24 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.8.2/Highball-0.8.2.zip" sparkle:version="0.8.2" sparkle:shortVersionString="0.8.2" sparkle:edSignature="jXl3RZ+o9/V8DqTfGOL510hfhk5qZaalljG5dL/6kPiDXjTNy/fd9hUDFcmuWkCgDEDe7BvNJg6jvj5cdxu3CQ==" length="3166477" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.8.1</title>
       <description><![CDATA[Fixes the 0.8.0 create-environment and first-run regressions (#21, #57): progress and clear errors instead of a silent Create; damaged environments recognized; play links wait for the library]]></description>
       <pubDate>Sat, 05 Sep 2026 04:57:50 -0700</pubDate>
