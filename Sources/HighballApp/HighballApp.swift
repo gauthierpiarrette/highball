@@ -101,6 +101,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The UI is dark by design (preferredColorScheme), but AppKit chrome (scroll bars,
+        // alerts, menus, open panels) follows the window appearance, which stayed light on a
+        // light-mode Mac: a pale scroll bar down a dark library. One appearance for everything.
+        NSApp.appearance = NSAppearance(named: .darkAqua)
         // Works as a bare SwiftPM executable during development: give it a real UI presence.
         // A bundled app is activated by macOS on its own; forcing it here would also drag
         // Highball in front of a game a Mac-app stub just started with `open -g` (issue #53).
