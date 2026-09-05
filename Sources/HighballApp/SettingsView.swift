@@ -5,6 +5,7 @@ import HighballKit
 /// canvas "Advanced: Settings"). Nothing here is needed to play a game.
 struct SettingsView: View {
     @Environment(AppState.self) private var state
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var state = state
@@ -16,6 +17,14 @@ struct SettingsView: View {
                     .tag(SettingsTab.engine)
                 TroubleshootingPane().tabItem { Label(L("Troubleshooting"), systemImage: "wrench.and.screwdriver") }
                     .tag(SettingsTab.troubleshooting)
+            }
+            // Issue #58: this window must never be the only one back after a relaunch. Restoration
+            // is off for it, and if it does appear without the main window (a restored session,
+            // or the main window closed earlier), open the main window.
+            .background(WindowAccessor { window in window.isRestorable = false })
+            .onAppear {
+                MainWindow.opener = { openWindow(id: "main") }
+                MainWindow.ensureOpen()
             }
             // The strip lives on the main window; a compact echo here so a repair or a new
             // environment started from Settings is not silent (review #14).

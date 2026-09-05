@@ -59,6 +59,22 @@ then
   sleep 5
 fi
 
+# Launch-window regressions (issue #58: only Settings came back after a relaunch) ship silently
+# because every other check starts the app fresh. A release wants a recent
+# Scripts/launch-window-smoke.sh result: Settings open, main closed, quit, relaunch, main is back.
+if ! python3 - <<'PY'
+import json, sys, time
+d = json.load(open("private/launch-window-smoke/latest.json"))
+sys.exit(0 if d.get("passed") and time.time() - d.get("epoch", 0) < 14*86400 else 1)
+PY
+then
+  echo "" >&2
+  echo "WARNING: no passing launch-window-smoke result from the last 14 days." >&2
+  echo "         Run Scripts/launch-window-smoke.sh: the app must open its main window on relaunch." >&2
+  echo "         Continuing in 5s…" >&2
+  sleep 5
+fi
+
 # Game regressions (a launcher going silent, a map load freezing) ship via engine, app and OS
 # changes alike, so a release wants a recent Scripts/game-smoke.sh result: every verified title
 # installed here launched, showed its window and kept drawing. Same rule: warn, don't block.

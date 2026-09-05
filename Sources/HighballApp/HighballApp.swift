@@ -9,8 +9,10 @@ struct HighballApp: App {
     @State private var state = AppState()
 
     var body: some Scene {
-        Settings { SettingsView().environment(state).preferredColorScheme(.dark) }
-        WindowGroup("Highball") {
+        // The main window group is declared first: it is the scene SwiftUI opens at launch.
+        // Settings comes after it and is non-restorable (SettingsView), so a session that ended
+        // with only Settings open cannot come back as Settings alone (issue #58).
+        WindowGroup("Highball", id: "main") {
             ContentView()
                 .environment(state)
                 .tint(HB.amber)
@@ -41,6 +43,7 @@ struct HighballApp: App {
                 }
             }
         }
+        Settings { SettingsView().environment(state).preferredColorScheme(.dark) }
     }
 }
 
@@ -102,8 +105,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            let icon = NSImage(contentsOf: iconURL) {
             NSApp.applicationIconImage = icon
         }
+        // Issue #58: if window restoration brought back only the Settings window, open the main
+        // one. SettingsView asks for it as it appears; this is the fallback once launch settles.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { MainWindow.ensureOpen() }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// Dock click with only Settings on screen: SwiftUI sees a visible window and opens nothing,
+    /// so bring the main window back ourselves (issue #58).
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard !MainWindow.isOpen, MainWindow.opener != nil else { return true }
+        MainWindow.ensureOpen()
+        return false
+    }
 }
 
 struct ContentView: View {
