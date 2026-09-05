@@ -305,6 +305,9 @@ final class AppState {
     /// so it must not spawn per call beyond legendary's install list, and never touches the
     /// directories it watches.
     func refreshInstalledGames() {
+        // Re-arm first: a steamapps that did not exist at the last full refresh (Steam was
+        // installed after launch) is only watched from here on, and a replaced one is reopened.
+        installWatcher?.watch(bottles.flatMap(installDirectories))
         let games = Dictionary(bottles.map { ($0.name, SteamLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
         if games != gamesByBottle { gamesByBottle = games; rebuildLibrary() }
         guard epicSignedIn, !epicFetchInFlight else { return }

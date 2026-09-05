@@ -31,6 +31,16 @@ public final class DirectoryWatcher {
             source.cancel()
             sources[path] = nil
         }
+        // A watched directory that was deleted and recreated (Steam's first update rebuilds
+        // its folders) leaves the source on the old inode, where nothing ever happens again:
+        // the library then misses every later install until a relaunch. Compare inodes and
+        // reopen such a source.
+        for (path, source) in sources where wanted.contains(path) {
+            var onDisk = stat(), held = stat()
+            let same = stat(path, &onDisk) == 0 && fstat(Int32(source.handle), &held) == 0
+                && onDisk.st_ino == held.st_ino && onDisk.st_dev == held.st_dev
+            if !same { source.cancel(); sources[path] = nil }
+        }
         for path in wanted where sources[path] == nil {
             let fd = open(path, O_EVTONLY)
             guard fd >= 0 else { continue }
