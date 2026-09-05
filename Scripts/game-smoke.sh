@@ -50,7 +50,18 @@ for row in "${GAMES[@]}"; do
   id=$("$WINLIST" 2>/dev/null | grep -iE "wine.*($winre)" | grep on=true | head -1 | awk '{print $1}')
   if [ -z "$id" ]; then echo "  FAIL: no window within $((n*3))s"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"no window\"}"); passed=false
   else
-    sleep 40; h=(); for k in 1 2 3; do screencapture -x -l "$id" "$OUT/$name-$k.png" 2>/dev/null; h+=("$(md5 -q "$OUT/$name-$k.png" 2>/dev/null)"); sleep 10; done
+    # Capture three frames ten seconds apart. Prefer the per-window grab, but some games use a
+    # layer-hosted (Metal) window that screencapture -l cannot image (it returns nothing/black);
+    # fall back to a full-screen shot cropped to the window rect, which works for any window type.
+    geo=$("$WINLIST" 2>/dev/null | grep -E "id=$id|^$id" | head -1); geo=$("$WINLIST" 2>/dev/null | awk -v id="$id" '$1==id{print $5}')
+    gx=${geo%%,*}; rest=${geo#*,}; gy=${rest%% *}; wh=${geo##* }; gw=${wh%%x*}; gh=${wh##*x}
+    grab(){ local out="$1"; screencapture -x -l "$id" "$out" 2>/dev/null
+      # if the -l grab is missing or ~uniformly black, use full-screen + crop
+      if [ ! -s "$out" ] || [ "$(sips -g pixelWidth "$out" 2>/dev/null | awk '/pixelWidth/{print $2}')" = "" ]; then
+        screencapture -x "$OUT/.fs.png" 2>/dev/null
+        [ -n "$gw" ] && sips --cropOffset $((gy*2)) $((gx*2)) -c $((gh*2)) $((gw*2)) "$OUT/.fs.png" --out "$out" >/dev/null 2>&1
+      fi; }
+    sleep 40; h=(); for k in 1 2 3; do grab "$OUT/$name-$k.png"; h+=("$(md5 -q "$OUT/$name-$k.png" 2>/dev/null)"); sleep 10; done
     crash=$("$WINLIST" 2>/dev/null | grep -iE 'Program Error|Wine Debugger' | grep -c on=true)
     if [ "$crash" -gt 0 ]; then echo "  FAIL: crash dialog"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"crash dialog\"}"); passed=false
     elif [ "${h[1]}" = "${h[2]}" ] && [ "${h[2]}" = "${h[3]}" ]; then echo "  FAIL: window frozen or blank (3 identical captures)"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"frozen\"}"); passed=false
