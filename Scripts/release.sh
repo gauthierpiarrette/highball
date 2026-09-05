@@ -43,6 +43,22 @@ then
   sleep 5
 fi
 
+# First-run regressions (issue #57/#21: engine tab empty, create-environment silent) hit brand-new
+# users only, and every other check assumes an engine already exists. A release wants a recent
+# Scripts/firstrun-smoke.sh result: an empty home installs the engine from the bundled manifest.
+if ! python3 - <<'PY'
+import json, sys, time
+d = json.load(open("private/firstrun-smoke/latest.json"))
+sys.exit(0 if d.get("passed") and time.time() - d.get("epoch", 0) < 14*86400 else 1)
+PY
+then
+  echo "" >&2
+  echo "WARNING: no passing firstrun-smoke result from the last 14 days." >&2
+  echo "         Run Scripts/firstrun-smoke.sh: a broken first run leaves new users with no engine." >&2
+  echo "         Continuing in 5s…" >&2
+  sleep 5
+fi
+
 # Game regressions (a launcher going silent, a map load freezing) ship via engine, app and OS
 # changes alike, so a release wants a recent Scripts/game-smoke.sh result: every verified title
 # installed here launched, showed its window and kept drawing. Same rule: warn, don't block.
