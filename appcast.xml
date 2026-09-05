@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.8.3</title>
+      <description><![CDATA[Library keeps up with installs; a stuck Steam first start restarts itself; Mac apps stay out of the way and cover launchers (#53)]]></description>
+      <pubDate>Sat, 05 Sep 2026 09:42:35 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.8.3/Highball-0.8.3.zip" sparkle:version="0.8.3" sparkle:shortVersionString="0.8.3" sparkle:edSignature="rgOWNM75cNJj+/ilN4H9C/dQu6PoUGj+fGpU8DZRK7cYFmZI1NJj/RRQhZW4URaniZu4xwBxe2Le/CZwTsRnDg==" length="3174951" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.8.2</title>
       <description><![CDATA[Fixes launch opening only the Settings window when it was left open at quit (#58); the main window always comes back]]></description>
       <pubDate>Sat, 05 Sep 2026 06:20:24 -0700</pubDate>
