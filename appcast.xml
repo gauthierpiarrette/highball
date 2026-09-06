@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.8.5</title>
+      <description><![CDATA[A graphics mode the engine cannot run no longer kills every launch (#61)]]></description>
+      <pubDate>Sun, 06 Sep 2026 08:33:00 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.8.5/Highball-0.8.5.zip" sparkle:version="0.8.5" sparkle:shortVersionString="0.8.5" sparkle:edSignature="nRky9ek/kHYVsPYAbJJdyuv6oQMuz6KCelzFQfSBeuepZrEzlQA54L0Q4OWUyDVEwU5jO4nR6vYsHpC9zS2jDA==" length="3198186" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.8.4</title>
       <description><![CDATA[Dark appearance for the whole app; installer junctions turned into symlinks]]></description>
       <pubDate>Sun, 06 Sep 2026 06:07:43 -0700</pubDate>
