@@ -1,4 +1,6 @@
 import XCTest
+import CoreGraphics
+import ImageIO
 @testable import HighballKit
 
 /// The unified library's data layer (One Library Phase 2): aggregation, dedup, per-bottle
@@ -82,22 +84,55 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(store.load(), [:])
     }
 
+    /// A real image file of the given size, for the cover tests.
+    private func makeImage(width: Int, height: Int, at url: URL, type: String = "public.png") throws {
+        let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.setFillColor(CGColor(red: 0.2, green: 0.5, blue: 0.8, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = ctx.makeImage()!
+        let dest = CGImageDestinationCreateWithURL(url as CFURL, type as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+    }
+
+    private func size(of url: URL) -> (Int, Int)? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        return (w, h)
+    }
+
+    /// Covers are stored cropped to the tile's 2:3 and capped, as PNG, whatever came in (#64: a
+    /// macOS 27 beta drew nothing for a tile image of any other aspect, and the crop belongs
+    /// to the store, not to a layout). An unreadable file is refused, never stored.
     func testCoverStoreRoundTrip() throws {
         let tmp = FileManager.default.temporaryDirectory.appending(path: "hb-cover-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: tmp) }
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         let store = CoverStore(paths: HighballPaths(home: tmp))
         XCTAssertNil(store.coverURL(for: "steam:620"))
-        let src = tmp.appending(path: "src.png")
-        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: src)
-        try store.setCover(for: "steam:620", from: src)
-        let stored = store.coverURL(for: "steam:620")
-        XCTAssertEqual(stored?.lastPathComponent, "steam_620.png", "id colon sanitized, extension kept")
-        // Replacing with a different extension removes the old file.
-        let jpg = tmp.appending(path: "src2.jpg")
-        try Data([0xFF, 0xD8]).write(to: jpg)
-        try store.setCover(for: "steam:620", from: jpg)
-        XCTAssertEqual(store.coverURL(for: "steam:620")?.pathExtension, "jpg")
+
+        let wide = tmp.appending(path: "wide.png"); try makeImage(width: 300, height: 100, at: wide)
+        try store.setCover(for: "steam:620", from: wide)
+        let stored = try XCTUnwrap(store.coverURL(for: "steam:620"))
+        XCTAssertEqual(stored.lastPathComponent, "steam_620.png", "id colon sanitized, always PNG")
+        let (w, h) = try XCTUnwrap(size(of: stored))
+        XCTAssertEqual(h, 100, "never upscaled")
+        XCTAssertEqual(Double(w) / Double(h), 2.0 / 3.0, accuracy: 0.02, "centre-cropped to 2:3")
+
+        let huge = tmp.appending(path: "huge.jpg"); try makeImage(width: 3000, height: 4500, at: huge, type: "public.jpeg")
+        try store.setCover(for: "steam:620", from: huge)
+        XCTAssertEqual(store.coverURL(for: "steam:620")?.pathExtension, "png", "a JPEG source is stored as PNG and replaces the old file")
+        XCTAssertEqual(try XCTUnwrap(size(of: store.coverURL(for: "steam:620")!)).1, CoverStore.maxHeight, "capped in height")
+
+        let exact = tmp.appending(path: "exact.png"); try makeImage(width: 100, height: 150, at: exact)
+        try store.setCover(for: "steam:620", from: exact)
+        XCTAssertEqual(try XCTUnwrap(size(of: store.coverURL(for: "steam:620")!)).0, 100, "an exact 2:3 image keeps its size")
+
+        let junk = tmp.appending(path: "junk.png"); try Data([0x89, 0x50, 0x4E, 0x47]).write(to: junk)
+        XCTAssertThrowsError(try store.setCover(for: "steam:620", from: junk), "four bytes are not a cover")
+        XCTAssertNotNil(store.coverURL(for: "steam:620"), "a refused file leaves the previous cover in place")
+
         store.clearCover(for: "steam:620")
         XCTAssertNil(store.coverURL(for: "steam:620"))
     }

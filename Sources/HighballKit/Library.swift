@@ -1,4 +1,6 @@
 import Foundation
+import CoreGraphics
+import ImageIO
 
 // The unified library (One Library, Phase 2): every playable thing across all bottles and
 // sources as one flat, source-neutral list. The store is a badge and a filter, never a
@@ -193,12 +195,60 @@ public struct CoverStore: Sendable {
     }
 
     /// Copies the chosen image in (replacing any previous override).
+    /// The tile's aspect and the stored cover's cap. Covers are normalized at import: centre-
+    /// cropped to 2:3, capped at `maxHeight` pixels tall, written as PNG, orientation applied.
+    /// The crop belongs here and not to a layout: a macOS 27 beta drew nothing for a tile image
+    /// of any other aspect (#64), and a 20 MB photo should not travel the library as a texture.
+    public static let aspect: Double = 2.0 / 3.0
+    public static let maxHeight = 900
+
     public func setCover(for id: String, from source: URL) throws {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let png = try Self.normalized(imageAt: source)
         clearCover(for: id)
-        let ext = source.pathExtension.isEmpty ? "png" : source.pathExtension.lowercased()
-        let dest = dir.appending(path: Self.filename(for: id)).appendingPathExtension(ext)
-        try FileManager.default.copyItem(at: source, to: dest)
+        let dest = dir.appending(path: Self.filename(for: id)).appendingPathExtension("png")
+        try png.write(to: dest, options: .atomic)
+    }
+
+    /// The stored form of an image file: 2:3, capped, PNG. Refuses what ImageIO cannot read.
+    public static func normalized(imageAt url: URL) throws -> Data {
+        // A thumbnail request applies the EXIF orientation and pre-shrinks a huge photo before
+        // any pixel is touched; the max size keeps the crop below at full quality for covers.
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(src, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 4096] as CFDictionary) else {
+            throw HighballError.invalid("\(url.lastPathComponent) is not an image Highball can read. Choose a PNG, JPEG or HEIC file.")
+        }
+        return try normalized(image)
+    }
+
+    static func normalized(_ image: CGImage) throws -> Data {
+        let w = image.width, h = image.height
+        var cropW = w, cropH = h
+        if Double(w) / Double(h) > aspect { cropW = max(1, Int((Double(h) * aspect).rounded())) }
+        else { cropH = max(1, Int((Double(w) / aspect).rounded())) }
+        let rect = CGRect(x: (w - cropW) / 2, y: (h - cropH) / 2, width: cropW, height: cropH)
+        guard let cropped = image.cropping(to: rect) else { throw HighballError.invalid("could not crop the cover") }
+        let scale = min(1, Double(maxHeight) / Double(cropped.height))
+        let outW = max(1, Int((Double(cropped.width) * scale).rounded()))
+        let outH = max(1, Int((Double(cropped.height) * scale).rounded()))
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(data: nil, width: outW, height: outH, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            throw HighballError.invalid("could not prepare the cover")
+        }
+        ctx.interpolationQuality = .high
+        ctx.draw(cropped, in: CGRect(x: 0, y: 0, width: outW, height: outH))
+        let data = NSMutableData()
+        guard let out = ctx.makeImage(),
+              let dest = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else {
+            throw HighballError.invalid("could not encode the cover")
+        }
+        CGImageDestinationAddImage(dest, out, nil)
+        guard CGImageDestinationFinalize(dest) else { throw HighballError.invalid("could not encode the cover") }
+        return data as Data
     }
 
     public func clearCover(for id: String) {

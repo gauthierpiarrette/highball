@@ -333,31 +333,32 @@ struct CoverArt: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
-            // A user-chosen cover always wins (coverVersion invalidates after changes).
-            if let custom = state.coverStore.coverURL(for: item.id),
-               let image = NSImage(contentsOf: custom) {
-                Image(nsImage: image).resizable().scaledToFill()
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .clipped()
-                    .id(state.coverVersion)
-            } else if let url {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    case .failure:
-                        placeholder.onAppear { stage += 1 }
-                    default:
-                        Rectangle().fill(HB.card)
+        // The tile takes the size its parent proposes; the image lives in an overlay, so its
+        // own dimensions never take part in layout and the crop is a plain clip. The previous
+        // GeometryReader-and-frame form rendered nothing on a macOS 27 beta for any image whose
+        // aspect was not exactly 2:3 (#64): a chosen cover, or Steam's wide fallback art.
+        Color.clear
+            .overlay {
+                // A user-chosen cover always wins (coverVersion invalidates after changes).
+                if let custom = state.coverStore.coverURL(for: item.id),
+                   let image = NSImage(contentsOf: custom) {
+                    Image(nsImage: image).resizable().scaledToFill().id(state.coverVersion)
+                } else if let url {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        case .failure:
+                            placeholder.onAppear { stage += 1 }
+                        default:
+                            Rectangle().fill(HB.card)
+                        }
                     }
+                } else {
+                    placeholder
                 }
-                .frame(width: geo.size.width, height: geo.size.height)
-                .clipped()
-            } else {
-                placeholder.frame(width: geo.size.width, height: geo.size.height)
             }
-        }
+            .clipped()
     }
 
     private var placeholder: some View {

@@ -59,18 +59,24 @@ struct GameDetailView: View {
             Color.clear
                 .aspectRatio(460 / 215, contentMode: .fit)
                 .frame(maxWidth: 640)
-                .overlay(
-                    AsyncImage(url: item.artworkWide ?? item.artworkTall) { phase in
-                        if case .success(let image) = phase {
-                            image.resizable().scaledToFill()
-                        } else {
-                            ZStack {
-                                LinearGradient(colors: [HB.card, HB.ground], startPoint: .top, endPoint: .bottom)
-                                Image(systemName: "gamecontroller").font(.largeTitle).foregroundStyle(.quaternary)
+                .overlay {
+                    // A chosen cover wins here as it does on the tile (#64: it never reached
+                    // the page, which read the store's artwork only).
+                    if let custom = state.coverStore.coverURL(for: item.id), let image = NSImage(contentsOf: custom) {
+                        Image(nsImage: image).resizable().scaledToFill().id(state.coverVersion)
+                    } else {
+                        AsyncImage(url: item.artworkWide ?? item.artworkTall) { phase in
+                            if case .success(let image) = phase {
+                                image.resizable().scaledToFill()
+                            } else {
+                                ZStack {
+                                    LinearGradient(colors: [HB.card, HB.ground], startPoint: .top, endPoint: .bottom)
+                                    Image(systemName: "gamecontroller").font(.largeTitle).foregroundStyle(.quaternary)
+                                }
                             }
                         }
                     }
-                )
+                }
                 .clipped()
             LinearGradient(colors: [.black.opacity(0.8), .clear], startPoint: .bottom, endPoint: .center)
                 .frame(maxWidth: 640)
