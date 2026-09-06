@@ -4,6 +4,9 @@ public struct LaunchResult: Sendable {
     public let exitStatus: Int32
     public let duration: TimeInterval
     public let log: URL
+    /// Set when the launch ran with a different graphics mode than the bottle asked for (#61);
+    /// the same sentence is in the log header.
+    public var note: String? = nil
     /// Heuristic: exited non-zero (or at all) within 10 s of launch. The app uses this to suggest another renderer.
     public var crashedEarly: Bool { duration < 10 && exitStatus != 0 }
 }
@@ -105,7 +108,10 @@ public struct WineRunner: Sendable {
         // DXVK reads its options from the generated conf (async toggle + per-game profiles like
         // [csgo.exe], issue #21) — refresh it before the spawn. Every renderer but wined3d gets
         // DXVK's d3d9 attached, so every one of them needs the conf, not just .dxvk.
-        if (renderer ?? bottle.settings.renderer) != .wined3d { try? bottle.writeDxvkConfig() }
+        // A bottle set to a renderer its engine cannot run degrades to one it can (#61); the
+        // note goes in the header and to the caller so the substitution is never silent.
+        let resolved = try bottle.effectiveRenderer(requested: renderer, engine: engine)
+        if resolved.renderer != .wined3d { try? bottle.writeDxvkConfig() }
         var env = try bottle.environment(engine: engine, renderer: renderer, extra: extraEnvironment)
         // Wine fixes the sync mode when the prefix's wineserver starts; a process started with a
         // different one dies at msync_init before doing anything (issue #32: a registry write
@@ -120,8 +126,12 @@ public struct WineRunner: Sendable {
         let logURL = Self.uniqueLogURL(in: paths.logs, named: "\(stamp)-\(bottle.name)-\(label ?? args.first ?? "wine")")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         let logHandle = try FileHandle(forWritingTo: logURL)
-        let header = Self.launchHeader(engine: engine, bottle: bottle,
-                                       renderer: renderer ?? bottle.settings.renderer, env: env, args: args)
+        var header = Self.launchHeader(engine: engine, bottle: bottle,
+                                       renderer: resolved.renderer, env: env, args: args)
+        if let note = resolved.note {
+            header += "# note: \(note)\n"
+            onOutput?("note: \(note)")
+        }
         logHandle.write(Data(header.utf8))
 
         let process = Process()
@@ -185,7 +195,7 @@ public struct WineRunner: Sendable {
             try? tail.close()
         }
         onOutput?(footer.trimmingCharacters(in: .newlines))
-        return LaunchResult(exitStatus: status, duration: duration, log: logURL)
+        return LaunchResult(exitStatus: status, duration: duration, log: logURL, note: resolved.note)
     }
 
     /// Runs the executable directly under `wine` (not `start /unix`) so the process stays attached and
@@ -212,8 +222,16 @@ public struct WineRunner: Sendable {
             throw HighballError.invalid("\(pin.name) points at \(pin.path), which isn't there. If this was added by an older Highball, remove it and drag the program in again.")
         }
         let env = pin.environment.merging(extraEnvironment) { $1 }
+        // A pin's own mode is a preference recorded by a recipe or a person, not a demand: when
+        // this engine cannot run it, the environment's mode applies (and degrades in turn if it
+        // must), with a note, rather than a launch that dies before Wine (#61).
+        var renderer = pin.renderer
+        if let wanted = renderer, let why = wanted.unavailableReason(in: engine) {
+            onOutput?("note: \(pin.name) asks for \(Renderer.displayName(wanted)), but \(why) Using the environment's mode.")
+            renderer = nil
+        }
         // cwd = the exe's folder, as a Windows shortcut would — games with relative asset paths need it.
-        return try await start(exe, arguments: pin.arguments, renderer: pin.renderer, extraEnvironment: env,
+        return try await start(exe, arguments: pin.arguments, renderer: renderer, extraEnvironment: env,
                                workingDirectory: exe.deletingLastPathComponent(), onOutput: onOutput)
     }
 

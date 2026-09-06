@@ -137,6 +137,11 @@ extension GamePageCopy {
     /// The consequence sentence of the D3DMetal ask, from the row: "will not start" only when
     /// no other renderer is recorded as working, "runs faster with it" when one is.
     public static func d3dMetalAsk(title: String, entry: GameDBEntry?) -> String {
+        // Asked because the environment (or a pinned program) is set to D3DMetal, not because
+        // the row needs it (#61): say where the setting came from and that the default runs.
+        guard entry?.effectiveRenderer() == .d3dmetal else {
+            return "The environment \(title) runs in is set to D3DMetal, which needs Apple's licence accepted for its engine. Turning it on means accepting that licence, which allows non-commercial use; nothing downloads and nothing is sent to Apple. Playing with DXMT, Highball's default, works for most games."
+        }
         let consequence = otherWorkingRenderer(entry).map {
             "Without it, \(title) still runs on \(plainName($0)), which was recorded as working, but slower."
         } ?? "The database records no other graphics mode as working for \(title), so without it Highball has nothing else to try."

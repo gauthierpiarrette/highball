@@ -164,11 +164,28 @@ final class AppState {
     func play(_ item: LibraryItem, renderer: Renderer? = nil) {
         guard let bottleName = item.bottleName,
               let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
-        if renderer == nil, !bottle.settings.rendererExplicit,
-           let appid = item.steamAppID, gameDB[appid]?.effectiveRenderer() == .d3dmetal,
-           let engine = engine(for: bottle), engine.ships("d3dmetal"), engine.rendererDir("d3dmetal") == nil {
-            pendingD3DMetal = (item, bottle, engine)
-            return
+        // The mode this launch will run with, whoever chose it: the caller, the row (unless the
+        // environment's mode is an explicit choice), a pinned program's own, or the environment.
+        // An engine that cannot run it must not be found out by Wine (#61: a fix recipe had set
+        // D3DMetal on a bottle whose engine had no licence accepted, and every launch in it
+        // died with "missing renderer"). A licence is asked for here, once, in context; a mode
+        // the engine simply lacks degrades to one it has, and the log says so.
+        var renderer = renderer
+        if let engine = engine(for: bottle) {
+            let rowMode = bottle.settings.rendererExplicit ? nil : item.steamAppID.flatMap { gameDB[$0]?.effectiveRenderer() }
+            let pinMode = item.pinID.flatMap { id in bottle.settings.pins.first { $0.id == id }?.renderer }
+            let wanted = renderer ?? rowMode ?? pinMode ?? bottle.settings.renderer
+            switch wanted.availability(in: engine) {
+            case .available:
+                break
+            case .needsLicence:
+                pendingD3DMetal = (item, bottle, engine)
+                return
+            case .notShipped:
+                let instead = Renderer.fallback(for: wanted, in: engine)
+                appendLog("\(item.title): \(wanted.unavailableReason(in: engine) ?? "") Playing with \(GamePageCopy.plainName(instead)).")
+                renderer = instead
+            }
         }
         if let recipe = fixRecipe(for: item), !bottle.settings.recipes.contains(recipe.id),
            let engine = engine(for: bottle) {
@@ -990,6 +1007,14 @@ final class AppState {
 
     func launch(pin: Pin, in bottle: Bottle) {
         guard let engine = engine(for: bottle) else { return }
+        // A pinned program's own mode behind an unaccepted licence gets the same ask as a game's
+        // (#61); the runner degrades any other mode the engine lacks, with a note.
+        if let wanted = pin.renderer ?? Optional(bottle.settings.renderer),
+           case .needsLicence = wanted.availability(in: engine),
+           let item = libraryItems.first(where: { $0.pinID == pin.id }) {
+            pendingD3DMetal = (item, bottle, engine)
+            return
+        }
         guard !launchingPins.contains(pin.id) else {
             fail(HighballError.failed("\(pin.name) is already starting or running. If its window never appeared, stop the environment's processes in Settings, then try again."))
             return

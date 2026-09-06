@@ -39,7 +39,13 @@ struct Engine: AsyncParsableCommand {
             if engines.isEmpty { print("no engines installed — try: highball engine install spike/engine-manifest.json"); return }
             for e in engines {
                 let v = (try? e.wineVersion()) ?? "?"
-                let renderers = HighballKit.Renderer.allCases.filter { $0 == .wined3d || e.rendererDir($0.rawValue) != nil }.map(\.rawValue).joined(separator: ",")
+                let renderers = HighballKit.Renderer.allCases.compactMap { r -> String? in
+                    switch r.availability(in: e) {
+                    case .available: return r.rawValue
+                    case .needsLicence: return "\(r.rawValue) (licence not accepted)"
+                    case .notShipped: return nil
+                    }
+                }.joined(separator: ",")
                 print("\(e.id)\t\(v)\trenderers: \(renderers)")
             }
         }
@@ -350,6 +356,7 @@ struct Run: AsyncParsableCommand {
             }
             result = try await runner.run([program] + arguments, renderer: renderer, label: program, onOutput: out)
         }
+        if let note = result.note { print("note: \(note)") }
         print("exit=\(result.exitStatus) after \(Int(result.duration))s — log: \(result.log.path)")
         if result.crashedEarly {
             // A sync-mode mismatch with the running wineserver kills the process before it does

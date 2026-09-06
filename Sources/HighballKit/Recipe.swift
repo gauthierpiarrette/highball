@@ -249,9 +249,11 @@ public struct RecipeRunner: Sendable {
         self.paths = paths; self.engine = engine; self.bottle = bottle; self.store = EngineStore(paths: paths)
     }
 
-    /// The renderer a recipe may set, or nil when the user's explicit choice must stand (#29).
-    public static func rendererToApply(recipeRenderer: Renderer?, settings: BottleSettings) -> Renderer? {
-        guard let r = recipeRenderer, !settings.rendererExplicit else { return nil }
+    /// The renderer a recipe may set, or nil when the user's explicit choice must stand (#29) or
+    /// the bottle's engine cannot run it (#61: a fix recipe set D3DMetal on a bottle whose engine
+    /// had no licence accepted for it, and every later launch in that bottle died before Wine).
+    public static func rendererToApply(recipeRenderer: Renderer?, settings: BottleSettings, available: Bool = true) -> Renderer? {
+        guard let r = recipeRenderer, !settings.rendererExplicit, available else { return nil }
         return r
     }
 
@@ -266,8 +268,11 @@ public struct RecipeRunner: Sendable {
         // A recipe's renderer is a default, never an override: an explicit user choice wins
         // (issue #29 — the Steam recipe silently reset a d3dmetal bottle to dxmt).
         if let r = recipe.renderer {
-            if let applied = Self.rendererToApply(recipeRenderer: r, settings: bottle.settings) {
+            let why = r.unavailableReason(in: engine)
+            if let applied = Self.rendererToApply(recipeRenderer: r, settings: bottle.settings, available: why == nil) {
                 bottle.settings.renderer = applied
+            } else if let why {
+                notes.append("Kept this bottle's renderer (\(bottle.settings.renderer.rawValue)); the recipe suggests \(r.rawValue): \(why)")
             } else {
                 notes.append("Kept this bottle's renderer (\(bottle.settings.renderer.rawValue)); the recipe suggests \(r.rawValue).")
             }

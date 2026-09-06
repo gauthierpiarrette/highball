@@ -264,6 +264,7 @@ struct BottleSettingsSheet: View {
     @State private var dpiDraft: Double? = nil
 
     private var currentDpi: Int { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.dpiScale }
+    private var currentRenderer: Renderer { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.renderer }
     private var engine: InstalledEngine? { state.engine(for: bottle) }
     private var d3dmetalAvailable: Bool { engine?.rendererDir("d3dmetal") != nil }
     private var d3dmetalPossible: Bool {
@@ -294,9 +295,16 @@ struct BottleSettingsSheet: View {
                             Task { @MainActor in state.update(copy) }
                         })) {
                         Text(L("DXMT — D3D10/11 → Metal (default)")).tag(Renderer.dxmt)
-                        if d3dmetalAvailable { Text(L("D3DMetal — D3D11/12, Apple")).tag(Renderer.d3dmetal) }
+                        // Shown when selectable, and when it is the setting even though this
+                        // engine cannot run it: a picker that hides the current value reads as
+                        // empty, and the row below says what happens instead (#61).
+                        if d3dmetalAvailable || currentRenderer == .d3dmetal { Text(L("D3DMetal — D3D11/12, Apple")).tag(Renderer.d3dmetal) }
                         Text(L("DXVK — D3D9/10/11 → Vulkan")).tag(Renderer.dxvk)
                         Text(L("WineD3D — slow fallback")).tag(Renderer.wined3d)
+                    }
+                    if !d3dmetalAvailable, currentRenderer == .d3dmetal, let engine, let why = Renderer.d3dmetal.unavailableReason(in: engine) {
+                        Text(String(format: L("Programs here start with %@ until this is resolved: %@"), GamePageCopy.plainName(Renderer.fallback(for: .d3dmetal, in: engine)), why))
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     if !d3dmetalAvailable && d3dmetalPossible {
                         HStack {

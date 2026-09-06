@@ -18,10 +18,12 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
         case .wined3d:
             return env
         case .dxmt:
-            guard let dir = engine.rendererDir("dxmt") else { throw HighballError.missing("dxmt renderer in engine \(engine.id)") }
+            guard let dir = engine.rendererDir("dxmt") else { throw HighballError.missing(unavailableReason(in: engine) ?? "dxmt renderer in engine \(engine.id)") }
             env["WINEDLLPATH_PREPEND"] = Self.withD9VK(dir.appending(path: "wine").path, engine: engine)
         case .d3dmetal:
-            guard let dir = engine.rendererDir("d3dmetal") else { throw HighballError.missing("d3dmetal renderer in engine \(engine.id) (optional component not installed?)") }
+            // The old text said "(optional component not installed?)" whether the files were absent or
+            // merely unlicensed; #61's engine had them, and the reporter went looking for a download.
+            guard let dir = engine.rendererDir("d3dmetal") else { throw HighballError.missing(unavailableReason(in: engine) ?? "d3dmetal renderer in engine \(engine.id)") }
             let external = dir.appending(path: "external").path
             env["WINEDLLPATH_PREPEND"] = Self.withD9VK(dir.appending(path: "wine").path, engine: engine)
             env["CX_D3DMETALPATH"] = external
@@ -78,6 +80,55 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
         // licence): setting it would make every launch in the environment fail (review #2).
         if next == .d3dmetal && !d3dmetalAvailable { return current == .dxmt ? .dxvk : .dxmt }
         return next
+    }
+
+    // MARK: Availability (issue #61)
+
+    /// Whether an engine can run this renderer, and if not, why: the files may be absent, or
+    /// present but behind a licence that has not been accepted for that engine. The two need
+    /// different actions, and the old single message ("optional component not installed?")
+    /// sent a user whose engine had the files to reinstalling.
+    public enum Availability: Equatable, Sendable {
+        case available
+        case needsLicence(String)
+        case notShipped
+    }
+
+    public func availability(in engine: InstalledEngine) -> Availability {
+        if self == .wined3d { return .available }
+        if engine.rendererDir(rawValue) != nil { return .available }
+        if let gate = EngineManifest.gatedRenderers[rawValue], engine.ships(rawValue) { return .needsLicence(gate) }
+        return .notShipped
+    }
+
+    /// One sentence for a person: what stops this renderer in `engine` and what to do. Nil when it runs.
+    public func unavailableReason(in engine: InstalledEngine) -> String? {
+        let name = Self.displayName(self)
+        switch availability(in: engine) {
+        case .available: return nil
+        case .needsLicence:
+            return "\(name) is in engine \(engine.id), but Apple's licence has not been accepted for that engine. Accept it in the environment's settings (Graphics → Review licence…), or choose another graphics mode."
+        case .notShipped:
+            return "engine \(engine.id) has no \(name). Switch the environment to an engine that has it (its settings → Advanced → Engine), or choose another graphics mode."
+        }
+    }
+
+    /// The order a bottle-level setting degrades in when its renderer cannot run: Highball's
+    /// default first, then Vulkan, then Wine's own D3D, which every engine has.
+    public static let fallbackOrder: [Renderer] = [.dxmt, .dxvk, .wined3d]
+
+    /// The best renderer `engine` can run in place of `wanted`. Never `wanted` itself.
+    public static func fallback(for wanted: Renderer, in engine: InstalledEngine) -> Renderer {
+        fallbackOrder.first { $0 != wanted && $0.availability(in: engine) == .available } ?? .wined3d
+    }
+
+    static func displayName(_ r: Renderer) -> String {
+        switch r {
+        case .wined3d: return "WineD3D"
+        case .dxmt: return "DXMT"
+        case .d3dmetal: return "D3DMetal"
+        case .dxvk: return "DXVK"
+        }
     }
 }
 
@@ -355,7 +406,25 @@ public struct Bottle: Sendable {
 
     /// Environment for running something in this bottle: engine base + bottle settings + renderer + extras.
     /// Keys ending in `+` are appended to an existing value with `:` (paths) or `;` (WINEDLLOVERRIDES).
+    /// The renderer a launch will actually use. `requested` (a per-launch or per-program choice)
+    /// is strict: when the engine cannot run it, the error says why and what to do. The bottle's
+    /// own setting (`requested == nil`) degrades instead, to the best mode the engine can run,
+    /// with a note for the log and the person: a setting is a preference, and a preference must
+    /// never leave an environment where nothing starts (#61: a recipe had set D3DMetal on a
+    /// bottle whose engine had no licence accepted for it, and every launch died before Wine).
+    public func effectiveRenderer(requested: Renderer?, engine: InstalledEngine) throws -> (renderer: Renderer, note: String?) {
+        if let requested {
+            if let why = requested.unavailableReason(in: engine) { throw HighballError.missing(why) }
+            return (requested, nil)
+        }
+        let wanted = settings.renderer
+        guard let why = wanted.unavailableReason(in: engine) else { return (wanted, nil) }
+        let instead = Renderer.fallback(for: wanted, in: engine)
+        return (instead, "running with \(Renderer.displayName(instead)) instead of \(Renderer.displayName(wanted)): \(why)")
+    }
+
     public func environment(engine: InstalledEngine, renderer: Renderer? = nil, extra: [String: String] = [:]) throws -> [String: String] {
+        let effective = try effectiveRenderer(requested: renderer, engine: engine).renderer
         var env = engine.baseEnvironment()
         env["WINEPREFIX"] = url.path
         env["WINEDEBUG"] = "fixme-all"
@@ -367,7 +436,7 @@ public struct Bottle: Sendable {
         }
         if settings.metalHUD { env["MTL_HUD_ENABLED"] = "1" }
         if settings.advertiseAVX { env["ROSETTA_ADVERTISE_AVX"] = "1" }
-        let r = renderer ?? settings.renderer
+        let r = effective
         // The async toggle travels in the generated dxvk.conf, NOT the DXVK_ASYNC env var:
         // the async fork reads `env == "1" || config.enableAsync`, so an env 1 can never be
         // overridden for a single game, while the conf's [csgo.exe] section can (issue #21).
@@ -405,7 +474,7 @@ public struct Bottle: Sendable {
         if !settings.dllOverrides.isEmpty { merge(&env, ["WINEDLLOVERRIDES+": settings.dllOverrides]) }
         merge(&env, ["WINEDLLOVERRIDES+": "winemenubuilder.exe=d"])
         merge(&env, settings.environment)
-        merge(&env, try (renderer ?? settings.renderer).environment(engine: engine))
+        merge(&env, try effective.environment(engine: engine))
         merge(&env, extra)
         return env
     }

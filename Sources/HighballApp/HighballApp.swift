@@ -207,6 +207,10 @@ struct ContentView: View {
             Button(L("Turn it on and play")) { state.enableD3DMetalAndPlay() }
             if let other = GamePageCopy.otherWorkingRenderer(pending.item.steamAppID.flatMap { state.gameDB[$0] }) {
                 Button(String(format: L("Play with %@"), GamePageCopy.plainName(other))) { state.playPendingD3DMetal(with: other) }
+            } else if pending.item.steamAppID.flatMap({ state.gameDB[$0]?.effectiveRenderer() }) != .d3dmetal {
+                // The ask came from the environment's setting, not a row that needs D3DMetal:
+                // the default mode is a real way out (#61 had none short of a new bottle).
+                Button(String(format: L("Play with %@"), GamePageCopy.plainName(.dxmt))) { state.playPendingD3DMetal(with: .dxmt) }
             }
             Button(L("Read Apple's licence")) {
                 state.licenseEngine = pending.engine
