@@ -200,7 +200,10 @@ public struct WineRunner: Sendable {
     /// Runs the pinned program, honouring its own renderer/env/args.
     @discardableResult
     public func start(pin: Pin, extraEnvironment: [String: String] = [:], onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
-        let exe = pin.executableURL(driveC: bottle.driveC)
+        // A path behind a Windows junction the installer made (EA app) exists only once the
+        // junction stub is turned into a host symlink; do that before judging it missing.
+        let exe = WineReparsePoint.resolve(pin.executableURL(driveC: bottle.driveC), driveC: bottle.driveC)
+            ?? pin.executableURL(driveC: bottle.driveC)
         // A pin whose target no longer exists otherwise dies deep in Wine with an opaque
         // c0000135 ("failed to open"). Catch it here with a message the user can act on.
         // Pins written before 0.7.6 stored only a filename, so old entries resolve to a

@@ -335,7 +335,7 @@ struct Run: AsyncParsableCommand {
                 result = try await runner.start(pin: p, onOutput: out)
             }
         } else if program.contains(":") || program.contains("\\") {
-            let exe = b.resolve(windowsPath: program)
+            let exe = WineReparsePoint.resolve(b.resolve(windowsPath: program), driveC: b.driveC) ?? b.resolve(windowsPath: program)
             result = try await runner.start(exe, arguments: arguments, renderer: renderer,
                                             workingDirectory: exe.deletingLastPathComponent(), onOutput: out)
         } else if FileManager.default.fileExists(atPath: program) {

@@ -303,6 +303,11 @@ public struct RecipeRunner: Sendable {
                 if result.exitStatus != 0 {
                     log?("[\(recipe.id)] \(label) exited with \(result.exitStatus)\(WineRunner.exitCodeNote(for: result.exitStatus)) — treating as done")
                 }
+                // Junctions the installer made (EA app: EA Desktop\EA Desktop → a versioned folder)
+                // are stubs nothing follows until they are host symlinks.
+                for link in WineReparsePoint.materializeTree(under: bottle.driveC, driveC: bottle.driveC) {
+                    log?("[\(recipe.id)] linked \(link.lastPathComponent) (a Windows junction the installer made, as a symlink)")
+                }
             case let .registry(key, name, type, data):
                 try await runner.regAdd(key: key, name: name, type: type, data: data)
             case let .winetricks(verbs, _):
