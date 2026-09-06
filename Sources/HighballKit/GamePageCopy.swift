@@ -88,6 +88,7 @@ public enum GamePageCopy {
         case .d3dmetal: return "Apple's DirectX 12 support"
         case .dxvk: return "DXVK (Vulkan on Metal)"
         case .wined3d: return "Wine's own Direct3D"
+        case .vkd3d: return "vkd3d-proton (DirectX 12 through Vulkan)"
         }
     }
 
@@ -151,7 +152,7 @@ extension GamePageCopy {
     /// A graphics mode other than D3DMetal that the row recorded as working, if any.
     public static func otherWorkingRenderer(_ entry: GameDBEntry?) -> Renderer? {
         guard let results = entry?.rendererResults else { return nil }
-        for key in ["dxmt", "dxvk", "wined3d"] where results[key]?.verdict == "works" {
+        for key in ["dxmt", "vkd3d", "dxvk", "wined3d"] where results[key]?.verdict == "works" {
             if let r = Renderer(rawValue: key) { return r }
         }
         return nil

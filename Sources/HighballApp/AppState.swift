@@ -1081,7 +1081,7 @@ final class AppState {
             } crashed: { result in
                 let current = pin.renderer ?? bottle.settings.renderer
                 self.crashSuggestion = CrashSuggestion(program: pin.name, bottleName: bottle.name,
-                                                       renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil),
+                                                       renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil, vkd3dAvailable: engine.rendererDir("vkd3d") != nil),
                                                        logPath: result.log.path, current: current, seconds: Int(result.duration),
                                                        alternateEngine: self.alternateEngine(for: bottle))
             }
@@ -1206,7 +1206,7 @@ final class AppState {
             } crashed: { result in
                 let current = renderer ?? bottle.settings.renderer
                 self.crashSuggestion = CrashSuggestion(program: game.name, bottleName: bottle.name,
-                                                       renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil),
+                                                       renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil, vkd3dAvailable: engine.rendererDir("vkd3d") != nil),
                                                        logPath: result.log.path, current: current, seconds: Int(result.duration),
                                                        alternateEngine: self.alternateEngine(for: bottle))
             }
@@ -1407,7 +1407,7 @@ final class AppState {
             } crashed: { result in
                 let current = renderer ?? bottle.settings.renderer
                 self.crashSuggestion = CrashSuggestion(program: game.app_title, bottleName: bottle.name,
-                                                       renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil),
+                                                       renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil, vkd3dAvailable: engine.rendererDir("vkd3d") != nil),
                                                        logPath: result.log.path, current: current, seconds: Int(result.duration),
                                                        alternateEngine: self.alternateEngine(for: bottle))
             }

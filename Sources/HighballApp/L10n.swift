@@ -115,6 +115,7 @@ enum L10n {
         "DXMT — D3D10/11 → Metal (default)": "DXMT — D3D10/11 → Metal (défaut)",
         "D3DMetal — D3D11/12, Apple": "D3DMetal — D3D11/12, Apple",
         "DXVK — D3D9/10/11 → Vulkan": "DXVK — D3D9/10/11 → Vulkan",
+        "vkd3d-proton — D3D12 → Vulkan (experimental)": "vkd3d-proton — D3D12 → Vulkan (expérimental)",
         "WineD3D — slow fallback": "WineD3D — solution de repli, lent",
         "D3DMetal (needed for DirectX 12) requires accepting Apple’s Game Porting Toolkit license.":
             "D3DMetal (nécessaire pour DirectX 12) demande d’accepter la licence du Game Porting Toolkit d’Apple.",

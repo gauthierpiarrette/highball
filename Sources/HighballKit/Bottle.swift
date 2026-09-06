@@ -10,6 +10,11 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
     case d3dmetal
     /// D3D9/10/11 → Vulkan → MoltenVK. Use for D3D9 titles.
     case dxvk
+    /// D3D12 → Vulkan → MoltenVK through vkd3d-proton, with DXVK's DXGI and D3D11 beside it.
+    /// The one route to DirectX 12 that does not go through Apple's D3DMetal, which lacks
+    /// timestamp queries (#63) and stops at Shader Model 6.6 (highball-db #6). Built by us with
+    /// two patches each; the overlay is the "vkd3d" renderer directory of an engine.
+    case vkd3d
 
     /// Environment contributed by this renderer, given the engine that hosts it.
     public func environment(engine: InstalledEngine) throws -> [String: String] {
@@ -17,6 +22,20 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
         switch self {
         case .wined3d:
             return env
+        case .vkd3d:
+            guard let dir = engine.rendererDir("vkd3d") else { throw HighballError.missing(unavailableReason(in: engine) ?? "vkd3d renderer in engine \(engine.id)") }
+            env["WINEDLLPATH_PREPEND"] = Self.withD9VK(dir.appending(path: "wine").path, engine: engine)
+            // DXVK's DXGI must serve vkd3d-proton (Wine's asks for a swapchain factory it does not
+            // implement), so DXGI, D3D11 and D3D12 all come from the overlay, native first.
+            env["WINEDLLOVERRIDES+"] = "dxgi,d3d11,d3d10core,d3d12,d3d12core=n,b"
+            // MoltenVK lacks a few capabilities both libraries refuse to start without (transform
+            // feedback, robustness2, null descriptors, depth clip, cull distance): these switches
+            // turn those gates into warnings. Feature level and shader model are declared rather
+            // than derived, at what D3DMetal declares, since Metal reports neither honestly.
+            env["VKD3D_RELAX_DEVICE_CAPS"] = "1"
+            env["DXVK_RELAX_FEATURES"] = "1"
+            env["VKD3D_FEATURE_LEVEL"] = "12_0"
+            env["VKD3D_SHADER_MODEL"] = "6_6"
         case .dxmt:
             guard let dir = engine.rendererDir("dxmt") else { throw HighballError.missing(unavailableReason(in: engine) ?? "dxmt renderer in engine \(engine.id)") }
             env["WINEDLLPATH_PREPEND"] = Self.withD9VK(dir.appending(path: "wine").path, engine: engine)
@@ -69,16 +88,19 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
     /// The backend to offer after `current` failed on launch, cycling through the Metal-backed
     /// options. Direct3D 9 no longer constrains this: `withD9VK` attaches DXVK's d3d9 to every
     /// renderer, so switching backend can't drop D3D9 support the way it could before 0.7.17.
-    public static func suggestion(after current: Renderer, d3dmetalAvailable: Bool = true) -> Renderer {
+    public static func suggestion(after current: Renderer, d3dmetalAvailable: Bool = true, vkd3dAvailable: Bool = false) -> Renderer {
         let next: Renderer
         switch current {
         case .dxmt: next = .d3dmetal
-        case .d3dmetal: next = .dxvk
+        // After Apple's DirectX 12 fails, the other DirectX 12 route comes before giving up on
+        // 12 altogether (#63: a title that D3DMetal crashes may run through vkd3d-proton).
+        case .d3dmetal: next = vkd3dAvailable ? .vkd3d : .dxvk
+        case .vkd3d: next = .dxvk
         case .dxvk, .wined3d: next = .dxmt
         }
         // Never suggest D3DMetal on an engine that does not ship it (or has not accepted the
         // licence): setting it would make every launch in the environment fail (review #2).
-        if next == .d3dmetal && !d3dmetalAvailable { return current == .dxmt ? .dxvk : .dxmt }
+        if next == .d3dmetal && !d3dmetalAvailable { return current == .dxmt ? (vkd3dAvailable ? .vkd3d : .dxvk) : .dxmt }
         return next
     }
 
@@ -128,6 +150,7 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
         case .dxmt: return "DXMT"
         case .d3dmetal: return "D3DMetal"
         case .dxvk: return "DXVK"
+        case .vkd3d: return "vkd3d-proton"
         }
     }
 }
@@ -459,6 +482,7 @@ public struct Bottle: Sendable {
         if settings.fpsCap > 0 {
             switch r {
             case .dxvk: env["DXVK_FRAME_RATE"] = String(settings.fpsCap)
+            case .vkd3d: env["DXVK_FRAME_RATE"] = String(settings.fpsCap); env["VKD3D_FRAME_RATE"] = String(settings.fpsCap)
             case .dxmt: env["DXMT_CONFIG"] = "d3d11.preferredMaxFrameRate=\(settings.fpsCap);"
             default: break
             }

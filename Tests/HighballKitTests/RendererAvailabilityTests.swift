@@ -103,6 +103,36 @@ final class RendererAvailabilityTests: XCTestCase {
         XCTAssertThrowsError(try bottle(renderer: .dxmt).environment(engine: e, renderer: .d3dmetal), "an explicit request stays strict")
     }
 
+    // MARK: DirectX 12 through Vulkan
+
+    /// The vkd3d-proton route (#63): its overlay carries DXGI, D3D11 and D3D12 together, native
+    /// first, and the switches that let both libraries start on MoltenVK. Absent from an engine
+    /// that lacks the overlay, and never a general fallback.
+    func testVkd3dEnvironmentAndAvailability() throws {
+        let e = try engine(ships: ["dxmt", "dxvk", "d9vk", "vkd3d"], accepted: false)
+        XCTAssertEqual(Renderer.vkd3d.availability(in: e), .available)
+        let env = try Renderer.vkd3d.environment(engine: e)
+        XCTAssertTrue(env["WINEDLLPATH_PREPEND"]!.contains("/vkd3d/wine"), "the overlay leads the search path")
+        XCTAssertTrue(env["WINEDLLPATH_PREPEND"]!.contains("/d9vk/wine"), "D3D9 still comes from DXVK")
+        XCTAssertEqual(env["WINEDLLOVERRIDES+"], "dxgi,d3d11,d3d10core,d3d12,d3d12core=n,b")
+        XCTAssertEqual(env["VKD3D_FEATURE_LEVEL"], "12_0")
+        XCTAssertEqual(env["VKD3D_SHADER_MODEL"], "6_6")
+        XCTAssertEqual(env["VKD3D_RELAX_DEVICE_CAPS"], "1")
+        XCTAssertEqual(env["DXVK_RELAX_FEATURES"], "1")
+        let without = try engine(ships: ["dxmt", "dxvk", "d9vk"], accepted: false)
+        XCTAssertEqual(Renderer.vkd3d.availability(in: without), .notShipped)
+        XCTAssertThrowsError(try Renderer.vkd3d.environment(engine: without))
+        XCTAssertEqual(Renderer.fallback(for: .vkd3d, in: e), .dxmt, "a bottle set to it degrades to the default, never to another DirectX 12 route")
+        XCTAssertFalse(Renderer.fallbackOrder.contains(.vkd3d), "never a fallback for other modes")
+    }
+
+    func testSuggestionOffersTheOtherDirectX12RouteAfterAppleFails() {
+        XCTAssertEqual(Renderer.suggestion(after: .d3dmetal, vkd3dAvailable: true), .vkd3d)
+        XCTAssertEqual(Renderer.suggestion(after: .d3dmetal, vkd3dAvailable: false), .dxvk)
+        XCTAssertEqual(Renderer.suggestion(after: .vkd3d), .dxvk)
+        XCTAssertEqual(Renderer.suggestion(after: .dxmt, d3dmetalAvailable: false, vkd3dAvailable: true), .vkd3d, "no licence, but the other DirectX 12 route exists")
+    }
+
     // MARK: The ask
 
     func testAskCopySaysWhereTheSettingCameFromWhenNoRowNeedsIt() {

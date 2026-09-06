@@ -267,6 +267,7 @@ struct BottleSettingsSheet: View {
     private var currentRenderer: Renderer { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.renderer }
     private var engine: InstalledEngine? { state.engine(for: bottle) }
     private var d3dmetalAvailable: Bool { engine?.rendererDir("d3dmetal") != nil }
+    private var vkd3dAvailable: Bool { engine?.rendererDir("vkd3d") != nil }
     private var d3dmetalPossible: Bool {
         guard let engine else { return false }
         return FileManager.default.fileExists(atPath: engine.frameworksDir.appending(path: "renderer/d3dmetal/wine").path)
@@ -300,6 +301,7 @@ struct BottleSettingsSheet: View {
                         // empty, and the row below says what happens instead (#61).
                         if d3dmetalAvailable || currentRenderer == .d3dmetal { Text(L("D3DMetal — D3D11/12, Apple")).tag(Renderer.d3dmetal) }
                         Text(L("DXVK — D3D9/10/11 → Vulkan")).tag(Renderer.dxvk)
+                        if vkd3dAvailable || currentRenderer == .vkd3d { Text(L("vkd3d-proton — D3D12 → Vulkan (experimental)")).tag(Renderer.vkd3d) }
                         Text(L("WineD3D — slow fallback")).tag(Renderer.wined3d)
                     }
                     if !d3dmetalAvailable, currentRenderer == .d3dmetal, let engine, let why = Renderer.d3dmetal.unavailableReason(in: engine) {

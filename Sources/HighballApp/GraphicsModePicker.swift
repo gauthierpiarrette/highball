@@ -10,6 +10,7 @@ struct GraphicsModePicker: View {
 
     private var live: Bottle { state.bottles.first { $0.name == bottle.name } ?? bottle }
     private var d3dmetalAvailable: Bool { state.engine(for: live)?.rendererDir("d3dmetal") != nil }
+    private var vkd3dAvailable: Bool { state.engine(for: live)?.rendererDir("vkd3d") != nil }
 
     /// nil = Automatic.
     private var selection: Binding<Renderer?> {
@@ -29,6 +30,7 @@ struct GraphicsModePicker: View {
                     Text(L("Automatic")).tag(Renderer?.none)
                     Text(GamePageCopy.plainName(.dxmt)).tag(Renderer?.some(.dxmt))
                     Text(GamePageCopy.plainName(.dxvk)).tag(Renderer?.some(.dxvk))
+                    if vkd3dAvailable { Text(GamePageCopy.plainName(.vkd3d)).tag(Renderer?.some(.vkd3d)) }
                     if d3dmetalAvailable { Text(GamePageCopy.plainName(.d3dmetal)).tag(Renderer?.some(.d3dmetal)) }
                     Text(GamePageCopy.plainName(.wined3d)).tag(Renderer?.some(.wined3d))
                 }
