@@ -36,6 +36,13 @@ public struct BottleStore: Sendable {
     /// The bottle directory becomes part of the Wine prefix's Windows-side path (Z:\…\bottles\<name>\),
     /// so characters Windows forbids in paths break prefix initialization outright:
     /// wineboot exits 53 with "could not load kernel32.dll, status c0000135" (issue #12).
+    /// `base` when no bottle has it, else the first "base 2", "base 3"… that is free.
+    public static func freeName(_ base: String, taken: Set<String>) -> String {
+        var candidate = base, n = 2
+        while taken.contains(candidate) { candidate = "\(base) \(n)"; n += 1 }
+        return candidate
+    }
+
     public static func nameProblem(_ name: String) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty { return "The bottle name is empty." }

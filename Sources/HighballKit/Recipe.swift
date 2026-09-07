@@ -193,6 +193,9 @@ public struct Recipe: Codable, Sendable, Identifiable {
     public var title: String
     public var requires: [String]?
     public var renderer: Renderer?
+    /// The engine this recipe needs, by manifest id (the EA app needs the Wine 11 tree, #60).
+    /// Highball offers that engine before applying the recipe to an environment on another Wine.
+    public var engine: String?
     public var steps: [Step]
     public var knownIssues: [KnownIssue]?
     public var lastVerified: Verification?
@@ -372,5 +375,16 @@ public struct RecipeRunner: Sendable {
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: tmp, to: dest)
         return dest
+    }
+}
+
+public extension Recipe {
+    /// The engine to offer before applying this recipe to an environment on `current`: the
+    /// manifest the recipe names when its Wine build differs from `current`'s, nil otherwise
+    /// (the environment already runs that Wine, a later build of it included, or the app does
+    /// not know the manifest).
+    func engineToOffer(current: EngineManifest, known: [EngineManifest]) -> EngineManifest? {
+        guard let id = engine, let wanted = known.first(where: { $0.id == id }) else { return nil }
+        return EngineManifest.needsPrefixRefresh(from: current, to: wanted) ? wanted : nil
     }
 }

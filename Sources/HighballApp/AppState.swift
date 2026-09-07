@@ -451,11 +451,11 @@ final class AppState {
     /// Moves one bottle to another installed engine, on its owner's request. Re-runs the Windows
     /// first boot only when the Wine build differs (the same rule as an engine update), then the
     /// per-bottle setup that boot resets. Switching back is the same call the other way.
-    func moveBottle(_ bottle: Bottle, to target: InstalledEngine) {
+    func moveBottle(_ bottle: Bottle, to target: InstalledEngine, done: DoneState? = nil) {
         guard bottle.settings.engineID != target.id, !busy else { return }
         let title = String(format: L("Moving '%@' to %@"), bottle.name, target.id)
         runBusy(title, expected: L("a minute or two when the Windows setup re-runs"),
-                done: DoneState(title: L("Engine switched"), ctaTitle: nil, cta: nil)) { [self] in
+                done: done ?? DoneState(title: L("Engine switched"), ctaTitle: nil, cta: nil)) { [self] in
             try await performMove(bottle, to: target)
         }
     }
@@ -710,6 +710,52 @@ final class AppState {
     /// context"). Nothing downloads; the files are in the engine and accepting flips the flag.
     var pendingD3DMetal: (item: LibraryItem, bottle: Bottle, engine: InstalledEngine)?
 
+    /// A launcher whose recipe names another engine (the EA app needs the Wine 11 tree, #60),
+    /// about to be installed into an environment on a different Wine build. Nothing downloads
+    /// or re-runs the Windows setup without asking: the ask offers a new environment on that
+    /// engine (other programs untouched) or moving this one.
+    var pendingEngine: (recipe: HighballKit.Recipe, bottle: Bottle, manifest: EngineManifest)?
+
+    /// The ask's first way out: a new environment on the engine the recipe names, the recipe
+    /// applied; the engine downloads first when it is not installed.
+    func createEnvironment(for recipe: HighballKit.Recipe, on manifest: EngineManifest) {
+        pendingEngine = nil
+        guard !busy else { return }
+        let name = BottleStore.freeName(recipe.title, taken: Set(bottles.map(\.name)))
+        let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
+        runBusy(String(format: L("Creating the %@ environment on %@"), name, GamePageCopy.shortEngineName(manifest)),
+                expected: L("a download when the engine is new, then a first boot of about 90 seconds"),
+                done: DoneState(title: String(format: L("%@ installed"), recipe.title), ctaTitle: nil, cta: nil),
+                stop: .cancelTask(label: L("Stop"))) { [self] in
+            let engine: InstalledEngine
+            if let installed = engines.first(where: { $0.id == manifest.id }) {
+                engine = installed
+            } else {
+                engine = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
+                    Task { @MainActor in self.reportDownload(name, received: received, total: total) }
+                }
+                await MainActor.run { self.appendLog("engine \(engine.id) installed"); self.refresh() }
+            }
+            let bottle = try await bottleStore.create(name: name, engine: engine)
+            await MainActor.run { self.appendLog("bottle '\(name)' created on \(engine.id)"); self.refresh() }
+            var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
+            let notes = try await runner.apply(recipe) { line in Task { @MainActor in self.appendLog(line) } }
+            for n in notes { await MainActor.run { self.appendLog("note: \(n)") } }
+            await MainActor.run { self.selectedBottle = name }
+        }
+    }
+
+    /// The ask's second way out: move the environment itself (the Windows setup re-runs, nothing
+    /// installed is lost), then the done row offers the install.
+    func moveEnvironment(for recipe: HighballKit.Recipe, bottle: Bottle, to manifest: EngineManifest) {
+        pendingEngine = nil
+        let done = DoneState(title: L("Engine switched"), ctaTitle: String(format: L("Install %@"), recipe.title), cta: { [weak self] in
+            guard let self, let fresh = self.bottles.first(where: { $0.name == bottle.name }) else { return }
+            self.applyRecipe(recipe.id, to: fresh)
+        })
+        moveBottle(bottle, toEngineID: manifest.id, done: done)
+    }
+
     func enableD3DMetalAndPlay() {
         guard let (item, _, engine) = pendingD3DMetal else { return }
         pendingD3DMetal = nil
@@ -755,6 +801,9 @@ final class AppState {
 
     func applyRecipe(_ id: String, to bottle: Bottle, then done: DoneState? = nil) {
         guard let engine = engine(for: bottle), let recipe = Self.recipe(id) else { return }
+        if let wanted = recipe.engineToOffer(current: engine.manifest, known: Self.knownManifests) {
+            pendingEngine = (recipe, bottle, wanted); return
+        }
         runBusy("Installing \(recipe.title)",
                 done: done ?? DoneState(title: String(format: L("%@ installed"), recipe.title), ctaTitle: nil, cta: nil),
                 stop: .killBottleThenRepair(bottle, label: L("Stop and repair"))) { [self] in
@@ -1506,14 +1555,14 @@ final class AppState {
 
     /// Moves a bottle to an engine by id, installing it first when it is only known from a
     /// bundled manifest. Licenses accepted on any installed engine carry over.
-    func moveBottle(_ bottle: Bottle, toEngineID id: String) {
+    func moveBottle(_ bottle: Bottle, toEngineID id: String, done: DoneState? = nil) {
         guard !busy else { return }
-        if let installed = engines.first(where: { $0.id == id }) { moveBottle(bottle, to: installed); return }
+        if let installed = engines.first(where: { $0.id == id }) { moveBottle(bottle, to: installed, done: done); return }
         guard let manifest = Self.knownManifests.first(where: { $0.id == id }) else { return }
         let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
         let title = String(format: L("Downloading engine %@"), manifest.id)
         runBusy(title, expected: L("usually a few minutes"),
-                done: DoneState(title: L("Engine switched"), ctaTitle: nil, cta: nil),
+                done: done ?? DoneState(title: L("Engine switched"), ctaTitle: nil, cta: nil),
                 stop: .cancelTask(label: L("Stop"))) { [self] in
             let fresh = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
                 Task { @MainActor in self.reportDownload(name, received: received, total: total) }
