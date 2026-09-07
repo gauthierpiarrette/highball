@@ -217,7 +217,7 @@ struct GameDetailView: View {
                             Text(L("Files")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
                             Button(L("Show the Windows drive")) { NSWorkspace.shared.open(bottle.driveC) }.controlSize(.small)
                             if PlayLink.target(for: item) != nil {
-                                Button(L("Make a Mac app…")) { state.makeMacApp(for: item) }.controlSize(.small)
+                                Button(L("Make a shortcut…")) { state.makeMacApp(for: item) }.controlSize(.small)
                                     .help(L("A small app in ~/Applications/Highball that starts this game without opening Highball first."))
                             }
                         }

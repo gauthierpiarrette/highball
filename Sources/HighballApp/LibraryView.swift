@@ -276,7 +276,7 @@ struct LibraryTile: View {
                 Button(L("Stop")) { state.stopSession(running) }
             } else if playable { Button(L("Play")) { state.play(item) } }
             if playable, PlayLink.target(for: item) != nil {
-                Button(L("Make a Mac app…")) { state.makeMacApp(for: item) }
+                Button(L("Make a shortcut…")) { state.makeMacApp(for: item) }
             }
             Button(L("Choose cover image…")) { state.chooseCover(for: item) }
             if state.coverStore.coverURL(for: item.id) != nil {

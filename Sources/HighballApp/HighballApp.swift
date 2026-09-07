@@ -73,9 +73,26 @@ final class CheckForUpdatesViewModel: ObservableObject {
     }
 }
 
+/// Sparkle asks which channels an install may see. Everyone sees stable; "Get beta builds"
+/// in Settings adds the beta channel, where each release soaks a day or two first.
+final class UpdaterDelegate: NSObject, SPUUpdaterDelegate {
+    func allowedChannels(for updater: SPUUpdater) -> Set<String> {
+        UpdateChannels.allowed(beta: UserDefaults.standard.bool(forKey: UpdateChannels.betaDefaultsKey))
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Owned here because Sparkle holds its delegate weakly.
+    let updaterDelegate: UpdaterDelegate
     /// Sparkle: reads SUFeedURL and SUPublicEDKey from Info.plist; no-ops in bare dev builds without them.
-    let updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    let updaterController: SPUStandardUpdaterController
+
+    override init() {
+        let delegate = UpdaterDelegate()
+        updaterDelegate = delegate
+        updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: delegate, userDriverDelegate: nil)
+        super.init()
+    }
     /// Set from the App's onAppear so quit-time can reach the bottles.
     weak var appState: AppState?
 
@@ -152,7 +169,12 @@ struct ContentView: View {
                         ToolbarItem(placement: .primaryAction) {
                             Menu {
                                 Button(state.defaultBottle.map(state.steamInstalled) == true ? L("Open Steam") : L("Install Steam")) { state.installSteam() }
-                                Button(L("Connect Epic account…")) { state.showEpicSignIn = true }
+                                if state.epicSignedIn {
+                                    // The menu said "Connect" even once connected (0.8.0 feedback).
+                                    Button(L("Epic account connected")) {}.disabled(true)
+                                } else {
+                                    Button(L("Connect Epic account…")) { state.showEpicSignIn = true }
+                                }
                                 Divider()
                                 ForEach(BottleView.launcherMeta.filter { $0.id != "steam" }, id: \.id) { meta in
                                     Button(String(format: state.launcherInstalled(meta.id) ? L("Open %@") : L("Install %@"), meta.short)) {

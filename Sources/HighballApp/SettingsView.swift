@@ -198,6 +198,8 @@ struct EnvironmentsPane: View {
 
 struct EnginePane: View {
     @Environment(AppState.self) private var state
+    /// The updater delegate reads the same key: AppStorage so the switch redraws when flipped.
+    @AppStorage(UpdateChannels.betaDefaultsKey) private var betaUpdates = false
     @State private var showLicense = false
 
     var body: some View {
@@ -218,6 +220,17 @@ struct EnginePane: View {
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
+            }
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle(L("Get beta builds"), isOn: $betaUpdates)
+                        .onChange(of: betaUpdates) { _, on in
+                            // A fresh opt-in should find the current beta now, not at the next scheduled check.
+                            if on { (NSApp.delegate as? AppDelegate)?.updaterController.updater.checkForUpdatesInBackground() }
+                        }
+                    Text(L("Each release goes to beta a day or two before everyone else, less tested. Turning this off keeps the build you have until the next stable one is newer."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
             if let update = state.engineUpdate {
                 GroupBox {
