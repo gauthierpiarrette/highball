@@ -30,7 +30,7 @@ open('appcast.xml', 'w').write(s.replace(item, new, 1))
 xml.dom.minidom.parse('appcast.xml')
 print(f'appcast: {v} promoted to stable, phased over seven days from now')
 PY
-    gh release edit "v$PV" --prerelease=false --latest
+    gh release edit "v$PV" --prerelease=false --latest --title "Highball $PV"
     git add appcast.xml && git commit -m "release: promote v$PV to stable" && git push
     echo "promoted v$PV"
     exit 0 ;;
