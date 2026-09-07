@@ -1,6 +1,6 @@
 {
   "$schema": "https://highball.app/schemas/engine-manifest/v0",
-  "id": "x64-sikarugir10.0_6-r1",
+  "id": "x64-sikarugir10.0_6-r2",
   "displayName": "Wine 10.0 (Sikarugir) + DXMT 0.80 + D3DMetal 3.0 + MoltenVK 1.4.1 (shadow-import patch)",
   "arch": "x86_64",
   "minMacOS": "14.0",
@@ -13,7 +13,8 @@
     "Runtime dylibs (GStreamer, MoltenVK, gnutls, freetype, SDL2, icu...) are NOT inside the engine; they come from the Sikarugir Wrapper Template's Frameworks/ and are found via DYLD_FALLBACK_LIBRARY_PATH.",
     "Wine 10 still ships a wine64 binary but the loader is `wine`; use `wine` so Wine 11 engines work unchanged.",
     "D3DMetal is NOT downloaded separately: the Template's frameworks/renderer/d3dmetal overlay is used, but only exposed once the user has accepted the Apple GPTK license (recorded in manifest.json as acceptedLicenses).",
-    "r1 (2026-09-02): adds the moltenvk component. Everything else is byte-identical to r0, so existing downloads are reused; only the 5 MB MoltenVK tarball is new."
+    "r1 (2026-09-02): adds the moltenvk component. Everything else is byte-identical to r0, so existing downloads are reused; only the 5 MB MoltenVK tarball is new.",
+    "r2 (2026-09-07): adds the d3dmetal-tsshim component, a d3d12.dll in front of D3DMetal's that serves DirectX 12 timestamp queries (D3DMetal 3.0 resolves them to zero at a reported 60 Hz, which crashes Guardians of the Galaxy, highball#63). Everything else is byte-identical to r1, so existing downloads are reused; only the 46 KB shim tarball is new. Source: spike/tsshim, Scripts/build-tsshim.sh."
   ],
   "components": {
     "wine": {
@@ -67,6 +68,23 @@
         "WINEDLLPATH_PREPEND": "${renderers}/dxmt/wine"
       },
       "replacesTemplateRenderer": "dxmt v0.74"
+    },
+    "d3dmetal-tsshim": {
+      "kind": "renderer",
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/d3dmetal-tsshim-20260907/d3dmetal-tsshim-20260907.tar.xz",
+      "sha256": "1ac868e6a4a9f713cd4ed22b8b53b2b7dde2e702a39aa23aa19a58448dd4e731",
+      "size": 46096,
+      "license": "MIT",
+      "version": "20260907",
+      "order": 1,
+      "extract": {
+        "subpath": "renderers/d3dmetal-tsshim/wine",
+        "into": "renderers/d3dmetal-tsshim/wine"
+      },
+      "layout": [
+        "x86_64-windows/d3d12.dll"
+      ],
+      "note": "D3DMetal timestamp shim: goes on WINEDLLPATH_PREPEND in front of the D3DMetal overlay for D3DMetal launches only (Bottle.environment), never a renderer of its own. At launch Highball hard-links D3DMetal's d3d12.dll beside it as d3d12_d3dmetal.dll and symlinks its x86_64-unix/d3d12.so, because Wine resolves builtin modules by base name. HB_D3D12_TSSHIM=0 leaves it idle."
     },
     "winetricks": {
       "kind": "tool",

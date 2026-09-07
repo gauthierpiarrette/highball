@@ -72,6 +72,12 @@ for row in "${GAMES[@]}"; do
   for p in $(ps -axo pid,command | grep -E 'steamapps/common' | grep -vE 'grep|steam\.exe|steamwebhelper|gameoverlayui' | awk '{print $1}'); do kill -9 $p 2>/dev/null; done
 done
 pkill -9 -f 'Steam/steam.exe' 2>/dev/null; pkill -9 -f steamwebhelper 2>/dev/null
+# Nothing installed is not a pass: say so and exit 3 so Scripts/gate.sh records "skipped".
+if ! printf '%s\n' "${results[@]}" | grep -qv '"not installed"'; then
+  echo "GAME SMOKE SKIPPED: none of the table's games is installed in the Gaming bottle"
+  python3 -c "import json,time;json.dump({'passed':False,'skipped':True,'epoch':int(time.time()),'date':time.strftime('%Y-%m-%d'),'results':[]},open('$OUT/latest.json','w'),indent=2)"
+  exit 3
+fi
 python3 - "$OUT/latest.json" "$passed" "$(IFS=,; echo "${results[*]}")" <<'PY'
 import json,sys,time
 out, passed, res = sys.argv[1], sys.argv[2]=="true", sys.argv[3]

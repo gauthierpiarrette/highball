@@ -380,6 +380,37 @@ public struct InstalledEngine: Sendable {
         return nil
     }
 
+    /// The D3DMetal timestamp shim overlay, laid out for launch, or nil when the engine has none.
+    /// Wine resolves builtin modules by base name, so the shim's d3d12.dll cannot load the real one
+    /// under its own name: the real PE is hard-linked beside the shim as d3d12_d3dmetal.dll and its
+    /// Mach-O half symlinked as x86_64-unix/d3d12_d3dmetal.so, both pointing into the licensed
+    /// D3DMetal overlay, so nothing of Apple's is copied anywhere new. Idempotent, and redone when
+    /// the D3DMetal files change (an engine update replaces the inode).
+    public func timestampShimDir(d3dmetal: URL) -> URL? {
+        guard let shim = rendererDir("d3dmetal-tsshim") else { return nil }
+        let fm = FileManager.default
+        let realPE = d3dmetal.appending(path: "wine/x86_64-windows/d3d12.dll")
+        let realSO = d3dmetal.appending(path: "wine/x86_64-unix/d3d12.so")
+        let pe = shim.appending(path: "wine/x86_64-windows/d3d12_d3dmetal.dll")
+        let so = shim.appending(path: "wine/x86_64-unix/d3d12_d3dmetal.so")
+        do {
+            let realID = try fm.attributesOfItem(atPath: realPE.path)[.systemFileNumber] as? Int
+            let peID = (try? fm.attributesOfItem(atPath: pe.path))?[.systemFileNumber] as? Int
+            if peID == nil || peID != realID {
+                try? fm.removeItem(at: pe)
+                do { try fm.linkItem(at: realPE, to: pe) } catch { try fm.copyItem(at: realPE, to: pe) }
+            }
+            try fm.createDirectory(at: so.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if (try? fm.destinationOfSymbolicLink(atPath: so.path)) != realSO.path {
+                try? fm.removeItem(at: so)
+                try fm.createSymbolicLink(at: so, withDestinationURL: realSO)
+            }
+            return shim
+        } catch {
+            return nil
+        }
+    }
+
     public func wineVersion() throws -> String {
         try Shell.capture(wineBinary.path, ["--version"], env: baseEnvironment()).trimmingCharacters(in: .whitespacesAndNewlines)
     }

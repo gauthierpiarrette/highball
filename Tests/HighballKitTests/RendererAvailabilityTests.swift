@@ -103,6 +103,37 @@ final class RendererAvailabilityTests: XCTestCase {
         XCTAssertThrowsError(try bottle(renderer: .dxmt).environment(engine: e, renderer: .d3dmetal), "an explicit request stays strict")
     }
 
+    // MARK: D3DMetal timestamp shim (#63)
+
+    func testTimestampShimGoesInFrontOfD3DMetalWithTheRealFilesBesideIt() throws {
+        let e = try engine(accepted: true)
+        let fm = FileManager.default
+        let real = e.root.appending(path: "frameworks/renderer/d3dmetal/wine")
+        try fm.createDirectory(at: real.appending(path: "x86_64-windows"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: real.appending(path: "x86_64-unix"), withIntermediateDirectories: true)
+        try Data("pe".utf8).write(to: real.appending(path: "x86_64-windows/d3d12.dll"))
+        try Data("so".utf8).write(to: real.appending(path: "x86_64-unix/d3d12.so"))
+        let shim = e.root.appending(path: "renderers/d3dmetal-tsshim/wine")
+        try fm.createDirectory(at: shim.appending(path: "x86_64-windows"), withIntermediateDirectories: true)
+        try Data("shim".utf8).write(to: shim.appending(path: "x86_64-windows/d3d12.dll"))
+
+        let env = try bottle(renderer: .d3dmetal).environment(engine: e)
+        XCTAssertTrue(env["WINEDLLPATH_PREPEND"]?.hasPrefix(shim.path) == true, "the shim overlay comes first: \(env["WINEDLLPATH_PREPEND"] ?? "")")
+        XCTAssertTrue(env["WINEDLLPATH_PREPEND"]?.contains("/d3dmetal/wine") == true, "D3DMetal itself stays on the path")
+        XCTAssertEqual(try String(contentsOf: shim.appending(path: "x86_64-windows/d3d12_d3dmetal.dll"), encoding: .utf8), "pe",
+                       "the real PE sits beside the shim under a name of its own")
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: shim.appending(path: "x86_64-unix/d3d12_d3dmetal.so").path),
+                       real.appending(path: "x86_64-unix/d3d12.so").path, "and its Mach-O half is a link, not a copy")
+        XCTAssertEqual(env["HB_D3D12_REAL"], "Z:" + shim.path.replacingOccurrences(of: "/", with: "\\") + "\\x86_64-windows\\d3d12_d3dmetal.dll",
+                       "the shim gets the real one's Windows path")
+        _ = try bottle(renderer: .d3dmetal).environment(engine: e)   // a second launch changes nothing
+
+        let plain = try engine(accepted: true)
+        let env2 = try bottle(renderer: .d3dmetal).environment(engine: plain)
+        XCTAssertFalse(env2["WINEDLLPATH_PREPEND"]?.contains("tsshim") == true, "no shim shipped, no shim on the path")
+        XCTAssertNil(env2["HB_D3D12_REAL"])
+    }
+
     // MARK: DirectX 12 through Vulkan
 
     /// The vkd3d-proton route (#63): its overlay carries DXGI, D3D11 and D3D12 together, native

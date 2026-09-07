@@ -24,7 +24,8 @@ Scripts/make-app.sh >"$OUT/make-app.log" 2>&1 || { echo "gate: make-app failed, 
 typeset -A R T
 run() {
   local name=$1; shift; local start=$(date +%s)
-  if "$@" >"$OUT/$name.log" 2>&1; then R[$name]=pass; else R[$name]=fail; fi
+  "$@" >"$OUT/$name.log" 2>&1; local rc=$?
+  case $rc in 0) R[$name]=pass ;; 3) R[$name]=skipped ;; *) R[$name]=fail ;; esac
   T[$name]=$(( $(date +%s) - start ))
   printf '  %-14s %s (%ss)\n' "$name" "${R[$name]}" "${T[$name]}"
 }

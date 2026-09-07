@@ -44,7 +44,17 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
             // merely unlicensed; #61's engine had them, and the reporter went looking for a download.
             guard let dir = engine.rendererDir("d3dmetal") else { throw HighballError.missing(unavailableReason(in: engine) ?? "d3dmetal renderer in engine \(engine.id)") }
             let external = dir.appending(path: "external").path
-            env["WINEDLLPATH_PREPEND"] = Self.withD9VK(dir.appending(path: "wine").path, engine: engine)
+            // D3DMetal 3.0 has no timestamp queries (Guardians of the Galaxy, #63). When the engine
+            // carries the timestamp shim, its d3d12.dll goes in front of D3DMetal's and serves them.
+            // HB_D3D12_TSSHIM=0 in a program's environment leaves the shim loaded but idle.
+            var overlays = dir.appending(path: "wine").path
+            if let shim = engine.timestampShimDir(d3dmetal: dir) {
+                overlays = shim.appending(path: "wine").path + ":" + overlays
+                // The shim loads D3DMetal's d3d12.dll by this path: Wine resolves builtin modules by base
+                // name, so under its own name the real one would come back as the shim.
+                env["HB_D3D12_REAL"] = "Z:" + shim.appending(path: "wine/x86_64-windows/d3d12_d3dmetal.dll").path.replacingOccurrences(of: "/", with: "\\")
+            }
+            env["WINEDLLPATH_PREPEND"] = Self.withD9VK(overlays, engine: engine)
             env["CX_D3DMETALPATH"] = external
             env["DYLD_FALLBACK_LIBRARY_PATH+"] = external
             env["DYLD_FALLBACK_FRAMEWORK_PATH+"] = external
