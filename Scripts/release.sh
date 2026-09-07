@@ -63,8 +63,8 @@ if age > 86400:
     print(f"release gate: the last passing Scripts/gate.sh run is {age/3600:.0f} hours old. Run it again, or --hotfix for an urgent fix.", file=sys.stderr); sys.exit(1)
 if d.get("commit") != os.environ["HB_HEAD"]:
     print(f"release gate: Scripts/gate.sh ran on {d.get('commit', '?')[:7]}, HEAD is {os.environ['HB_HEAD'][:7]}. Run it again on this commit, or --hotfix for an urgent fix.", file=sys.stderr); sys.exit(1)
-advisory = [k for k, v in checks.items() if k not in required and v.get("result") != "pass"]
-print("release gate: passed." + (f" Advisory checks not passing: {', '.join(advisory)} (private/gate/*.log)." if advisory else ""), file=sys.stderr)
+advisory = [f"{k} ({v.get('result')})" for k, v in checks.items() if k not in required and v.get("result") != "pass"]
+print("release gate: passed." + (f" Advisory checks: {', '.join(advisory)} (private/gate/*.log)." if advisory else ""), file=sys.stderr)
 PY
 else
   for check in render-smoke upgrade-smoke firstrun-smoke launch-window-smoke game-smoke; do
