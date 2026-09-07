@@ -117,7 +117,7 @@ enum L10n {
         "DXVK — D3D9/10/11 → Vulkan": "DXVK — D3D9/10/11 → Vulkan",
         "Get beta builds": "Recevoir les versions bêta",
         "%@ needs the %@ engine": "%@ a besoin du moteur %@",
-        "Create a %@ environment": "Créer un environnement %@",
+        "New environment for %@": "Nouvel environnement pour %@",
         "Move this environment": "Déplacer cet environnement",
         "Creating the %@ environment on %@": "Création de l'environnement %@ sur %@",
         "a download when the engine is new, then a first boot of about 90 seconds": "un téléchargement si le moteur est nouveau, puis un premier démarrage d'environ 90 secondes",

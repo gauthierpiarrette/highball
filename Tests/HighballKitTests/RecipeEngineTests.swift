@@ -47,6 +47,21 @@ final class RecipeEngineTests: XCTestCase {
         XCTAssertNotNil(wine11.components["d3dmetal-tsshim"], "the timestamp shim rides along on every engine with D3DMetal")
     }
 
+    /// The EA recipe in the sibling database checkout names the bundled Wine 11 engine at the top
+    /// level (a `lastVerified.engine` alone is provenance, not a requirement: that is exactly what
+    /// let the first screen check install straight onto Wine 10).
+    func testTheEARecipeInTheDatabaseNamesTheBundledWine11Engine() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let recipeURL = root.deletingLastPathComponent().appending(path: "highball-db/recipes/launchers/ea-app.json")
+        guard FileManager.default.fileExists(atPath: recipeURL.path) else { throw XCTSkip("no highball-db checkout beside the repo") }
+        let ea = try Recipe.load(from: recipeURL)
+        let def = try EngineManifest.load(from: root.appending(path: "spike/engine-manifest.json"))
+        let wine11 = try EngineManifest.load(from: root.appending(path: "spike/engines/x64-crossover26.3-r4.json"))
+        XCTAssertEqual(ea.engine, wine11.id)
+        XCTAssertEqual(ea.engineToOffer(current: def, known: [def, wine11])?.id, wine11.id, "installing the EA app on the default engine offers Wine 11")
+        XCTAssertNil(ea.engineToOffer(current: wine11, known: [def, wine11]))
+    }
+
     func testFreeBottleName() {
         XCTAssertEqual(BottleStore.freeName("EA app", taken: []), "EA app")
         XCTAssertEqual(BottleStore.freeName("EA app", taken: ["EA app"]), "EA app 2")
