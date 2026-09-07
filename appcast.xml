@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.8.8</title>
+      <description><![CDATA[The Wine 11 engine ships as an option and is offered where a launcher needs it: the EA app, and the Rockstar and Ubisoft sign-in windows (#60, #15, #56)]]></description>
+      <pubDate>Mon, 07 Sep 2026 02:45:04 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.8.8/Highball-0.8.8.zip" sparkle:version="0.8.8" sparkle:shortVersionString="0.8.8" sparkle:edSignature="NpgGbW8klJzsdP9j3dqY72shYaNqBNpkHVnp9lvTA7IGN66BEIhL5O4ITortAlU6NiEpzdlHU2OdX+Zu7jWLAQ==" length="3236294" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.8.7</title>
       <description><![CDATA[DirectX 12 timestamp queries under D3DMetal, served by a shim in engine r2 (#63)]]></description>
       <pubDate>Mon, 07 Sep 2026 02:29:28 -0700</pubDate>
