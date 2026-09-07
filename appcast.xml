@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.8.7</title>
+      <description><![CDATA[DirectX 12 timestamp queries under D3DMetal, served by a shim in engine r2 (#63)]]></description>
+      <pubDate>Mon, 07 Sep 2026 02:29:28 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.8.7/Highball-0.8.7.zip" sparkle:version="0.8.7" sparkle:shortVersionString="0.8.7" sparkle:edSignature="O1QLX5mEKf7v89ZQX/OWWJwdz+hR/DzxqjMZ1cmLRnhCyVyc4VjEG3+WntIIaHYNWPlGvz+Rpw5K8ESHqm+NDg==" length="3213796" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.8.6</title>
       <description><![CDATA[Chosen covers show everywhere (#64), a beta channel with steadier updates, the Epic menu shows when connected, Make a shortcut]]></description>
       <pubDate>Mon, 07 Sep 2026 02:07:30 -0700</pubDate>
