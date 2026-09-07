@@ -22,8 +22,7 @@ struct LibraryView: View {
             if let sourceFilter, item.source != sourceFilter { return false }
             if installedOnly && !item.installed { return false }
             if verifiedOnly {
-                guard let appid = item.steamAppID,
-                      state.gameDB[appid]?.status == "verified-local" else { return false }
+                guard state.gameDB.entry(for: item)?.status == "verified-local" else { return false }
             }
             if !search.isEmpty && !item.title.localizedCaseInsensitiveContains(search) { return false }
             return true
@@ -81,7 +80,7 @@ struct LibraryView: View {
     }
 
     private func entry(for item: LibraryItem) -> GameDBEntry? {
-        item.steamAppID.flatMap { state.gameDB[$0] }
+        state.gameDB.entry(for: item)
     }
 
     private var filterBar: some View {

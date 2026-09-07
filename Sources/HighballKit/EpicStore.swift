@@ -161,6 +161,15 @@ public struct EpicStore: Sendable {
         return try JSONDecoder().decode([InstalledGame].self, from: Data(out.utf8))
     }
 
+    /// Legendary's install records, app name to path, keeping only the ones whose folder still
+    /// exists. Legendary never notices a removed environment or a deleted game folder, and a
+    /// record it keeps showed Guardians of the Galaxy as installed after its bottle was gone (#63).
+    public static func installMap(_ games: [InstalledGame]) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: games.compactMap { g in
+            g.install_path.flatMap { FileManager.default.fileExists(atPath: $0) ? (g.app_name, $0) : nil }
+        })
+    }
+
     /// True when an install path lies inside the given bottle's drive_c.
     public static func isInstalled(path: String, inDriveC driveC: URL) -> Bool {
         let p = URL(fileURLWithPath: path).standardizedFileURL.path + "/"

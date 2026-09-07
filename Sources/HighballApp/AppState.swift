@@ -148,7 +148,7 @@ final class AppState {
 
     /// The verified fix recipe for a library item, if the db has one (db entry id == recipe id).
     func fixRecipe(for item: LibraryItem) -> HighballKit.Recipe? {
-        guard let appid = item.steamAppID, let entry = gameDB[appid],
+        guard let entry = gameDB.entry(for: item),
               let recipe = Self.recipe(entry.id), recipe.kind == .game else { return nil }
         return recipe
     }
@@ -172,7 +172,7 @@ final class AppState {
         // the engine simply lacks degrades to one it has, and the log says so.
         var renderer = renderer
         if let engine = engine(for: bottle) {
-            let rowMode = bottle.settings.rendererExplicit ? nil : item.steamAppID.flatMap { gameDB[$0]?.effectiveRenderer() }
+            let rowMode = bottle.settings.rendererExplicit ? nil : gameDB.entry(for: item)?.effectiveRenderer()
             let pinMode = item.pinID.flatMap { id in bottle.settings.pins.first { $0.id == id }?.renderer }
             let wanted = renderer ?? rowMode ?? pinMode ?? bottle.settings.renderer
             switch wanted.availability(in: engine) {
@@ -334,7 +334,7 @@ final class AppState {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.epicFetchInFlight = false
-                let installs = Dictionary(uniqueKeysWithValues: installed.compactMap { g in g.install_path.map { (g.app_name, $0) } })
+                let installs = EpicStore.installMap(installed)
                 guard installs != self.epicInstalls else { return }
                 self.epicInstalls = installs
                 self.rebuildLibrary()
@@ -1390,8 +1390,7 @@ final class AppState {
             let installed = (try? store.installedGames()) ?? []
             await MainActor.run { [weak self] in
                 self?.epicOwned = owned.sorted { $0.app_title < $1.app_title }
-                self?.epicInstalls = Dictionary(uniqueKeysWithValues:
-                    installed.compactMap { g in g.install_path.map { (g.app_name, $0) } })
+                self?.epicInstalls = EpicStore.installMap(installed)
                 self?.epicLoading = false
                 self?.epicFetchInFlight = false
                 self?.rebuildLibrary()   // Epic results arrive after refresh(); fold them in

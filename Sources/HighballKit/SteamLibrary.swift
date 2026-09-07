@@ -73,6 +73,9 @@ public struct GameDBEntry: Codable, Sendable {
     public var id: String
     public var title: String
     public var steam_appid: Int?
+    /// Legendary's app name for the Epic copy (#63: an Epic copy of a row's game matched nothing,
+    /// so Play never asked for D3DMetal and DXMT refused the DirectX 12 game).
+    public var epic_app_name: String?
     public var status: String       // verified-local | reported-upstream | community | blocked-anticheat
     public var renderer: Renderer?
     public var provenance: String?
@@ -135,6 +138,10 @@ public struct GameDBEntry: Codable, Sendable {
 
 public struct GameDB: Sendable {
     public let byAppID: [Int: GameDBEntry]
+    /// Rows by Legendary app name, for Epic copies.
+    public let byEpicAppName: [String: GameDBEntry]
+    /// Rows by normalized title, the fallback for a copy from a store the row does not name.
+    public let byTitle: [String: GameDBEntry]
 
     /// Default lookup locations for a CLI/dev context: a sibling highball-db checkout, or ./db/games.
     public static func defaultDirectories() -> [URL] {
@@ -142,18 +149,40 @@ public struct GameDB: Sendable {
     }
 
     public init(directories: [URL]) {
-        var index: [Int: GameDBEntry] = [:]
+        var index: [Int: GameDBEntry] = [:], epic: [String: GameDBEntry] = [:], titles: [String: GameDBEntry] = [:]
         for dir in directories {
             guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { continue }
             for file in files where file.pathExtension == "json" {
                 guard let data = try? Data(contentsOf: file),
-                      let entry = try? JSONDecoder().decode(GameDBEntry.self, from: data),
-                      let appid = entry.steam_appid else { continue }
-                index[appid] = entry
+                      let entry = try? JSONDecoder().decode(GameDBEntry.self, from: data) else { continue }
+                if let appid = entry.steam_appid { index[appid] = entry }
+                if let name = entry.epic_app_name { epic[name] = entry }
+                let key = Self.normalizedTitle(entry.title)
+                if !key.isEmpty, titles[key] == nil { titles[key] = entry }
             }
         }
-        byAppID = index
+        byAppID = index; byEpicAppName = epic; byTitle = titles
     }
 
     public subscript(appid: Int) -> GameDBEntry? { byAppID[appid] }
+
+    /// Lowercased letters, digits and single spaces, apostrophes dropped: "Marvel's Guardians of
+    /// the Galaxy™" and "Marvels Guardians Of The Galaxy" are the same title. Exact after that,
+    /// never fuzzy.
+    public static func normalizedTitle(_ title: String) -> String {
+        let apostrophes: Set<Unicode.Scalar> = ["'", "\u{2019}", "\u{2018}"]
+        let kept = title.lowercased().unicodeScalars.compactMap { scalar -> Character? in
+            if apostrophes.contains(scalar) { return nil }
+            return CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
+        }
+        return String(kept).split(separator: " ").joined(separator: " ")
+    }
+
+    /// The row for a library item, whatever store it came from: the Steam id first, then the
+    /// Epic app name, then the normalized title. Nil for a program the database does not know.
+    public func entry(for item: LibraryItem) -> GameDBEntry? {
+        if let appid = item.steamAppID, let e = byAppID[appid] { return e }
+        if let name = item.epicAppName, let e = byEpicAppName[name] { return e }
+        return byTitle[Self.normalizedTitle(item.title)]
+    }
 }

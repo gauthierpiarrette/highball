@@ -227,9 +227,9 @@ struct ContentView: View {
                isPresented: .init(get: { state.pendingD3DMetal != nil }, set: { if !$0 { state.pendingD3DMetal = nil } }),
                presenting: state.pendingD3DMetal) { pending in
             Button(L("Turn it on and play")) { state.enableD3DMetalAndPlay() }
-            if let other = GamePageCopy.otherWorkingRenderer(pending.item.steamAppID.flatMap { state.gameDB[$0] }) {
+            if let other = GamePageCopy.otherWorkingRenderer(state.gameDB.entry(for: pending.item)) {
                 Button(String(format: L("Play with %@"), GamePageCopy.plainName(other))) { state.playPendingD3DMetal(with: other) }
-            } else if pending.item.steamAppID.flatMap({ state.gameDB[$0]?.effectiveRenderer() }) != .d3dmetal {
+            } else if state.gameDB.entry(for: pending.item)?.effectiveRenderer() != .d3dmetal {
                 // The ask came from the environment's setting, not a row that needs D3DMetal:
                 // the default mode is a real way out (#61 had none short of a new bottle).
                 Button(String(format: L("Play with %@"), GamePageCopy.plainName(.dxmt))) { state.playPendingD3DMetal(with: .dxmt) }
@@ -241,8 +241,7 @@ struct ContentView: View {
             }
             Button(L("Not now"), role: .cancel) { state.pendingD3DMetal = nil }
         } message: { pending in
-            let entry = pending.item.steamAppID.flatMap { state.gameDB[$0] }
-            Text(GamePageCopy.d3dMetalAsk(title: pending.item.title, entry: entry))
+            Text(GamePageCopy.d3dMetalAsk(title: pending.item.title, entry: state.gameDB.entry(for: pending.item)))
         }
         .alert(state.pendingEngine.map { String(format: L("%@ needs the %@ engine"), $0.recipe.title, GamePageCopy.shortEngineName($0.manifest)) } ?? "",
                isPresented: .init(get: { state.pendingEngine != nil }, set: { if !$0 { state.pendingEngine = nil } }),

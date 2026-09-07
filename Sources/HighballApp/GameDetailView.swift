@@ -12,7 +12,7 @@ struct GameDetailView: View {
     @State private var showWhy = false
     @State private var showAdvanced = false
 
-    private var entry: GameDBEntry? { item.steamAppID.flatMap { state.gameDB[$0] } }
+    private var entry: GameDBEntry? { state.gameDB.entry(for: item) }
     private var bottle: Bottle? { item.bottleName.flatMap { name in state.bottles.first { $0.name == name } } }
     private var blocked: Bool { entry?.isBlocked == true }
     private var fixRecipe: HighballKit.Recipe? { state.fixRecipe(for: item) }
