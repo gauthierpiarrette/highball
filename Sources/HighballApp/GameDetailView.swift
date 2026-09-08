@@ -27,7 +27,7 @@ struct GameDetailView: View {
     private var verdict: GamePageCopy.Verdict { GamePageCopy.verdict(entry, myChip: state.machineChip) }
     private var willDo: [GamePageCopy.WillDo] {
         GamePageCopy.willDo(entry, recipe: fixRecipe, applied: fixApplied, bottleRenderer: bottle?.settings.renderer ?? .dxvk,
-                            explicit: bottle?.settings.rendererExplicit ?? false)
+                            explicit: bottle?.settings.rendererExplicit ?? false, gameOverride: state.rendererOverride(for: item))
     }
     private var engineName: String? { bottle.flatMap { state.engine(for: $0) }?.displayName }
 
@@ -200,9 +200,26 @@ struct GameDetailView: View {
             DisclosureGroup(isExpanded: $showAdvanced) {
                 VStack(alignment: .leading, spacing: 10) {
                     if let bottle {
-                        HStack(alignment: .top, spacing: 12) {
-                            Text(L("Graphics mode")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 4)
-                            GraphicsModePicker(bottle: bottle)
+                        if entry?.nativeVulkan == true {
+                            row(L("Graphics mode"), L("Does not apply: this game draws with Vulkan directly, not through any Direct3D layer."))
+                        } else {
+                            if let engine = state.engine(for: bottle) {
+                                HStack(alignment: .top, spacing: 12) {
+                                    Text(L("Mode for this game")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 4)
+                                    Picker("", selection: Binding(
+                                        get: { state.rendererOverride(for: item)?.rawValue ?? "" },
+                                        set: { state.setRendererOverride(Renderer(rawValue: $0), for: item.id) })) {
+                                        Text(L("Environment's mode")).tag("")
+                                        ForEach(Renderer.allCases.filter { $0.availability(in: engine) == .available }, id: \.self) { r in
+                                            Text(GamePageCopy.plainName(r)).tag(r.rawValue)
+                                        }
+                                    }.labelsHidden().frame(maxWidth: 360)
+                                }
+                            }
+                            HStack(alignment: .top, spacing: 12) {
+                                Text(L("Environment's mode")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 4)
+                                GraphicsModePicker(bottle: bottle)
+                            }
                         }
                         row(L("Engine"), (state.engine(for: bottle)?.displayName).map { "\($0) · \(bottle.settings.engineID)" } ?? bottle.settings.engineID)
                         HStack(alignment: .firstTextBaseline, spacing: 12) {

@@ -127,15 +127,9 @@ struct ActivityStrip: View {
             Text(String(format: L("%d min"), record.seconds / 60)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             Spacer(minLength: 12)
             Button(L("It played fine")) { state.reportPlay(record) }.controlSize(.small)
-            Button(L("Had problems")) {
-                state.postPlay = nil
-                let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
-                // The report samples live games for a few seconds; never on the main thread.
-                Task.detached {
-                    let url = BugReport.url(version: version)
-                    await MainActor.run { NSWorkspace.shared.open(url) }
-                }
-            }.controlSize(.small)
+            // A bad session first gets the one thing that most often fixes it, another mode for this
+            // game, and the report from inside that ask (guided renderer trial, ux-plan item 1).
+            Button(L("Had problems")) { state.offerRendererTrial(for: record) }.controlSize(.small)
             Button(L("Not now")) { state.postPlay = nil }.controlSize(.small).buttonStyle(.link)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)

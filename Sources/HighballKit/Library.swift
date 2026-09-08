@@ -134,6 +134,11 @@ public struct LibraryStore: Sendable {
     private struct FileShape: Codable {
         var formatVersion: Int = 1
         var items: [String: PlayRecord] = [:]
+        /// A graphics mode chosen for one game, by library id: the guided trial's answer (item 1,
+        /// #66 and #67 were users stuck on Wine's own Direct3D for old DirectX 9 games with no way
+        /// to change one game without changing the whole environment). Optional so files written
+        /// before it still decode.
+        var overrides: [String: Renderer]?
     }
 
     public let paths: HighballPaths
@@ -148,8 +153,26 @@ public struct LibraryStore: Sendable {
         return shape.items
     }
 
+    public func rendererOverrides() -> [String: Renderer] { loadShape().overrides ?? [:] }
+
+    /// Sets, or with nil clears, the graphics mode this one game runs with.
+    public func setRendererOverride(_ renderer: Renderer?, for id: String) {
+        var shape = loadShape()
+        var overrides = shape.overrides ?? [:]
+        overrides[id] = renderer
+        shape.overrides = overrides.isEmpty ? nil : overrides
+        try? paths.ensure()
+        if let data = try? JSONEncoder.highball.encode(shape) { try? data.write(to: fileURL, options: .atomic) }
+    }
+
+    private func loadShape() -> FileShape {
+        guard let data = try? Data(contentsOf: fileURL),
+              let shape = try? JSONDecoder.highball.decode(FileShape.self, from: data) else { return FileShape() }
+        return shape
+    }
+
     public func recordPlay(id: String, bottle: String?, date: Date = Date()) {
-        var shape = FileShape(items: load())
+        var shape = loadShape()
         shape.items[id] = PlayRecord(lastPlayedAt: date, bottle: bottle)
         try? paths.ensure()
         if let data = try? JSONEncoder.highball.encode(shape) {
@@ -159,10 +182,12 @@ public struct LibraryStore: Sendable {
 
     /// Drops records whose items no longer exist (uninstalled games, deleted pins).
     public func prune(validIDs: Set<String>) {
-        let current = load()
+        let whole = loadShape()
+        let current = whole.items
         let kept = current.filter { validIDs.contains($0.key) }
-        guard kept.count != current.count else { return }
-        let shape = FileShape(items: kept)
+        let keptOverrides = (whole.overrides ?? [:]).filter { validIDs.contains($0.key) }
+        guard kept.count != current.count || keptOverrides.count != (whole.overrides ?? [:]).count else { return }
+        let shape = FileShape(items: kept, overrides: keptOverrides.isEmpty ? nil : keptOverrides)
         if let data = try? JSONEncoder.highball.encode(shape) {
             try? data.write(to: fileURL, options: .atomic)
         }

@@ -629,3 +629,16 @@ extension JSONDecoder {
         return d
     }
 }
+
+public extension Renderer {
+    /// The mode a launch runs with, most specific choice first: the caller's (the D3DMetal ask's
+    /// "play with the other mode"), the game's own override, the database row unless the
+    /// environment's mode is an explicit choice, a pinned program's own, then the environment's.
+    /// A native-Vulkan title ignores rows and overrides: no Direct3D layer draws it, so the
+    /// environment's mode is as good as any (#44).
+    static func choose(requested: Renderer?, gameOverride: Renderer?, row: Renderer?, environmentExplicit: Bool,
+                       pin: Renderer?, environment: Renderer, nativeVulkan: Bool = false) -> Renderer {
+        if nativeVulkan { return requested ?? environment }
+        return requested ?? gameOverride ?? (environmentExplicit ? nil : row) ?? pin ?? environment
+    }
+}

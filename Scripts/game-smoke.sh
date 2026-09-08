@@ -34,6 +34,7 @@ GAMES=(
   "244210|d3dmetal|Assetto|assetto|"
   "230410|dxmt|Warframe|warframe|"
   "3314060|dxvk|Sims|sims|"
+  "319510|dxvk|Five Nights|fnaf|"
 )
 only=("$@")
 results=(); passed=true
@@ -53,7 +54,9 @@ for row in "${GAMES[@]}"; do
     # Capture three frames ten seconds apart. Prefer the per-window grab, but some games use a
     # layer-hosted (Metal) window that screencapture -l cannot image (it returns nothing/black);
     # fall back to a full-screen shot cropped to the window rect, which works for any window type.
-    geo=$("$WINLIST" 2>/dev/null | grep -E "id=$id|^$id" | head -1); geo=$("$WINLIST" 2>/dev/null | awk -v id="$id" '$1==id{print $5}')
+    # Geometry sits in the two fields before "layer=", never at a fixed index: a title with
+    # spaces ("Five Nights at Freddy's") shifts the columns and broke the parse on 2026-09-08.
+    geo=$("$WINLIST" 2>/dev/null | awk -v id="$id" '$1==id{print $(NF-3), $(NF-2)}')
     gx=${geo%%,*}; rest=${geo#*,}; gy=${rest%% *}; wh=${geo##* }; gw=${wh%%x*}; gh=${wh##*x}
     grab(){ local out="$1"; screencapture -x -l "$id" "$out" 2>/dev/null
       # if the -l grab is missing or ~uniformly black, use full-screen + crop

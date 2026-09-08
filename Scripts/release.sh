@@ -15,6 +15,22 @@ case "${1:-}" in
   --promote)
     PV="${2:?usage: release.sh --promote <version>}"
     git diff-index --quiet HEAD -- || { echo "tracked files modified; commit before promoting" >&2; exit 1; }
+    # Cadence (2026-09-08): a stable rollout takes seven days, so promoting again inside that window
+    # restarts the clock for everyone and makes beta testers chase daily builds. Betas ship as often
+    # as needed; a promotion waits for the previous one to finish unless HB_CADENCE_OK=1 says the
+    # new build fixes something stable users are hitting now.
+    python3 - <<'PY' || { echo "set HB_CADENCE_OK=1 to promote anyway" >&2; exit 1; }
+import os, re, sys, time
+from email.utils import parsedate_to_datetime
+s = open('appcast.xml').read()
+last = None
+for item in re.findall(r'<item>.*?</item>', s, re.S):
+    if 'phasedRolloutInterval' in item:
+        m = re.search(r'<pubDate>(.*?)</pubDate>', item)
+        if m: last = max(last or 0, parsedate_to_datetime(m.group(1)).timestamp())
+if last and time.time() - last < 7 * 86400 and os.environ.get('HB_CADENCE_OK') != '1':
+    print(f"release cadence: the previous stable promotion was {(time.time() - last) / 86400:.1f} days ago and its seven-day rollout is still running.", file=sys.stderr); sys.exit(1)
+PY
     HB_VERSION="$PV" HB_DATE="$(date -R 2>/dev/null || date "+%a, %d %b %Y %H:%M:%S %z")" python3 - <<'PY'
 import os, re, xml.dom.minidom
 v = os.environ['HB_VERSION']

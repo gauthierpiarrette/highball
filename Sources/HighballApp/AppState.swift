@@ -99,6 +99,66 @@ final class AppState {
         var seconds: Int
         /// Another installed engine to offer as the second way out, when there is one.
         var alternateEngine: InstalledEngine? = nil
+        /// The library item this launch belongs to, when it is a game: accepting then changes the
+        /// mode for that game alone, never the whole environment.
+        var itemID: String? = nil
+    }
+
+    /// A game that ran, badly by the player's account, with another mode to try next time (the
+    /// guided renderer trial, ux-plan item 1). One click sets it for this game only.
+    struct RendererTrial {
+        let itemID: String
+        let title: String
+        let current: Renderer
+        let next: Renderer
+    }
+    var rendererTrial: RendererTrial?
+
+    /// Graphics modes chosen per game (library id), the store's copy for the views.
+    var libraryOverrides: [String: Renderer] = [:]
+    func rendererOverride(for item: LibraryItem) -> Renderer? { libraryOverrides[item.id] }
+    func setRendererOverride(_ renderer: Renderer?, for id: String) {
+        libraryStore.setRendererOverride(renderer, for: id)
+        libraryOverrides = libraryStore.rendererOverrides()
+        appendLog(renderer.map { "\(id): graphics mode set to \($0.rawValue) for this game" } ?? "\(id): graphics mode back to the environment's")
+    }
+
+    /// "Had problems" on the post-play row: offer the next mode for this game, then the report.
+    func offerRendererTrial(for record: SessionRecord) {
+        postPlay = nil
+        guard let bottle = bottles.first(where: { $0.name == record.bottle }), let engine = engine(for: bottle),
+              let item = libraryItems.first(where: { $0.steamAppID != nil && $0.steamAppID == record.appid })
+                ?? libraryItems.first(where: { $0.title == record.title && $0.bottleName == record.bottle }) else { return }
+        let current = record.renderer.flatMap(Renderer.init(rawValue:)) ?? rendererOverride(for: item) ?? bottle.settings.renderer
+        let next = Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil,
+                                       vkd3dAvailable: engine.rendererDir("vkd3d") != nil)
+        rendererTrial = RendererTrial(itemID: item.id, title: item.title, current: current, next: next)
+    }
+    func acceptRendererTrial() {
+        guard let trial = rendererTrial else { return }
+        setRendererOverride(trial.next, for: trial.itemID)
+        rendererTrial = nil
+    }
+
+    /// A component-only engine update (same Wine) applies itself, once per launch, when nothing
+    /// runs in any environment: the move kills a bottle's Wine processes, so a running game or
+    /// Steam client makes it wait for the next launch (EngineStore.autoUpdateAllowed).
+    private var autoUpdateTried = false
+    func maybeAutoUpdateEngine() {
+        guard !autoUpdateTried, !busy, !needsOnboarding, runningSessions.isEmpty,
+              let update = engineUpdate, let current = defaultEngine,
+              EngineStore.autoUpdateAllowed(from: current.manifest, to: update) else { return }
+        autoUpdateTried = true
+        let prefixes = bottles.map(\.url)
+        Task { [weak self] in
+            let steamUp = await Task.detached { prefixes.contains { WineRunner.steamIsRunning(inPrefix: $0) } }.value
+            await MainActor.run {
+                guard let self else { return }
+                if steamUp { self.appendLog("engine \(update.id) is ready; it applies itself once Steam is closed"); self.autoUpdateTried = false; return }
+                self.appendLog("engine \(update.id) is the same Wine as \(current.id): applying it now, no click needed")
+                self.updateEngine()
+            }
+        }
     }
 
     /// The engine the crash alert offers next to the renderer suggestion, if another one is installed.
@@ -172,9 +232,11 @@ final class AppState {
         // the engine simply lacks degrades to one it has, and the log says so.
         var renderer = renderer
         if let engine = engine(for: bottle) {
-            let rowMode = bottle.settings.rendererExplicit ? nil : gameDB.entry(for: item)?.effectiveRenderer()
+            let entry = gameDB.entry(for: item)
             let pinMode = item.pinID.flatMap { id in bottle.settings.pins.first { $0.id == id }?.renderer }
-            let wanted = renderer ?? rowMode ?? pinMode ?? bottle.settings.renderer
+            let wanted = Renderer.choose(requested: renderer, gameOverride: rendererOverride(for: item), row: entry?.effectiveRenderer(),
+                                         environmentExplicit: bottle.settings.rendererExplicit, pin: pinMode,
+                                         environment: bottle.settings.renderer, nativeVulkan: entry?.nativeVulkan == true)
             switch wanted.availability(in: engine) {
             case .available:
                 break
@@ -364,8 +426,10 @@ final class AppState {
         installWatcher?.watch(bottles.flatMap(installDirectories))
         startSteamClientWatch()
         libraryPlays = libraryStore.load()
+        libraryOverrides = libraryStore.rendererOverrides()
         rebuildLibrary()
         epicRefresh()
+        maybeAutoUpdateEngine()
         if gameDB.byAppID.isEmpty {
             var dirs: [URL] = []
             if let res = Bundle.main.resourceURL { dirs.append(res.appending(path: "db-games")) }
@@ -1257,7 +1321,7 @@ final class AppState {
                 self.crashSuggestion = CrashSuggestion(program: game.name, bottleName: bottle.name,
                                                        renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil, vkd3dAvailable: engine.rendererDir("vkd3d") != nil),
                                                        logPath: result.log.path, current: current, seconds: Int(result.duration),
-                                                       alternateEngine: self.alternateEngine(for: bottle))
+                                                       alternateEngine: self.alternateEngine(for: bottle), itemID: "steam:\(game.appid)")
             }
             guard handedOff else { return }
             beginSession(GameSession(title: game.name, bottleName: bottle.name, appid: game.appid, markers: markers,

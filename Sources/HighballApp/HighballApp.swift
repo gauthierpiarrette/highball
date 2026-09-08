@@ -252,6 +252,19 @@ struct ContentView: View {
         } message: { pending in
             Text(GamePageCopy.engineAsk(recipe: pending.recipe, manifest: pending.manifest, installed: state.engines.contains { $0.id == pending.manifest.id }))
         }
+        .alert(state.rendererTrial.map { String(format: L("Try %@ for %@ next time?"), GamePageCopy.plainName($0.next), $0.title) } ?? "",
+               isPresented: .init(get: { state.rendererTrial != nil }, set: { if !$0 { state.rendererTrial = nil } }),
+               presenting: state.rendererTrial) { trial in
+            Button(String(format: L("Use %@ for this game"), GamePageCopy.plainName(trial.next))) { state.acceptRendererTrial() }
+            Button(L("Report how it went…")) {
+                state.rendererTrial = nil
+                let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+                Task.detached { let url = BugReport.url(version: version); await MainActor.run { NSWorkspace.shared.open(url) } }
+            }
+            Button(L("Not now"), role: .cancel) { state.rendererTrial = nil }
+        } message: { trial in
+            Text(String(format: L("It ran with %@. Another mode often suits a game better on this Mac, and old DirectX 9 games in particular do badly on Wine's own Direct3D. This changes the mode for this game only; the environment keeps its own. Undo it any time under Advanced on the game's page."), GamePageCopy.plainName(trial.current)))
+        }
         .sheet(isPresented: $state.showEpicSignIn) { EpicSignInSheet() }
         // A partial delete succeeded — the bottle is gone and the name is free — so framing it as
         // a failure, with an invitation to file a bug, misreads what happened. Same alert, honest
@@ -289,8 +302,10 @@ struct ContentView: View {
         }
         .alert(crashTitle, isPresented: Binding(get: { state.crashSuggestion != nil }, set: { if !$0 { state.crashSuggestion = nil } }),
                presenting: state.crashSuggestion) { s in
-            Button("Use \(s.renderer.rawValue.uppercased())") {
-                if var bottle = state.bottles.first(where: { $0.name == s.bottleName }) {
+            Button(s.itemID == nil ? "Use \(s.renderer.rawValue.uppercased())" : String(format: L("Use %@ for this game"), s.renderer.rawValue.uppercased())) {
+                if let itemID = s.itemID {
+                    state.setRendererOverride(s.renderer, for: itemID)   // this game only; the environment keeps its mode
+                } else if var bottle = state.bottles.first(where: { $0.name == s.bottleName }) {
                     bottle.settings.renderer = s.renderer
                     bottle.settings.rendererExplicit = true   // the user picked it; recipes must not clobber it (#29)
                     state.update(bottle)

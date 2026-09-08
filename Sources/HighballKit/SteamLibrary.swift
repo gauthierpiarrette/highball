@@ -78,6 +78,9 @@ public struct GameDBEntry: Codable, Sendable {
     public var epic_app_name: String?
     public var status: String       // verified-local | reported-upstream | community | blocked-anticheat
     public var renderer: Renderer?
+    /// The game draws with Vulkan directly (The Sims Legacy Collection): every graphics mode is a
+    /// Direct3D layer, so none applies, and the page must say so instead of offering a choice (#44).
+    public var nativeVulkan: Bool?
     public var provenance: String?
     public var notes: String?
     public var anticheat: AnticheatInfo?

@@ -56,10 +56,14 @@ public enum GamePageCopy {
     /// What Play applies, in order, from the row and the fix recipe. `applied` means the recipe
     /// already ran in this environment, so its steps read as done.
     public static func willDo(_ entry: GameDBEntry?, recipe: Recipe?, applied: Bool,
-                              bottleRenderer: Renderer, explicit: Bool = false,
+                              bottleRenderer: Renderer, explicit: Bool = false, gameOverride: Renderer? = nil,
                               osMajor: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion) -> [WillDo] {
         var items: [WillDo] = []
-        if explicit {
+        if entry?.nativeVulkan == true {
+            items.append(WillDo(text: "Let it draw with Vulkan directly; the graphics mode does not apply to this game"))
+        } else if let gameOverride {
+            items.append(WillDo(text: "Use \(plainName(gameOverride)) for this game (set by you); the environment stays on \(plainName(bottleRenderer))"))
+        } else if explicit {
             items.append(WillDo(text: "Use \(plainName(bottleRenderer)), the environment's setting (set by you)"))
         } else if let wanted = entry?.effectiveRenderer(osMajor: osMajor) {
             items.append(WillDo(text: wanted == bottleRenderer

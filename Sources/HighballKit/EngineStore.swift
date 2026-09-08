@@ -57,6 +57,14 @@ public struct EngineStore: Sendable {
             ?? installed.max { $0.id.compare($1.id, options: .numeric) == .orderedAscending }
     }
 
+    /// Whether an engine update may apply itself without a click: only when the Wine build is the
+    /// same (a component-only update, r1's MoltenVK or r2's timestamp shim), so no environment is
+    /// re-run and nothing can regress. Users kept appearing on old engines because the update
+    /// needed a click (#61's reporter was on r0 with 0.8.3; ux-plan item 9).
+    public static func autoUpdateAllowed(from installed: EngineManifest, to update: EngineManifest) -> Bool {
+        !EngineManifest.needsPrefixRefresh(from: installed, to: update)
+    }
+
     /// Engines nothing references any more: not the default, not the engine of any bottle, and
     /// not one the app still offers (`keep`: the bundled manifests, so an engine someone
     /// downloaded for rollback survives the next update even with no bottle on it right now).
