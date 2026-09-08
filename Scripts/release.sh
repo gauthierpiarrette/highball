@@ -93,6 +93,19 @@ PY
   done
 fi
 
+# Push CI (.github/workflows/ci.yml) builds with the runners' Xcode 16, older than this Mac's.
+# 2026-09-08: the 0.9.0 beta shipped while CI was red on a type-check timeout that only Xcode 16
+# hit, so the local gate alone is not enough. A beta or stable release needs a green CI run for
+# HEAD. No finished run yet (the push may be minutes old) only warns; --hotfix only warns.
+ci=$(gh run list --workflow ci.yml --commit "$(git rev-parse HEAD)" --limit 1 --json status,conclusion -q '.[0] | "\(.status) \(.conclusion)"' 2>/dev/null || true)
+case "$ci" in
+  "completed success") echo "release gate: push CI is green for HEAD." >&2 ;;
+  "completed "*)
+    if [ "$CHANNEL" = hotfix ]; then echo "WARNING (hotfix): push CI is ${ci#completed } for HEAD." >&2
+    else echo "release gate: push CI is ${ci#completed } for HEAD (gh run list --workflow ci.yml). Fix it, or --hotfix for an urgent fix." >&2; exit 1; fi ;;
+  *) echo "WARNING: no finished push CI run for HEAD yet (${ci:-none}); it should be green before this release is promoted." >&2 ;;
+esac
+
 Scripts/make-app.sh release "$VERSION"
 ZIP="dist/Highball-$VERSION.zip"
 ditto -c -k --keepParent dist/Highball.app "$ZIP"

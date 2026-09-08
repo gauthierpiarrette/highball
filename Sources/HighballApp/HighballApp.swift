@@ -158,53 +158,7 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var state = state
-        Group {
-            if let missing = state.homeUnavailable {
-                VStack(spacing: 14) {
-                    Image(systemName: "externaldrive.badge.questionmark").font(.system(size: 44)).foregroundStyle(.secondary)
-                    Text(L("Your Highball folder is not connected")).font(.title2.bold())
-                    Text(String(format: L("Highball keeps its engines and environments in %@, and that location is not available right now. Connect the drive and relaunch, or go back to the default location on this Mac."), missing.path))
-                        .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 520)
-                    HStack {
-                        Button(L("Relaunch")) { AppState.relaunch() }.buttonStyle(.borderedProminent)
-                        Button(L("Use the default location")) { state.useDefaultHome() }
-                    }
-                }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(40)
-            } else if state.needsOnboarding {
-                OnboardingView()
-            } else {
-                // One library, full width (UX plan Phase 1): no sidebar, no bottles in the way.
-                // Environments and the engine live in Settings (⌘,).
-                NavigationStack { LibraryView() }
-                    .toolbar {
-                        ToolbarItem(placement: .primaryAction) {
-                            Menu {
-                                Button(state.defaultBottle.map(state.steamInstalled) == true ? L("Open Steam") : L("Install Steam")) { state.installSteam() }
-                                if state.epicSignedIn {
-                                    // The menu said "Connect" even once connected (0.8.0 feedback).
-                                    Button(L("Epic account connected")) {}.disabled(true)
-                                } else {
-                                    Button(L("Connect Epic account…")) { state.showEpicSignIn = true }
-                                }
-                                Divider()
-                                ForEach(BottleView.launcherMeta.filter { $0.id != "steam" }, id: \.id) { meta in
-                                    Button(String(format: state.launcherInstalled(meta.id) ? L("Open %@") : L("Install %@"), meta.short)) {
-                                        state.openOrInstallLauncher(meta.id, short: meta.short)
-                                    }
-                                }
-                                Divider()
-                                Button(L("A Windows program I have…")) { state.chooseProgramToRun() }
-                            } label: {
-                                Label(L("Add games"), systemImage: "plus")
-                            }
-                            .disabled(state.busy || state.bottles.isEmpty)
-                        }
-                        ToolbarItem(placement: .automatic) {
-                            SettingsLink { Label(L("Settings"), systemImage: "gearshape") }
-                        }
-                    }
-            }
-        }
+        screen
         // Everything that takes time lives on one strip at the bottom, never modal (UX plan 0.5).
         .safeAreaInset(edge: .bottom, spacing: 0) { ActivityStrip() }
         // A Windows program dropped anywhere on the window, or picked from Add games and ⌘O,
@@ -223,18 +177,92 @@ struct ContentView: View {
             }
             return true
         }
-        .confirmationDialog(String(format: L("Run %@ in %@?"), state.pendingRun?.lastPathComponent ?? "", runTarget?.name ?? ""),
-                            isPresented: .init(get: { state.pendingRun != nil }, set: { if !$0 { state.pendingRun = nil; state.pendingRunBottle = nil } }),
-                            titleVisibility: .visible) {
-            Button(L("Run")) { if let u = state.pendingRun, let b = runTarget { state.runDropped(u, in: b, andPin: false) }; state.pendingRun = nil }
-            Button(L("Run and add to Programs")) { if let u = state.pendingRun, let b = runTarget { state.runDropped(u, in: b, andPin: true) }; state.pendingRun = nil }
-            Button(L("Cancel"), role: .cancel) { state.pendingRun = nil }
-        }
+        .runDroppedDialog(state, target: runTarget)
         .sheet(isPresented: $state.showLog) { LogSheet() }
         .sheet(isPresented: $state.showGPTKLicense) { GPTKLicenseSheet() }
+        .d3dMetalAsk(state)
+        .engineAsk(state)
+        .rendererTrialAsk(state)
+        .homeMoveAsk(state)
+        .sheet(isPresented: $state.showEpicSignIn) { EpicSignInSheet() }
+        .errorAlert(state)
+        .sheet(isPresented: Binding(get: { state.showErrorDetails }, set: { state.showErrorDetails = $0 })) {
+            ErrorDetailsSheet(text: state.errorDetailsText)
+        }
+        .crashAlert(state, title: crashTitle)
+    }
+
+    /// The window itself: the unplugged-drive screen, onboarding, or the library.
+    @ViewBuilder private var screen: some View {
+        if let missing = state.homeUnavailable {
+            VStack(spacing: 14) {
+                Image(systemName: "externaldrive.badge.questionmark").font(.system(size: 44)).foregroundStyle(.secondary)
+                Text(L("Your Highball folder is not connected")).font(.title2.bold())
+                Text(String(format: L("Highball keeps its engines and environments in %@, and that location is not available right now. Connect the drive and relaunch, or go back to the default location on this Mac."), missing.path))
+                    .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 520)
+                HStack {
+                    Button(L("Relaunch")) { AppState.relaunch() }.buttonStyle(.borderedProminent)
+                    Button(L("Use the default location")) { state.useDefaultHome() }
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(40)
+        } else if state.needsOnboarding {
+            OnboardingView()
+        } else {
+            // One library, full width (UX plan Phase 1): no sidebar, no bottles in the way.
+            // Environments and the engine live in Settings (⌘,).
+            NavigationStack { LibraryView() }
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu {
+                            Button(state.defaultBottle.map(state.steamInstalled) == true ? L("Open Steam") : L("Install Steam")) { state.installSteam() }
+                            if state.epicSignedIn {
+                                // The menu said "Connect" even once connected (0.8.0 feedback).
+                                Button(L("Epic account connected")) {}.disabled(true)
+                            } else {
+                                Button(L("Connect Epic account…")) { state.showEpicSignIn = true }
+                            }
+                            Divider()
+                            ForEach(BottleView.launcherMeta.filter { $0.id != "steam" }, id: \.id) { meta in
+                                Button(String(format: state.launcherInstalled(meta.id) ? L("Open %@") : L("Install %@"), meta.short)) {
+                                    state.openOrInstallLauncher(meta.id, short: meta.short)
+                                }
+                            }
+                            Divider()
+                            Button(L("A Windows program I have…")) { state.chooseProgramToRun() }
+                        } label: {
+                            Label(L("Add games"), systemImage: "plus")
+                        }
+                        .disabled(state.busy || state.bottles.isEmpty)
+                    }
+                    ToolbarItem(placement: .automatic) {
+                        SettingsLink { Label(L("Settings"), systemImage: "gearshape") }
+                    }
+                }
+        }
+    }
+    private var crashTitle: String {
+        guard let s = state.crashSuggestion else { return "" }
+        return s.seconds < 2 ? String(format: L("%@ quit right away"), s.program) : String(format: L("%@ quit after %d seconds"), s.program, s.seconds)
+    }
+}
+
+// The main window's dialogs, one function each. Chained in `body` they were a single
+// expression that Xcode 16's type checker gave up on ("unable to type-check this expression
+// in reasonable time", CI and the nightly E2E on 2026-09-08) while Xcode 26 took it fine.
+private extension View {
+    @MainActor func runDroppedDialog(_ state: AppState, target: Bottle?) -> some View {
+        self.confirmationDialog(String(format: L("Run %@ in %@?"), state.pendingRun?.lastPathComponent ?? "", target?.name ?? ""),
+                            isPresented: .init(get: { state.pendingRun != nil }, set: { if !$0 { state.pendingRun = nil; state.pendingRunBottle = nil } }),
+                            titleVisibility: .visible) {
+            Button(L("Run")) { if let u = state.pendingRun, let b = target { state.runDropped(u, in: b, andPin: false) }; state.pendingRun = nil }
+            Button(L("Run and add to Programs")) { if let u = state.pendingRun, let b = target { state.runDropped(u, in: b, andPin: true) }; state.pendingRun = nil }
+            Button(L("Cancel"), role: .cancel) { state.pendingRun = nil }
+        }
+    }
+    @MainActor func d3dMetalAsk(_ state: AppState) -> some View {
         // Asked at the first game that needs it, never at install (UX plan §3.5). Nothing
         // downloads: D3DMetal is already inside the engine and accepting flips a flag.
-        .alert(String(format: L("%@ needs Apple's DirectX 12 support"), state.pendingD3DMetal?.item.title ?? ""),
+        self.alert(String(format: L("%@ needs Apple's DirectX 12 support"), state.pendingD3DMetal?.item.title ?? ""),
                isPresented: .init(get: { state.pendingD3DMetal != nil }, set: { if !$0 { state.pendingD3DMetal = nil } }),
                presenting: state.pendingD3DMetal) { pending in
             Button(L("Turn it on and play")) { state.enableD3DMetalAndPlay() }
@@ -254,7 +282,9 @@ struct ContentView: View {
         } message: { pending in
             Text(GamePageCopy.d3dMetalAsk(title: pending.item.title, entry: state.gameDB.entry(for: pending.item)))
         }
-        .alert(state.pendingEngine.map { String(format: L("%@ needs the %@ engine"), $0.recipe.title, GamePageCopy.shortEngineName($0.manifest)) } ?? "",
+    }
+    @MainActor func engineAsk(_ state: AppState) -> some View {
+        self.alert(state.pendingEngine.map { String(format: L("%@ needs the %@ engine"), $0.recipe.title, GamePageCopy.shortEngineName($0.manifest)) } ?? "",
                isPresented: .init(get: { state.pendingEngine != nil }, set: { if !$0 { state.pendingEngine = nil } }),
                presenting: state.pendingEngine) { pending in
             Button(String(format: L("New environment for %@"), pending.recipe.title)) { state.createEnvironment(for: pending.recipe, on: pending.manifest) }
@@ -263,7 +293,9 @@ struct ContentView: View {
         } message: { pending in
             Text(GamePageCopy.engineAsk(recipe: pending.recipe, manifest: pending.manifest, installed: state.engines.contains { $0.id == pending.manifest.id }))
         }
-        .alert(state.rendererTrial.map { String(format: L("Try %@ for %@ next time?"), GamePageCopy.plainName($0.next), $0.title) } ?? "",
+    }
+    @MainActor func rendererTrialAsk(_ state: AppState) -> some View {
+        self.alert(state.rendererTrial.map { String(format: L("Try %@ for %@ next time?"), GamePageCopy.plainName($0.next), $0.title) } ?? "",
                isPresented: .init(get: { state.rendererTrial != nil }, set: { if !$0 { state.rendererTrial = nil } }),
                presenting: state.rendererTrial) { trial in
             Button(String(format: L("Use %@ for this game"), GamePageCopy.plainName(trial.next))) { state.acceptRendererTrial() }
@@ -276,7 +308,9 @@ struct ContentView: View {
         } message: { trial in
             Text(String(format: L("It ran with %@. Another mode often suits a game better on this Mac, and old DirectX 9 games in particular do badly on Wine's own Direct3D. This changes the mode for this game only; the environment keeps its own. Undo it any time under Advanced on the game's page."), GamePageCopy.plainName(trial.current)))
         }
-        .alert(state.pendingHome.map { String(format: L("Move Highball's data to %@?"), $0.lastPathComponent) } ?? "",
+    }
+    @MainActor func homeMoveAsk(_ state: AppState) -> some View {
+        self.alert(state.pendingHome.map { String(format: L("Move Highball's data to %@?"), $0.lastPathComponent) } ?? "",
                isPresented: .init(get: { state.pendingHome != nil }, set: { if !$0 { state.pendingHome = nil } }),
                presenting: state.pendingHome) { target in
             Button(L("Move now")) { state.moveHome(to: target) }
@@ -284,11 +318,12 @@ struct ContentView: View {
         } message: { target in
             Text(String(format: L("Engines, environments and downloads copy to %@, get checked, and are then removed from %@. Highball relaunches when it is done. Nothing is removed until the copy checks out."), target.path, state.paths.home.path))
         }
-        .sheet(isPresented: $state.showEpicSignIn) { EpicSignInSheet() }
+    }
+    @MainActor func errorAlert(_ state: AppState) -> some View {
         // A partial delete succeeded — the bottle is gone and the name is free — so framing it as
         // a failure, with an invitation to file a bug, misreads what happened. Same alert, honest
         // title, and no Report button for something that is not a problem to report.
-        .alert(state.errorIsPartialSuccess ? L("Some files couldn't be removed") : (state.errorRecovery.map { L($0.headline) } ?? L("Something went wrong")),
+        self.alert(state.errorIsPartialSuccess ? L("Some files couldn't be removed") : (state.errorRecovery.map { L($0.headline) } ?? L("Something went wrong")),
                isPresented: .init(
             get: { state.errorMessage != nil },
             set: { if !$0 { state.errorMessage = nil } })) {
@@ -316,10 +351,9 @@ struct ContentView: View {
             // The meaning, in words; exit codes, paths and raw output live behind Details.
             Text(state.errorIsPartialSuccess ? (state.errorMessage ?? "") : (state.errorRecovery?.meaning ?? ""))
         }
-        .sheet(isPresented: Binding(get: { state.showErrorDetails }, set: { state.showErrorDetails = $0 })) {
-            ErrorDetailsSheet(text: state.errorDetailsText)
-        }
-        .alert(crashTitle, isPresented: Binding(get: { state.crashSuggestion != nil }, set: { if !$0 { state.crashSuggestion = nil } }),
+    }
+    @MainActor func crashAlert(_ state: AppState, title: String) -> some View {
+        self.alert(title, isPresented: Binding(get: { state.crashSuggestion != nil }, set: { if !$0 { state.crashSuggestion = nil } }),
                presenting: state.crashSuggestion) { s in
             Button(s.itemID == nil ? "Use \(s.renderer.rawValue.uppercased())" : String(format: L("Use %@ for this game"), s.renderer.rawValue.uppercased())) {
                 if let itemID = s.itemID {
@@ -349,10 +383,6 @@ struct ContentView: View {
                         s.renderer.rawValue.uppercased())
             Text(seen + " " + next)
         }
-    }
-    private var crashTitle: String {
-        guard let s = state.crashSuggestion else { return "" }
-        return s.seconds < 2 ? String(format: L("%@ quit right away"), s.program) : String(format: L("%@ quit after %d seconds"), s.program, s.seconds)
     }
 }
 
