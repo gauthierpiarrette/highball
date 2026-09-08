@@ -20,7 +20,7 @@ git diff-index --quiet HEAD -- || echo "note: tracked files modified, so this re
 
 # A locked session (display slept, caffeinate expired) shows no window to any smoke and every
 # screen check "fails" (2026-09-08, gate run 5): say so and stop instead of recording a regression.
-if Scripts/winlist 2>/dev/null | grep loginwindow | grep -E "\|\|\s+0,0 [0-9]+x[0-9]+ layer=20[0-9][0-9] on=true" -q; then   # the lock screen: full-size, layer 2000-2099
+if Scripts/winlist 2>/dev/null | grep -qE "loginwindow[[:space:]]+\|\|[[:space:]]+0,0 [0-9]+x[0-9]+[[:space:]]+layer=20[0-9]{2}[[:space:]]+on=true"; then   # the lock screen: full size, layer 2000-2099, fields tab separated
   echo "gate: the screen is locked; unlock it and run again (nothing was tested)" >&2
   python3 -c "import json,time;json.dump({'passed':False,'locked':True,'epoch':int(time.time()),'date':time.strftime('%Y-%m-%d'),'commit':'$COMMIT','required':['upgrade','firstrun','launch-window'],'checks':{}},open('$OUT/latest.json','w'),indent=2)"
   exit 3
