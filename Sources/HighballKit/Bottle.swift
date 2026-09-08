@@ -50,9 +50,9 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
             var overlays = dir.appending(path: "wine").path
             if let shim = engine.timestampShimDir(d3dmetal: dir) {
                 overlays = shim.appending(path: "wine").path + ":" + overlays
-                // The shim loads D3DMetal's d3d12.dll by this path: Wine resolves builtin modules by base
-                // name, so under its own name the real one would come back as the shim.
-                env["HB_D3D12_REAL"] = "Z:" + shim.appending(path: "wine/x86_64-windows/d3d12_d3dmetal.dll").path.replacingOccurrences(of: "/", with: "\\")
+                // The shim loads D3DMetal's d3d12.dll by this path: under its own name the real one
+                // would come back as the shim (see InstalledEngine.timestampShimDir for the layout).
+                env["HB_D3D12_REAL"] = "Z:" + shim.appending(path: "wine/x86_64-windows/\(InstalledEngine.shimRealName).dll").path.replacingOccurrences(of: "/", with: "\\")
             }
             env["WINEDLLPATH_PREPEND"] = Self.withD9VK(overlays, engine: engine)
             env["CX_D3DMETALPATH"] = external

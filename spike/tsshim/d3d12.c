@@ -25,10 +25,11 @@ static int dbg, idle;
 static UINT64 qpc_freq;
 #define LOG(...) do { if (dbg) { fprintf(stderr, "tsshim: " __VA_ARGS__); fputc('\n', stderr); fflush(stderr); } } while (0)
 
-// Wine resolves builtin modules by base name, so a second "d3d12.dll" at another path comes back as
-// this shim. The real one therefore lives beside the shim as d3d12_d3dmetal.dll with its Mach-O half
-// as x86_64-unix/d3d12_d3dmetal.so (Highball lays both out from the licensed D3DMetal overlay).
-// HB_D3D12_REAL, a Windows path or module name, overrides that for experiments.
+// Wine tells builtin modules apart by name (the file name on Wine 10, the PE's internal export name
+// on CrossOver's Wine 11), so a second "d3d12.dll" at another path comes back as this shim. Highball
+// lays the real one out beside the shim as apd12.dll, export name patched to match, with its Mach-O
+// half as x86_64-unix/apd12.so (InstalledEngine.timestampShimDir), and passes the path in
+// HB_D3D12_REAL. The bare-name fallback below is for experiments only.
 static HMODULE load_real(void)
 {
     WCHAR path[1024];

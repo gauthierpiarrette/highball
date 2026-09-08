@@ -389,35 +389,49 @@ public struct InstalledEngine: Sendable {
     }
 
     /// The D3DMetal timestamp shim overlay, laid out for launch, or nil when the engine has none.
-    /// Wine resolves builtin modules by base name, so the shim's d3d12.dll cannot load the real one
-    /// under its own name: the real PE is hard-linked beside the shim as d3d12_d3dmetal.dll and its
-    /// Mach-O half symlinked as x86_64-unix/d3d12_d3dmetal.so, both pointing into the licensed
-    /// D3DMetal overlay, so nothing of Apple's is copied anywhere new. Idempotent, and redone when
-    /// the D3DMetal files change (an engine update replaces the inode).
+    /// The shim's d3d12.dll cannot load the real one under its own name, so the real PE is laid out
+    /// beside the shim as apd12.dll ("Apple's d3d12"), with its Mach-O half symlinked as
+    /// x86_64-unix/apd12.so into the licensed D3DMetal overlay. The copy differs from Apple's file
+    /// in nine bytes: its internal export name, because Wine 10 tells builtin modules apart by file
+    /// name but CrossOver's Wine 11 by that internal name, and with it untouched the copy came back
+    /// as the shim itself (no DirectX 12 device at all, 2026-09-08). Idempotent, and redone when the
+    /// D3DMetal files change (an engine update replaces them).
     public func timestampShimDir(d3dmetal: URL) -> URL? {
         guard let shim = rendererDir("d3dmetal-tsshim") else { return nil }
         let fm = FileManager.default
         let realPE = d3dmetal.appending(path: "wine/x86_64-windows/d3d12.dll")
         let realSO = d3dmetal.appending(path: "wine/x86_64-unix/d3d12.so")
-        let pe = shim.appending(path: "wine/x86_64-windows/d3d12_d3dmetal.dll")
-        let so = shim.appending(path: "wine/x86_64-unix/d3d12_d3dmetal.so")
+        let pe = shim.appending(path: "wine/x86_64-windows/\(Self.shimRealName).dll")
+        let so = shim.appending(path: "wine/x86_64-unix/\(Self.shimRealName).so")
         do {
-            let realID = try fm.attributesOfItem(atPath: realPE.path)[.systemFileNumber] as? Int
-            let peID = (try? fm.attributesOfItem(atPath: pe.path))?[.systemFileNumber] as? Int
-            if peID == nil || peID != realID {
+            let realAttrs = try fm.attributesOfItem(atPath: realPE.path)
+            let current = (try? fm.attributesOfItem(atPath: pe.path))
+            let fresh = current != nil
+                && current?[.size] as? UInt64 == realAttrs[.size] as? UInt64
+                && ((current?[.modificationDate] as? Date) ?? .distantPast) >= ((realAttrs[.modificationDate] as? Date) ?? .distantPast)
+                && (try? PEExportName.read(Data(contentsOf: pe))) == "\(Self.shimRealName).dll"
+            if !fresh {
                 try? fm.removeItem(at: pe)
-                do { try fm.linkItem(at: realPE, to: pe) } catch { try fm.copyItem(at: realPE, to: pe) }
+                try PEExportName.patched(Data(contentsOf: realPE), to: "\(Self.shimRealName).dll").write(to: pe)
             }
             try fm.createDirectory(at: so.deletingLastPathComponent(), withIntermediateDirectories: true)
             if (try? fm.destinationOfSymbolicLink(atPath: so.path)) != realSO.path {
                 try? fm.removeItem(at: so)
                 try fm.createSymbolicLink(at: so, withDestinationURL: realSO)
             }
+            // The 0.9.0 layout (a hard link under this name) is the one that collided.
+            for stale in ["wine/x86_64-windows/d3d12_d3dmetal.dll", "wine/x86_64-unix/d3d12_d3dmetal.so"] {
+                try? fm.removeItem(at: shim.appending(path: stale))
+            }
             return shim
         } catch {
             return nil
         }
     }
+
+    /// Base name of the real D3DMetal d3d12 laid out beside the shim: a name of the same length as
+    /// "d3d12" so the export-name patch fits, and distinct enough to never match a DLL a game ships.
+    public static let shimRealName = "apd12"
 
     public func wineVersion() throws -> String {
         try Shell.capture(wineBinary.path, ["--version"], env: baseEnvironment()).trimmingCharacters(in: .whitespacesAndNewlines)

@@ -111,22 +111,32 @@ final class RendererAvailabilityTests: XCTestCase {
         let real = e.root.appending(path: "frameworks/renderer/d3dmetal/wine")
         try fm.createDirectory(at: real.appending(path: "x86_64-windows"), withIntermediateDirectories: true)
         try fm.createDirectory(at: real.appending(path: "x86_64-unix"), withIntermediateDirectories: true)
-        try Data("pe".utf8).write(to: real.appending(path: "x86_64-windows/d3d12.dll"))
+        try SyntheticPE.make(exportName: "d3d12.dll").write(to: real.appending(path: "x86_64-windows/d3d12.dll"))
         try Data("so".utf8).write(to: real.appending(path: "x86_64-unix/d3d12.so"))
         let shim = e.root.appending(path: "renderers/d3dmetal-tsshim/wine")
         try fm.createDirectory(at: shim.appending(path: "x86_64-windows"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: shim.appending(path: "x86_64-unix"), withIntermediateDirectories: true)
         try Data("shim".utf8).write(to: shim.appending(path: "x86_64-windows/d3d12.dll"))
+        // The 0.9.0 layout, which Wine 11 resolved back to the shim: it must go.
+        try Data("old".utf8).write(to: shim.appending(path: "x86_64-windows/d3d12_d3dmetal.dll"))
+        try fm.createSymbolicLink(at: shim.appending(path: "x86_64-unix/d3d12_d3dmetal.so"), withDestinationURL: real.appending(path: "x86_64-unix/d3d12.so"))
 
         let env = try bottle(renderer: .d3dmetal).environment(engine: e)
         XCTAssertTrue(env["WINEDLLPATH_PREPEND"]?.hasPrefix(shim.path) == true, "the shim overlay comes first: \(env["WINEDLLPATH_PREPEND"] ?? "")")
         XCTAssertTrue(env["WINEDLLPATH_PREPEND"]?.contains("/d3dmetal/wine") == true, "D3DMetal itself stays on the path")
-        XCTAssertEqual(try String(contentsOf: shim.appending(path: "x86_64-windows/d3d12_d3dmetal.dll"), encoding: .utf8), "pe",
-                       "the real PE sits beside the shim under a name of its own")
-        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: shim.appending(path: "x86_64-unix/d3d12_d3dmetal.so").path),
+        let copy = shim.appending(path: "x86_64-windows/apd12.dll")
+        XCTAssertEqual(PEExportName.read(try Data(contentsOf: copy)), "apd12.dll",
+                       "the real PE sits beside the shim under a name of its own, inside and out")
+        XCTAssertEqual(try Data(contentsOf: copy).count, SyntheticPE.make(exportName: "d3d12.dll").count, "same bytes otherwise")
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: shim.appending(path: "x86_64-unix/apd12.so").path),
                        real.appending(path: "x86_64-unix/d3d12.so").path, "and its Mach-O half is a link, not a copy")
-        XCTAssertEqual(env["HB_D3D12_REAL"], "Z:" + shim.path.replacingOccurrences(of: "/", with: "\\") + "\\x86_64-windows\\d3d12_d3dmetal.dll",
+        XCTAssertEqual(env["HB_D3D12_REAL"], "Z:" + shim.path.replacingOccurrences(of: "/", with: "\\") + "\\x86_64-windows\\apd12.dll",
                        "the shim gets the real one's Windows path")
+        XCTAssertFalse(fm.fileExists(atPath: shim.appending(path: "x86_64-windows/d3d12_d3dmetal.dll").path), "the colliding layout is removed")
+        XCTAssertNil(try? fm.destinationOfSymbolicLink(atPath: shim.appending(path: "x86_64-unix/d3d12_d3dmetal.so").path))
+        let stamp = try fm.attributesOfItem(atPath: copy.path)[.modificationDate] as? Date
         _ = try bottle(renderer: .d3dmetal).environment(engine: e)   // a second launch changes nothing
+        XCTAssertEqual(try fm.attributesOfItem(atPath: copy.path)[.modificationDate] as? Date, stamp, "the copy is not rewritten every launch")
 
         let plain = try engine(accepted: true)
         let env2 = try bottle(renderer: .d3dmetal).environment(engine: plain)

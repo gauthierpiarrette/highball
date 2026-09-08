@@ -2,7 +2,7 @@
 # Build the D3DMetal timestamp shim (spike/tsshim) into a renderer overlay tarball for the engine
 # manifest: renderers/d3dmetal-tsshim/wine/x86_64-windows/d3d12.dll, stamped as a Wine builtin so
 # WINEDLLPATH_PREPEND picks it up. At launch, Highball lays the real D3DMetal d3d12.dll beside it
-# as d3d12_d3dmetal.dll (see InstalledEngine.timestampShimDir). Needs mingw-w64 (brew).
+# as apd12.dll, export name patched to match (see InstalledEngine.timestampShimDir). Needs mingw-w64 (brew).
 # Usage: Scripts/build-tsshim.sh [tag]   -> dist/d3dmetal-tsshim-<tag>.tar.xz, prints sha256 and size
 set -euo pipefail
 cd "$(dirname "$0")/.."
