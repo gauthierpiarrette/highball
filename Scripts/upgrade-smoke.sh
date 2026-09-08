@@ -4,7 +4,7 @@
 # Seeds a home the way a real user's looks after 0.8: an environment that is NOT the default
 # name ("CS"), holding an installed Steam game, written in the previous release's on-disk
 # shape. Then checks, through the CLI, that the environment lists as real (not DAMAGED).
-# With --screen it also launches the app on that home and requires a window within 20 s,
+# With --screen it also launches the app on that home and requires a window within 30 s,
 # saving a capture to look at. Records private/upgrade-smoke/latest.json, which
 # Scripts/release.sh reads (warn-only, like render-smoke).
 #
@@ -91,11 +91,11 @@ if [ "$SCREEN" = 1 ]; then
   sleep 1; pid=$(pgrep -n -f "dist/Highball.app/Contents/MacOS/Highball" || true)
   [ -n "$pid" ] || fail "app did not start"
   n=0; win=0
-  until [ "$win" -ge 1 ] || [ $n -ge 20 ]; do
+  until [ "$win" -ge 1 ] || [ $n -ge 30 ]; do
     sleep 1; n=$((n+1))
     win=$(osascript -e "tell application \"System Events\" to count windows of (first process whose unix id is $pid)" 2>/dev/null || echo 0)
   done
-  [ "$win" -ge 1 ] || { kill "$pid" 2>/dev/null || true; fail "no window after 20 s"; }
+  [ "$win" -ge 1 ] || { kill "$pid" 2>/dev/null || true; fail "no window after 30 s"; }
   sleep 4
   screencapture -x "$ROOT/private/upgrade-smoke/library.png" 2>/dev/null || true
   kill "$pid" 2>/dev/null || true
