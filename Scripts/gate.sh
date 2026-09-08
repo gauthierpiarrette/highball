@@ -18,6 +18,13 @@ WITH_RENDER=0; [ "${1:-}" = "--with-render" ] && WITH_RENDER=1
 COMMIT=$(git rev-parse HEAD)
 git diff-index --quiet HEAD -- || echo "note: tracked files modified, so this result is for $COMMIT plus local changes" >&2
 
+# A locked session (display slept, caffeinate expired) shows no window to any smoke and every
+# screen check "fails" (2026-09-08, gate run 5): say so and stop instead of recording a regression.
+if Scripts/winlist 2>/dev/null | grep loginwindow | grep -q "layer=2000.*on=true"; then
+  echo "gate: the screen is locked; unlock it and run again (nothing was tested)" >&2
+  python3 -c "import json,time;json.dump({'passed':False,'locked':True,'epoch':int(time.time()),'date':time.strftime('%Y-%m-%d'),'commit':'$COMMIT','required':['upgrade','firstrun','launch-window'],'checks':{}},open('$OUT/latest.json','w'),indent=2)"
+  exit 3
+fi
 echo "gate: building dist/Highball.app from the working tree"
 Scripts/make-app.sh >"$OUT/make-app.log" 2>&1 || { echo "gate: make-app failed, see $OUT/make-app.log" >&2; exit 2; }
 
