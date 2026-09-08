@@ -104,7 +104,12 @@ if curl -fsSL --retry 3 -o "$G/appcast.xml" "https://raw.githubusercontent.com/$
   PARSED=$(python3 - "$G/appcast.xml" <<'PY'
 import sys, xml.etree.ElementTree as ET
 root = ET.parse(sys.argv[1]).getroot()
-item = root.find('./channel/item')           # release.sh inserts newest first
+NS = '{http://www.andymatuschak.org/xml-namespaces/sparkle}'
+# release.sh inserts newest first, but a beta item (sparkle:channel) is only for opted-in installs:
+# the item everyone gets is the newest one WITHOUT a channel, and that is what must match the
+# latest release (2026-09-08: the 0.9.0 beta on top tripped this as drift against v0.8.9).
+items = [i for i in root.findall('./channel/item') if i.find(NS + 'channel') is None]
+item = items[0] if items else root.find('./channel/item')
 enc = item.find('enclosure')
 print(enc.get('{http://www.andymatuschak.org/xml-namespaces/sparkle}version'), enc.get('url'))
 PY
