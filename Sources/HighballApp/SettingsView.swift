@@ -95,6 +95,15 @@ struct EnvironmentsPane: View {
             Spacer(minLength: 0)
             HStack(spacing: 10) {
                 Button(L("New environment…")) { showCreate = true }.disabled(state.busy)
+                Spacer()
+                // Where it all lives (#24, #68): games are big and internal disks are small.
+                Text(String(format: L("Kept in %@"), state.paths.home.path)).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    .help(state.paths.home.path)
+                Button(L("Change…")) { state.chooseHome() }.controlSize(.small).disabled(state.busy)
+                if HighballPaths.configuredHome() != nil {
+                    Button(L("Default")) { state.useDefaultHome() }.controlSize(.small).disabled(state.busy)
+                        .help(L("Back to ~/Library/Application Support/Highball, with the data"))
+                }
                 if let b = selected {
                     Button(L("Repair")) { state.repairBottle(b) }.disabled(state.busy)
                     Button(L("Full page…")) { openName = b.name }

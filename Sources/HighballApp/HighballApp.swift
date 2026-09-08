@@ -159,7 +159,18 @@ struct ContentView: View {
     var body: some View {
         @Bindable var state = state
         Group {
-            if state.needsOnboarding {
+            if let missing = state.homeUnavailable {
+                VStack(spacing: 14) {
+                    Image(systemName: "externaldrive.badge.questionmark").font(.system(size: 44)).foregroundStyle(.secondary)
+                    Text(L("Your Highball folder is not connected")).font(.title2.bold())
+                    Text(String(format: L("Highball keeps its engines and environments in %@, and that location is not available right now. Connect the drive and relaunch, or go back to the default location on this Mac."), missing.path))
+                        .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 520)
+                    HStack {
+                        Button(L("Relaunch")) { AppState.relaunch() }.buttonStyle(.borderedProminent)
+                        Button(L("Use the default location")) { state.useDefaultHome() }
+                    }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(40)
+            } else if state.needsOnboarding {
                 OnboardingView()
             } else {
                 // One library, full width (UX plan Phase 1): no sidebar, no bottles in the way.
@@ -264,6 +275,14 @@ struct ContentView: View {
             Button(L("Not now"), role: .cancel) { state.rendererTrial = nil }
         } message: { trial in
             Text(String(format: L("It ran with %@. Another mode often suits a game better on this Mac, and old DirectX 9 games in particular do badly on Wine's own Direct3D. This changes the mode for this game only; the environment keeps its own. Undo it any time under Advanced on the game's page."), GamePageCopy.plainName(trial.current)))
+        }
+        .alert(state.pendingHome.map { String(format: L("Move Highball's data to %@?"), $0.lastPathComponent) } ?? "",
+               isPresented: .init(get: { state.pendingHome != nil }, set: { if !$0 { state.pendingHome = nil } }),
+               presenting: state.pendingHome) { target in
+            Button(L("Move now")) { state.moveHome(to: target) }
+            Button(L("Cancel"), role: .cancel) { state.pendingHome = nil }
+        } message: { target in
+            Text(String(format: L("Engines, environments and downloads copy to %@, get checked, and are then removed from %@. Highball relaunches when it is done. Nothing is removed until the copy checks out."), target.path, state.paths.home.path))
         }
         .sheet(isPresented: $state.showEpicSignIn) { EpicSignInSheet() }
         // A partial delete succeeded — the bottle is gone and the name is free — so framing it as

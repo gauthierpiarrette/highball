@@ -7,7 +7,7 @@ struct Highball: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "highball",
         abstract: "Highball — run Windows games on Apple Silicon. Free, open, engine-agnostic.",
-        subcommands: [Engine.self, Bottle.self, Run.self, PinCommand.self, Recipe.self, Tricks.self, Env.self, Epic.self, Report.self, BugReportCommand.self, Verify.self],
+        subcommands: [Config.self, Engine.self, Bottle.self, Run.self, PinCommand.self, Recipe.self, Tricks.self, Env.self, Epic.self, Report.self, BugReportCommand.self, Verify.self],
         defaultSubcommand: nil
     )
 }
@@ -631,3 +631,37 @@ struct BugReportCommand: AsyncParsableCommand {
 }
 
 extension HighballKit.Renderer: ExpressibleByArgument {}
+
+
+struct Config: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(abstract: "Where Highball keeps engines and environments (#24): `config` shows it, `config home <folder>` moves there, `config home --default` goes back.")
+    @Argument(help: "'home' to change the location.") var setting: String?
+    @Argument(help: "A folder on any APFS volume, or --default.") var value: String?
+    @Flag(name: .customLong("default"), help: "Back to ~/Library/Application Support/Highball.") var useDefault = false
+
+    func run() async throws {
+        let paths = HighballPaths()
+        guard let setting else {
+            print("home: \(paths.home.path)\(HighballPaths.configuredHome() == nil ? " (default)" : " (chosen)")")
+            if let missing = paths.unavailableConfiguredHome { print("chosen location not available right now: \(missing.path); running on the default meanwhile") }
+            return
+        }
+        guard setting == "home" else { throw ValidationError("unknown setting \(setting); only 'home'") }
+        if useDefault {
+            let target = HighballPaths.defaultHome
+            if paths.home.standardizedFileURL != target.standardizedFileURL, paths.hasData {
+                print("moving data back to \(target.path)…"); try HomeMove.move(from: paths.home, to: target) { print("  \($0)") }
+            }
+            try HighballPaths.setConfiguredHome(nil); print("home: \(target.path) (default)"); return
+        }
+        guard let value else { throw ValidationError("usage: highball config home <folder> | --default") }
+        let target = URL(fileURLWithPath: value, isDirectory: true)
+        if let why = HighballPaths.locationProblem(target) { throw ValidationError(why) }
+        if paths.hasData, target.standardizedFileURL != paths.home.standardizedFileURL {
+            print("moving engines, environments and downloads to \(target.path)…")
+            try HomeMove.move(from: paths.home, to: target) { print("  \($0)") }
+        }
+        try HighballPaths.setConfiguredHome(target)
+        print("home: \(target.path). Relaunch the Highball app to use it.")
+    }
+}

@@ -7,15 +7,73 @@ public let reportRepo = "gauthierpiarrette/highball-db"
 /// `~/Library/Application Support/Gin`, overridable with `HIGHBALL_HOME` for tests.
 public struct HighballPaths: Sendable {
     public let home: URL
+    /// A location the user chose that is not there right now (its drive unplugged, #24): the app
+    /// runs on the default home for the moment, says so, and never treats it as a first run.
+    public let unavailableConfiguredHome: URL?
+
+    /// `~/Library/Application Support/Highball`, the home unless one is chosen.
+    public static var defaultHome: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appending(path: "Highball", directoryHint: .isDirectory)
+    }
+    /// The pointer to a chosen location, at the fixed default home so the app and the CLI read the
+    /// same one (UserDefaults is per bundle). `{"home": "/Volumes/Games/Highball"}`.
+    public static var configFile: URL { defaultHome.appending(path: "config.json") }
 
     public init(home: URL? = nil) {
-        if let home { self.home = home; return }
-        if let env = ProcessInfo.processInfo.environment["HIGHBALL_HOME"] {
-            self.home = URL(fileURLWithPath: env, isDirectory: true)
+        let env = ProcessInfo.processInfo.environment["HIGHBALL_HOME"].map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let chosen = Self.configuredHome()
+        let r = Self.resolve(explicit: home, env: env, configured: chosen,
+                             reachable: chosen.map { FileManager.default.fileExists(atPath: $0.path) } ?? false,
+                             defaultHome: Self.defaultHome)
+        self.home = r.home; self.unavailableConfiguredHome = r.unavailable
+    }
+
+    /// Precedence, most explicit first: the caller's, `HIGHBALL_HOME`, the chosen location when its
+    /// folder is there, else the default (with the chosen one reported as unavailable).
+    public static func resolve(explicit: URL?, env: URL?, configured: URL?, reachable: Bool, defaultHome: URL) -> (home: URL, unavailable: URL?) {
+        if let explicit { return (explicit, nil) }
+        if let env { return (env, nil) }
+        if let configured { return reachable ? (configured, nil) : (defaultHome, configured) }
+        return (defaultHome, nil)
+    }
+
+    public static func configuredHome(from file: URL = configFile) -> URL? {
+        guard let data = try? Data(contentsOf: file),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let path = obj["home"] as? String, !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+
+    /// Records a chosen location, or with nil goes back to the default.
+    public static func setConfiguredHome(_ url: URL?, file: URL = configFile) throws {
+        if let url {
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: ["home": url.standardizedFileURL.path], options: [.prettyPrinted])
+            try data.write(to: file, options: .atomic)
         } else {
-            let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            self.home = support.appending(path: "Highball", directoryHint: .isDirectory)
+            try? FileManager.default.removeItem(at: file)
         }
+    }
+
+    /// Why a folder cannot hold Highball's data, or nil when it can. Wine builds an environment's
+    /// drive letters out of symbolic links, so a volume without them (exFAT, FAT) cannot hold one;
+    /// the folder must exist and be writable; and it must not sit inside the default home, which
+    /// would move the data into itself.
+    public static func locationProblem(_ url: URL, defaultHome: URL = defaultHome) -> String? {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else { return "That folder does not exist." }
+        guard fm.isWritableFile(atPath: url.path) else { return "Highball cannot write in that folder." }
+        let target = url.standardizedFileURL.path + "/", base = defaultHome.standardizedFileURL.path + "/"
+        if target.hasPrefix(base) || base.hasPrefix(target) { return "Pick a folder outside Highball's own data folder." }
+        if let values = try? url.resourceValues(forKeys: [.volumeSupportsSymbolicLinksKey, .volumeIsReadOnlyKey]) {
+            if values.volumeIsReadOnly == true { return "That volume is read only." }
+            if values.volumeSupportsSymbolicLinks == false {
+                return "That drive's format (exFAT or FAT) cannot hold a Windows environment: Wine needs symbolic links. Format it as APFS, or pick another drive."
+            }
+        }
+        return nil
     }
 
     public var downloads: URL { home.appending(path: "downloads", directoryHint: .isDirectory) }
@@ -36,6 +94,51 @@ public struct HighballPaths: Sendable {
         for dir in [home, downloads, engines, bottles, logs, manifests, trash] {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
+    }
+
+    /// Whether this home holds anything worth moving.
+    public var hasData: Bool {
+        let fm = FileManager.default
+        return [engines, bottles].contains { (try? fm.contentsOfDirectory(atPath: $0.path))?.contains { !$0.hasPrefix(".") } == true }
+    }
+}
+
+/// Moves Highball's data between homes (#24, #68): every top-level entry except the pointer file
+/// and the trash is copied, checked file by file for count and bytes, and only then removed at
+/// the source, so a failure part way leaves the old home intact. Symbolic links are copied as
+/// links; the engine's absolute ones are re-made by the engine on its next use.
+public enum HomeMove {
+    public static let skipped: Set<String> = ["config.json", ".trash", ".DS_Store"]
+
+    public static func move(from source: URL, to target: URL, progress: (String) -> Void = { _ in }) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        let entries = try fm.contentsOfDirectory(atPath: source.path).filter { !skipped.contains($0) }.sorted()
+        for name in entries {
+            let from = source.appending(path: name), to = target.appending(path: name)
+            progress(name)
+            if fm.fileExists(atPath: to.path) { try fm.removeItem(at: to) }
+            try fm.copyItem(at: from, to: to)
+            let a = try tally(from), b = try tally(to)
+            guard a == b else { throw HighballError.failed("'\(name)' did not copy completely (\(a.files) files, \(a.bytes) bytes at the source, \(b.files) files, \(b.bytes) bytes at the destination); nothing was removed") }
+        }
+        for name in entries { try fm.removeItem(at: source.appending(path: name)) }
+    }
+
+    /// File count and byte total under a path, links counted as themselves and not followed.
+    public static func tally(_ root: URL) throws -> (files: Int, bytes: Int64) {
+        let fm = FileManager.default
+        var files = 0, bytes: Int64 = 0
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
+        guard let rootValues = try? root.resourceValues(forKeys: Set(keys + [.isDirectoryKey])) else { return (0, 0) }
+        if rootValues.isDirectory != true { return (1, Int64(rootValues.fileSize ?? 0)) }
+        guard let e = fm.enumerator(at: root, includingPropertiesForKeys: keys, options: []) else { return (0, 0) }
+        for case let url as URL in e {
+            let v = try url.resourceValues(forKeys: Set(keys))
+            if v.isSymbolicLink == true { files += 1; continue }
+            if v.isRegularFile == true { files += 1; bytes += Int64(v.fileSize ?? 0) }
+        }
+        return (files, bytes)
     }
 }
 

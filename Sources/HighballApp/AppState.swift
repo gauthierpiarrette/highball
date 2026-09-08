@@ -361,6 +361,60 @@ final class AppState {
     }
 
     let paths = HighballPaths()
+    /// The chosen data location whose drive is not connected (#24): shown instead of the library,
+    /// never as a first run, so nothing gets reinstalled onto the internal disk by mistake.
+    var homeUnavailable: URL? { paths.unavailableConfiguredHome }
+    /// A location chosen in Settings, waiting for the move to be confirmed.
+    var pendingHome: URL?
+
+    /// Settings › Environments › Change…: a folder on any APFS volume, checked before anything moves.
+    func chooseHome() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
+        panel.prompt = L("Use this folder")
+        panel.message = L("Highball will keep its engines and environments in this folder. It must be on an APFS volume (external drives formatted as exFAT cannot hold a Windows environment).")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if let why = HighballPaths.locationProblem(url) { errorMessage = why; return }
+        if url.standardizedFileURL == paths.home.standardizedFileURL { return }
+        pendingHome = url
+    }
+
+    /// Moves everything, records the location, then relaunches: the running app keeps its old paths.
+    func moveHome(to target: URL) {
+        pendingHome = nil
+        let source = paths.home
+        runBusy(String(format: L("Moving Highball's data to %@"), target.lastPathComponent),
+                expected: L("as long as copying your games takes; nothing is removed until the copy checks out"),
+                done: DoneState(title: L("Moved. Highball needs a relaunch to use the new location."), ctaTitle: L("Relaunch"), cta: { Self.relaunch() })) { [self] in
+            try await Task.detached {
+                try HomeMove.move(from: source, to: target) { name in
+                    Task { @MainActor in self.stage = String(format: L("Copying %@…"), name) }
+                }
+                try HighballPaths.setConfiguredHome(target)
+            }.value
+            await MainActor.run { self.appendLog("data moved to \(target.path)") }
+        }
+    }
+
+    /// Back to the default location, with the data, from the unavailable-drive screen or Settings.
+    func useDefaultHome() {
+        let target = HighballPaths.defaultHome
+        if paths.home.standardizedFileURL == target.standardizedFileURL || !paths.hasData {
+            try? HighballPaths.setConfiguredHome(nil); Self.relaunch(); return
+        }
+        pendingHome = nil
+        runBusy(L("Moving Highball's data back to the default location"), done: DoneState(title: L("Moved. Highball needs a relaunch."), ctaTitle: L("Relaunch"), cta: { Self.relaunch() })) { [self] in
+            try await Task.detached { try HomeMove.move(from: self.paths.home, to: target); try HighballPaths.setConfiguredHome(nil) }.value
+        }
+    }
+
+    static func relaunch() {
+        let bundle = Bundle.main.bundleURL.path
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 1; /usr/bin/open -n \"\(bundle)\""]
+        try? p.run()
+        NSApp.terminate(nil)
+    }
     /// This Mac's chip, read once: the game page compares it with the chip a verdict was taken on.
     let machineChip = Machine.chip()
     var engineStore: EngineStore { EngineStore(paths: paths) }
@@ -413,7 +467,7 @@ final class AppState {
         engines = (try? engineStore.installedEngines()) ?? []
         bottles = (try? bottleStore.list()) ?? []
         damagedBottles = (try? bottleStore.damaged()) ?? []
-        needsOnboarding = engines.isEmpty
+        needsOnboarding = engines.isEmpty && homeUnavailable == nil   // an unplugged drive is not a first run
         rosettaInstalled = FileManager.default.fileExists(atPath: "/Library/Apple/usr/share/rosetta/rosetta")
         // Drop a selection whose bottle is gone, not merely a nil one: a delete that threw after
         // the bottle had in fact been removed (the losing side of a race) left the selection
