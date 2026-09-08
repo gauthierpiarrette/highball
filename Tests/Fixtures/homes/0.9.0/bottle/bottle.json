@@ -1,0 +1,29 @@
+{
+  "advertiseAVX" : false,
+  "commandIsControl" : true,
+  "created" : "2026-09-08T01:15:21Z",
+  "dllOverrides" : "",
+  "dpiScale" : 96,
+  "dxvkAppConfig" : {
+
+  },
+  "dxvkAsync" : false,
+  "engineID" : "x64-sikarugir10.0_6-r2",
+  "environment" : {
+
+  },
+  "formatVersion" : 3,
+  "fpsCap" : 0,
+  "metalHUD" : false,
+  "name" : "Games",
+  "pins" : [
+
+  ],
+  "recipes" : [
+
+  ],
+  "renderer" : "dxmt",
+  "rendererExplicit" : false,
+  "sync" : "msync",
+  "windowsVersion" : "win10"
+}
