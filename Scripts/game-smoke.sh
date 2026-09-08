@@ -44,7 +44,7 @@ for row in "${GAMES[@]}"; do
   st=$(grep -E '"StateFlags"' "$ST/appmanifest_$appid.acf" 2>/dev/null | grep -oE '[0-9]+' | tail -1)
   if [ "$st" != "4" ]; then echo "[$name] not installed"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"not installed\"}"); continue; fi
   echo "[$(date +%H:%M:%S)] $name ($appid) under $renderer"
-  pkill -9 -f 'Steam/steam.exe' 2>/dev/null; pkill -9 -f steamwebhelper 2>/dev/null; sleep 3
+  pkill -9 -f 'Steam.steam\.exe' 2>/dev/null; pkill -9 -f steamwebhelper 2>/dev/null; sleep 3
   ($HB run Gaming 'C:\Program Files (x86)\Steam\steam.exe' --renderer $renderer -- -silent > /dev/null 2>&1 &); sleep 35
   ($HB run Gaming 'C:\Program Files (x86)\Steam\steam.exe' -- -applaunch $appid $extra > "$OUT/$name.log" 2>&1 &)
   n=0; until "$WINLIST" 2>/dev/null | grep -iE "wine.*($winre)" | grep -q 'on=true' || [ $n -ge 60 ]; do sleep 3; n=$((n+1)); done
@@ -74,7 +74,7 @@ for row in "${GAMES[@]}"; do
   # kill the game by its window-owning wine process if still up (generic)
   for p in $(ps -axo pid,command | grep -E 'steamapps/common' | grep -vE 'grep|steam\.exe|steamwebhelper|gameoverlayui' | awk '{print $1}'); do kill -9 $p 2>/dev/null; done
 done
-pkill -9 -f 'Steam/steam.exe' 2>/dev/null; pkill -9 -f steamwebhelper 2>/dev/null
+pkill -9 -f 'Steam.steam\.exe' 2>/dev/null; pkill -9 -f steamwebhelper 2>/dev/null
 # Nothing installed is not a pass: say so and exit 3 so Scripts/gate.sh records "skipped".
 if ! printf '%s\n' "${results[@]}" | grep -qv '"not installed"'; then
   echo "GAME SMOKE SKIPPED: none of the table's games is installed in the Gaming bottle"
