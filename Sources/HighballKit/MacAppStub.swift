@@ -51,7 +51,7 @@ public enum MacAppStub {
     /// Writes (or rewrites) the bundle and returns its location. `cover` is any image file; it
     /// becomes the icon when sips and iconutil can convert it, and the stub still works without.
     @discardableResult
-    public static func write(title: String, libraryID: String, url: URL, cover: URL?) throws -> URL {
+    public static func write(title: String, libraryID: String, url: URL, cover: URL?, icon: URL? = nil) throws -> URL {
         let fm = FileManager.default
         let name = appName(for: title)
         let app = folder().appending(path: "\(name).app", directoryHint: .isDirectory)
@@ -63,7 +63,9 @@ public enum MacAppStub {
         let script = contents.appending(path: "MacOS/launch")
         try launchScript(url: url).write(to: script, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
-        if let cover { try? makeIcon(from: cover, to: contents.appending(path: "Resources/icon.icns")) }
+        // The program's own icon when it has one (item 8), else the cover cropped square.
+        if let icon { try? makeIcon(from: icon, to: contents.appending(path: "Resources/icon.icns")) }
+        else if let cover { try? makeIcon(from: cover, to: contents.appending(path: "Resources/icon.icns")) }
         // Ad-hoc signature: a stable identity for macOS, no certificate needed for a local file.
         _ = try? Shell.run("/usr/bin/codesign", ["--force", "--sign", "-", app.path])
         return app

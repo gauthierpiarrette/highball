@@ -988,10 +988,32 @@ final class AppState {
         let url = PlayLink.url(for: target, token: PlayLink.token(in: paths))
         let cover = coverStore.coverURL(for: item.id) ?? item.artworkTall
         do {
-            let app = try MacAppStub.write(title: item.title, libraryID: item.id, url: url, cover: cover)
+            let app = try MacAppStub.write(title: item.title, libraryID: item.id, url: url, cover: cover, icon: programIcon(for: item))
             appendLog("made \(app.lastPathComponent) in ~/Applications/Highball")
             NSWorkspace.shared.activateFileViewerSelecting([app])
         } catch { fail(error) }
+    }
+
+    /// The game's own icon as a PNG under covers/icons, read from its executable (the largest
+    /// .exe in its folder, or a pin's own), or nil when there is none to read.
+    func programIcon(for item: LibraryItem) -> URL? {
+        guard let bottleName = item.bottleName, let bottle = bottles.first(where: { $0.name == bottleName }) else { return nil }
+        let exe: URL?
+        switch item.source {
+        case .steam:
+            guard let game = gamesByBottle[bottleName]?.first(where: { $0.appid == item.steamAppID }), !game.installdir.isEmpty else { return nil }
+            exe = PEIcon.bestExecutable(in: bottle.driveC.appending(path: "Program Files (x86)/Steam/steamapps/common/\(game.installdir)"))
+        case .epic:
+            exe = item.epicAppName.flatMap { epicInstalls[$0] }.flatMap { PEIcon.bestExecutable(in: URL(fileURLWithPath: $0)) }
+        case .pin:
+            exe = item.pinID.flatMap { id in bottle.settings.pins.first { $0.id == id } }.map { $0.executableURL(driveC: bottle.driveC) }
+        }
+        guard let exe, let png = PEIcon.png(from: exe) else { return nil }
+        let dir = paths.home.appending(path: "covers/icons", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let file = dir.appending(path: MacAppStub.bundleID(for: item.id) + ".png")
+        guard (try? png.write(to: file, options: .atomic)) != nil else { return nil }
+        return file
     }
 
     /// A Mac app for a launcher (Steam, Epic, …) that opens it, installing it first if needed
