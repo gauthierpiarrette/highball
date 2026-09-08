@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.0</title>
+      <description><![CDATA[A graphics mode per game with a guided trial after a bad session (#66, #67), engines and environments on any APFS drive (#24, #68), same-Wine engine updates that apply themselves, shortcuts with the game's own icon, the native-Vulkan flag (#44)]]></description>
+      <pubDate>Tue, 08 Sep 2026 01:49:38 -0700</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.0/Highball-0.9.0.zip" sparkle:version="0.9.0" sparkle:shortVersionString="0.9.0" sparkle:edSignature="kCaYi2tE/INn818UUDFTUjlyHW4K1EcoTGX5v8Dx3Dfccnz03hA7E5xs5L/0JAZGJG+fdgJQIZWpBlwNdWiYCg==" length="3316632" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.8.9</title>
       <description><![CDATA[Epic copies match their database rows, so Play asks for Apple's DirectX 12 where a row needs it, and a removed Epic game no longer shows as installed (#63)]]></description>
       <pubDate>Mon, 07 Sep 2026 15:19:01 -0700</pubDate>
