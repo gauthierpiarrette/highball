@@ -862,6 +862,28 @@ extension RegressionTests {
                        "an engine the app still offers (bundled manifest) is kept for rollback even with no bottle on it")
     }
 
+    // highball#61: an engine can carry D3DMetal while recording no acceptance for its licence, so a
+    // bottle set to Apple's DirectX 12 falls back on every launch and the engine looks broken.
+    // Reproduced here 2026-09-09: a fresh install of r5 dropped the acceptance made on r4.
+    func testFreshEngineInheritsLicencesAlreadyAccepted() throws {
+        func engine(_ id: String, accepted: [String]) throws -> InstalledEngine {
+            let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{},"acceptedLicenses":\#(String(data: try JSONEncoder().encode(accepted), encoding: .utf8)!)}"#
+            return InstalledEngine(manifest: try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8)),
+                                   root: URL(fileURLWithPath: "/tmp/\(id)"))
+        }
+        let gptk = "apple-gptk-license-2023-08-17"
+        let r4 = try engine("x64-crossover26.3-r4", accepted: [gptk])
+        let plain = try engine("x64-sikarugir10.0_6-r2", accepted: [])
+
+        XCTAssertEqual(EngineStore.acceptances(requested: [], installed: [r4, plain]), [gptk],
+                       "THE BUG: a new engine must inherit the licence the owner already accepted")
+        XCTAssertEqual(EngineStore.acceptances(requested: [], installed: [plain]), [],
+                       "nothing accepted anywhere: the new engine asks, as it should")
+        XCTAssertEqual(EngineStore.acceptances(requested: ["other-licence"], installed: [r4]),
+                       ["apple-gptk-license-2023-08-17", "other-licence"],
+                       "what the caller asks for is kept alongside what carries over")
+    }
+
     // 2026-09-09, found on the maintainer's own machine: an older Highball started, updated to its
     // bundled default, and walked EVERY bottle onto it, including two on a different Wine build
     // whose prefixes are a different format. It then deleted the engine it did not recognise, so a

@@ -74,6 +74,16 @@ public struct EngineStore: Sendable {
         installed.filter { $0.id != defaultID && !referencedIDs.contains($0.id) && !keep.contains($0.id) }
     }
 
+    /// Which licences a newly installed engine records as accepted: the ones asked for, plus any
+    /// already accepted on an engine installed here. Same id means the same licence text, so a
+    /// second engine carrying the same D3DMetal does not ask again. Not carrying them left an
+    /// engine that has D3DMetal but will not serve it, so a bottle set to Apple's DirectX 12
+    /// silently fell back on every launch with nothing obviously wrong (highball#61, reproduced
+    /// here 2026-09-09 when a fresh install of r5 dropped the acceptance made on r4).
+    public static func acceptances(requested: Set<String>, installed: [InstalledEngine]) -> [String] {
+        Array(requested.union(installed.flatMap { $0.manifest.acceptedLicenses ?? [] })).sorted()
+    }
+
     /// Whether an engine update may move a bottle onto `fresh` without re-running the Windows
     /// first boot. The question is about the bottle's OWN engine: comparing the previous default
     /// instead walked bottles across Wine builds whenever the default's own step was
@@ -162,8 +172,14 @@ public struct EngineStore: Sendable {
             try extract(archive, component: component, name: name, into: staging)
         }
 
+        // A licence the owner already accepted on another installed engine carries over. It is the
+        // same licence text under the same id, and not carrying it leaves an engine that has
+        // D3DMetal but will not serve it, so a bottle set to Apple's DirectX 12 silently falls back
+        // on every launch with nothing obviously wrong (highball#61, and again here 2026-09-09 when
+        // a fresh install of r5 dropped the acceptance made on r4). updateEngine() already gathered
+        // acceptances this way; doing it here covers every path, including first run and the CLI.
         var saved = manifest
-        saved.acceptedLicenses = Array(accepted).sorted()
+        saved.acceptedLicenses = Self.acceptances(requested: accepted, installed: (try? installedEngines()) ?? [])
         try saved.save(to: staging.appending(path: "manifest.json"))
         try linkRuntime(staging)
         try? FileManager.default.removeItem(at: root)
