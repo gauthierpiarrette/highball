@@ -55,6 +55,19 @@ final class HomeLocationTests: XCTestCase {
         XCTAssertTrue(problem?.contains("larger than") == true, "says why, not just no: \(problem ?? "nil")")
     }
 
+    // A game install is tens or hundreds of GB that nobody searches for. After a 75 GB install on
+    // 2026-09-09, Spotlight's mds_stores sat at 55% with the load average above 300 and the machine
+    // was unusable, which made a game launched into it look hung. ensure() marks the home so
+    // Spotlight skips it.
+    func testEnsureMarksTheHomeAsNeverIndexed() throws {
+        let home = tmp.appending(path: "home")
+        let paths = HighballPaths(home: home)
+        try paths.ensure()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: home.appending(path: ".metadata_never_index").path),
+                      "engines and environments must not be indexed")
+        try paths.ensure()  // idempotent: a second run must not fail on the existing marker
+    }
+
     func testVolumeProbePassesOnAWritableFolderAndLeavesNothing() throws {
         let dir = tmp.appending(path: "vol")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

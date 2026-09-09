@@ -129,6 +129,19 @@ public struct HighballPaths: Sendable {
         for dir in [home, downloads, engines, bottles, logs, manifests, trash] {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
+        excludeFromSpotlight()
+    }
+
+    /// Keeps Spotlight out of the engines and environments. A game install is tens or hundreds of
+    /// gigabytes of files nobody searches for, and indexing them costs real time: after a 75 GB
+    /// install on 2026-09-09 mds_stores sat at 55% with the load average above 300, the machine was
+    /// unusable for minutes, and a game launched into it looked like it had hung. The marker file
+    /// is the documented way to say "never index this subtree" and costs nothing when Spotlight is
+    /// already off.
+    func excludeFromSpotlight() {
+        let marker = home.appending(path: ".metadata_never_index")
+        guard !FileManager.default.fileExists(atPath: marker.path) else { return }
+        FileManager.default.createFile(atPath: marker.path, contents: nil)
     }
 
     /// Whether this home holds anything worth moving.
