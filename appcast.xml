@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.1</title>
+      <description><![CDATA[Guardians of the Galaxy plays, and a drive check that tells the truth]]></description>
+      <pubDate>Wed, 09 Sep 2026 16:36:03 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.1/Highball-0.9.1.zip" sparkle:version="0.9.1" sparkle:shortVersionString="0.9.1" sparkle:edSignature="Wkg6ginPUOOkL9osXkR1Xr3R/b+zbAye2qlb09BXDX55zq29BfMdV6WfJprEHgls8bIBfynX2jtwb/binc+dCw==" length="3337212" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.0</title>
       <description><![CDATA[A graphics mode per game with a guided trial after a bad session (#66, #67), engines and environments on any APFS drive (#24, #68), same-Wine engine updates that apply themselves, shortcuts with the game's own icon, the native-Vulkan flag (#44)]]></description>
       <pubDate>Tue, 08 Sep 2026 01:49:38 -0700</pubDate>
