@@ -372,7 +372,7 @@ final class AppState {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
         panel.prompt = L("Use this folder")
-        panel.message = L("Highball will keep its engines and environments in this folder. It must be on an APFS volume (external drives formatted as exFAT cannot hold a Windows environment).")
+        panel.message = L("Highball will keep its engines and environments in this folder. Pick a drive with room to spare: Highball checks the folder before moving anything, and says so if the drive cannot hold an environment.")
         guard panel.runModal() == .OK, let url = panel.url else { return }
         if let why = HighballPaths.locationProblem(url) { errorMessage = why; return }
         if url.standardizedFileURL == paths.home.standardizedFileURL { return }

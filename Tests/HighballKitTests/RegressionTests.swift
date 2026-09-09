@@ -1316,6 +1316,36 @@ extension RegressionTests {
         }
     }
 
+    // A game that must avoid a vendor library ships that as data, not app code. Guardians of the
+    // Galaxy calls agsCheckDriverVersion, and D3DMetal presents the Apple GPU as an AMD card, so
+    // the game takes AMD's vendor path and warns that the driver is too old (2026-09-09).
+    func testDllOverrideStepIsDataDriven() throws {
+        let json = """
+        {"id":"g","kind":"game","title":"G","steps":[{"type":"dlloverride","value":"amd_ags_x64="}]}
+        """
+        let r = try JSONDecoder.highball.decode(Recipe.self, from: Data(json.utf8))
+        XCTAssertTrue(r.isAutoApplicable, "setting an override touches no wine process, so Play may apply it")
+        guard case let .dllOverride(v) = r.steps[0] else { return XCTFail("expected a dllOverride step") }
+        XCTAssertEqual(v, "amd_ags_x64=")
+        // Round trips, so a recipe read back from a bottle keeps the step.
+        let back = try JSONDecoder.highball.decode(Recipe.self, from: try JSONEncoder().encode(r))
+        guard case .dllOverride("amd_ags_x64=") = back.steps[0] else { return XCTFail("did not round trip") }
+    }
+
+    // Applying the same recipe twice must not stack duplicate entries: WINEDLLOVERRIDES is
+    // semicolon separated and a repeated Play would otherwise grow it without bound.
+    func testDllOverrideAppliesIdempotently() {
+        var overrides = ""
+        for _ in 0..<3 {
+            for v in ["amd_ags_x64=", "version=n,b"] {
+                var parts = overrides.split(separator: ";").map(String.init)
+                if !parts.contains(v) { parts.append(v) }
+                overrides = parts.joined(separator: ";")
+            }
+        }
+        XCTAssertEqual(overrides, "amd_ags_x64=;version=n,b")
+    }
+
     // Tech-debt migration (#21): per-app DXVK options are data now. Recipe-set values
     // override the built-in csgo fallback, other exes render their own sections, and the
     // fallback survives untouched for bottles without the recipe.

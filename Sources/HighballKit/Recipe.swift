@@ -30,6 +30,11 @@ public struct Recipe: Codable, Sendable, Identifiable {
         case pin(Pin)
         /// Free-text instruction the UI surfaces to the user after install.
         case note(String)
+        /// A WINEDLLOVERRIDES entry the bottle keeps, e.g. "amd_ags_x64=" to disable AMD's AGS
+        /// library. Appended to whatever the renderer sets, and mirrored into the prefix registry
+        /// so it also reaches a game launched by an already-running Steam. This is how a game's
+        /// need to avoid a vendor library ships as data instead of app code.
+        case dllOverride(String)
         /// Per-app DXVK options ("csgo.exe" → dxvk.enableAsync=False…), stored on the bottle
         /// and rendered into its dxvk.conf at every DXVK launch. This is how game-specific
         /// DXVK knowledge ships as data instead of app code.
@@ -59,6 +64,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case "file": self = .file(path: try c.decode(String.self, forKey: .path), contents: try c.decode(String.self, forKey: .contents))
             case "pin": self = .pin(try c.decode(Pin.self, forKey: .pin))
             case "note": self = .note(try c.decode(String.self, forKey: .text))
+            case "dlloverride": self = .dllOverride(try c.decode(String.self, forKey: .value))
             case "dxvkconfig": self = .dxvkConfig(exe: try c.decode(String.self, forKey: .exe),
                                                   options: try c.decode([String: String].self, forKey: .options))
             case let other: throw HighballError.invalid("unknown recipe step type '\(other)'")
@@ -86,6 +92,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case let .file(path, contents): try c.encode("file", forKey: .type); try c.encode(path, forKey: .path); try c.encode(contents, forKey: .contents)
             case let .pin(p): try c.encode("pin", forKey: .type); try c.encode(p, forKey: .pin)
             case let .note(t): try c.encode("note", forKey: .type); try c.encode(t, forKey: .text)
+            case let .dllOverride(v): try c.encode("dlloverride", forKey: .type); try c.encode(v, forKey: .value)
             case let .dxvkConfig(exe, options):
                 try c.encode("dxvkconfig", forKey: .type); try c.encode(exe, forKey: .exe)
                 try c.encode(options, forKey: .options)
@@ -98,7 +105,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case let .installer(_, _, _, label, _, _): return label
             case let .winetricks(verbs, _): return verbs.joined(separator: " ")
             case .registry: return nil
-            case .environment, .renderer, .sync, .winver, .file, .pin, .note, .dxvkConfig: return nil
+            case .environment, .renderer, .sync, .winver, .file, .pin, .note, .dxvkConfig, .dllOverride: return nil
             }
         }
 
@@ -134,7 +141,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
         /// takes no meaningful time (installer/winetricks can take 20-40 minutes).
         public var isAutoApplicable: Bool {
             switch self {
-            case .file, .renderer, .sync, .environment, .pin, .note, .dxvkConfig: return true
+            case .file, .renderer, .sync, .environment, .pin, .note, .dxvkConfig, .dllOverride: return true
             case .installer, .winetricks, .registry, .winver: return false
             }
         }
@@ -349,6 +356,11 @@ public struct RecipeRunner: Sendable {
                 if !bottle.settings.pins.contains(where: { $0.path == p.path }) { bottle.settings.pins.append(p) }
             case let .note(t):
                 notes.append(t)
+            case let .dllOverride(v):
+                // Semicolon separated, and idempotent: a recipe re-run must not stack duplicates.
+                var parts = bottle.settings.dllOverrides.split(separator: ";").map(String.init)
+                if !parts.contains(v) { parts.append(v) }
+                bottle.settings.dllOverrides = parts.joined(separator: ";")
             case let .dxvkConfig(exe, options):
                 bottle.settings.dxvkAppConfig[exe] = options
             }

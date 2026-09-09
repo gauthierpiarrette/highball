@@ -133,6 +133,7 @@ public enum GamePageCopy {
         case let .file(path, _): return "Write \(URL(fileURLWithPath: path).lastPathComponent)"
         case .pin: return nil
         case let .note(text): return text
+        case let .dllOverride(v): return "Set the Windows library override \(v)"
         case let .dxvkConfig(exe, _): return "Configure DXVK for \(exe)"
         }
     }

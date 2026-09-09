@@ -56,10 +56,17 @@ public struct HighballPaths: Sendable {
         }
     }
 
-    /// Why a folder cannot hold Highball's data, or nil when it can. Wine builds an environment's
-    /// drive letters out of symbolic links, so a volume without them (exFAT, FAT) cannot hold one;
-    /// the folder must exist and be writable; and it must not sit inside the default home, which
-    /// would move the data into itself.
+    /// Why a folder cannot hold Highball's data, or nil when it can. The folder must exist and be
+    /// writable, must not sit inside the default home (which would move the data into itself), and
+    /// the volume must do the two things Wine needs: symbolic links, for an environment's drive
+    /// letters, and an execute bit that survives, because the engine's own binaries run from here.
+    ///
+    /// Those last two are probed rather than inferred. The previous check read
+    /// `volumeSupportsSymbolicLinks` and refused exFAT by name, but macOS reports exFAT as
+    /// supporting symbolic links and does in fact create them, so the check never fired and the
+    /// refusal the release notes promised never happened. Measured 2026-09-09 on an exFAT volume:
+    /// the flag reads true, links are created, and a bottle moved there launches and runs. Asking
+    /// the volume directly also catches what a format name never could.
     public static func locationProblem(_ url: URL, defaultHome: URL = defaultHome) -> String? {
         let fm = FileManager.default
         var isDir: ObjCBool = false
@@ -67,11 +74,39 @@ public struct HighballPaths: Sendable {
         guard fm.isWritableFile(atPath: url.path) else { return "Highball cannot write in that folder." }
         let target = url.standardizedFileURL.path + "/", base = defaultHome.standardizedFileURL.path + "/"
         if target.hasPrefix(base) || base.hasPrefix(target) { return "Pick a folder outside Highball's own data folder." }
-        if let values = try? url.resourceValues(forKeys: [.volumeSupportsSymbolicLinksKey, .volumeIsReadOnlyKey]) {
-            if values.volumeIsReadOnly == true { return "That volume is read only." }
-            if values.volumeSupportsSymbolicLinks == false {
-                return "That drive's format (exFAT or FAT) cannot hold a Windows environment: Wine needs symbolic links. Format it as APFS, or pick another drive."
-            }
+        if (try? url.resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly == true {
+            return "That volume is read only."
+        }
+        // FAT32 stops at one byte under 4 GiB per file, and game files pass that routinely. macOS
+        // reports the real limit, so this asks rather than matching on a format name (measured
+        // 2026-09-09: FAT32 4294967295, exFAT and APFS effectively unlimited).
+        if let max = (try? url.resourceValues(forKeys: [.volumeMaximumFileSizeKey]))?.volumeMaximumFileSize,
+           max < 4 << 30 {
+            return "That drive cannot store a file larger than \(max >> 30) GB, and game files are often bigger. Format it as APFS, or pick another drive."
+        }
+        return volumeProblem(url)
+    }
+
+    /// Makes and removes a scratch folder inside `url` to check what Wine actually needs from the
+    /// volume. Leaves nothing behind, including when a check fails.
+    static func volumeProblem(_ url: URL, uuid: String = UUID().uuidString) -> String? {
+        let fm = FileManager.default
+        let probe = url.appending(path: ".highball-probe-" + uuid.prefix(8))
+        defer { try? fm.removeItem(at: probe) }
+        do { try fm.createDirectory(at: probe, withIntermediateDirectories: true) }
+        catch { return "Highball cannot write in that folder." }
+        do { try fm.createSymbolicLink(atPath: probe.appending(path: "link").path, withDestinationPath: "target") }
+        catch {
+            return "That drive cannot hold a Windows environment: an environment's drive letters are symbolic links, and this volume does not support them. Format it as APFS, or pick another drive."
+        }
+        let bin = probe.appending(path: "bin")
+        guard fm.createFile(atPath: bin.path, contents: Data("#!/bin/sh\nexit 0\n".utf8),
+                            attributes: [.posixPermissions: 0o755]) else {
+            return "Highball cannot write in that folder."
+        }
+        let mode = ((try? fm.attributesOfItem(atPath: bin.path))?[.posixPermissions] as? NSNumber)?.uint16Value ?? 0
+        guard mode & 0o100 != 0 else {
+            return "That drive cannot hold a Windows environment: Highball runs its engine from here, and this volume does not keep the execute permission. Format it as APFS, or pick another drive."
         }
         return nil
     }

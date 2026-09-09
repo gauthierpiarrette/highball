@@ -41,6 +41,36 @@ final class HomeLocationTests: XCTestCase {
         XCTAssertNotNil(HighballPaths.locationProblem(tmp, defaultHome: tmp.appending(path: "default")), "the default's own parent is refused too")
     }
 
+    // The volume check asks the volume instead of trusting a name. The old check read
+    // volumeSupportsSymbolicLinks and refused exFAT by name, but macOS reports exFAT as supporting
+    // symbolic links and creates them, so it never fired and the promised refusal never happened
+    // (measured 2026-09-09: a home moved to exFAT was accepted and the bottle ran).
+    // FAT32 caps a file at one byte under 4 GiB and game files pass that routinely, so a drive
+    // that reports a small maximum is refused. Runs only where such a volume is mounted.
+    func testSmallMaximumFileSizeIsRefused() throws {
+        let fat = URL(fileURLWithPath: "/Volumes/FAT32TEST")
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: fat.path), "no FAT32 volume mounted")
+        let problem = HighballPaths.locationProblem(fat, defaultHome: tmp)
+        XCTAssertNotNil(problem)
+        XCTAssertTrue(problem?.contains("larger than") == true, "says why, not just no: \(problem ?? "nil")")
+    }
+
+    func testVolumeProbePassesOnAWritableFolderAndLeavesNothing() throws {
+        let dir = tmp.appending(path: "vol")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        XCTAssertNil(HighballPaths.volumeProblem(dir, uuid: "fixed-uuid"))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), [],
+                       "the probe cleans up after itself, including the symlink and the executable")
+    }
+
+    func testVolumeProbeReportsAnUnwritableFolder() throws {
+        let dir = tmp.appending(path: "ro")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path) }
+        XCTAssertNotNil(HighballPaths.volumeProblem(dir), "a folder it cannot write in is refused")
+    }
+
     func testMoveCopiesChecksThenRemovesAndKeepsLinks() throws {
         let src = tmp.appending(path: "src"), dst = tmp.appending(path: "dst")
         let fm = FileManager.default
