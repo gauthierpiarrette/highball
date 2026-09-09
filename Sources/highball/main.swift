@@ -112,7 +112,7 @@ struct Bottle: AsyncParsableCommand {
             print("created \(bottle.url.path)")
             if let recipe {
                 var r = RecipeRunner(engine: eng, bottle: bottle)
-                let notes = try await r.apply(try loadRecipe(recipe)) { print($0) }
+                let notes = try await r.apply(try loadRecipe(recipe), resolve: { try? loadRecipe($0) }) { print($0) }
                 for n in notes { print("note: \(n)") }
             }
         }
@@ -382,7 +382,7 @@ struct Recipe: AsyncParsableCommand {
             let b = try BottleStore().get(bottle)
             let eng = try EngineStore().engine(b.settings.engineID)
             var r = RecipeRunner(engine: eng, bottle: b)
-            let notes = try await r.apply(try loadRecipe(recipe)) { print($0) }
+            let notes = try await r.apply(try loadRecipe(recipe), resolve: { try? loadRecipe($0) }) { print($0) }
             for n in notes { print("note: \(n)") }
         }
     }

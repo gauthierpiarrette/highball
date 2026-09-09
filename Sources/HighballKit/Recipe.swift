@@ -268,13 +268,26 @@ public struct RecipeRunner: Sendable {
     }
 
     /// Runs every step. Returns the notes the UI should show afterwards.
-    public mutating func apply(_ recipe: Recipe, log: (@Sendable (String) -> Void)? = nil) async throws -> [String] {
+    public mutating func apply(_ recipe: Recipe,
+                               resolve: (@Sendable (String) -> Recipe?)? = nil,
+                               log: (@Sendable (String) -> Void)? = nil) async throws -> [String] {
         if let b = recipe.blocked {
             var msg = "'\(recipe.title)' is blocked on this engine: \(b.reason)"
             if let t = b.tracking { msg += " Tracked at \(t)" }
             throw HighballError.invalid(msg)
         }
         var notes: [String] = []
+        // Dependencies first. A recipe that declares requires: ["steam", "dotnet48"] means the game
+        // does not work without .NET, and until 2026-09-10 that field was read by nothing: pressing
+        // Play launched Assetto Corsa without .NET and it died with "Configuration system failed to
+        // initialize", while the recipe's only mention of it was a note telling the owner to go and
+        // install it themselves. Only tweaks are applied here; a launcher in `requires` is a
+        // statement about where the game comes from, not something to install on its behalf.
+        for id in recipe.requires ?? [] where !bottle.settings.recipes.contains(id) {
+            guard let dep = resolve?(id), dep.kind == .tweak else { continue }
+            log?("[\(recipe.id)] needs \(dep.id) first")
+            notes += try await apply(dep, resolve: resolve, log: log)
+        }
         // A recipe's renderer is a default, never an override: an explicit user choice wins
         // (issue #29 — the Steam recipe silently reset a d3dmetal bottle to dxmt).
         if let r = recipe.renderer {

@@ -884,6 +884,25 @@ extension RegressionTests {
                        "what the caller asks for is kept alongside what carries over")
     }
 
+    // A recipe that declares requires: ["steam", "dotnet48"] means the game does not work without
+    // .NET. Until 2026-09-10 that field was read by nothing, so pressing Play launched Assetto Corsa
+    // without .NET and it died with "Configuration system failed to initialize" while the recipe's
+    // only mention of the dependency was a note telling the owner to install it themselves.
+    func testRecipeDependenciesAreDeclaredAndResolvable() throws {
+        let dep = #"{"id":"dotnet48","kind":"tweak","title":"NET","steps":[{"type":"note","text":"n"}]}"#
+        let game = #"{"id":"ac","kind":"game","title":"AC","requires":["steam","dotnet48"],"steps":[{"type":"note","text":"g"}]}"#
+        let d = try JSONDecoder.highball.decode(Recipe.self, from: Data(dep.utf8))
+        let g = try JSONDecoder.highball.decode(Recipe.self, from: Data(game.utf8))
+        XCTAssertEqual(g.requires, ["steam", "dotnet48"], "the dependency must survive decoding")
+        XCTAssertEqual(d.kind, .tweak, "only tweaks are applied on a game's behalf")
+
+        // The resolver picks tweaks and ignores launchers: a launcher in `requires` says where the
+        // game comes from, it is not something to install for it.
+        let catalog = ["dotnet48": d]
+        let applied = (g.requires ?? []).compactMap { catalog[$0] }.filter { $0.kind == .tweak }.map(\.id)
+        XCTAssertEqual(applied, ["dotnet48"])
+    }
+
     // 2026-09-09, found on the maintainer's own machine: an older Highball started, updated to its
     // bundled default, and walked EVERY bottle onto it, including two on a different Wine build
     // whose prefixes are a different format. It then deleted the engine it did not recognise, so a

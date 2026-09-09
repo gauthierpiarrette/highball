@@ -254,7 +254,7 @@ final class AppState {
             if recipe.isAutoApplicable {
                 Task { @MainActor in
                     var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
-                    if let notes = try? await runner.apply(recipe) {
+                    if let notes = try? await runner.apply(recipe, resolve: { Self.recipe($0) }) {
                         logLines.append("applied the \(recipe.title) fix")
                         for n in notes { logLines.append("note: \(n)") }
                     }
@@ -869,7 +869,7 @@ final class AppState {
             let bottle = try await bottleStore.create(name: name, engine: engine)
             await MainActor.run { self.appendLog("bottle '\(name)' created on \(engine.id)"); self.refresh() }
             var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
-            let notes = try await runner.apply(recipe) { line in Task { @MainActor in self.appendLog(line) } }
+            let notes = try await runner.apply(recipe, resolve: { Self.recipe($0) }) { line in Task { @MainActor in self.appendLog(line) } }
             for n in notes { await MainActor.run { self.appendLog("note: \(n)") } }
             await MainActor.run { self.selectedBottle = name }
         }
@@ -922,7 +922,7 @@ final class AppState {
             await MainActor.run { self.appendLog("bottle created") }
             if let recipeID, let recipe = Self.recipe(recipeID) {
                 var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
-                let notes = try await runner.apply(recipe) { line in Task { @MainActor in self.appendLog(line) } }
+                let notes = try await runner.apply(recipe, resolve: { Self.recipe($0) }) { line in Task { @MainActor in self.appendLog(line) } }
                 for n in notes { await MainActor.run { self.appendLog("note: \(n)") } }
             }
             await MainActor.run { self.selectedBottle = name }
@@ -938,7 +938,7 @@ final class AppState {
                 done: done ?? DoneState(title: String(format: L("%@ installed"), recipe.title), ctaTitle: nil, cta: nil),
                 stop: .killBottleThenRepair(bottle, label: L("Stop and repair"))) { [self] in
             var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
-            let notes = try await runner.apply(recipe) { line in Task { @MainActor in self.appendLog(line) } }
+            let notes = try await runner.apply(recipe, resolve: { Self.recipe($0) }) { line in Task { @MainActor in self.appendLog(line) } }
             for n in notes { await MainActor.run { self.appendLog("note: \(n)") } }
         }
     }
@@ -1654,7 +1654,7 @@ final class AppState {
 
     // MARK: Resource lookup (repo checkout or app bundle)
 
-    static var repoRoot: URL? {
+    nonisolated static var repoRoot: URL? {
         var dir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
         for _ in 0..<6 {
             if FileManager.default.fileExists(atPath: dir.appending(path: "spike/engine-manifest.json").path) { return dir }
@@ -1738,7 +1738,9 @@ final class AppState {
         return out.values.sorted { $0.title < $1.title }
     }
 
-    static func recipe(_ id: String) -> HighballKit.Recipe? {
+    /// Reads a recipe from the bundle or a sibling checkout. Nonisolated because recipe
+    /// application resolves dependencies off the main actor: it touches no app state.
+    nonisolated static func recipe(_ id: String) -> HighballKit.Recipe? {
         if let url = Bundle.main.url(forResource: id, withExtension: "json"),
            let r = try? HighballKit.Recipe.load(from: url) { return r }
         guard let root = repoRoot else { return nil }
