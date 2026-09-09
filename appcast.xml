@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.2</title>
+      <description><![CDATA[An engine update no longer moves an environment onto the wrong Wine]]></description>
+      <pubDate>Wed, 09 Sep 2026 17:06:43 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.2/Highball-0.9.2.zip" sparkle:version="0.9.2" sparkle:shortVersionString="0.9.2" sparkle:edSignature="mqfoTaZv6Ajy6mO8WQfSAyLoVQp1fNbwfBD7msDU+ZJhGnc7IYqSiVL55VQ2c+50OqMpRyV7otxODq/dkTEyAg==" length="3338465" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.1</title>
       <description><![CDATA[Guardians of the Galaxy plays, and a drive check that tells the truth]]></description>
       <pubDate>Wed, 09 Sep 2026 16:36:03 +0200</pubDate>
