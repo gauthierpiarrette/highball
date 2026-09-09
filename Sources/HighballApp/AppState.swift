@@ -540,23 +540,35 @@ final class AppState {
                 Task { @MainActor in self.reportDownload(name, received: received, total: total) }
             }
             await MainActor.run { self.appendLog("engine \(fresh.id) installed") }
-            let sameWine = !EngineManifest.needsPrefixRefresh(from: old.manifest, to: fresh.manifest)
+            // Whether the prefix survives is a question about THIS bottle's engine, not about the
+            // default engine's own step. Comparing old (the previous default) to fresh moved a
+            // bottle sitting on a different Wine build across builds whenever the default's own
+            // update happened to be component-only: on 2026-09-09 a 0.8.9 build walked bottles
+            // from the Wine 11 engine onto its Wine 10 default because r1 to r2 was same-Wine.
+            let installedNow = try engineStore.installedEngines()
             for var bottle in try bottleStore.list() where bottle.settings.engineID != fresh.id {
-                guard sameWine else {
+                guard let bottleEngine = installedNow.first(where: { $0.id == bottle.settings.engineID }) else {
+                    await MainActor.run { self.appendLog("bottle '\(bottle.name)' stays on \(bottle.settings.engineID): that engine is not installed here, so this build cannot tell whether its Wine matches") }
+                    continue
+                }
+                guard EngineStore.canMoveBottle(on: bottleEngine.manifest, to: fresh.manifest) else {
                     await MainActor.run { self.appendLog("bottle '\(bottle.name)' stays on \(bottle.settings.engineID): the new engine has a different Wine build; switch it from the bottle's settings when you want") }
                     continue
                 }
-                let runnerOld = WineRunner(paths: paths, engine: old, bottle: bottle)
+                let runnerOld = WineRunner(paths: paths, engine: bottleEngine, bottle: bottle)
                 try? runnerOld.kill()
                 try? await Task.sleep(for: .seconds(2))
                 bottle.settings.engineID = fresh.id
                 try bottle.save()
                 await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(fresh.id) (same Wine, no prefix refresh needed)") }
             }
+            // Clean up only the engine this update superseded. Anything else stays, including an
+            // engine this build has never heard of: a newer Highball may have installed it, and
+            // deleting it throws away a 300 MB download and strands every bottle on it.
             let referenced = Set(try bottleStore.list().map(\.settings.engineID))
-            let installed = try engineStore.installedEngines()
-            let offered = Set(Self.knownManifests.map(\.id))
-            for stale in EngineStore.unreferencedEngines(installed: installed, referencedIDs: referenced, defaultID: fresh.id, keep: offered) {
+            if let stale = EngineStore.engineToRemoveAfterUpdate(
+                oldID: oldID, freshID: fresh.id, referencedIDs: referenced,
+                installed: try engineStore.installedEngines()) {
                 try? FileManager.default.removeItem(at: stale.root)
                 await MainActor.run { self.appendLog("old engine \(stale.id) removed (no bottle uses it)") }
             }

@@ -862,6 +862,55 @@ extension RegressionTests {
                        "an engine the app still offers (bundled manifest) is kept for rollback even with no bottle on it")
     }
 
+    // 2026-09-09, found on the maintainer's own machine: an older Highball started, updated to its
+    // bundled default, and walked EVERY bottle onto it, including two on a different Wine build
+    // whose prefixes are a different format. It then deleted the engine it did not recognise, so a
+    // 300 MB download vanished and the bottles pointed at a Wine 10 engine with Wine 11 prefixes.
+    // The move is a question about each bottle's own engine, never about the default's own step.
+    func testBottleMovesOnlyWhenItsOwnEngineHasTheSameWine() throws {
+        func manifest(_ id: String, wine sha: String) throws -> EngineManifest {
+            let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{"wine":{"kind":"engine","url":"https://x/\#(sha).tar.gz","sha256":"\#(sha)"}}}"#
+            return try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8))
+        }
+        let wine10a = try manifest("x64-sikarugir10.0_6-r1", wine: "aaaa")
+        let wine10b = try manifest("x64-sikarugir10.0_6-r2", wine: "aaaa")   // same Wine, shim added
+        let wine11  = try manifest("x64-crossover26.3-r5",   wine: "bbbb")   // different Wine
+
+        XCTAssertTrue(EngineStore.canMoveBottle(on: wine10a, to: wine10b),
+                      "same Wine build: a component-only update may move the bottle")
+        XCTAssertFalse(EngineStore.canMoveBottle(on: wine11, to: wine10b),
+                       "THE BUG: a Wine 11 bottle must never be walked onto a Wine 10 engine")
+        XCTAssertFalse(EngineStore.canMoveBottle(on: nil, to: wine10b),
+                       "engine not installed here: this build cannot tell, so it leaves the bottle alone")
+    }
+
+    // The same incident, second half: cleanup removed an engine the running build had never heard
+    // of. Only the superseded default may go, and only when nothing runs on it.
+    func testUpdateRemovesOnlyTheEngineItSuperseded() throws {
+        func engine(_ id: String) throws -> InstalledEngine {
+            let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"14.0","components":{}}"#
+            return InstalledEngine(manifest: try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8)),
+                                   root: URL(fileURLWithPath: "/tmp/\(id)"))
+        }
+        let old = try engine("x64-sikarugir10.0_6-r1")
+        let fresh = try engine("x64-sikarugir10.0_6-r2")
+        let newer = try engine("x64-crossover26.3-r5")     // installed by a newer Highball
+        let all = [old, fresh, newer]
+
+        XCTAssertEqual(EngineStore.engineToRemoveAfterUpdate(oldID: old.id, freshID: fresh.id,
+                                                            referencedIDs: [], installed: all)?.id, old.id,
+                       "the superseded default goes when no bottle is on it")
+        XCTAssertNil(EngineStore.engineToRemoveAfterUpdate(oldID: old.id, freshID: fresh.id,
+                                                          referencedIDs: [old.id], installed: all),
+                     "a bottle still runs on it: it stays")
+        // The engine this build does not know is never even a candidate.
+        for referenced in [Set<String>(), Set([newer.id])] {
+            XCTAssertNotEqual(EngineStore.engineToRemoveAfterUpdate(oldID: old.id, freshID: fresh.id,
+                                                                   referencedIDs: referenced, installed: all)?.id,
+                              newer.id, "THE BUG: an unrecognised newer engine must never be removed")
+        }
+    }
+
     // The crash alert's second way out: the default engine when the bottle is not on it, else the
     // newest other engine, and nothing with a single engine installed.
     func testAlternateEngineForCrashAlert() throws {

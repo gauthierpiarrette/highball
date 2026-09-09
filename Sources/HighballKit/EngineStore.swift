@@ -74,6 +74,28 @@ public struct EngineStore: Sendable {
         installed.filter { $0.id != defaultID && !referencedIDs.contains($0.id) && !keep.contains($0.id) }
     }
 
+    /// Whether an engine update may move a bottle onto `fresh` without re-running the Windows
+    /// first boot. The question is about the bottle's OWN engine: comparing the previous default
+    /// instead walked bottles across Wine builds whenever the default's own step was
+    /// component-only (2026-09-09, a 0.8.9 build moved Wine 11 bottles onto its Wine 10 default
+    /// because r1 to r2 was same-Wine, and their prefixes are a different format).
+    /// A bottle whose engine is not installed here returns false: this build cannot tell.
+    public static func canMoveBottle(on bottleEngine: EngineManifest?, to fresh: EngineManifest) -> Bool {
+        guard let bottleEngine else { return false }
+        return !EngineManifest.needsPrefixRefresh(from: bottleEngine, to: fresh)
+    }
+
+    /// The one engine an update may delete: the default it just superseded, and only when no
+    /// bottle is left on it. Everything else stays, including an engine this build does not
+    /// recognise, because a newer Highball may have installed it and removing it both discards a
+    /// large download and strands the bottles that use it.
+    public static func engineToRemoveAfterUpdate(oldID: String, freshID: String,
+                                                 referencedIDs: Set<String>,
+                                                 installed: [InstalledEngine]) -> InstalledEngine? {
+        guard oldID != freshID, !referencedIDs.contains(oldID) else { return nil }
+        return installed.first { $0.id == oldID }
+    }
+
     /// The engine to offer when a program fails on `currentID`: the default engine when the
     /// bottle is not on it (the newer one, usually), else the newest other installed engine.
     /// nil with a single engine installed.
