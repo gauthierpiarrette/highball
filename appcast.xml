@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.3</title>
+      <description><![CDATA[Guardians of the Galaxy and GTA V play, and engine updates stop moving environments onto the wrong Wine]]></description>
+      <pubDate>Thu, 10 Sep 2026 00:24:18 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.3/Highball-0.9.3.zip" sparkle:version="0.9.3" sparkle:shortVersionString="0.9.3" sparkle:edSignature="m3pDp/MZ/H06E4bY26qpIArOXlqqQ48nHFadfy8QaSxK4UEFlxjfc7SBmvSX2xaKenc30nrnhKnfAfKeCLtfDw==" length="3345458" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.2</title>
       <description><![CDATA[An engine update no longer moves an environment onto the wrong Wine]]></description>
       <pubDate>Wed, 09 Sep 2026 17:06:43 +0200</pubDate>
