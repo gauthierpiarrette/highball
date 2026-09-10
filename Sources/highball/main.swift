@@ -134,7 +134,7 @@ struct Bottle: AsyncParsableCommand {
     }
 
     struct Set: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Change a bottle setting: engine, renderer, winver, sync, hud, avx, dpi, dxvkasync, dlloverrides, env KEY=VALUE")
+        static let configuration = CommandConfiguration(abstract: "Change a bottle setting: engine, renderer, winver, sync, hud, avx, dpi, dxvkasync, dlloverrides, env KEY=VALUE (empty VALUE removes)")
         @Argument var name: String
         @Argument var setting: String
         @Argument var value: String
@@ -169,9 +169,7 @@ struct Bottle: AsyncParsableCommand {
                 let eng = try EngineStore().engine(b.settings.engineID)
                 try await WineRunner(engine: eng, bottle: b).setDpi(logPixels: scale)
             case "env":
-                let parts = value.split(separator: "=", maxSplits: 1).map(String.init)
-                guard parts.count == 2 else { fail("env expects KEY=VALUE") }
-                b.settings.environment[parts[0]] = parts[1]
+                guard EnvAssignment.apply(value, to: &b.settings.environment) else { fail("env expects KEY=VALUE (empty VALUE removes)") }
             default: fail("unknown setting \(setting)")
             }
             try bs.update(b)
@@ -296,11 +294,7 @@ struct PinCommand: AsyncParsableCommand {
                 else if let r = HighballKit.Renderer(rawValue: v) { b.settings.pins[i].renderer = r }
                 else { fail("bad renderer \(v)") }
             case "env":
-                guard let v = value.first else { fail("env expects KEY=VALUE") }
-                let parts = v.split(separator: "=", maxSplits: 1).map(String.init)
-                guard parts.count == 2 else { fail("env expects KEY=VALUE") }
-                if parts[1].isEmpty { b.settings.pins[i].environment.removeValue(forKey: parts[0]) }
-                else { b.settings.pins[i].environment[parts[0]] = parts[1] }
+                guard let v = value.first, EnvAssignment.apply(v, to: &b.settings.pins[i].environment) else { fail("env expects KEY=VALUE (empty VALUE removes)") }
             default: fail("unknown setting \(setting) (args, renderer, env)")
             }
             try bs.update(b)
