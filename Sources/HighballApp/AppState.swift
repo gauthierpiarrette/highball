@@ -1079,8 +1079,15 @@ final class AppState {
                 await MainActor.run { [self] in if self.steamClients != running { self.steamClients = running } }
                 // A first start that deadlocked after its bootstrap (issue #9) is restarted once.
                 for bottle in bottles where running.contains(bottle.name) {
-                    guard let root = SteamLibrary.steamRoot(of: bottle), SteamFirstStart.isHung(steamRoot: root) else { continue }
-                    await MainActor.run { [self] in self.restartHungFirstStart(bottle) }
+                    guard let root = SteamLibrary.steamRoot(of: bottle) else { continue }
+                    if SteamFirstStart.isHung(steamRoot: root) {
+                        await MainActor.run { [self] in self.restartHungFirstStart(bottle) }
+                        continue
+                    }
+                    // Steam can park a launch on a dialog nobody sees (issue #74).
+                    if let waiting = SteamGameAction.pending(steamRoot: root) {
+                        await MainActor.run { [self] in self.steamIsWaitingForAnAnswer(waiting, in: bottle) }
+                    }
                 }
                 try? await Task.sleep(for: .seconds(8))
             }
@@ -1103,6 +1110,24 @@ final class AppState {
             guard let self, let fresh = self.bottles.first(where: { $0.name == bottle.name }) else { return }
             self.showSteam(in: fresh)
         }
+    }
+
+    /// Launch attempts already reported, so one dialog is mentioned once and not every 8 seconds.
+    @ObservationIgnored private var steamWaitsReported: Set<String> = []
+
+    /// Steam stopped a launch and is waiting for the player to answer something in its own window
+    /// — usually a publisher licence agreement (issue #74). Nothing is wrong with the game: the
+    /// process starts and then sits there, every log is clean, and if the Steam window is behind
+    /// another one the dialog is never seen. Say what is happening and put the window in front.
+    func steamIsWaitingForAnAnswer(_ waiting: SteamGameAction.Pending, in bottle: Bottle) {
+        let key = "\(bottle.name)#\(waiting.appID)#\(waiting.actionID)#\(waiting.task)"
+        guard !steamWaitsReported.contains(key) else { return }
+        steamWaitsReported.insert(key)
+        let name = SteamLibrary.games(in: bottle).first { $0.appid == waiting.appID }?.name
+        let message = SteamGameAction.message(for: waiting, name: name)
+        appendLog(message)
+        stage = message
+        showSteam(in: bottle)
     }
 
     /// Brings the bottle's Steam window forward (the running client is asked to show it; with

@@ -27,4 +27,23 @@ final class SteamFirstStartTests: XCTestCase {
             .write(to: logs.appending(path: "connection_log.txt"), atomically: true, encoding: .utf8)
         XCTAssertFalse(SteamFirstStart.isHung(steamRoot: root), "it connected after the bootstrap")
     }
+
+    /// Steam's logs are CRLF and Swift treats CRLF as a single Character, so a split on "\n"
+    /// returns the whole file as one line and every timestamp read came back nil. This check
+    /// silently never fired on a real machine until that was fixed.
+    func testReadsTimestampsOutOfCRLFLogs() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appending(path: "bootstrap_log.txt")
+        let crlf = "[2026-09-10 02:41:50] Startup\r\n[2026-09-10 02:41:57] Update complete, launching Steam...\r\n"
+        try crlf.write(to: file, atomically: true, encoding: .utf8)
+
+        let got = SteamFirstStart.lastTimestamp(in: file, matching: "Update complete")
+        XCTAssertNotNil(got, "CRLF logs must still yield a timestamp")
+
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"; f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = .current
+        XCTAssertEqual(got, f.date(from: "2026-09-10 02:41:57"))
+    }
 }

@@ -31,12 +31,16 @@ public enum SteamFirstStart {
 
     /// The newest `[YYYY-MM-DD HH:MM:SS]` stamp in the file (on a line containing `matching`,
     /// when given). Steam writes local time without a zone.
+    ///
+    /// Split on `isNewline`, never on the character `"\n"`. Steam's logs are CRLF and Swift
+    /// treats CRLF as one Character, so splitting on `"\n"` returns the whole file as a single
+    /// line: every timestamp read came back nil and this check silently never fired.
     static func lastTimestamp(in file: URL, matching: String?) -> Date? {
         guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss"; f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = .current
         var newest: Date?
-        for line in text.split(separator: "\n").reversed() {
+        for line in text.split(whereSeparator: \.isNewline).reversed() {
             if let m = matching, !line.contains(m) { continue }
             guard line.hasPrefix("["), let close = line.firstIndex(of: "]") else { continue }
             let stamp = String(line[line.index(after: line.startIndex)..<close])
