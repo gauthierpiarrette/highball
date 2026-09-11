@@ -405,11 +405,12 @@ public struct RecipeRunner: Sendable {
 
 public extension Recipe {
     /// The engine to offer before applying this recipe to an environment on `current`: the
-    /// manifest the recipe names when its Wine build differs from `current`'s, nil otherwise
-    /// (the environment already runs that Wine, a later build of it included, or the app does
-    /// not know the manifest).
+    /// manifest the recipe names unless `current` already satisfies it (the same engine, or a
+    /// later revision of the same Wine build, since revisions are cumulative), or the app does
+    /// not know the manifest. Same Wine is not enough on its own: r7 adds a builtin DLL r6
+    /// lacks, and a bottle on r6 needs the offer.
     func engineToOffer(current: EngineManifest, known: [EngineManifest]) -> EngineManifest? {
         guard let id = engine, let wanted = known.first(where: { $0.id == id }) else { return nil }
-        return EngineManifest.needsPrefixRefresh(from: current, to: wanted) ? wanted : nil
+        return EngineManifest.satisfies(current: current, wanted: wanted) ? nil : wanted
     }
 }

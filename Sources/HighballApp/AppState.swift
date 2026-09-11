@@ -251,6 +251,13 @@ final class AppState {
         }
         if let recipe = fixRecipe(for: item), !bottle.settings.recipes.contains(recipe.id),
            let engine = engine(for: bottle) {
+            // The engine comes first, whatever the steps: a recipe of plain notes that names r7
+            // used to auto-apply on r5 and launch there, so nobody was ever offered the engine
+            // the game was verified on (Red Dead's and CS:GO's case).
+            if let wanted = recipe.engineToOffer(current: engine.manifest, known: Self.knownManifests) {
+                pendingEngine = (recipe, bottle, wanted)
+                return
+            }
             if recipe.isAutoApplicable {
                 Task { @MainActor in
                     var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)

@@ -287,8 +287,8 @@ private extension View {
         self.alert(state.pendingEngine.map { String(format: L("%@ needs the %@ engine"), $0.recipe.title, GamePageCopy.shortEngineName($0.manifest)) } ?? "",
                isPresented: .init(get: { state.pendingEngine != nil }, set: { if !$0 { state.pendingEngine = nil } }),
                presenting: state.pendingEngine) { pending in
-            Button(String(format: L("New environment for %@"), pending.recipe.title)) { state.createEnvironment(for: pending.recipe, on: pending.manifest) }
             Button(L("Move this environment")) { state.moveEnvironment(for: pending.recipe, bottle: pending.bottle, to: pending.manifest) }
+            Button(String(format: L("New environment for %@"), pending.recipe.title)) { state.createEnvironment(for: pending.recipe, on: pending.manifest) }
             Button(L("Not now"), role: .cancel) { state.pendingEngine = nil }
         } message: { pending in
             Text(GamePageCopy.engineAsk(recipe: pending.recipe, manifest: pending.manifest, installed: state.engines.contains { $0.id == pending.manifest.id }))

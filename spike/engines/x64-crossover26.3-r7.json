@@ -93,7 +93,8 @@
       "sha256": "cbda8aeee87e84ecf98c06759d2123b073dc99a7aa1c639480fade33383d18a2",
       "size": 1759,
       "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/nvapi-stub-2-i386.tar.gz",
-      "version": "2"
+      "version": "2",
+      "refreshesPrefix": true
     }
   },
   "displayName": "Wine 11.0 (CrossOver 26.3 tree, Highball build) + DXMT (Highball branch) + D3DMetal 3.0 + MoltenVK 1.4.1",

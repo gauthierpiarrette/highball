@@ -29,6 +29,11 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
         /// A component that must land on top of another one's files, like a patched
         /// MoltenVK replacing the runtime's, declares a higher order than the one it overrides.
         public var order: Int?
+        /// True when installing this component changes what `wineboot` writes into a prefix
+        /// (a new builtin DLL needs its placeholder in system32/syswow64 before a game can load
+        /// it by its system path). A bottle moving to an engine that adds such a component gets
+        /// its Windows setup re-run even when the Wine build is the same.
+        public var refreshesPrefix: Bool?
 
         public var isOptional: Bool { optional ?? false }
     }
@@ -74,7 +79,28 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
     /// in wineboot's 32-bit step on both engines during the r1 rollout test.
     public static func needsPrefixRefresh(from old: EngineManifest, to new: EngineManifest) -> Bool {
         guard let a = old.components["wine"]?.sha256, let b = new.components["wine"]?.sha256 else { return true }
-        return a != b
+        if a != b { return true }
+        // Same Wine: only a component that asks for it (a new builtin DLL) forces the setup.
+        return new.components.contains { name, c in
+            c.refreshesPrefix == true && old.components[name]?.sha256 != c.sha256
+        }
+    }
+
+    /// The revision number at the end of an engine id (`x64-crossover26.3-r7` is 7), or nil
+    /// for an id without one. Revisions of one Wine build are cumulative: r7 carries everything
+    /// r6 does, so a bottle on r7 already satisfies a recipe that names r6.
+    public static func revision(of id: String) -> Int? {
+        guard let range = id.range(of: #"-r(\d+)$"#, options: .regularExpression) else { return nil }
+        return Int(id[range].dropFirst(2))
+    }
+
+    /// True when a bottle on `current` already has everything `wanted` would bring: the same
+    /// engine, or a later revision of the same Wine build.
+    public static func satisfies(current: EngineManifest, wanted: EngineManifest) -> Bool {
+        if current.id == wanted.id { return true }
+        guard let a = current.components["wine"]?.sha256, let b = wanted.components["wine"]?.sha256, a == b,
+              let c = revision(of: current.id), let w = revision(of: wanted.id) else { return false }
+        return c >= w
     }
 
     /// Same rule when the bottle's current engine cannot be resolved (its directory is gone):

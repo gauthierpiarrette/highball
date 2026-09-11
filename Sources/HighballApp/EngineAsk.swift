@@ -15,7 +15,7 @@ extension GamePageCopy {
 
     static func engineAsk(recipe: HighballKit.Recipe, manifest: EngineManifest, installed: Bool) -> String {
         let download = installed ? "" : String(format: L(", after a download of about %@"), downloadSize(manifest))
-        return String(format: L("%@ is verified on the %@ engine, and its installer fails on this environment's Wine build. A new environment keeps your other programs where they are%@. Moving this environment re-runs the Windows setup and keeps everything installed."),
+        return String(format: L("%@ is verified on the %@ engine, and this environment is not on it. Moving this environment switches it there%@ and keeps everything installed; the Windows setup re-runs when needed, a minute or two. A new environment keeps your other programs where they are and starts empty, so the game has to be installed again."),
                       recipe.title, shortEngineName(manifest), download)
     }
 }

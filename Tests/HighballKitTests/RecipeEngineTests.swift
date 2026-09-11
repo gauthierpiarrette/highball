@@ -24,16 +24,44 @@ final class RecipeEngineTests: XCTestCase {
         XCTAssertNil(try recipe(engine: nil).engine)
     }
 
-    func testOfferedOnlyWhenTheWineBuildDiffers() throws {
+    func testOfferedUnlessTheEnvironmentAlreadySatisfiesIt() throws {
         let wine10 = try manifest(id: "x64-sikarugir10.0_6-r2", wine: "aaa")
         let wine11 = try manifest(id: "x64-crossover26.3-r4", wine: "bbb")
         let wine11Later = try manifest(id: "x64-crossover26.3-r5", wine: "bbb")
         let r = try recipe(engine: "x64-crossover26.3-r4")
         XCTAssertEqual(r.engineToOffer(current: wine10, known: [wine10, wine11])?.id, "x64-crossover26.3-r4")
         XCTAssertNil(r.engineToOffer(current: wine11, known: [wine10, wine11]), "already on it")
-        XCTAssertNil(r.engineToOffer(current: wine11Later, known: [wine10, wine11]), "a later build of the same Wine counts")
+        XCTAssertNil(r.engineToOffer(current: wine11Later, known: [wine10, wine11]), "a later revision of the same Wine counts")
         XCTAssertNil(r.engineToOffer(current: wine10, known: [wine10]), "an engine the app does not know is never offered")
         XCTAssertNil(try recipe(engine: nil).engineToOffer(current: wine10, known: [wine10, wine11]))
+    }
+
+    /// r6 and r7 are the same Wine as r5, and a bottle on r5 still needs them: r6 changes
+    /// MoltenVK (Red Dead), r7 adds a builtin DLL (CS:GO). Same Wine never meant "has it".
+    func testALaterRevisionOfTheSameWineIsOffered() throws {
+        let r5 = try manifest(id: "x64-crossover26.3-r5", wine: "bbb")
+        let r7 = try manifest(id: "x64-crossover26.3-r7", wine: "bbb")
+        let r = try recipe(engine: "x64-crossover26.3-r7")
+        XCTAssertEqual(r.engineToOffer(current: r5, known: [r5, r7])?.id, "x64-crossover26.3-r7")
+        XCTAssertNil(r.engineToOffer(current: r7, known: [r5, r7]))
+        XCTAssertEqual(EngineManifest.revision(of: "x64-crossover26.3-r7"), 7)
+        XCTAssertNil(EngineManifest.revision(of: "x64-crossover26.3"))
+        XCTAssertFalse(EngineManifest.needsPrefixRefresh(from: r5, to: r7), "same Wine, no component asks: the prefix stays")
+    }
+
+    /// A component that adds a builtin DLL asks for the Windows setup to run again, so the
+    /// bottle gets the DLL's placeholder in syswow64 (a game loading it by system path finds
+    /// nothing otherwise). The same Wine build is no reason to skip that.
+    func testAComponentCanAskForThePrefixRefresh() throws {
+        let json = """
+        {"id": "x64-crossover26.3-r7", "displayName": "Wine 11.0 (test)", "arch": "x86_64", "minMacOS": "14.0",
+         "components": {"wine": {"kind": "engine", "url": "https://example.invalid/bbb.tar.gz", "sha256": "bbb", "size": 1000},
+                        "nvapi-stub": {"kind": "runtime", "url": "https://example.invalid/stub.tar.gz", "sha256": "ccc", "size": 10, "refreshesPrefix": true}}}
+        """
+        let r7 = try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8))
+        let r6 = try manifest(id: "x64-crossover26.3-r6", wine: "bbb")
+        XCTAssertTrue(EngineManifest.needsPrefixRefresh(from: r6, to: r7))
+        XCTAssertFalse(EngineManifest.needsPrefixRefresh(from: r7, to: r7), "the stub is already there")
     }
 
     func testTheShippedWine11ManifestIsOfferedByTheEARecipeOnTheDefaultEngine() throws {
