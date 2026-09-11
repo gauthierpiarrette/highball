@@ -300,6 +300,16 @@ public struct EngineStore: Sendable {
         onProgress(written, total)
     }
 
+    /// Non-nil, with the reason, when placing a directory at `dest` would take over a directory
+    /// that already has contents. A single-file target and an empty or absent directory are fine.
+    static func directoryCollision(at dest: URL, sourceIsDirectory: Bool) -> String? {
+        guard sourceIsDirectory else { return nil }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: dest.path, isDirectory: &isDir), isDir.boolValue else { return nil }
+        let count = (try? FileManager.default.contentsOfDirectory(atPath: dest.path).count) ?? 0
+        return count == 0 ? nil : "which already holds \(count) items"
+    }
+
     func extract(_ archive: URL, component: EngineManifest.Component, name: String, into root: URL) throws {
         guard let ex = component.extract else {
             // Plain file (e.g. winetricks script): copy into tools/.
@@ -330,6 +340,12 @@ public struct EngineStore: Sendable {
         var isDir: ObjCBool = false
         _ = FileManager.default.fileExists(atPath: source.path, isDirectory: &isDir)
         let dest = root.appending(path: ex.into, directoryHint: isDir.boolValue ? .isDirectory : .notDirectory)
+        if let why = Self.directoryCollision(at: dest, sourceIsDirectory: isDir.boolValue) {
+            // highball#76: a directory component that lands on a directory another component
+            // filled used to replace it wholesale (the first r7 candidate lost its whole Wine
+            // tree this way and still reported "installed"). Refuse and say which.
+            throw HighballError.invalid("component '\(name)' would replace \(ex.into), \(why). A component adds a directory of its own or replaces one file; to add a file to another component's directory, name that file as 'into'.")
+        }
         try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: source, to: dest)
