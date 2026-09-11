@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.6</title>
+      <description><![CDATA[A game's page says one thing about its graphics mode, the log is one click away, and the environment settings are three clicks from anywhere.]]></description>
+      <pubDate>Fri, 11 Sep 2026 19:22:25 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.6/Highball-0.9.6.zip" sparkle:version="0.9.6" sparkle:shortVersionString="0.9.6" sparkle:edSignature="HlQqfCX4R5J6vzIFCOYvbKDtY8ft1uMSoU2kTQvaKrGorSsYOgLsm6CD7x5uX7/STkA6TrBlOBkji3slIX73AQ==" length="3414692" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.5</title>
       <description><![CDATA[Red Dead Redemption 2 and legacy CS:GO play on macOS 26 through engine r7; Play offers the right engine]]></description>
       <pubDate>Fri, 11 Sep 2026 16:52:01 +0200</pubDate>
