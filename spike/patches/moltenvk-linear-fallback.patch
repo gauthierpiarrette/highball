@@ -1,0 +1,37 @@
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm b/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
+index 5463d5a..54efcc6 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
+@@ -1403,8 +1403,14 @@ static MTLRegion getMTLRegion(const ImgRgn& imgRgn) {
+ 
+ 	bool isLin = true;
+ 
++	// HIGHBALL linear-fallback: Metal cannot back a 3D or mipmapped texture with linear memory, but a
++	// game that asks for one (Red Dead Redemption 2 does, for its 3D LUTs) gets nothing at all when
++	// vkCreateImage fails. Create the image with optimal tiling instead and say so once; the image
++	// then lives in the usual MTLTexture and host writes reach it through the memory binding's
++	// flush path rather than through a shared MTLBuffer.
+ 	if (getImageType() != VK_IMAGE_TYPE_2D) {
+-		setConfigurationResult(reportError(VK_ERROR_FEATURE_NOT_PRESENT, "vkCreateImage() : If tiling is VK_IMAGE_TILING_LINEAR, imageType must be VK_IMAGE_TYPE_2D."));
++		static bool reported3D = false;
++		if (!reported3D) { reported3D = true; reportMessage(MVK_CONFIG_LOG_LEVEL_WARNING, "HIGHBALL linear-fallback: linear tiling requested for a non-2D image; creating it with optimal tiling instead (reported once)."); }
+ 		isLin = false;
+ 	}
+ 
+@@ -1422,12 +1428,14 @@ static MTLRegion getMTLRegion(const ImgRgn& imgRgn) {
+ 	}
+ 
+ 	if (pCreateInfo->mipLevels > 1) {
+-		setConfigurationResult(reportError(VK_ERROR_FEATURE_NOT_PRESENT, "vkCreateImage() : If tiling is VK_IMAGE_TILING_LINEAR, mipLevels must be 1."));
++		static bool reportedMips = false;
++		if (!reportedMips) { reportedMips = true; reportMessage(MVK_CONFIG_LOG_LEVEL_WARNING, "HIGHBALL linear-fallback: linear tiling requested for a mipmapped image; creating it with optimal tiling instead (reported once)."); }
+ 		isLin = false;
+ 	}
+ 
+ 	if (pCreateInfo->arrayLayers > 1) {
+-		setConfigurationResult(reportError(VK_ERROR_FEATURE_NOT_PRESENT, "vkCreateImage() : If tiling is VK_IMAGE_TILING_LINEAR, arrayLayers must be 1."));
++		static bool reportedLayers = false;
++		if (!reportedLayers) { reportedLayers = true; reportMessage(MVK_CONFIG_LOG_LEVEL_WARNING, "HIGHBALL linear-fallback: linear tiling requested for an array image; creating it with optimal tiling instead (reported once)."); }
+ 		isLin = false;
+ 	}
+ 
