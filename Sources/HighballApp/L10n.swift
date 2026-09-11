@@ -379,6 +379,8 @@ enum L10n {
         "Show the Windows drive": "Afficher le disque Windows",
         "Show the activity log": "Afficher le journal d'activité",
         "Show the last background task": "Afficher la dernière tâche de fond",
+        "Settings…": "Réglages…",
+        "Graphics, compatibility, engine, DLL overrides, environment variables and dependencies for this environment.": "Graphismes, compatibilité, moteur, remplacements de DLL, variables d'environnement et dépendances de cet environnement.",
         "Show the last launch log": "Afficher le journal du dernier lancement",
         "Log": "Journal",
         "Ignored, not KEY=VALUE: ": "Ignoré, pas de la forme CLÉ=VALEUR : ",

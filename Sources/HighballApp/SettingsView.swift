@@ -109,7 +109,7 @@ struct EnvironmentsPane: View {
                 }
                 if let b = selected {
                     Button(L("Repair")) { state.repairBottle(b) }.disabled(state.busy)
-                    Button(L("Environment settings…")) { settingsName = b.name }
+                    Button(L("Settings…")) { settingsName = b.name }.help(L("Graphics, compatibility, engine, DLL overrides, environment variables and dependencies for this environment."))
                     Button(L("Full page…")) { openName = b.name }
                 }
                 Spacer()
