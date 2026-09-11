@@ -325,10 +325,16 @@ struct Run: AsyncParsableCommand {
             if let renderer { p.renderer = renderer }
             p.arguments += arguments
             if p.path.lowercased().hasSuffix("steam/steam.exe") {
-                if let shown = try await runner.showRunningSteam(onOutput: out) {
+                switch WineRunner.steamInvocation(clientRunning: runner.steamIsRunning(), arguments: p.arguments) {
+                case .forward:
+                    print("Steam is already running in this bottle; handed it: \(p.arguments.joined(separator: " "))")
+                    if let forwarded = try await runner.forwardToRunningSteam(p.arguments, onOutput: out) { result = forwarded }
+                    else { result = try await runner.start(pin: p, onOutput: out) }
+                case .showWindow:
                     print("Steam is already running in this bottle; asked it to show its window")
-                    result = shown
-                } else {
+                    if let shown = try await runner.showRunningSteam(onOutput: out) { result = shown }
+                    else { result = try await runner.start(pin: p, onOutput: out) }
+                case .start:
                     result = try await runner.startResumingKnownSteamCrash(pin: p, onOutput: out ?? { _ in }).result
                 }
             } else {

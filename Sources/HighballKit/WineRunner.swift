@@ -340,6 +340,24 @@ public struct WineRunner: Sendable {
         argv0.replacingOccurrences(of: "\\", with: "/").lowercased().hasSuffix("/steam.exe")
     }
 
+    /// What a `run <bottle> Steam [args]` should do. A running client stays: a second
+    /// steam.exe forwards its command line to it over Steam's own IPC and exits, so arguments
+    /// such as `-applaunch` still reach the game (highball#75); without arguments the only
+    /// thing to do is show the window (#33). No client: start one with the arguments.
+    public enum SteamInvocation: Equatable { case start, showWindow, forward }
+    public static func steamInvocation(clientRunning: Bool, arguments: [String]) -> SteamInvocation {
+        guard clientRunning else { return .start }
+        return arguments.isEmpty ? .showWindow : .forward
+    }
+
+    /// Hands a command line to the running Steam client: a second steam.exe forwards it and
+    /// exits. Nil when no client runs.
+    public func forwardToRunningSteam(_ arguments: [String], onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult? {
+        guard steamIsRunning() else { return nil }
+        let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
+        return try await start(steam, arguments: arguments, onOutput: onOutput)
+    }
+
     /// If a Steam client is already running in the bottle, asks it to show its window and
     /// returns that launch; nil when no client runs (the caller then starts one).
     ///

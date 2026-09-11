@@ -1485,4 +1485,15 @@ extension RegressionTests {
         e.rendererMinMacOS = nil
         XCTAssertEqual(e.effectiveRenderer(osMajor: 14), .dxmt, "no gate: the renderer applies everywhere")
     }
+
+    /// highball#75: `run <bottle> Steam -- -applaunch 4465480` with the client already running
+    /// only showed the window and dropped the arguments. A second steam.exe forwards its
+    /// command line to the running client, so arguments are handed over; the window is shown
+    /// only when there is nothing to hand over.
+    func testRunningSteamGetsTheArgumentsForwarded() {
+        XCTAssertEqual(WineRunner.steamInvocation(clientRunning: false, arguments: []), .start)
+        XCTAssertEqual(WineRunner.steamInvocation(clientRunning: false, arguments: ["-applaunch", "730"]), .start)
+        XCTAssertEqual(WineRunner.steamInvocation(clientRunning: true, arguments: []), .showWindow)
+        XCTAssertEqual(WineRunner.steamInvocation(clientRunning: true, arguments: ["-applaunch", "730"]), .forward)
+    }
 }
