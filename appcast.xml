@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.7</title>
+      <description><![CDATA[A game reinstalled by Steam gets its fix back when you press Play.]]></description>
+      <pubDate>Fri, 11 Sep 2026 19:59:21 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.7/Highball-0.9.7.zip" sparkle:version="0.9.7" sparkle:shortVersionString="0.9.7" sparkle:edSignature="OzJKonio53j4OYEQLJFZxyObOlBaJfSdAHscGotZlSdf1Gp0LxzJhWyy6kgWN7W08wa8yP6nyVw24OO5317PAw==" length="3415579" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.6</title>
       <description><![CDATA[A game's page says one thing about its graphics mode, the log is one click away, and the environment settings are three clicks from anywhere.]]></description>
       <pubDate>Fri, 11 Sep 2026 19:24:03 +0200</pubDate>
