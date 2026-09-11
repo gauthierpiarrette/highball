@@ -54,18 +54,21 @@ titles as impossible before you download 80 GB.
 
 ### [Search your game in the database →](https://gethighball.com/database/)
 
-Cyberpunk 2077, for one, runs 60–82 fps on an M5 (D3DMetal + FSR 2.1). Renderer switching,
-32-bit apps via Wine's WoW64, Windows runtimes, ReShade, and your Epic library via Legendary
-work too.
+Cyberpunk 2077, for one, runs 60–82 fps on an M5 (D3DMetal + FSR 2.1), and Red Dead
+Redemption 2 plays on an M1 Pro after a MoltenVK fix that is now a pull request upstream.
+Renderer switching, 32-bit apps via Wine's WoW64, Windows runtimes, ReShade, and your Epic
+library via Legendary work too.
 
-## What doesn't work yet
+## Launchers
 
-Several store launchers with an embedded browser (Chromium/CEF) UI don't render under this
-Wine build. Rockstar is blocked (it needs a CrossOver-only loader patch), and Ubisoft
-Connect and GOG Galaxy don't render a usable login window (Ubisoft stays unpainted, GOG comes
-up black), so you can't sign in. Battle.net and
-the EA app are flaky. GOG's DRM-free offline installers can be run directly in a bottle,
-and Epic works through Legendary. Each case is tracked in the recipe's `knownIssues`.
+Steam and Epic (through Legendary) work on the default engine. Rockstar, the EA app and
+Ubisoft Connect draw their sign-in windows in an embedded browser that needs Highball's Wine 11
+engine (built from the CrossOver 26.3 tree); Play offers that engine when a game needs it, and
+you can move an environment to it in Settings. Rockstar signs in and runs GTA V and Red Dead
+Redemption 2 here, the EA app signs in and runs The Sims 4, Ubisoft Connect and Battle.net show
+their sign-in windows but no game has been played through them here yet. GOG Galaxy still comes
+up black, so you can't sign in; GOG's DRM-free offline installers run directly in an environment
+instead. Each case is tracked in the launcher recipe's `knownIssues`.
 
 ## Getting started
 
@@ -90,7 +93,7 @@ git clone https://github.com/gauthierpiarrette/highball && cd highball        # 
 git clone https://github.com/gauthierpiarrette/highball-db ../highball-db     # recipes + game database (CC0)
 swift build -c release
 .build/release/highball engine install spike/engine-manifest.json
-.build/release/highball engine accept x64-sikarugir10.0_6-r0 apple-gptk-license-2023-08-17  # optional: D3DMetal
+.build/release/highball engine accept x64-sikarugir10.0_6-r2 apple-gptk-license-2023-08-17  # optional: D3DMetal
 .build/release/highball bottle create play --recipe steam
 .build/release/highball run play Steam
 ```
@@ -108,11 +111,15 @@ Highball itself.
 This niche has a cautionary tale: [Whisky](https://github.com/Whisky-App/Whisky) was
 archived in 2025. Highball is built to avoid the ways these tools tend to die:
 
-- **Engine-agnostic: zero Wine patches, zero hosted binaries.** Engines are assembled from *pinned,
-  SHA-256-verified* upstream releases ([Gcenx](https://github.com/Gcenx)'s builds,
-  [DXMT](https://github.com/3Shain/dxmt), the
-  [Sikarugir](https://github.com/Sikarugir-App/Sikarugir) runtime). An engine update is a
-  JSON pull request, not a build pipeline.
+- **Engine-agnostic, and every patch is public.** Engines are assembled from *pinned,
+  SHA-256-verified* builds: upstream releases where they exist ([Gcenx](https://github.com/Gcenx)'s
+  builds, [DXMT](https://github.com/3Shain/dxmt), the
+  [Sikarugir](https://github.com/Sikarugir-App/Sikarugir) runtime), and where a game needed a
+  fix nobody ships yet (a MoltenVK change for Red Dead Redemption 2, a Wine change for Guardians
+  of the Galaxy, the Wine 11 build from the CrossOver 26.3 tree), the patch and the build script
+  are in `spike/`, the artifact is a checksummed GitHub release asset, and the patch goes
+  upstream ([MoltenVK #2825](https://github.com/KhronosGroup/MoltenVK/pull/2825)). An engine
+  update is a JSON pull request.
 - **The database is the product.** Recipes ("Steam needs `sync: none`; this game needs
   DXVK") are versioned CC0 data anyone can use, CrossOver users included. We don't know of
   another machine-readable, CC0 recipe dataset for Wine on Mac.
@@ -128,7 +135,7 @@ manifest-defined bundle (Wine + runtime dylibs + renderer overlays) laid out und
 `engines/<id>`; a *bottle* is a `WINEPREFIX` plus `bottle.json`; renderers (WineD3D /
 DXMT / D3DMetal / DXVK) are directory overlays selected per launch via
 `WINEDLLPATH_PREPEND`; *recipes* are declarative JSON steps (installer, registry,
-winetricks, sync, renderer, pin, note) applied to a bottle. D3DMetal is gated behind
+winetricks, sync, renderer, pin, copy, file, note) applied to a bottle. D3DMetal is gated behind
 explicit acceptance of Apple's Game Porting Toolkit license and is never redistributed in
 this repository.
 
@@ -156,7 +163,8 @@ never hold.
 ## Credits
 
 Standing on: [Wine](https://winehq.org) · [Gcenx](https://github.com/Gcenx) (the entire
-free Mac Wine supply chain) · [3Shain's DXMT](https://github.com/3Shain/dxmt) ·
+free Mac Wine supply chain) · [CodeWeavers](https://www.codeweavers.com) (the CrossOver tree
+the Wine 11 engine is built from) · [3Shain's DXMT](https://github.com/3Shain/dxmt) ·
 [Sikarugir](https://github.com/Sikarugir-App/Sikarugir) · Apple's Game Porting Toolkit ·
 [Whisky](https://github.com/Whisky-App/Whisky), whose honesty about its own limits shaped
 this design.
