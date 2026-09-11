@@ -147,7 +147,7 @@ this repository.
 - **Bugs in Highball itself**: Highball menu → **Report a Problem** (pre-filled with your
   system info and the log).
 - **Recipes**: PRs to [highball-db](https://github.com/gauthierpiarrette/highball-db)
-  `recipes/` with the CLI output attached. Every recipe carries `lastVerified` (engine id,
+  `recipes/` with the CLI output attached. A verified recipe carries `lastVerified` (engine id,
   macOS, chip) so stale data is visible, not silently wrong.
 - **Engines**: manifest PRs bumping pinned versions, with a verification note.
 
