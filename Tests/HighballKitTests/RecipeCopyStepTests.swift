@@ -21,6 +21,31 @@ final class RecipeCopyStepTests: XCTestCase {
         guard case let .copy(_, _, nativeAgain) = again.steps[0], nativeAgain else { return XCTFail("round trip lost the step or the flag") }
     }
 
+    /// A reinstalled game loses the copied file while the environment still lists the recipe as
+    /// applied. The recipe knows its file is gone, so Play applies it again instead of launching
+    /// the game on the wrong Direct3D (2026-09-11, CS:GO Legacy reinstalled).
+    func testArtifactsPresentFollowsTheCopiedFile() throws {
+        let json = """
+        {"id": "csgo-legacy", "kind": "game", "title": "CS:GO", "steps": [
+          {"type": "note", "text": "notes carry no file"},
+          {"type": "copy", "from": "engine/lib/wine/i386-windows/d3d9.dll", "to": "Program Files (x86)/Steam/steamapps/common/csgo legacy/bin/d3d9.dll", "asNative": true}]}
+        """
+        let r = try JSONDecoder().decode(Recipe.self, from: Data(json.utf8))
+        let driveC = FileManager.default.temporaryDirectory.appending(path: "hb-artifacts-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: driveC) }
+        XCTAssertFalse(r.artifactsPresent(driveC: driveC), "the file was never placed")
+        let dest = driveC.appending(path: "Program Files (x86)/Steam/steamapps/common/csgo legacy/bin/d3d9.dll")
+        try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: dest)
+        XCTAssertTrue(r.artifactsPresent(driveC: driveC))
+        try FileManager.default.removeItem(at: dest)
+        XCTAssertFalse(r.artifactsPresent(driveC: driveC), "the game was reinstalled: the copy is gone")
+        let notesOnly = try JSONDecoder().decode(Recipe.self, from: Data("""
+        {"id": "x", "kind": "game", "title": "X", "steps": [{"type": "note", "text": "n"}]}
+        """.utf8))
+        XCTAssertTrue(notesOnly.artifactsPresent(driveC: driveC), "a recipe without copies has nothing to lose")
+    }
+
     func testAsNativeBlanksTheBuiltinMarkerAndLeavesOtherFilesAlone() {
         var pe = Data(count: 0x80); pe[0] = 0x4D; pe[1] = 0x5A
         pe.replaceSubrange(0x40..<0x51, with: Data("Wine builtin DLL\0".utf8))

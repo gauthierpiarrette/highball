@@ -249,7 +249,8 @@ final class AppState {
                 renderer = instead
             }
         }
-        if let recipe = fixRecipe(for: item), !bottle.settings.recipes.contains(recipe.id),
+        if let recipe = fixRecipe(for: item),
+           !bottle.settings.recipes.contains(recipe.id) || !recipe.artifactsPresent(driveC: bottle.driveC),
            let engine = engine(for: bottle) {
             // The engine comes first, whatever the steps: a recipe of plain notes that names r7
             // used to auto-apply on r5 and launch there, so nobody was ever offered the engine

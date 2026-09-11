@@ -167,6 +167,17 @@ public struct Recipe: Codable, Sendable, Identifiable {
     /// Recipes with heavy or wine-touching steps get an honest prompt instead.
     public var isAutoApplicable: Bool { steps.allSatisfy(\.isAutoApplicable) }
 
+    /// False when a file a `copy` step placed is gone: the game was reinstalled or Steam put its
+    /// files back, and the environment still records the recipe as applied. Play then treats the
+    /// recipe as not applied, so the copy comes back before the launch (2026-09-11: CS:GO Legacy
+    /// reinstalled without its d3d9.dll would have launched on the wrong Direct3D).
+    public func artifactsPresent(driveC: URL) -> Bool {
+        steps.allSatisfy { step in
+            if case let .copy(_, to, _) = step { return FileManager.default.fileExists(atPath: driveC.appending(path: to).path) }
+            return true
+        }
+    }
+
     /// True when applying the recipe changes what a launch inherits: the renderer, the sync
     /// mode or an environment variable. A Steam client that is already running keeps the
     /// environment it started with (issues #22/#25), so a Play that auto-applied such a recipe
