@@ -26,6 +26,16 @@ public struct Recipe: Codable, Sendable, Identifiable {
         case winver(WindowsVersion)
         /// Write a text file inside drive_c.
         case file(path: String, contents: String)
+        /// Copies one file from the engine into the environment: `from` is relative to the
+        /// engine's directory and must stay inside it, `to` is relative to `drive_c`. A DLL put
+        /// beside a game's executable is what its loader takes first, so this gives one game a
+        /// Direct3D of its own (wined3d's d3d9 for legacy CS:GO) while the environment, and the
+        /// Steam client in it, keep their graphics mode.
+        /// With `asNative`, the copy loses Wine's builtin marker, so a per-application load order
+        /// of `n,b` (a `registry` step under `AppDefaults\<exe>\DllOverrides`) makes the game's
+        /// loader take it. A Direct3D imported by name from a DLL in the game's own `bin` folder
+        /// is found there and nowhere else (legacy CS:GO's shaderapidx9.dll).
+        case copy(from: String, to: String, asNative: Bool)
         /// Add a pinned program to the bottle.
         case pin(Pin)
         /// Free-text instruction the UI surfaces to the user after install.
@@ -40,7 +50,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
         /// DXVK knowledge ships as data instead of app code.
         case dxvkConfig(exe: String, options: [String: String])
 
-        private enum CodingKeys: String, CodingKey { case type, url, sha256, arguments, label, slow, okExitCodes, key, name, value, valueType, data, verbs, renderer, sync, winver, path, contents, pin, text, exe, options }
+        private enum CodingKeys: String, CodingKey { case type, url, sha256, arguments, label, slow, okExitCodes, key, name, value, valueType, data, verbs, renderer, sync, winver, path, contents, from, to, asNative, pin, text, exe, options }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -62,6 +72,8 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case "sync": self = .sync(try c.decode(SyncMode.self, forKey: .sync))
             case "winver": self = .winver(try c.decode(WindowsVersion.self, forKey: .winver))
             case "file": self = .file(path: try c.decode(String.self, forKey: .path), contents: try c.decode(String.self, forKey: .contents))
+            case "copy": self = .copy(from: try c.decode(String.self, forKey: .from), to: try c.decode(String.self, forKey: .to),
+                                      asNative: try c.decodeIfPresent(Bool.self, forKey: .asNative) ?? false)
             case "pin": self = .pin(try c.decode(Pin.self, forKey: .pin))
             case "note": self = .note(try c.decode(String.self, forKey: .text))
             case "dlloverride": self = .dllOverride(try c.decode(String.self, forKey: .value))
@@ -90,6 +102,9 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case let .sync(m): try c.encode("sync", forKey: .type); try c.encode(m, forKey: .sync)
             case let .winver(v): try c.encode("winver", forKey: .type); try c.encode(v, forKey: .winver)
             case let .file(path, contents): try c.encode("file", forKey: .type); try c.encode(path, forKey: .path); try c.encode(contents, forKey: .contents)
+            case let .copy(from, to, asNative):
+                try c.encode("copy", forKey: .type); try c.encode(from, forKey: .from); try c.encode(to, forKey: .to)
+                if asNative { try c.encode(true, forKey: .asNative) }
             case let .pin(p): try c.encode("pin", forKey: .type); try c.encode(p, forKey: .pin)
             case let .note(t): try c.encode("note", forKey: .type); try c.encode(t, forKey: .text)
             case let .dllOverride(v): try c.encode("dlloverride", forKey: .type); try c.encode(v, forKey: .value)
@@ -105,7 +120,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case let .installer(_, _, _, label, _, _): return label
             case let .winetricks(verbs, _): return verbs.joined(separator: " ")
             case .registry: return nil
-            case .environment, .renderer, .sync, .winver, .file, .pin, .note, .dxvkConfig, .dllOverride: return nil
+            case .environment, .renderer, .sync, .winver, .file, .copy, .pin, .note, .dxvkConfig, .dllOverride: return nil
             }
         }
 
@@ -141,7 +156,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
         /// takes no meaningful time (installer/winetricks can take 20-40 minutes).
         public var isAutoApplicable: Bool {
             switch self {
-            case .file, .renderer, .sync, .environment, .pin, .note, .dxvkConfig, .dllOverride: return true
+            case .file, .copy, .renderer, .sync, .environment, .pin, .note, .dxvkConfig, .dllOverride: return true
             case .installer, .winetricks, .registry, .winver: return false
             }
         }
@@ -259,6 +274,26 @@ public struct RecipeRunner: Sendable {
         self.paths = paths; self.engine = engine; self.bottle = bottle; self.store = EngineStore(paths: paths)
     }
 
+    /// The file a `copy` step reads, or nil when `from` is absolute, climbs out of the engine
+    /// with `..`, or does not exist. Recipes are data from the database, so a step must not be
+    /// able to read anything but the engine it was written for.
+    /// Wine stamps its builtin PE DLLs with "Wine builtin DLL" at offset 0x40; blanking it makes
+    /// the loader treat the file as native, which is what a per-application `n,b` order selects.
+    static func withoutBuiltinMarker(_ data: Data) -> Data {
+        let marker = Data("Wine builtin DLL\0".utf8)
+        guard data.count >= 0x40 + marker.count, data[0x40..<0x40 + marker.count] == marker else { return data }
+        var out = data; out.replaceSubrange(0x40..<0x40 + marker.count, with: Data(count: marker.count)); return out
+    }
+
+    public static func copySource(engineRoot: URL, _ from: String) -> URL? {
+        guard !from.hasPrefix("/"), !from.split(separator: "/").contains("..") else { return nil }
+        let url = engineRoot.appending(path: from).standardizedFileURL
+        guard url.path.hasPrefix(engineRoot.standardizedFileURL.path + "/") else { return nil }
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else { return nil }
+        return url
+    }
+
     /// The renderer a recipe may set, or nil when the user's explicit choice must stand (#29) or
     /// the bottle's engine cannot run it (#61: a fix recipe set D3DMetal on a bottle whose engine
     /// had no licence accepted for it, and every later launch in that bottle died before Wine).
@@ -365,6 +400,19 @@ public struct RecipeRunner: Sendable {
                 let url = bottle.driveC.appending(path: path)
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try contents.write(to: url, atomically: true, encoding: .utf8)
+            case let .copy(from, to, asNative):
+                guard let source = Self.copySource(engineRoot: engine.root, from) else {
+                    throw HighballError.invalid("copy step: '\(from)' is not a file inside the engine")
+                }
+                let dest = bottle.driveC.appending(path: to)
+                try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if FileManager.default.fileExists(atPath: dest.path) { try FileManager.default.removeItem(at: dest) }
+                if asNative {
+                    try Self.withoutBuiltinMarker(Data(contentsOf: source)).write(to: dest)
+                } else {
+                    try FileManager.default.copyItem(at: source, to: dest)
+                }
+                log?("copied \(source.lastPathComponent) from the engine to \(to)\(asNative ? " as a native DLL" : "")")
             case let .pin(p):
                 if !bottle.settings.pins.contains(where: { $0.path == p.path }) { bottle.settings.pins.append(p) }
             case let .note(t):

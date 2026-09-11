@@ -131,6 +131,7 @@ public enum GamePageCopy {
         case let .sync(m): return "Set the environment's sync mode to \(m.rawValue)"
         case let .winver(v): return "Report Windows \(v.rawValue) to the game"
         case let .file(path, _): return "Write \(URL(fileURLWithPath: path).lastPathComponent)"
+        case let .copy(from, _, _): return "Give the game its own \(URL(fileURLWithPath: from).lastPathComponent) from the engine"
         case .pin: return nil
         case let .note(text): return text
         case let .dllOverride(v): return "Set the Windows library override \(v)"
