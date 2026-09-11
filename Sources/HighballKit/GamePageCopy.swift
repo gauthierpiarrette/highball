@@ -26,8 +26,8 @@ public enum GamePageCopy {
             var head = chip.map { "Verified on an \($0)." } ?? "Verified on this project's own Mac."
             if chip == mine { head = "Verified on an \(mine), the same chip as yours." }
             var parts: [String] = []
-            if let fps = entry.verified?.fps {
-                parts.append(fps.hasSuffix("fps") ? fps : "\(fps) frames per second")
+            if let fps = entry.verified?.fps, let phrase = fpsPhrase(fps) {
+                parts.append(phrase)
             }
             if let os = entry.verified?.macos { parts.append("on macOS \(os)") }
             var detail = parts.isEmpty ? "" : sentenceCase(parts.joined(separator: " "))
@@ -64,7 +64,11 @@ public enum GamePageCopy {
         } else if let gameOverride {
             items.append(WillDo(text: "Use \(plainName(gameOverride)) for this game (set by you); the environment stays on \(plainName(bottleRenderer))"))
         } else if explicit {
-            items.append(WillDo(text: "Use \(plainName(bottleRenderer)), the environment's setting (set by you)"))
+            if let wanted = entry?.effectiveRenderer(osMajor: osMajor), wanted != bottleRenderer {
+                items.append(WillDo(text: "Use \(plainName(bottleRenderer)), your environment's setting. The database asks for \(plainName(wanted)), and an environment's own setting wins"))
+            } else {
+                items.append(WillDo(text: "Use \(plainName(bottleRenderer)), the environment's setting (set by you)"))
+            }
         } else if let wanted = entry?.effectiveRenderer(osMajor: osMajor) {
             items.append(WillDo(text: wanted == bottleRenderer
                                 ? "Use \(plainName(wanted)), the way it was verified"
@@ -82,6 +86,33 @@ public enum GamePageCopy {
             }
         }
         return items
+    }
+
+    /// The row's renderer when only the environment's explicit setting keeps it from applying and
+    /// no per-game choice exists yet. The game page offers it for this game alone, so the reader
+    /// is never left with a plan that names two graphics modes (2026-09-11 walkthrough).
+    public static func rowRendererHeldBack(_ entry: GameDBEntry?, bottleRenderer: Renderer, explicit: Bool, gameOverride: Renderer?,
+                                           osMajor: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion) -> Renderer? {
+        guard explicit, gameOverride == nil, entry?.nativeVulkan != true,
+              let wanted = entry?.effectiveRenderer(osMajor: osMajor), wanted != bottleRenderer else { return nil }
+        return wanted
+    }
+
+    /// The row's fps field is a figure followed by where it was read: "about 34 in the prologue
+    /// ride at 1280x720". The sentence keeps both, puts "frames per second" after the figure, and
+    /// stops at the first full stop so the verdict stays one sentence. A field that starts with
+    /// no figure ("menu renders, DXVK") is used as it is; a paragraph stitched in by mistake is
+    /// cut the same way (2026-09-11, Assetto Corsa).
+    public static func fpsPhrase(_ fps: String) -> String? {
+        var t = fps.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let stop = t.range(of: ". ") { t = String(t[..<stop.lowerBound]) }
+        if t.hasSuffix(".") { t.removeLast() }
+        guard !t.isEmpty else { return nil }
+        let figure = "^(?i:about )?[0-9]+(?:\\.[0-9]+)?(?:\\s*(?:-|–|to)\\s*[0-9]+(?:\\.[0-9]+)?)?"
+        guard let r = t.range(of: figure, options: .regularExpression) else { return t }
+        let rest = String(t[r.upperBound...])
+        if rest.lowercased().hasPrefix(" fps") { return t }
+        return String(t[r]) + " frames per second" + rest
     }
 
     // MARK: helpers

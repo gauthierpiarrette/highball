@@ -433,6 +433,13 @@ public struct WineRunner: Sendable {
         return entries
     }
 
+    /// The entries of a DLL-overrides field that `parseDllOverrides` would drop, so the settings
+    /// sheet can say so instead of losing them silently (2026-09-11 walkthrough).
+    public static func dllOverridesIgnored(_ overrides: String) -> [String] {
+        overrides.split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && parseDllOverrides($0).isEmpty }
+    }
+
     static let dllOverridesKey = #"HKCU\Software\Wine\DllOverrides"#
 
     /// Mirrors the bottle's DLL-overrides field into the prefix registry. The env var reaches only

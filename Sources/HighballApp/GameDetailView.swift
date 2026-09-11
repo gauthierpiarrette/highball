@@ -155,6 +155,15 @@ struct GameDetailView: View {
                     }
                 }
             }
+            if let held = GamePageCopy.rowRendererHeldBack(entry, bottleRenderer: bottle?.settings.renderer ?? .dxvk,
+                                                           explicit: bottle?.settings.rendererExplicit ?? false,
+                                                           gameOverride: state.rendererOverride(for: item)),
+               let engine = bottle.flatMap({ state.engine(for: $0) }), held.availability(in: engine) == .available {
+                Button(String(format: L("Use %@ for this game"), GamePageCopy.plainName(held))) {
+                    state.setRendererOverride(held, for: item.id)
+                }
+                .controlSize(.small).padding(.top, 2)
+            }
             HStack(spacing: 6) {
                 Text(entry == nil ? L("No row in the compatibility database yet.") : L("From the open compatibility database."))
                     .font(.caption).foregroundStyle(.secondary)
@@ -236,6 +245,13 @@ struct GameDetailView: View {
                             if PlayLink.target(for: item) != nil {
                                 Button(L("Make a shortcut…")) { state.makeMacApp(for: item) }.controlSize(.small)
                                     .help(L("A small app in ~/Applications/Highball that starts this game without opening Highball first."))
+                            }
+                        }
+                        if let log = state.lastLaunchLog(for: item) {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(L("Log")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+                                Button(L("Show the last launch log")) { NSWorkspace.shared.open(log) }.controlSize(.small)
+                                    .help(log.lastPathComponent)
                             }
                         }
                         if let fixRecipe, item.installed {

@@ -59,6 +59,9 @@ struct EnvironmentsPane: View {
     @Environment(AppState.self) private var state
     @State private var selectedName: String?
     @State private var openName: String?
+    /// The environment whose settings sheet is open from here: engine, overrides, variables and
+    /// dependencies were five clicks away behind the full page (2026-09-11 walkthrough).
+    @State private var settingsName: String?
     @State private var pendingDelete: String?
     @State private var showCreate = false
 
@@ -106,6 +109,7 @@ struct EnvironmentsPane: View {
                 }
                 if let b = selected {
                     Button(L("Repair")) { state.repairBottle(b) }.disabled(state.busy)
+                    Button(L("Environment settings…")) { settingsName = b.name }
                     Button(L("Full page…")) { openName = b.name }
                 }
                 Spacer()
@@ -121,6 +125,11 @@ struct EnvironmentsPane: View {
                         .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("Done")) { openName = nil } } }
                 }
                 .frame(minWidth: 780, minHeight: 560)
+            }
+        }
+        .sheet(isPresented: .init(get: { settingsName != nil }, set: { if !$0 { settingsName = nil } })) {
+            if let bottle = state.bottles.first(where: { $0.name == settingsName }) {
+                BottleSettingsSheet(bottle: bottle)
             }
         }
         .sheet(isPresented: $showCreate) { CreateBottleSheet() }
@@ -281,7 +290,7 @@ struct TroubleshootingPane: View {
                         await MainActor.run { NSWorkspace.shared.open(url) }
                     }
                 }
-                Button(L("Show the activity log")) { showLog = true }
+                Button(L("Show the last background task")) { showLog = true }
             }
             if let b = state.defaultBottle {
                 Divider()

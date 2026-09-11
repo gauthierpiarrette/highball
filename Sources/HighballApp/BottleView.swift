@@ -388,6 +388,10 @@ struct BottleSettingsSheet: View {
                         .font(.body.monospaced())
                     Text(L("Extra Wine DLL overrides for this environment, semicolon separated. Mods like Cyber Engine Tweaks need version=n,b."))
                         .font(.caption).foregroundStyle(.secondary)
+                    let ignoredDlls = WineRunner.dllOverridesIgnored(binding(\.dllOverrides).wrappedValue)
+                    if !ignoredDlls.isEmpty {
+                        Text(L("Ignored, not name=n,b: ") + ignoredDlls.joined(separator: ", ")).font(.caption).foregroundStyle(HB.amber)
+                    }
                     EnvEditor(bottle: bottle)
                     Text(L("Environment variables, one KEY=VALUE per line. Applied to everything launched in this environment."))
                         .font(.caption).foregroundStyle(.secondary)
@@ -591,14 +595,7 @@ struct PinSettingsSheet: View {
                 Button(L("Cancel")) { dismiss() }
                 Button(L("Save")) {
                     pin.arguments = ArgumentLine.split(argsText)
-                    var env: [String: String] = [:]
-                    for line in envText.split(separator: "\n") {
-                        let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
-                        if parts.count == 2, !parts[0].trimmingCharacters(in: .whitespaces).isEmpty {
-                            env[parts[0].trimmingCharacters(in: .whitespaces)] = parts[1]
-                        }
-                    }
-                    pin.environment = env
+                    pin.environment = EnvText.parse(envText).environment
                     state.updatePin(pin, in: bottle)
                     dismiss()
                 }
@@ -615,30 +612,31 @@ struct EnvEditor: View {
     @Environment(AppState.self) private var state
     let bottle: Bottle
     @State private var text: String = ""
+    @State private var ignored: [String] = []
     @State private var loaded = false
 
     var body: some View {
-        TextEditor(text: $text)
-            .font(.body.monospaced())
-            .frame(height: 72)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
-            .onAppear {
-                guard !loaded else { return }
-                loaded = true
-                let env = (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.environment
-                text = env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n")
+        VStack(alignment: .leading, spacing: 4) {
+            TextEditor(text: $text)
+                .font(.body.monospaced())
+                .frame(height: 72)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
+            if !ignored.isEmpty {
+                Text(L("Ignored, not KEY=VALUE: ") + ignored.joined(separator: ", ")).font(.caption).foregroundStyle(HB.amber)
             }
-            .onChange(of: text) { _, newValue in
-                var env: [String: String] = [:]
-                for line in newValue.split(separator: "\n") {
-                    let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
-                    if parts.count == 2, !parts[0].trimmingCharacters(in: .whitespaces).isEmpty {
-                        env[parts[0].trimmingCharacters(in: .whitespaces)] = parts[1]
-                    }
-                }
-                var copy = state.bottles.first { $0.name == bottle.name } ?? bottle
-                copy.settings.environment = env
-                state.update(copy)
-            }
+        }
+        .onAppear {
+            guard !loaded else { return }
+            loaded = true
+            text = EnvText.text(for: (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.environment)
+        }
+        .onChange(of: text) { _, newValue in
+            let parsed = EnvText.parse(newValue)
+            ignored = parsed.ignored
+            var copy = state.bottles.first { $0.name == bottle.name } ?? bottle
+            guard copy.settings.environment != parsed.environment else { return }
+            copy.settings.environment = parsed.environment
+            state.update(copy)
+        }
     }
 }

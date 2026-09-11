@@ -69,7 +69,29 @@ extension GamePageCopyTests {
         XCTAssertTrue(GamePageCopy.d3dMetalAsk(title: "X", entry: alt).contains("but slower"))
         XCTAssertEqual(GamePageCopy.otherWorkingRenderer(alt), .dxvk)
         let e = try entry(#"{"id":"x","title":"X","steam_appid":1,"status":"verified-local","renderer":"dxmt"}"#)
+        // The row asks for one mode and the environment's explicit setting wins: the plan says so
+        // in one line, and names the mode held back so the page can offer it for this game.
         XCTAssertEqual(GamePageCopy.willDo(e, recipe: nil, applied: false, bottleRenderer: .dxvk, explicit: true, osMajor: 26).first?.text,
-                       "Use DXVK (Vulkan on Metal), the environment's setting (set by you)")
+                       "Use DXVK (Vulkan on Metal), your environment's setting. The database asks for DXMT (DirectX 11 on Metal), and an environment's own setting wins")
+        XCTAssertEqual(GamePageCopy.rowRendererHeldBack(e, bottleRenderer: .dxvk, explicit: true, gameOverride: nil, osMajor: 26), .dxmt)
+        XCTAssertNil(GamePageCopy.rowRendererHeldBack(e, bottleRenderer: .dxvk, explicit: false, gameOverride: nil, osMajor: 26), "not explicit: the row applies on its own")
+        XCTAssertNil(GamePageCopy.rowRendererHeldBack(e, bottleRenderer: .dxvk, explicit: true, gameOverride: .dxmt, osMajor: 26), "a per-game choice already exists")
+        XCTAssertEqual(GamePageCopy.willDo(e, recipe: nil, applied: false, bottleRenderer: .dxmt, explicit: true, osMajor: 26).first?.text,
+                       "Use DXMT (DirectX 11 on Metal), the environment's setting (set by you)", "same mode: nothing is held back")
+        XCTAssertNil(GamePageCopy.rowRendererHeldBack(e, bottleRenderer: .dxmt, explicit: true, gameOverride: nil, osMajor: 26))
+    }
+
+    func testFpsPhraseKeepsTheFigureAndWhereItWasRead() {
+        XCTAssertEqual(GamePageCopy.fpsPhrase("60 to 82"), "60 to 82 frames per second")
+        XCTAssertEqual(GamePageCopy.fpsPhrase("111.8 fps"), "111.8 fps")
+        XCTAssertEqual(GamePageCopy.fpsPhrase("About 70"), "About 70 frames per second")
+        XCTAssertEqual(GamePageCopy.fpsPhrase("about 34 in the prologue blizzard ride at 1280x720 windowed (GPU 18-21 ms), 55-60 in the menus"),
+                       "about 34 frames per second in the prologue blizzard ride at 1280x720 windowed (GPU 18-21 ms), 55-60 in the menus")
+        XCTAssertEqual(GamePageCopy.fpsPhrase("60-120 in the prologue mission at 1280x800. An earlier reading of 48 was at 800x600."),
+                       "60-120 frames per second in the prologue mission at 1280x800", "one sentence: the verdict stops at the first full stop")
+        XCTAssertEqual(GamePageCopy.fpsPhrase("menu renders, DXVK, HDR-off recipe"), "menu renders, DXVK, HDR-off recipe", "no figure: used as it is")
+        XCTAssertEqual(GamePageCopy.fpsPhrase("111.8 driving at Laguna Seca, GPU-bound. Measured 2026-09-10 on a fresh install."),
+                       "111.8 frames per second driving at Laguna Seca, GPU-bound")
+        XCTAssertNil(GamePageCopy.fpsPhrase("  "))
     }
 }

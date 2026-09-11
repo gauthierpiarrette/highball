@@ -1161,10 +1161,27 @@ final class AppState {
     /// Opens highball-db's report form prefilled from the session. The rating is theirs to give.
     func reportPlay(_ record: SessionRecord) {
         let engine = bottles.first { $0.name == record.bottle }?.settings.engineID ?? "?"
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
         NSWorkspace.shared.open(PlayReport.url(title: record.title, appid: record.appid, renderer: record.renderer,
                                                chip: Machine.chip(), macos: Machine.macOSVersion(), engine: engine,
-                                               minutes: record.seconds / 60))
+                                               minutes: record.seconds / 60, version: version))
         postPlay = nil
+    }
+
+    /// The newest launch log for a game, by the log's name. A Steam game runs inside the client,
+    /// whose log carries its output; a program's log carries the program's name.
+    func lastLaunchLog(for item: LibraryItem) -> URL? {
+        guard let bottleName = item.bottleName else { return nil }
+        let executable: String
+        switch item.source {
+        case .steam: executable = "steam.exe"
+        case .pin:
+            guard let pin = bottles.first(where: { $0.name == bottleName })?.settings.pins.first(where: { $0.id == item.pinID }) else { return nil }
+            executable = URL(fileURLWithPath: pin.path.replacingOccurrences(of: "\\", with: "/")).lastPathComponent
+        default: return nil
+        }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: paths.logs.path)) ?? []
+        return LaunchLogs.newest(names: names, bottle: bottleName, executable: executable).map { paths.logs.appending(path: $0) }
     }
     private var sessionWatchers: [UUID: Task<Void, Never>] = [:]
 

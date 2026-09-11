@@ -21,12 +21,13 @@ public enum PlayReport {
     /// The issue URL for highball-db's report form, its fields prefilled by id. Query items use
     /// the form's field ids, which GitHub reads into the matching inputs.
     public static func url(title: String, appid: Int?, renderer: String?, chip: String, macos: String,
-                           engine: String, minutes: Int) -> URL {
+                           engine: String, minutes: Int, version: String? = nil) -> URL {
         var comps = URLComponents(string: "https://github.com/gauthierpiarrette/highball-db/issues/new")!
         var items = [URLQueryItem(name: "template", value: template),
                      URLQueryItem(name: "title", value: title)]
         if let appid { items.append(URLQueryItem(name: "steam_appid", value: String(appid))) }
         if let renderer { items.append(URLQueryItem(name: "renderer", value: renderer)) }
+        if let version { items.append(URLQueryItem(name: "version", value: version)) }
         items += [URLQueryItem(name: "chip", value: chip),
                   URLQueryItem(name: "macos", value: macos),
                   URLQueryItem(name: "engine", value: engine),

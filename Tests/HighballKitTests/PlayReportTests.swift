@@ -4,7 +4,7 @@ import XCTest
 final class PlayReportTests: XCTestCase {
     func testFormFieldsArePrefilledById() throws {
         let url = PlayReport.url(title: "Counter-Strike 2", appid: 730, renderer: "dxmt", chip: "Apple M1 Pro",
-                                 macos: "26.6.2", engine: "x64-sikarugir10.0_6-r1", minutes: 23)
+                                 macos: "26.6.2", engine: "x64-sikarugir10.0_6-r1", minutes: 23, version: "0.9.6")
         let comps = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
         XCTAssertEqual(comps.host, "github.com")
         XCTAssertEqual(comps.path, "/gauthierpiarrette/highball-db/issues/new")
@@ -17,6 +17,7 @@ final class PlayReportTests: XCTestCase {
         XCTAssertEqual(q["macos"], "26.6.2")
         XCTAssertEqual(q["engine"], "x64-sikarugir10.0_6-r1")
         XCTAssertEqual(q["notes"], "Played for 23 min through Highball.")
+        XCTAssertEqual(q["version"], "0.9.6")
         XCTAssertNil(q["rating"], "the rating is the player's to give")
     }
 
