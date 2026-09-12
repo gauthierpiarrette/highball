@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.8</title>
+      <description><![CDATA[Engine r8: Metaphor: ReFantazio plays, and games that switch fibers no longer trip macOS's thread scheduler.]]></description>
+      <pubDate>Sat, 12 Sep 2026 22:21:50 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.8/Highball-0.9.8.zip" sparkle:version="0.9.8" sparkle:shortVersionString="0.9.8" sparkle:edSignature="MhbJzBiWXHmY8fKTzgdW3IY6gixIdfBOxOVldEV6S38LjYoFXI/D+RyRR9+9tGNwczuRscBMDJtsa268i/coDQ==" length="3429004" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.7</title>
       <description><![CDATA[A game reinstalled by Steam gets its fix back when you press Play.]]></description>
       <pubDate>Fri, 11 Sep 2026 20:00:07 +0200</pubDate>
