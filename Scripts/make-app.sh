@@ -99,7 +99,9 @@ fi
 codesign -dv "$APP" 2>&1 | grep -E "Authority=Developer|flags" | head -2 || true
 
 # Notarize + staple when credentials are stored (xcrun notarytool store-credentials highball ...).
-if xcrun notarytool history --keychain-profile highball >/dev/null 2>&1; then
+# Only a release build is notarized: a debug or e2e bundle is ad-hoc signed and stapling it can
+# fail (error 73, 2026-09-13), and it should never look shippable anyway.
+if [ "$CONFIG" = release ] && xcrun notarytool history --keychain-profile highball >/dev/null 2>&1; then
   echo "notarizing…"
   ditto -c -k --keepParent "$APP" dist/Highball-notarize.zip
   xcrun notarytool submit dist/Highball-notarize.zip --keychain-profile highball --wait
