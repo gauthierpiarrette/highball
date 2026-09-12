@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.9</title>
+      <description><![CDATA[Metaphor: ReFantazio's recipe reaches the app again (0.9.8 bundled it in a shape the app dropped), so Play moves the environment to engine r8.]]></description>
+      <pubDate>Sat, 12 Sep 2026 22:50:19 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.9/Highball-0.9.9.zip" sparkle:version="0.9.9" sparkle:shortVersionString="0.9.9" sparkle:edSignature="Z142CVrnD4XSL5oC1lfRjoYhuVSHLuYrsJv1vi9PphsVoKCNnNll87wfzRiW0AlGJMvGulN2NtuqbXcgjX4tCQ==" length="3431192" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.8</title>
       <description><![CDATA[Engine r8: Metaphor: ReFantazio plays, and games that switch fibers no longer trip macOS's thread scheduler.]]></description>
       <pubDate>Sat, 12 Sep 2026 22:22:42 +0200</pubDate>
