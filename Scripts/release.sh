@@ -106,6 +106,18 @@ case "$ci" in
   *) echo "WARNING: no finished push CI run for HEAD yet (${ci:-none}); it should be green before this release is promoted." >&2 ;;
 esac
 
+# Every recipe the app will bundle must decode with this very build of the CLI. A recipe the app
+# cannot decode is dropped silently at load, so Play never applies it: 0.9.8 shipped the Metaphor
+# recipe with a bare-date lastVerified and the engine it asks for never reached anyone (2026-09-12).
+RECIPES_DIR="../highball-db/recipes"; [ -d "$RECIPES_DIR" ] || RECIPES_DIR=".build/highball-db/recipes"
+if [ -d "$RECIPES_DIR" ]; then
+  swift build -c debug --product highball >/dev/null 2>&1 || { echo "release: debug CLI build failed" >&2; exit 1; }
+  for f in "$RECIPES_DIR"/launchers/*.json "$RECIPES_DIR"/games/*.json "$RECIPES_DIR"/tweaks/*.json; do
+    [ -f "$f" ] || continue
+    .build/debug/highball recipe show "$f" >/dev/null 2>/tmp/hb-recipe-err || { echo "release: the CLI cannot decode $f: $(head -c 300 /tmp/hb-recipe-err)" >&2; exit 1; }
+  done
+  echo "release: every recipe in $RECIPES_DIR decodes with this build"
+fi
 Scripts/make-app.sh release "$VERSION"
 ZIP="dist/Highball-$VERSION.zip"
 ditto -c -k --keepParent dist/Highball.app "$ZIP"

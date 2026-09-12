@@ -219,6 +219,27 @@ public struct Recipe: Codable, Sendable, Identifiable {
         public var macos: String
         public var chip: String
         public var result: String
+
+        public init(date: String, engine: String, macos: String, chip: String, result: String) {
+            self.date = date; self.engine = engine; self.macos = macos; self.chip = chip; self.result = result
+        }
+
+        /// A recipe's lastVerified is an object, a row's is a date string. A recipe written with the
+        /// row's shape must not vanish from the app: 0.9.8 shipped the Metaphor recipe as a bare
+        /// date and every bundled load of it failed silently, so Play never moved the environment
+        /// to the engine the recipe asks for (2026-09-12). A bare string is taken as the date.
+        public init(from decoder: Decoder) throws {
+            if let single = try? decoder.singleValueContainer(), let date = try? single.decode(String.self) {
+                self.init(date: date, engine: "", macos: "", chip: "", result: "")
+                return
+            }
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(date: try c.decode(String.self, forKey: .date),
+                      engine: try c.decodeIfPresent(String.self, forKey: .engine) ?? "",
+                      macos: try c.decodeIfPresent(String.self, forKey: .macos) ?? "",
+                      chip: try c.decodeIfPresent(String.self, forKey: .chip) ?? "",
+                      result: try c.decodeIfPresent(String.self, forKey: .result) ?? "")
+        }
     }
 
     public var id: String
