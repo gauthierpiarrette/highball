@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.11</title>
+      <description><![CDATA[Double-click a Windows program in Finder, or Open With Highball, and it runs in your environment, with the option to keep it in Programs.]]></description>
+      <pubDate>Sun, 13 Sep 2026 23:07:40 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.11/Highball-0.9.11.zip" sparkle:version="0.9.11" sparkle:shortVersionString="0.9.11" sparkle:edSignature="auZJxHAtr7YuodaL9/EClm2iLdkpafmWc2fkj0bdXtTHQqTOzsoqzGZCaLpUBNIDfBYRbwQ0cUjZ91YikwucCg==" length="3442782" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.10</title>
       <description><![CDATA[Dependencies gain Microsoft's core fonts for games whose menus come up blank, and a report from a game on the environment's mode names that mode.]]></description>
       <pubDate>Sun, 13 Sep 2026 21:39:23 +0200</pubDate>
