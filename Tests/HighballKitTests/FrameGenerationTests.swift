@@ -76,11 +76,21 @@ private func frameGenerationChecks() throws {
         env = try bottle.environment(engine: engine, renderer: .dxvk)
         try check(env["LSFGVK_MULTIPLIER"] == String(multiplier), "Supported multiplier not configured")
     }
-    env = try bottle.environment(engine: engine, renderer: .dxmt)
-    try check(env["LSFGVK_ENV"] == nil && env["DISABLE_LSFGVK"] == "1", "Metal renderer activated shim")
+    let dylib = shim.appending(path: "libMoltenVK.dylib").path
+    env = try bottle.environment(engine: engine, renderer: .dxmt, extra: ["DYLD_INSERT_LIBRARIES": "/custom/insert.dylib"])
+    try check(env["LSFGVK_ENV"] == "1" && env["LSFGVK_METAL"] == "1", "Metal renderer did not use the metal hook")
+    try check(env["DYLD_INSERT_LIBRARIES"] == dylib + ":/custom/insert.dylib", "Metal hook not inserted ahead of custom libraries")
+    try check(env["DYLD_LIBRARY_PATH"]?.hasPrefix(shim.path) == true, "Vulkan hook (D3D9 on a Metal renderer) missing")
+    env = try bottle.environment(engine: engine, renderer: .wined3d, extra: ["WINE_D3D_CONFIG": "csmt=0,renderer=gl"])
+    try check(env["LSFGVK_ENV"] == "1" && env["LSFGVK_METAL"] == nil, "WineD3D did not use the Vulkan hook")
+    try check(env["WINE_D3D_CONFIG"] == "renderer=vulkan,csmt=0", "WineD3D was not switched to its Vulkan renderer")
+    env = try bottle.environment(engine: engine, renderer: .dxvk, extra: ["LSFGVK_METAL": "1"])
+    try check(env["LSFGVK_METAL"] == nil && env["DYLD_INSERT_LIBRARIES"] == nil, "Vulkan renderer picked up the metal hook")
     bottle.settings.frameGen = 1
     env = try bottle.environment(engine: engine, renderer: .dxvk, extra: ["LSFGVK_ENV": "1", "LSFGVK_MULTIPLIER": "3"])
     try check(env["LSFGVK_ENV"] == nil && env["DISABLE_LSFGVK"] == "1", "Off setting was bypassed by an override")
+    env = try bottle.environment(engine: engine, renderer: .dxmt, extra: ["LSFGVK_METAL": "1"])
+    try check(env["LSFGVK_METAL"] == nil && env["DISABLE_LSFGVK"] == "1", "Off setting left the metal hook armed")
     for value in [-1, 0, 999] {
         let settings = try JSONDecoder.highball.decode(BottleSettings.self,
             from: Data("{\"name\":\"old\",\"engineID\":\"e\",\"frameGen\":\(value)}".utf8))

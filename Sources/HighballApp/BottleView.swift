@@ -259,6 +259,7 @@ struct BottleSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let bottle: Bottle
     @State private var confirmDelete = false
+    @State private var showFrameGenInfo = false
     /// Live slider value while dragging; nil means "read the saved dpiScale". Applied on release
     /// only, so dragging doesn't fire a wine registry write on every step.
     @State private var dpiDraft: Double? = nil
@@ -322,19 +323,29 @@ struct BottleSettingsSheet: View {
                             }.controlSize(.small)
                         }
                     }
-                    // keep unavailable settings visible
-                    if let engine {
-                        Picker(L("Frame generation (Lossless Scaling)"), selection: binding(\.frameGen)) {
+                    // only engines that ship the shim get the control
+                    if let engine, engine.lsfgShimDir != nil {
+                        Picker(L("Frame generation (Lossless Scaling, beta)"), selection: Binding(
+                            get: { liveBottle.settings.frameGen },
+                            set: { newValue in
+                                let turnedOn = liveBottle.settings.frameGen <= 1 && newValue > 1
+                                var copy = state.bottles.first { $0.name == bottle.name } ?? bottle
+                                copy.settings.frameGen = newValue
+                                Task { @MainActor in state.update(copy) }
+                                if turnedOn { showFrameGenInfo = true }
+                            })) {
                             Text(L("Off")).tag(1)
                             Text("2×").tag(2)
                             Text("3×").tag(3)
                             Text("4×").tag(4)
                         }
+                        Button(L("How frame generation works")) { showFrameGenInfo = true }
+                            .buttonStyle(.link).controlSize(.small)
                         if case .unavailable(let why) = liveBottle.frameGenStatus(renderer: currentRenderer, engine: engine) {
                             Text(String(format: L("Frame generation stays off: %@"), L(why)))
                                 .font(.caption).foregroundStyle(.secondary)
                         } else if case .active = liveBottle.frameGenStatus(renderer: currentRenderer, engine: engine) {
-                            Text(L("Generated frames are paced by vsync: works best when the game holds a steady frame rate that divides the display's refresh rate (60 fps → 120 Hz). A Steam game picks this up after the environment is stopped and Steam restarted."))
+                            Text(L("After changing this, stop the environment and relaunch so a Steam game picks it up."))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -445,6 +456,11 @@ struct BottleSettingsSheet: View {
                             isPresented: $confirmDelete, titleVisibility: .visible) {
             Button(L("Delete"), role: .destructive) { dismiss(); state.deleteBottle(bottle.name) }
             Button(L("Cancel"), role: .cancel) {}
+        }
+        .alert(L("About frame generation"), isPresented: $showFrameGenInfo) {
+            Button(L("Got it"), role: .cancel) {}
+        } message: {
+            Text(L("Lossless Scaling inserts interpolated frames between the game's real frames to make motion look smoother. The generated frames are paced to your display, so it can never present more frames than your screen's refresh rate.\n\nThat means it only helps when a game runs BELOW your refresh rate, for example a demanding game locked at 30 fps smoothed up to 60. On the built-in 60 Hz display, a game already running above 60 gets capped to 60 and feels worse, not better.\n\nIt pays off on an external high-refresh monitor (120 Hz or more), where a 60 fps game becomes 120. It also adds a little input lag, because a real frame is held back to interpolate.\n\nFrame generation works with every graphics mode: DXVK and vkd3d-proton through Vulkan, DXMT and D3DMetal through Metal, and WineD3D by switching it to its Vulkan renderer. After changing it, stop the environment and relaunch so a Steam game picks up the new setting.\n\nThis is a beta feature: some games may show artifacts, stutter or not start with it on. Turn it off if a game misbehaves."))
         }
     }
 

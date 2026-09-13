@@ -209,10 +209,10 @@ index 2704bea..4859b0f 100644
          .handleTypes = vk::ExternalSemaphoreHandleTypeFlagBits::eOpaqueFd
      };
 diff --git a/lsfg-vk-layer/CMakeLists.txt b/lsfg-vk-layer/CMakeLists.txt
-index c42bcf7..337acb8 100644
+index c42bcf7..8cebf99 100644
 --- a/lsfg-vk-layer/CMakeLists.txt
 +++ b/lsfg-vk-layer/CMakeLists.txt
-@@ -1,10 +1,45 @@
+@@ -1,10 +1,48 @@
 -add_library(lsfg-vk-layer SHARED
 +set(_layer_sources
    "src/modes/vsync.cpp"
@@ -231,8 +231,11 @@ index c42bcf7..337acb8 100644
 +    "${CMAKE_SOURCE_DIR}/thirdparty/vulkan/vulkan.hpp"
 +    "${CMAKE_CURRENT_BINARY_DIR}/device-chain-sizes.inc"
 +    COMMAND_ERROR_IS_FATAL ANY)
-+  # build the driver shim used by wine
-+  add_library(lsfg-vk-shim SHARED ${_layer_sources})
++  # build the driver shim used by wine, with the metal front end for dxmt and d3dmetal
++  enable_language(OBJCXX)
++  add_library(lsfg-vk-shim SHARED ${_layer_sources} "src/metal.mm")
++  set_source_files_properties("src/metal.mm" PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
++  target_link_libraries(lsfg-vk-shim PRIVATE "-framework Metal" "-framework QuartzCore" "-framework AppKit")
 +  target_include_directories(lsfg-vk-shim PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 +  target_compile_definitions(lsfg-vk-shim PRIVATE LSFGVK_SHIM=1)
 +  target_link_libraries(lsfg-vk-shim
@@ -259,6 +262,50 @@ index c42bcf7..337acb8 100644
  target_link_libraries(lsfg-vk-layer
    PRIVATE lsfg-vk-config
    PRIVATE lsfg-vk-helper
+diff --git a/lsfg-vk-layer/src/device_chain.hpp b/lsfg-vk-layer/src/device_chain.hpp
+new file mode 100644
+index 0000000..124b498
+--- /dev/null
++++ b/lsfg-vk-layer/src/device_chain.hpp
+@@ -0,0 +1,38 @@
++/* SPDX-License-Identifier: CC-BY-NC-ND-4.0 */
++#pragma once
++#include <cstring>
++#include <memory>
++#include <stdexcept>
++#include <vector>
++#include <vk>
++
++namespace lsfgvk::layer {
++// copy chain nodes; borrow nested data only during device creation
++class DeviceChain {
++public:
++    explicit DeviceChain(const void* head) {
++        VkBaseOutStructure* tail = nullptr;
++        for (auto* node = static_cast<const VkBaseInStructure*>(head); node; node = node->pNext) {
++            const size_t bytes = size(node->sType);
++            auto storage = std::make_unique<unsigned char[]>(bytes);
++            std::memcpy(storage.get(), node, bytes);
++            auto* copy = reinterpret_cast<VkBaseOutStructure*>(storage.get());
++            copy->pNext = nullptr;
++            if (tail) tail->pNext = copy;
++            else m_head = copy;
++            tail = copy;
++            m_nodes.push_back(std::move(storage));
++        }
++    }
++    void* head() const { return m_head; }
++private:
++    static size_t size(VkStructureType type) {
++        switch (static_cast<vk::StructureType>(type)) {
++#include "device-chain-sizes.inc"
++            default: throw std::runtime_error("Unrecognized device feature chain; using passthrough");
++        }
++    }
++    VkBaseOutStructure* m_head{nullptr};
++    std::vector<std::unique_ptr<unsigned char[]>> m_nodes;
++};
++}
 diff --git a/lsfg-vk-layer/src/hooks.cpp b/lsfg-vk-layer/src/hooks.cpp
 index d4bc492..3854723 100644
 --- a/lsfg-vk-layer/src/hooks.cpp
@@ -574,14 +621,15 @@ index d39aa64..63238c2 100644
          Swapchain(
              PFN_vkCreateSwapchainKHR createFunc,
 diff --git a/lsfg-vk-layer/src/layer.cpp b/lsfg-vk-layer/src/layer.cpp
-index 8d98ddd..7bf338d 100644
+index 8d98ddd..7f860ea 100644
 --- a/lsfg-vk-layer/src/layer.cpp
 +++ b/lsfg-vk-layer/src/layer.cpp
-@@ -18,6 +18,11 @@
+@@ -18,6 +18,12 @@
  
  #include <vulkan/vulkan_to_string.hpp>
  
 +#ifdef LSFGVK_SHIM
++#include "metal.hpp"
 +#include <dlfcn.h>
 +#include <mutex>
 +#endif
@@ -589,7 +637,7 @@ index 8d98ddd..7bf338d 100644
  using namespace lsfgvk;
  
  namespace {
-@@ -26,6 +31,14 @@ namespace {
+@@ -26,6 +32,14 @@ namespace {
      struct DeviceData;
      struct SwapchainData;
  
@@ -604,7 +652,7 @@ index 8d98ddd..7bf338d 100644
      /// Layer-wide global info
      struct GlobalInfo {
          std::shared_mutex mutex;
-@@ -47,6 +60,19 @@ namespace {
+@@ -47,6 +61,19 @@ namespace {
          std::unique_ptr<layer::Layer> layer;
      }* global{nullptr}; // NOLINT (global variable)
  
@@ -624,7 +672,7 @@ index 8d98ddd..7bf338d 100644
  
  #define ASSERT_FATAL(cond, msg) \
      if (!(cond)) { \
-@@ -71,6 +97,11 @@ namespace {
+@@ -71,6 +98,11 @@ namespace {
          const VkAllocationCallbacks* alloc,
          VkInstance* instance
      ) noexcept {
@@ -636,7 +684,7 @@ index 8d98ddd..7bf338d 100644
          // Apply layer chaining
          const auto* chain{static_cast<const VkLayerInstanceCreateInfo*>(info->pNext)};
          while (chain && (chain->sType != VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO
-@@ -86,6 +117,7 @@ namespace {
+@@ -86,6 +118,7 @@ namespace {
          ASSERT_FATAL(gipa, "Function pointer to vkGetInstanceProcAddr is null")
  
          const_cast<VkLayerInstanceCreateInfo*>(chain)->u.pLayerInfo = layerInfo->pNext;
@@ -644,7 +692,7 @@ index 8d98ddd..7bf338d 100644
  
          auto* CreateInstance{reinterpret_cast<PFN_vkCreateInstance>(
              gipa(VK_NULL_HANDLE, "vkCreateInstance"))};
-@@ -193,7 +225,11 @@ namespace {
+@@ -193,7 +226,11 @@ namespace {
          }
  
          if (!instance) {
@@ -656,7 +704,7 @@ index 8d98ddd..7bf338d 100644
          }
  
          // Instance functions
-@@ -208,6 +244,9 @@ namespace {
+@@ -208,6 +245,9 @@ namespace {
  
              const auto funcIt{global->funcMap.find(view)};
              if (funcIt != global->funcMap.end()) {
@@ -666,7 +714,7 @@ index 8d98ddd..7bf338d 100644
                  return funcIt->second;
              }
  
-@@ -219,6 +258,7 @@ namespace {
+@@ -219,6 +259,7 @@ namespace {
  
      /// Destroy instance
      void myvkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* alloc) noexcept {
@@ -674,7 +722,7 @@ index 8d98ddd..7bf338d 100644
          PFN_vkDestroyInstance DestroyInstance{nullptr};
          {
              const std::unique_lock<std::shared_mutex> lock(global->mutex);
-@@ -255,6 +295,11 @@ namespace {
+@@ -255,6 +296,11 @@ namespace {
          const VkAllocationCallbacks* alloc,
          VkDevice* device
      ) noexcept {
@@ -686,7 +734,7 @@ index 8d98ddd..7bf338d 100644
          // Apply layer chaining
          const auto* chain{static_cast<const VkLayerDeviceCreateInfo*>(info->pNext)};
          while (chain && (chain->sType != VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO
-@@ -281,6 +326,7 @@ namespace {
+@@ -281,6 +327,7 @@ namespace {
  
          PFN_vkSetDeviceLoaderData SetDeviceLoaderData{chain->u.pfnSetDeviceLoaderData};
          ASSERT_FATAL(SetDeviceLoaderData, "Function pointer to vkSetDeviceLoaderData is null")
@@ -694,7 +742,7 @@ index 8d98ddd..7bf338d 100644
  
          // Fetch instance data
          PFN_vkGetInstanceProcAddr gipa{nullptr};
-@@ -308,6 +354,7 @@ namespace {
+@@ -308,6 +355,7 @@ namespace {
          ASSERT_FATAL(CreateDevice, "Failed to fetch vkCreateDevice")
  
          // Create device
@@ -702,7 +750,7 @@ index 8d98ddd..7bf338d 100644
          std::unique_ptr<layer::Device> layerDevice;
          if (layerInstance && layer::supportsDevice(*info)) {
              try {
-@@ -320,9 +367,19 @@ namespace {
+@@ -320,9 +368,19 @@ namespace {
                  };
                  layerDevice.swap(newDevice); // Required due to no-move constraint
              } catch (const std::exception& e) {
@@ -724,7 +772,7 @@ index 8d98ddd..7bf338d 100644
              }
          } else {
              auto result{CreateDevice(physicalDevice, info, alloc, device)};
-@@ -371,11 +428,18 @@ namespace {
+@@ -371,11 +429,18 @@ namespace {
  
              const auto it{global->devices.find(device)};
              if (it == global->devices.end()) {
@@ -743,7 +791,7 @@ index 8d98ddd..7bf338d 100644
                  return funcIt->second;
              }
  
-@@ -387,6 +451,7 @@ namespace {
+@@ -387,6 +452,7 @@ namespace {
  
      /// Destroy device
      void myvkDestroyDevice(VkDevice device, const VkAllocationCallbacks* alloc) noexcept {
@@ -751,7 +799,7 @@ index 8d98ddd..7bf338d 100644
          PFN_vkDestroyDevice DestroyDevice{nullptr};
          {
              const std::unique_lock<std::shared_mutex> lock(global->mutex);
-@@ -420,6 +485,7 @@ namespace {
+@@ -420,6 +486,7 @@ namespace {
          const VkAllocationCallbacks* alloc,
          VkSwapchainKHR* swapchain
      ) noexcept {
@@ -759,7 +807,7 @@ index 8d98ddd..7bf338d 100644
          // Fetch device & instance data
          PFN_vkGetDeviceProcAddr gdpa{nullptr};
          layer::Device* layerDevice{};
-@@ -440,7 +506,32 @@ namespace {
+@@ -440,7 +507,32 @@ namespace {
              gdpa(device, "vkCreateSwapchainKHR"))};
          ASSERT_FATAL(CreateSwapchain, "Failed to fetch vkCreateSwapchainKHR")
  
@@ -792,7 +840,7 @@ index 8d98ddd..7bf338d 100644
          std::unique_ptr<layer::Swapchain> layerSwapchain;
          if (layerDevice) {
              try {
-@@ -451,6 +542,13 @@ namespace {
+@@ -451,6 +543,13 @@ namespace {
              } catch (const std::exception& e) {
                  LOG(Error) << "An error occured while initializing the lsfg-vk swapchain:";
                  LOG(Error) << "- " << e.what();
@@ -806,7 +854,7 @@ index 8d98ddd..7bf338d 100644
                  return VK_ERROR_INITIALIZATION_FAILED;
              }
          } else {
-@@ -494,6 +592,7 @@ namespace {
+@@ -494,6 +593,7 @@ namespace {
          VkSwapchainKHR swapchain,
          const VkAllocationCallbacks* alloc
      ) noexcept {
@@ -814,7 +862,7 @@ index 8d98ddd..7bf338d 100644
          PFN_vkDestroySwapchainKHR DestroySwapchain{nullptr};
          {
              const std::unique_lock<std::shared_mutex> lock(global->mutex);
-@@ -534,6 +633,7 @@ namespace {
+@@ -534,6 +634,7 @@ namespace {
              const char* name, V vktype0, V2 vktype1, Args&&... args) {
          // NOTE: It is assumed that the Vulkan API externally synchronizes any access
          // that could modify the objects being used. Therefore, only a shared lock is used.
@@ -822,7 +870,7 @@ index 8d98ddd..7bf338d 100644
          const std::shared_lock<std::shared_mutex> lock(global->mutex);
  
  #define RETURN(val) \
-@@ -580,10 +680,21 @@ namespace {
+@@ -580,10 +681,21 @@ namespace {
                  LOG(Warning) << "A Vulkan error occured while calling " << name;
                  LOG(Warning) << "- " << vk::to_string(vk::Result(e.code().value()));
              }
@@ -844,7 +892,7 @@ index 8d98ddd..7bf338d 100644
              RETURN(err)
          }
  #undef RETURN
-@@ -604,6 +715,147 @@ namespace {
+@@ -604,6 +716,161 @@ namespace {
      #undef ARGS
  }
  
@@ -934,6 +982,19 @@ index 8d98ddd..7bf338d 100644
 +    }
 +}
 +
++bool layer::shim::initialize() {
++    initShim();
++    return shimActive;
++}
++
++PFN_vkGetInstanceProcAddr layer::shim::driverGipa() {
++    return real ? real->gipa : nullptr;
++}
++
++layer::Layer* layer::shim::layerHook() {
++    return global ? global->layer.get() : nullptr;
++}
++
 +extern "C" {
 +
 +/// export the entry points wine loads
@@ -958,6 +1019,7 @@ index 8d98ddd..7bf338d 100644
 +    initShim();
 +    if (!real)
 +        return VK_ERROR_INITIALIZATION_FAILED;
++    layer::metal::registerVulkanSurface(name, info); // keep the metal hooks off vulkan layers
 +    auto* fn{reinterpret_cast<PFN_createSurface>(real->gipa(instance, name))};
 +    return fn ? fn(instance, info, alloc, surface) : VK_ERROR_EXTENSION_NOT_PRESENT;
 +}
@@ -992,7 +1054,7 @@ index 8d98ddd..7bf338d 100644
  /// Vulkan layer entrypoint
  __attribute__((visibility("default")))
  VkResult vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVersionStruct) {
-@@ -625,27 +877,7 @@ VkResult vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVers
+@@ -625,27 +892,7 @@ VkResult vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVers
      // Initialize global info
      try {
          global = new GlobalInfo { // NOLINT (memory management)
@@ -1021,13 +1083,605 @@ index 8d98ddd..7bf338d 100644
              .layer = std::make_unique<layer::Layer>()
          };
  
-@@ -668,3 +900,4 @@ VkResult vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVers
+@@ -668,3 +915,4 @@ VkResult vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVers
      pVersionStruct->pfnGetInstanceProcAddr = myvkGetInstanceProcAddr;
      return VK_SUCCESS;
  }
 +#endif // lsfgvk_shim
+diff --git a/lsfg-vk-layer/src/metal.hpp b/lsfg-vk-layer/src/metal.hpp
+new file mode 100644
+index 0000000..bb3e082
+--- /dev/null
++++ b/lsfg-vk-layer/src/metal.hpp
+@@ -0,0 +1,27 @@
++/* SPDX-License-Identifier: CC-BY-NC-ND-4.0 */
++
++#pragma once
++
++#include <vk>
++
++namespace lsfgvk::layer {
++
++    class Layer;
++
++    /// entry points of the driver shim shared with the metal front end
++    namespace shim {
++        /// load the real driver and the profile; true when hooks are active
++        bool initialize();
++        /// vkGetInstanceProcAddr of the real MoltenVK (null before initialize)
++        PFN_vkGetInstanceProcAddr driverGipa();
++        /// the active layer hook (null without a profile)
++        Layer* layerHook();
++    }
++
++    /// frame generation for games presenting through CAMetalLayer (DXMT, D3DMetal)
++    namespace metal {
++        /// presentation of vulkan surfaces stays with the vulkan hooks
++        void registerVulkanSurface(const char* entryPoint, const void* createInfo);
++    }
++
++}
+diff --git a/lsfg-vk-layer/src/metal.mm b/lsfg-vk-layer/src/metal.mm
+new file mode 100644
+index 0000000..678b68d
+--- /dev/null
++++ b/lsfg-vk-layer/src/metal.mm
+@@ -0,0 +1,553 @@
++/* SPDX-License-Identifier: CC-BY-NC-ND-4.0 */
++
++// metal front end: hooks CAMetalLayer presentation (dxmt, d3dmetal) and runs the pipeline on
++// drawable textures imported through VK_EXT_metal_objects; enabled by LSFGVK_METAL=1
++
++#import <AppKit/NSView.h>
++#import <Metal/Metal.h>
++#import <QuartzCore/CAMetalLayer.h>
++#include <objc/runtime.h>
++
++#include "metal.hpp"
++#include "hooks.hpp"
++#include "logger.hpp"
++#include "wrapper.hpp"
++
++#include "lsfg-vk-helper/vkhelper.hpp"
++
++#include <atomic>
++#include <condition_variable>
++#include <cstdint>
++#include <cstdlib>
++#include <deque>
++#include <exception>
++#include <memory>
++#include <mutex>
++#include <set>
++#include <thread>
++#include <unordered_map>
++#include <unistd.h>
++#include <vector>
++#include <vk>
++#include <vulkan/vulkan_to_string.hpp>
++
++using namespace lsfgvk;
++using namespace lsfgvk::layer;
++
++/// the present a command buffer carries until it is committed
++@interface LSFGPendingPresent : NSObject
++@property (nonatomic, strong) id<CAMetalDrawable> drawable;
++@property (nonatomic) double minimumDuration;
++@end
++@implementation LSFGPendingPresent
++@end
++
++namespace {
++
++    // plain mirrors of the metal structs, vulkan.hpp cannot hold their objc pointers under arc
++    constexpr const char* metalObjectsExtension{"VK_EXT_metal_objects"};
++    struct ImportMetalTextureInfo {
++        VkStructureType sType{VK_STRUCTURE_TYPE_IMPORT_METAL_TEXTURE_INFO_EXT};
++        const void* pNext{nullptr};
++        VkImageAspectFlagBits plane{VK_IMAGE_ASPECT_PLANE_0_BIT};
++        const void* mtlTexture{nullptr};
++    };
++    struct MetalSurfaceCreateInfo {
++        VkStructureType sType;
++        const void* pNext;
++        VkFlags flags;
++        const void* pLayer;
++    };
++    struct MacOSSurfaceCreateInfo {
++        VkStructureType sType;
++        const void* pNext;
++        VkFlags flags;
++        const void* pView;
++    };
++
++    std::mutex vulkanLayersMutex;
++    std::set<const void*> vulkanLayers; // NOLINT (global variable)
++
++    bool isVulkanLayer(CAMetalLayer* layer) {
++        const std::lock_guard<std::mutex> lock(vulkanLayersMutex);
++        return vulkanLayers.contains((__bridge const void*)layer);
++    }
++
++    std::atomic<bool> enabled{false}; // NOLINT (global variable): profile active and no failure yet
++    void (*origCommit)(id, SEL){nullptr}; // NOLINT (global variable)
++
++    /// the pipeline's own vulkan device on the real driver
++    struct Backend {
++        vk::detail::DispatchLoaderDynamic dld;
++        vk::UniqueHandle<vk::Instance, vk::detail::DispatchLoaderDynamic> instance;
++        vk::PhysicalDevice physdev;
++        vk::UniqueHandle<vk::Device, vk::detail::DispatchLoaderDynamic> device;
++        uint32_t qfi{};
++        vk::Queue queue;
++        vk::UniqueHandle<vk::CommandPool, vk::detail::DispatchLoaderDynamic> pool;
++        std::unique_ptr<InstanceWrapper> wrapper;
++
++        explicit Backend(const Layer& layerHook) {
++            auto* gipa{shim::driverGipa()};
++            if (!gipa)
++                throw std::runtime_error("real MoltenVK is not loaded");
++            this->dld.init(gipa);
++
++            const vk::ApplicationInfo app{
++                .pApplicationName = "lsfg-vk",
++                .apiVersion = vk::ApiVersion12
++            };
++            this->instance = vk::createInstanceUnique({ .pApplicationInfo = &app }, nullptr, this->dld);
++            this->dld.init(*this->instance);
++
++            const auto devices{this->instance->enumeratePhysicalDevices(this->dld)};
++            if (devices.empty())
++                throw std::runtime_error("no Vulkan device");
++            this->physdev = devices.front();
++            this->qfi = vkhelper::findQueueFamilyIndex(this->dld, this->physdev,
++                vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute);
++
++            bool metalObjects{false};
++            for (const auto& ext : this->physdev.enumerateDeviceExtensionProperties(nullptr, this->dld))
++                if (std::string_view(ext.extensionName) == metalObjectsExtension) metalObjects = true;
++            if (!metalObjects)
++                throw std::runtime_error("driver lacks VK_EXT_metal_objects");
++
++            const auto& config{layerHook.configuration()};
++            const bool fp16{config.allowHalfPrecision && vkhelper::checkHalfPrecisionSupport(this->dld, this->physdev)};
++
++            const std::vector<const char*> extensions{
++                vk::KHRSynchronization2ExtensionName,
++                metalObjectsExtension
++            };
++            vk::PhysicalDeviceSynchronization2FeaturesKHR sync2{ .synchronization2 = vk::True };
++            const vk::PhysicalDeviceVulkan12Features features12{
++                .pNext = &sync2,
++                .shaderFloat16 = fp16,
++                .timelineSemaphore = vk::True
++            };
++            const float priority{1.0F};
++            const vk::DeviceQueueCreateInfo queueInfo{
++                .queueFamilyIndex = this->qfi,
++                .queueCount = 1,
++                .pQueuePriorities = &priority
++            };
++            this->device = this->physdev.createDeviceUnique({
++                .pNext = &features12,
++                .queueCreateInfoCount = 1,
++                .pQueueCreateInfos = &queueInfo,
++                .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
++                .ppEnabledExtensionNames = extensions.data()
++            }, nullptr, this->dld);
++            this->dld.init(*this->device);
++            this->queue = this->device->getQueue(this->qfi, 0, this->dld);
++            this->pool = vkhelper::createCommandPool(this->dld, *this->device, this->qfi, true);
++            this->wrapper = std::make_unique<InstanceWrapper>(
++                this->dld, *this->instance, *this->device, this->physdev, this->qfi, fp16, config);
++        }
++    };
++
++    Backend& backend() {
++        // never freed, the worker may still be presenting during static destruction
++        static Backend* instance{new Backend(*shim::layerHook())}; // NOLINT (memory management)
++        return *instance;
++    }
++
++    vk::Format vulkanFormat(MTLPixelFormat format) {
++        switch (format) {
++            case MTLPixelFormatBGRA8Unorm: return vk::Format::eB8G8R8A8Unorm;
++            case MTLPixelFormatBGRA8Unorm_sRGB: return vk::Format::eB8G8R8A8Srgb;
++            case MTLPixelFormatRGBA8Unorm: return vk::Format::eR8G8B8A8Unorm;
++            case MTLPixelFormatRGBA8Unorm_sRGB: return vk::Format::eR8G8B8A8Srgb;
++            case MTLPixelFormatRGBA16Float: return vk::Format::eR16G16B16A16Sfloat;
++            case MTLPixelFormatRGB10A2Unorm: return vk::Format::eA2B10G10R10UnormPack32;
++            default: return vk::Format::eUndefined;
++        }
++    }
++
++    /// a drawable texture wrapped as a VkImage
++    struct Imported {
++        id<MTLTexture> texture;
++        vk::UniqueHandle<vk::Image, vk::detail::DispatchLoaderDynamic> image;
++        vk::UniqueHandle<vk::DeviceMemory, vk::detail::DispatchLoaderDynamic> memory;
++    };
++
++    /// LSFGVK_METAL_DUMP=<dir>: write presented frames around the 90th original as PPM
++    void dump(id<MTLTexture> texture, const std::string& name) {
++        const char* dir{std::getenv("LSFGVK_METAL_DUMP")};
++        if (!dir || !*dir) return;
++        @autoreleasepool {
++            id<MTLDevice> device{texture.device};
++            static id<MTLCommandQueue> queue{[device newCommandQueue]};
++            const NSUInteger w{texture.width}, h{texture.height};
++            id<MTLBuffer> buffer{[device newBufferWithLength:w * h * 4 options:MTLResourceStorageModeShared]};
++            id<MTLCommandBuffer> cb{[queue commandBuffer]};
++            id<MTLBlitCommandEncoder> blit{[cb blitCommandEncoder]};
++            [blit copyFromTexture:texture sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
++                sourceSize:MTLSizeMake(w, h, 1) toBuffer:buffer destinationOffset:0
++                destinationBytesPerRow:w * 4 destinationBytesPerImage:w * h * 4];
++            [blit endEncoding];
++            origCommit(cb, @selector(commit));
++            [cb waitUntilCompleted];
++            const auto* px{static_cast<const uint8_t*>(buffer.contents)};
++            const bool bgra{texture.pixelFormat == MTLPixelFormatBGRA8Unorm || texture.pixelFormat == MTLPixelFormatBGRA8Unorm_sRGB};
++            FILE* f{fopen((std::string(dir) + "/" + name + ".ppm").c_str(), "wb")};
++            if (!f) return;
++            fprintf(f, "P6 %lu %lu 255\n", (unsigned long)w, (unsigned long)h);
++            for (NSUInteger i = 0; i < w * h; i++) {
++                const uint8_t* p{px + i * 4};
++                const uint8_t rgb[3]{bgra ? p[2] : p[0], p[1], bgra ? p[0] : p[2]};
++                fwrite(rgb, 1, 3, f);
++            }
++            fclose(f);
++        }
++    }
++
++    struct Job {
++        id<MTLCommandBuffer> commandBuffer;
++        id<CAMetalDrawable> drawable;
++        double minimumDuration;
++    };
++
++    /// frame generation for one CAMetalLayer, driven by a worker thread
++    class Generator {
++    public:
++        explicit Generator(CAMetalLayer* layer) : m_layer(layer) {}
++
++        void enqueue(Job job) {
++            {
++                const std::lock_guard<std::mutex> lock(this->m_mutex);
++                this->m_jobs.push_back(std::move(job));
++                this->m_busy++;
++            }
++            this->m_wake.notify_one();
++            if (!this->m_thread.joinable())
++                this->m_thread = std::thread([this]() { this->run(); });
++        }
++
++        /// the game waits here so the worker gets its drawables first
++        void waitIdle() {
++            std::unique_lock<std::mutex> lock(this->m_mutex);
++            this->m_done.wait(lock, [this]() { return this->m_busy == 0; });
++        }
++
++        static id<CAMetalDrawable> nextDrawable(CAMetalLayer* layer);
++        static void present(id<CAMetalDrawable> drawable, double minimumDuration) {
++            if (minimumDuration > 0) [drawable presentAfterMinimumDuration:minimumDuration];
++            else [drawable present];
++        }
++    private:
++        CAMetalLayer* m_layer;
++        std::thread m_thread;
++        std::mutex m_mutex;
++        std::condition_variable m_wake;
++        std::condition_variable m_done;
++        std::deque<Job> m_jobs;
++        uint32_t m_busy{0};
++
++        std::unique_ptr<ContextWrapper> m_context;
++        vk::Extent2D m_extent;
++        vk::Format m_format{vk::Format::eUndefined};
++        std::unordered_map<void*, Imported> m_imported;
++        std::pair<vk::UniqueHandle<vk::Image, vk::detail::DispatchLoaderDynamic>,
++                  vk::UniqueHandle<vk::DeviceMemory, vk::detail::DispatchLoaderDynamic>> m_original;
++        std::vector<vk::UniqueHandle<vk::CommandBuffer, vk::detail::DispatchLoaderDynamic>> m_cmdbufs;
++        bool m_reportStats{std::getenv("LSFGVK_STATS") != nullptr};
++        uint64_t m_originalPresents{0};
++        uint64_t m_generatedPresents{0};
++
++        void run() {
++            for (;;) {
++                Job job;
++                {
++                    std::unique_lock<std::mutex> lock(this->m_mutex);
++                    this->m_wake.wait(lock, [this]() { return !this->m_jobs.empty(); });
++                    job = std::move(this->m_jobs.front());
++                    this->m_jobs.pop_front();
++                }
++                @autoreleasepool {
++                    this->process(job);
++                }
++                {
++                    const std::lock_guard<std::mutex> lock(this->m_mutex);
++                    this->m_busy--;
++                }
++                this->m_done.notify_all();
++            }
++        }
++
++        void process(Job& job);
++        void prepare(id<MTLTexture> texture);
++        vk::Image imported(id<MTLTexture> texture);
++        void copy(const vk::CommandBuffer& cmdbuf, const vk::Image& src, const vk::Image& dst);
++        void recordPresent(bool generated);
++    };
++
++    std::mutex generatorsMutex;
++
++    Generator& generatorFor(CAMetalLayer* layer) {
++        // never freed either, a joinable thread must not be destroyed at exit
++        static auto* generators{new std::unordered_map<void*, Generator*>}; // NOLINT (memory management)
++        const std::lock_guard<std::mutex> lock(generatorsMutex);
++        auto& slot{(*generators)[(__bridge void*)layer]};
++        if (!slot) slot = new Generator(layer); // NOLINT (memory management)
++        return *slot;
++    }
++
++    void Generator::recordPresent(bool generated) {
++        if (!this->m_reportStats) return;
++        if (generated) { ++this->m_generatedPresents; return; }
++        ++this->m_originalPresents;
++        if (this->m_originalPresents % 60 == 0) {
++            LOG(Info) << "Frame generation stats pid=" << getpid()
++                << " original=" << this->m_originalPresents
++                << " generated=" << this->m_generatedPresents
++                << " total=" << (this->m_originalPresents + this->m_generatedPresents)
++                << " (metal presents on this layer)";
++        }
++    }
++
++    void Generator::prepare(id<MTLTexture> texture) {
++        auto& be{backend()};
++        const vk::Extent2D extent{static_cast<uint32_t>(texture.width), static_cast<uint32_t>(texture.height)};
++        const auto format{vulkanFormat(texture.pixelFormat)};
++        if (format == vk::Format::eUndefined)
++            throw std::runtime_error("unsupported drawable pixel format " + std::to_string(texture.pixelFormat));
++        if (this->m_context && extent == this->m_extent && format == this->m_format)
++            return;
++
++        if (this->m_context) this->m_context->idle();
++        this->m_context.reset();
++        this->m_imported.clear();
++        this->m_original.first.reset();
++        this->m_original.second.reset();
++        this->m_extent = extent;
++        this->m_format = format;
++
++        const auto& profile{shim::layerHook()->profile()};
++        LOG(Info) << "Metal presentation " << extent.width << "x" << extent.height
++            << " (" << vk::to_string(format) << "), multiplier " << profile.multiplier;
++        this->m_context = be.wrapper->createPipeline(profile, extent.width, extent.height);
++
++        auto image{vkhelper::createImage(be.dld, *be.device, extent, format, 1,
++            vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst)};
++        const auto requirements{be.device->getImageMemoryRequirements(*image, be.dld)};
++        auto memory{vkhelper::allocateMemory(be.dld, *be.device, be.physdev, requirements.size, requirements.memoryTypeBits)};
++        be.device->bindImageMemory(*image, *memory, 0, be.dld);
++        this->m_original = { std::move(image), std::move(memory) };
++
++        while (this->m_cmdbufs.size() < profile.multiplier + 1U)
++            this->m_cmdbufs.push_back(vkhelper::createCommandBuffer(be.dld, *be.device, *be.pool));
++    }
++
++    vk::Image Generator::imported(id<MTLTexture> texture) {
++        auto& be{backend()};
++        void* key{(__bridge void*)texture};
++        if (const auto it{this->m_imported.find(key)}; it != this->m_imported.end()) {
++            if (it->second.texture == texture) return *it->second.image;
++            this->m_imported.erase(it); // a new texture at a recycled address
++        }
++        if (texture.width != this->m_extent.width || texture.height != this->m_extent.height
++                || vulkanFormat(texture.pixelFormat) != this->m_format)
++            throw std::runtime_error("drawable does not match the layer it came from");
++
++        const ImportMetalTextureInfo import{ .mtlTexture = (__bridge const void*)texture };
++        auto image{be.device->createImageUnique({
++            .pNext = &import,
++            .imageType = vk::ImageType::e2D,
++            .format = this->m_format,
++            .extent = { this->m_extent.width, this->m_extent.height, 1 },
++            .mipLevels = 1,
++            .arrayLayers = 1,
++            .samples = vk::SampleCountFlagBits::e1,
++            .tiling = vk::ImageTiling::eOptimal,
++            .usage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst,
++            .sharingMode = vk::SharingMode::eExclusive,
++            .initialLayout = vk::ImageLayout::eUndefined
++        }, nullptr, be.dld)};
++        const auto requirements{be.device->getImageMemoryRequirements(*image, be.dld)};
++        auto memory{vkhelper::allocateMemory(be.dld, *be.device, be.physdev, requirements.size, requirements.memoryTypeBits)};
++        be.device->bindImageMemory(*image, *memory, 0, be.dld);
++        const vk::Image handle{*image};
++        this->m_imported.emplace(key, Imported{ texture, std::move(image), std::move(memory) });
++        return handle;
++    }
++
++    void Generator::copy(const vk::CommandBuffer& cmdbuf, const vk::Image& src, const vk::Image& dst) {
++        auto& be{backend()};
++        cmdbuf.begin({ .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit }, be.dld);
++        cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, {
++            vkhelper::barrier(src, vk::AccessFlagBits::eNone, vk::AccessFlagBits::eTransferRead,
++                vk::ImageLayout::eGeneral, vk::ImageLayout::eGeneral),
++            vkhelper::barrier(dst, vk::AccessFlagBits::eNone, vk::AccessFlagBits::eTransferWrite,
++                vk::ImageLayout::eUndefined, vk::ImageLayout::eGeneral)
++        }, be.dld);
++        vkhelper::blitImage(be.dld, cmdbuf, src, 0, dst, 0, this->m_extent);
++        cmdbuf.end(be.dld);
++        be.queue.submit({{ .commandBufferCount = 1, .pCommandBuffers = &cmdbuf }}, nullptr, be.dld);
++    }
++
++    void Generator::process(Job& job) {
++        [job.commandBuffer waitUntilCompleted];
++        if (!enabled.load()) {
++            Generator::present(job.drawable, job.minimumDuration);
++            this->recordPresent(false);
++            return;
++        }
++        try {
++            auto& be{backend()};
++            id<MTLTexture> texture{job.drawable.texture};
++            this->prepare(texture);
++            const auto& profile{shim::layerHook()->profile()};
++            const uint32_t inserted{profile.multiplier - 1};
++            const double duration{job.minimumDuration > 0 ? job.minimumDuration / profile.multiplier : 0};
++
++            // the game's drawable carries the first generated frame, its content is kept aside
++            const vk::Image source{this->imported(texture)};
++            this->copy(*this->m_cmdbufs.at(0), source, *this->m_original.first);
++            this->m_context->dispatch(*this->m_cmdbufs.at(1), be.queue, source, {}, inserted);
++
++            for (uint32_t i = 0; i < inserted; i++) {
++                id<CAMetalDrawable> target{i == 0 ? job.drawable : Generator::nextDrawable(this->m_layer)};
++                if (!target)
++                    throw std::runtime_error("no drawable for a generated frame");
++                this->m_context->acquire(*this->m_cmdbufs.at(2 + i), be.queue, this->imported(target.texture), {}, {});
++                be.queue.waitIdle(be.dld); // the copy must land before the drawable goes on screen
++                if (this->m_originalPresents == 90) dump(target.texture, "generated" + std::to_string(i));
++                Generator::present(target, duration);
++                this->recordPresent(true);
++            }
++
++            id<CAMetalDrawable> last{Generator::nextDrawable(this->m_layer)};
++            if (!last)
++                throw std::runtime_error("no drawable for the original frame");
++            this->copy(*this->m_cmdbufs.at(0), *this->m_original.first, this->imported(last.texture));
++            be.queue.waitIdle(be.dld);
++            if (this->m_originalPresents == 90) dump(last.texture, "original");
++            if (this->m_originalPresents == 89) dump(last.texture, "previous");
++            Generator::present(last, duration);
++            this->recordPresent(false);
++        } catch (const std::exception& e) {
++            LOG(Error) << "Metal frame generation failed, presenting natively from now on:";
++            LOG(Error) << "- " << e.what();
++            enabled.store(false);
++            try { if (this->m_context) this->m_context->idle(); } catch (...) { }
++            this->m_context.reset();
++            this->m_imported.clear();
++            Generator::present(job.drawable, job.minimumDuration);
++        }
++    }
++
++    const void* pendingKey{&pendingKey}; // NOLINT (global variable)
++    id (*origNextDrawable)(id, SEL){nullptr}; // NOLINT (global variable)
++    void (*origPresent)(id, SEL, id){nullptr}; // NOLINT (global variable)
++    void (*origPresentAfter)(id, SEL, id, CFTimeInterval){nullptr}; // NOLINT (global variable)
++    void (*origPresentAt)(id, SEL, id, CFTimeInterval){nullptr}; // NOLINT (global variable)
++
++    id<CAMetalDrawable> Generator::nextDrawable(CAMetalLayer* layer) {
++        return origNextDrawable(layer, @selector(nextDrawable));
++    }
++
++    /// intercept this present?
++    bool intercept(id<MTLDrawable> drawable) {
++        if (!enabled.load() || ![drawable conformsToProtocol:@protocol(CAMetalDrawable)]) return false;
++        CAMetalLayer* layer{((id<CAMetalDrawable>)drawable).layer};
++        return layer && !isVulkanLayer(layer);
++    }
++
++    void setPending(id self, id<MTLDrawable> drawable, double minimumDuration) {
++        LSFGPendingPresent* pending{[LSFGPendingPresent new]};
++        pending.drawable = (id<CAMetalDrawable>)drawable;
++        pending.minimumDuration = minimumDuration;
++        objc_setAssociatedObject(self, pendingKey, pending, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
++    }
++
++    void hookPresent(id self, SEL cmd, id<MTLDrawable> drawable) {
++        if (intercept(drawable)) setPending(self, drawable, 0);
++        else origPresent(self, cmd, drawable);
++    }
++
++    void hookPresentAfter(id self, SEL cmd, id<MTLDrawable> drawable, CFTimeInterval duration) {
++        if (intercept(drawable)) setPending(self, drawable, duration);
++        else origPresentAfter(self, cmd, drawable, duration);
++    }
++
++    void hookPresentAt(id self, SEL cmd, id<MTLDrawable> drawable, CFTimeInterval time) {
++        if (intercept(drawable)) setPending(self, drawable, 0);
++        else origPresentAt(self, cmd, drawable, time);
++    }
++
++    void hookCommit(id self, SEL cmd) {
++        LSFGPendingPresent* pending{objc_getAssociatedObject(self, pendingKey)};
++        if (pending) objc_setAssociatedObject(self, pendingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
++        origCommit(self, cmd);
++        if (!pending) return;
++        generatorFor(pending.drawable.layer).enqueue({ self, pending.drawable, pending.minimumDuration });
++    }
++
++    template<typename F>
++    void swizzle(Class cls, SEL selector, F*& original, void* replacement) {
++        Method method{class_getInstanceMethod(cls, selector)};
++        if (!method) return;
++        original = reinterpret_cast<F*>(method_setImplementation(method, reinterpret_cast<IMP>(replacement)));
++    }
++
++    /// the command buffer class is private to the driver, hook it once a layer is in use
++    void hookCommandBuffers(id<MTLDevice> device) {
++        static std::once_flag once;
++        std::call_once(once, [device]() {
++            id<MTLDevice> dev{device ?: MTLCreateSystemDefaultDevice()};
++            id<MTLCommandBuffer> probe{[[dev newCommandQueue] commandBuffer]};
++            Class cls{object_getClass(probe)};
++            swizzle(cls, @selector(presentDrawable:), origPresent, reinterpret_cast<void*>(hookPresent));
++            swizzle(cls, @selector(presentDrawable:afterMinimumDuration:), origPresentAfter, reinterpret_cast<void*>(hookPresentAfter));
++            swizzle(cls, @selector(presentDrawable:atTime:), origPresentAt, reinterpret_cast<void*>(hookPresentAt));
++            swizzle(cls, @selector(commit), origCommit, reinterpret_cast<void*>(hookCommit));
++            LOG(Info) << "Metal presentation hooks installed on " << class_getName(cls);
++        });
++    }
++
++    id hookNextDrawable(id self, SEL cmd) {
++        CAMetalLayer* layer{self};
++        static std::once_flag once;
++        std::call_once(once, []() {
++            if (!shim::initialize()) return; // no profile: stay out of the way
++            enabled.store(true);
++            LOG(Info) << "lsfg-vk metal front end active";
++        });
++        if (enabled.load() && !isVulkanLayer(layer)) {
++            hookCommandBuffers(layer.device);
++            // one on screen, one queued, one for the game
++            if (layer.maximumDrawableCount < 3) layer.maximumDrawableCount = 3;
++            // vsync paces the inserted frames, like fifo on the vulkan side
++            if (!layer.displaySyncEnabled) layer.displaySyncEnabled = YES;
++            generatorFor(layer).waitIdle();
++        }
++        return origNextDrawable(self, cmd);
++    }
++
++    __attribute__((constructor)) void install() {
++        const char* env{std::getenv("LSFGVK_METAL")};
++        if (!env || !*env || std::string_view(env) == "0") return;
++        swizzle([CAMetalLayer class], @selector(nextDrawable), origNextDrawable, reinterpret_cast<void*>(hookNextDrawable));
++    }
++}
++
++namespace {
++    void registerVulkanLayer(const void* layer) {
++        if (!layer) return;
++        const std::lock_guard<std::mutex> lock(vulkanLayersMutex);
++        vulkanLayers.insert(layer);
++    }
++}
++
++void metal::registerVulkanSurface(const char* entryPoint, const void* createInfo) {
++    if (!entryPoint || !createInfo) return;
++    const std::string_view name{entryPoint};
++    if (name == "vkCreateMetalSurfaceEXT") {
++        registerVulkanLayer(static_cast<const MetalSurfaceCreateInfo*>(createInfo)->pLayer);
++    } else if (name == "vkCreateMacOSSurfaceMVK") {
++        NSView* view{(__bridge NSView*)static_cast<const MacOSSurfaceCreateInfo*>(createInfo)->pView};
++        if ([view isKindOfClass:[NSView class]]) registerVulkanLayer((__bridge const void*)view.layer);
++    }
++}
 diff --git a/lsfg-vk-layer/src/modes/vsync.cpp b/lsfg-vk-layer/src/modes/vsync.cpp
-index 7daa4d7..3e22453 100644
+index 7daa4d7..88826c0 100644
 --- a/lsfg-vk-layer/src/modes/vsync.cpp
 +++ b/lsfg-vk-layer/src/modes/vsync.cpp
 @@ -2,6 +2,8 @@
@@ -1039,7 +1693,7 @@ index 7daa4d7..3e22453 100644
  
  #include "lsfg-vk-helper/vkhelper.hpp"
  
-@@ -133,45 +135,62 @@ namespace {
+@@ -133,45 +135,69 @@ namespace {
      }
  }
  
@@ -1061,24 +1715,31 @@ index 7daa4d7..3e22453 100644
      VkQueue queue,
      const VkPresentInfoKHR* presentInfo
  ) {
+-    const auto status{Swapchain::QueuePresentKHR(fetchFunc, queue, presentInfo)};
+-    if (!this->m_lsfgvkContext) {
+-        return fetchFunc(queue, presentInfo);
 +    auto nativePresent = [&]() {
 +        const auto result = fetchFunc(queue, presentInfo);
 +        if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) this->recordPresent(false);
 +        return result;
 +    };
 +    // bypass unsupported presents and queues
-+    if (presentInfo->swapchainCount != 1 || presentInfo->pNext
++    if (presentInfo->swapchainCount != 1
 +#ifdef __APPLE__
 +            || vk::Queue(queue) != this->m_device.get().queue()
 +#endif
-+    ) return nativePresent();
-+
-     const auto status{Swapchain::QueuePresentKHR(fetchFunc, queue, presentInfo)};
--    if (!this->m_lsfgvkContext) {
--        return fetchFunc(queue, presentInfo);
--    }
-+    if (!this->m_lsfgvkContext) return nativePresent();
++    ) {
++        if (!this->m_bypassLogged) { // say why once
++            this->m_bypassLogged = true;
++            LOG(Warning) << "Native presentation kept for this swapchain: "
++                << (presentInfo->swapchainCount != 1 ? "multi-swapchain present" : "present on a queue other than the adopted one");
++        }
++        return nativePresent();
+     }
  
++    const auto status{Swapchain::QueuePresentKHR(fetchFunc, queue, presentInfo)};
++    if (!this->m_lsfgvkContext) return nativePresent();
++
      const auto& layerHook{this->m_layer.get()};
      const auto& deviceHook{this->m_device.get()};
 -
@@ -1125,7 +1786,7 @@ index 7daa4d7..3e22453 100644
      // Dispatch frame generation
      const uint32_t imagesToInsert{profile.multiplier - 1};
  
-@@ -190,12 +209,15 @@ VkResult VsyncSwapchain::QueuePresentKHR(
+@@ -190,12 +216,15 @@ VkResult VsyncSwapchain::QueuePresentKHR(
          // Acquire swapchain image
          const auto acquireResult{deviceHook.device().acquireNextImageKHR(
             this->m_swapchain,
@@ -1142,7 +1803,20 @@ index 7daa4d7..3e22453 100644
          // Copy generated frame into swapchain image
          const auto& swapchainImage{this->m_swapchainImages.at(acquireResult.value)};
  
-@@ -227,6 +249,7 @@ VkResult VsyncSwapchain::QueuePresentKHR(
+@@ -216,7 +245,12 @@ VkResult VsyncSwapchain::QueuePresentKHR(
+         VkSemaphore copySemaphore2{*innerSyncPass.copySemaphore}; // NOLINT (32-bit const)
+         const VkPresentInfoKHR presentInfo2{
+             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
++#ifdef __APPLE__
++            // present ids, fences and regions belong to the game's own frame
++            .pNext = nullptr,
++#else
+             .pNext = (i == 0) ? static_cast<const void*>(presentInfo->pNext) : nullptr,
++#endif
+             .waitSemaphoreCount = 1,
+             .pWaitSemaphores = &copySemaphore2,
+             .swapchainCount = 1,
+@@ -227,12 +261,16 @@ VkResult VsyncSwapchain::QueuePresentKHR(
          if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
              throw vk::SystemError(result, vk::errorCategory());
          }
@@ -1150,7 +1824,16 @@ index 7daa4d7..3e22453 100644
      }
  
      // Present the original image
-@@ -244,5 +267,18 @@ VkResult VsyncSwapchain::QueuePresentKHR(
+     VkSemaphore presentSemaphore2{*syncPass.presentSemaphore}; // NOLINT (32-bit const)
+     const VkPresentInfoKHR presentInfo2{
+         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
++#ifdef __APPLE__
++        .pNext = presentInfo->pNext,
++#endif
+         .waitSemaphoreCount = 1,
+         .pWaitSemaphores = &presentSemaphore2,
+         .swapchainCount = 1,
+@@ -244,5 +282,18 @@ VkResult VsyncSwapchain::QueuePresentKHR(
          throw vk::SystemError(result, vk::errorCategory());
      }
  
@@ -1170,7 +1853,7 @@ index 7daa4d7..3e22453 100644
 +    }
 +}
 diff --git a/lsfg-vk-layer/src/modes/vsync.hpp b/lsfg-vk-layer/src/modes/vsync.hpp
-index 0e24f33..376e251 100644
+index 0e24f33..f372d1f 100644
 --- a/lsfg-vk-layer/src/modes/vsync.hpp
 +++ b/lsfg-vk-layer/src/modes/vsync.hpp
 @@ -5,6 +5,8 @@
@@ -1190,11 +1873,12 @@ index 0e24f33..376e251 100644
      private:
          struct SyncPass {
              vk::UniqueCommandBuffer copyCmdbuf;
-@@ -51,6 +54,10 @@ namespace lsfgvk::layer {
+@@ -51,6 +54,11 @@ namespace lsfgvk::layer {
              std::vector<InnerSyncPass> innerSyncPasses;
          };
          std::vector<SyncPass> m_syncPasses;
 +        bool m_reportStats{std::getenv("LSFGVK_STATS") != nullptr};
++        bool m_bypassLogged{false};
 +        uint64_t m_originalPresents{0};
 +        uint64_t m_generatedPresents{0};
 +        void recordPresent(bool generated);
@@ -1799,56 +2483,12 @@ index add40d6..d3997cb 100644
                      .image = *subimage
                  };
                  auto allocation{vkhelper::allocateMemory(
-diff --git a/lsfg-vk-layer/src/device_chain.hpp b/lsfg-vk-layer/src/device_chain.hpp
-new file mode 100644
-index 0000000..124b498
---- /dev/null
-+++ b/lsfg-vk-layer/src/device_chain.hpp
-@@ -0,0 +1,38 @@
-+/* SPDX-License-Identifier: CC-BY-NC-ND-4.0 */
-+#pragma once
-+#include <cstring>
-+#include <memory>
-+#include <stdexcept>
-+#include <vector>
-+#include <vk>
-+
-+namespace lsfgvk::layer {
-+// copy chain nodes; borrow nested data only during device creation
-+class DeviceChain {
-+public:
-+    explicit DeviceChain(const void* head) {
-+        VkBaseOutStructure* tail = nullptr;
-+        for (auto* node = static_cast<const VkBaseInStructure*>(head); node; node = node->pNext) {
-+            const size_t bytes = size(node->sType);
-+            auto storage = std::make_unique<unsigned char[]>(bytes);
-+            std::memcpy(storage.get(), node, bytes);
-+            auto* copy = reinterpret_cast<VkBaseOutStructure*>(storage.get());
-+            copy->pNext = nullptr;
-+            if (tail) tail->pNext = copy;
-+            else m_head = copy;
-+            tail = copy;
-+            m_nodes.push_back(std::move(storage));
-+        }
-+    }
-+    void* head() const { return m_head; }
-+private:
-+    static size_t size(VkStructureType type) {
-+        switch (static_cast<vk::StructureType>(type)) {
-+#include "device-chain-sizes.inc"
-+            default: throw std::runtime_error("Unrecognized device feature chain; using passthrough");
-+        }
-+    }
-+    VkBaseOutStructure* m_head{nullptr};
-+    std::vector<std::unique_ptr<unsigned char[]>> m_nodes;
-+};
-+}
 diff --git a/macos/README.md b/macos/README.md
 new file mode 100644
-index 0000000..ad8cf0e
+index 0000000..557e96c
 --- /dev/null
 +++ b/macos/README.md
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,149 @@
 +# lsfg-vk on macOS (MoltenVK shim)
 +
 +Lossless Scaling frame generation for Windows games running under Wine on Apple Silicon,
@@ -1888,6 +2528,46 @@ index 0000000..ad8cf0e
 +*before* the copy that waits on it (upstream does the opposite, which is fine across two queues
 +and a guaranteed GPU timeout on one).
 +
++## Metal front end (DXMT, D3DMetal)
++
++DXMT and D3DMetal never load MoltenVK: they render with Metal and present through
++`CAMetalLayer`. `lsfg-vk-layer/src/metal.mm` covers them with the same pipeline. The launcher
++inserts the shim dylib into the process (`DYLD_INSERT_LIBRARIES`) and sets `LSFGVK_METAL=1`;
++the shim then swizzles `-[CAMetalLayer nextDrawable]` and, on the driver's command buffer class,
++`presentDrawable:` (all three variants) and `commit`.
++
++- A present is not forwarded. It is attached to the command buffer and, once that buffer is
++  committed, handed to a worker thread per layer. The worker waits for the buffer to complete,
++  so the game's frame is finished before anything reads it.
++- The pipeline runs on the shim's own VkDevice on the real MoltenVK, created with
++  `VK_EXT_metal_objects`. Drawable textures are imported as `VkImage`s
++  (`VkImportMetalTextureInfoEXT`); `macos/mtlimport.mm` proves the import aliases the texture.
++- A `CAMetalLayer` has at most three drawables and the one on screen counts, so holding the
++  game's drawable while acquiring more would deadlock. The worker copies the game's frame out,
++  writes the first generated frame back into the game's drawable and presents it, then acquires
++  drawables for the remaining generated frames and finally for the original. Every drawable is
++  presented with `presentAfterMinimumDuration:` of the game's requested duration divided by the
++  multiplier (DXMT asks for the refresh interval), or `present` when none was requested.
++- `displaySyncEnabled` is forced on and `maximumDrawableCount` to 3, the Metal equivalent of the
++  FIFO override on the Vulkan side. The game's `nextDrawable` waits for the worker first, so the
++  worker always gets its drawables before the game takes the next one.
++- Any failure logs once, presents the pending drawable natively and turns the front end off for
++  the process. Unsupported pixel formats (anything but 8-bit RGBA/BGRA, RGBA16F, RGB10A2) do the
++  same.
++- Layers that belong to Vulkan surfaces (`vkCreateMetalSurfaceEXT`, `vkCreateMacOSSurfaceMVK`)
++  are left alone, so a D3D9 title running through DXVK on a DXMT or D3DMetal bottle keeps using
++  the Vulkan hooks and is never generated twice.
++- `LSFGVK_METAL_DUMP=<dir>` writes the 89th/90th original and the generated frames around them
++  as PPM files. With `macos/mtlclear.mm` (a white square moving 8 px per frame) the generated
++  frames show the square at the intermediate positions; that is the check that the output is an
++  interpolation and not a copy.
++
++WineD3D presents through OpenGL, which nothing can hook. Its Vulkan renderer
++(`WINE_D3D_CONFIG=renderer=vulkan`) goes through MoltenVK like DXVK, so the launcher switches it
++over when frame generation is on. WineD3D chains a structure on `VkPresentInfoKHR::pNext`; the
++Vulkan hook attaches that chain to the original frame's present (generated frames get none)
++instead of refusing the swapchain.
++
 +## Other macOS changes
 +
 +- `config.cpp`: no inotify (a `stat()` mtime poll), no `/proc` (profiles come from
@@ -1914,7 +2594,13 @@ index 0000000..ad8cf0e
 +- `macos/vkclear.mm` (native) and `macos/vkclear-win32.c`, `macos/d3dclear-win32.c` (Wine,
 +  mingw-w64): clear-and-present loops that print their app frame rate. With a vsync-paced
 +  swapchain and `LSFGVK_MULTIPLIER=2` the app rate halves; that is the generated frames being
-+  presented in between.
++  presented in between. `macos/d3dclear-win32.exe` also exercises the Metal front end when run
++  on a DXMT or D3DMetal bottle with `DYLD_INSERT_LIBRARIES=<shim dylib> LSFGVK_METAL=1`.
++- `macos/mtlclear.mm` (native Metal, `macos/build-mtlclear.sh`) does the same through
++  `CAMetalLayer`: run it with `DYLD_INSERT_LIBRARIES=<shim dylib> LSFGVK_METAL=1
++  LSFGVK_MOLTENVK=<real dylib>` and the usual `LSFGVK_ENV=1 LSFGVK_MULTIPLIER=2
++  LSFGVK_DLL_PATH=<lsfg-vk.dll>`. On a 60 Hz display it reports about 30 fps at 2x, 20 at 3x
++  and 15 at 4x.
 +- Run the native one with `DYLD_LIBRARY_PATH=<shim dir>` and `LSFGVK_MOLTENVK=<real dylib>`.
 +  Do not wrap it in `arch`, `env`, `perl` or any other system binary: those are SIP-restricted
 +  and strip `DYLD_*` from the environment.
@@ -1965,6 +2651,22 @@ index 0000000..fe5dc02
 +OUT="${1:-$(pwd)/build-macos}"; mkdir -p "$OUT"
 +x86_64-w64-mingw32-gcc -O1 -Wall macos/d3dclear-win32.c -o "$OUT/d3dclear-win32.exe" -ld3d11 -ldxgi -ldxguid -lgdi32 -luser32
 +echo "$OUT/d3dclear-win32.exe"
+diff --git a/macos/build-mtlclear.sh b/macos/build-mtlclear.sh
+new file mode 100755
+index 0000000..9607c00
+--- /dev/null
++++ b/macos/build-mtlclear.sh
+@@ -0,0 +1,10 @@
++#!/bin/zsh
++# build the native metal smoke tests (x86_64, like the engine)
++set -euo pipefail
++cd "$(dirname "$0")/.."
++OUT="${1:-$(pwd)/build-macos}"; mkdir -p "$OUT"
++clang++ -arch x86_64 -std=c++20 -ObjC++ -fobjc-arc -O1 macos/mtlclear.mm \
++  -framework Cocoa -framework QuartzCore -framework Metal -o "$OUT/mtlclear"
++clang++ -arch x86_64 -std=c++20 -ObjC++ -fobjc-arc -O1 -I thirdparty macos/mtlimport.mm \
++  -framework Foundation -framework Metal -o "$OUT/mtlimport"
++echo "$OUT/mtlclear" "$OUT/mtlimport"
 diff --git a/macos/build-vkclear-win32.sh b/macos/build-vkclear-win32.sh
 new file mode 100755
 index 0000000..194cb62
@@ -2134,6 +2836,151 @@ index 0000000..bc52510
 +level = sum(bool(re.match(r"\s*#\s*if(?:def|ndef)?\b", line)) - bool(re.match(r"\s*#\s*endif\b", line)) for line in output)
 +output += ["#endif"] * level
 +pathlib.Path(sys.argv[2]).write_text("\n".join(output) + "\n")
+diff --git a/macos/mtlclear.mm b/macos/mtlclear.mm
+new file mode 100644
+index 0000000..346be13
+--- /dev/null
++++ b/macos/mtlclear.mm
+@@ -0,0 +1,67 @@
++// native metal clear-and-present loop; prints the app frame rate (like vkclear.mm)
++#import <Cocoa/Cocoa.h>
++#import <Metal/Metal.h>
++#import <QuartzCore/CAMetalLayer.h>
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++
++int main(int argc, char** argv) {
++    const int frames = argc > 1 ? atoi(argv[1]) : 240;
++    const int width = getenv("VKTEST_WIDTH") ? atoi(getenv("VKTEST_WIDTH")) : 640;
++    const int height = getenv("VKTEST_HEIGHT") ? atoi(getenv("VKTEST_HEIGHT")) : 480;
++    const bool minDuration = getenv("MTLTEST_MINDURATION");
++    @autoreleasepool {
++        [NSApplication sharedApplication];
++        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
++        NSWindow* win = [[NSWindow alloc] initWithContentRect:NSMakeRect(100, 100, width, height)
++            styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable) backing:NSBackingStoreBuffered defer:NO];
++        [win setTitle:@"mtlclear"];
++        NSView* view = [win contentView];
++        [view setWantsLayer:YES];
++        CAMetalLayer* layer = [CAMetalLayer layer];
++        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
++        layer.device = device;
++        layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
++        layer.drawableSize = CGSizeMake(width, height);
++        layer.framebufferOnly = NO;
++        [view setLayer:layer];
++        [win makeKeyAndOrderFront:nil];
++        [NSApp activateIgnoringOtherApps:YES];
++        id<MTLCommandQueue> queue = [device newCommandQueue];
++        printf("device: %s\n", device.name.UTF8String);
++        // a white square moves 8 px per frame, generated frames show it in between
++        MTLTextureDescriptor* sd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:32 height:32 mipmapped:NO];
++        id<MTLTexture> square = [device newTextureWithDescriptor:sd];
++        { std::vector<uint32_t> px(32 * 32, 0xFFFFFFFFu); [square replaceRegion:MTLRegionMake2D(0, 0, 32, 32) mipmapLevel:0 withBytes:px.data() bytesPerRow:32 * 4]; }
++        auto start = std::chrono::steady_clock::now();
++        for (int i = 0; i < frames; i++) {
++            @autoreleasepool {
++                NSEvent* e; while ((e = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES])) [NSApp sendEvent:e];
++                id<CAMetalDrawable> drawable = [layer nextDrawable];
++                if (!drawable) { fprintf(stderr, "no drawable\n"); continue; }
++                MTLRenderPassDescriptor* rp = [MTLRenderPassDescriptor renderPassDescriptor];
++                rp.colorAttachments[0].texture = drawable.texture;
++                rp.colorAttachments[0].loadAction = MTLLoadActionClear;
++                rp.colorAttachments[0].storeAction = MTLStoreActionStore;
++                const float t = (i % 120) / 120.0f;
++                rp.colorAttachments[0].clearColor = MTLClearColorMake(t, 0.2, 1.0 - t, 1.0);
++                id<MTLCommandBuffer> cb = [queue commandBuffer];
++                id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
++                [enc endEncoding];
++                const int sx = (i * 8) % (width - 32), sy = height / 2 - 16;
++                id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
++                [blit copyFromTexture:square sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0) sourceSize:MTLSizeMake(32, 32, 1)
++                    toTexture:drawable.texture destinationSlice:0 destinationLevel:0 destinationOrigin:MTLOriginMake(sx, sy, 0)];
++                [blit endEncoding];
++                if (minDuration) [cb presentDrawable:drawable afterMinimumDuration:1.0 / 60];
++                else [cb presentDrawable:drawable];
++                [cb commit];
++            }
++        }
++        [[queue commandBuffer] commit];
++        const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
++        printf("%d frames in %.2fs = %.1f fps\n", frames, secs, frames / secs);
++    }
++    return 0;
++}
+diff --git a/macos/mtlimport.mm b/macos/mtlimport.mm
+new file mode 100644
+index 0000000..7b53b22
+--- /dev/null
++++ b/macos/mtlimport.mm
+@@ -0,0 +1,66 @@
++// does a VkImage imported from an MTLTexture (VK_EXT_metal_objects) really alias it?
++#import <Metal/Metal.h>
++#include <dlfcn.h>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <vector>
++#define VK_NO_PROTOTYPES
++#include <vulkan/vulkan.h>
++#define CHECK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS) { fprintf(stderr, "%s failed: %d\n", #x, r_); exit(2); } } while (0)
++struct ImportInfo { VkStructureType sType; const void* pNext; VkImageAspectFlagBits plane; const void* mtlTexture; };
++int main() {
++    @autoreleasepool {
++        id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
++        MTLTextureDescriptor* d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:64 height:64 mipmapped:NO];
++        d.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite | MTLTextureUsageRenderTarget;
++        id<MTLTexture> tex = [dev newTextureWithDescriptor:d];
++        std::vector<uint32_t> px(64 * 64, 0xFF0000FFu); // opaque blue in BGRA little-endian: B=FF,G=00,R=00,A=FF
++        [tex replaceRegion:MTLRegionMake2D(0, 0, 64, 64) mipmapLevel:0 withBytes:px.data() bytesPerRow:256];
++        void* lib = dlopen(getenv("LSFGVK_MOLTENVK"), RTLD_NOW);
++        if (!lib) { fprintf(stderr, "dlopen: %s\n", dlerror()); return 2; }
++        auto gipa = (PFN_vkGetInstanceProcAddr)dlsym(lib, "vkGetInstanceProcAddr");
++#define I(n) auto n = (PFN_##n)gipa(inst, #n)
++        VkInstance inst = VK_NULL_HANDLE;
++        auto vkCreateInstance = (PFN_vkCreateInstance)gipa(nullptr, "vkCreateInstance");
++        VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO}; app.apiVersion = VK_API_VERSION_1_2;
++        VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO}; ici.pApplicationInfo = &app;
++        CHECK(vkCreateInstance(&ici, nullptr, &inst));
++        I(vkEnumeratePhysicalDevices); I(vkCreateDevice); I(vkGetDeviceProcAddr); I(vkGetPhysicalDeviceMemoryProperties);
++        uint32_t n = 1; VkPhysicalDevice pd; vkEnumeratePhysicalDevices(inst, &n, &pd);
++        const char* ext[] = {"VK_EXT_metal_objects"};
++        float prio = 1; VkDeviceQueueCreateInfo qi{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}; qi.queueCount = 1; qi.pQueuePriorities = &prio;
++        VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO}; dci.queueCreateInfoCount = 1; dci.pQueueCreateInfos = &qi; dci.enabledExtensionCount = 1; dci.ppEnabledExtensionNames = ext;
++        VkDevice dv; CHECK(vkCreateDevice(pd, &dci, nullptr, &dv));
++#define D(n) auto n = (PFN_##n)vkGetDeviceProcAddr(dv, #n)
++        D(vkCreateImage); D(vkGetImageMemoryRequirements); D(vkAllocateMemory); D(vkBindImageMemory); D(vkGetDeviceQueue);
++        D(vkCreateCommandPool); D(vkAllocateCommandBuffers); D(vkBeginCommandBuffer); D(vkCmdClearColorImage); D(vkEndCommandBuffer); D(vkQueueSubmit); D(vkQueueWaitIdle); D(vkCmdPipelineBarrier);
++        ImportInfo imp{VK_STRUCTURE_TYPE_IMPORT_METAL_TEXTURE_INFO_EXT, nullptr, VK_IMAGE_ASPECT_PLANE_0_BIT, (__bridge const void*)tex};
++        VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO}; ci.pNext = &imp; ci.imageType = VK_IMAGE_TYPE_2D; ci.format = VK_FORMAT_B8G8R8A8_UNORM;
++        ci.extent = {64, 64, 1}; ci.mipLevels = 1; ci.arrayLayers = 1; ci.samples = VK_SAMPLE_COUNT_1_BIT; ci.tiling = VK_IMAGE_TILING_OPTIMAL;
++        ci.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT; ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
++        VkImage img; CHECK(vkCreateImage(dv, &ci, nullptr, &img));
++        VkMemoryRequirements req; vkGetImageMemoryRequirements(dv, img, &req);
++        printf("requirements: size %llu types %x\n", (unsigned long long)req.size, req.memoryTypeBits);
++        if (!getenv("NOBIND")) {
++            VkPhysicalDeviceMemoryProperties mp; vkGetPhysicalDeviceMemoryProperties(pd, &mp);
++            uint32_t ti = 0; for (; ti < mp.memoryTypeCount; ti++) if ((req.memoryTypeBits & (1u << ti)) && (mp.memoryTypes[ti].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) break;
++            VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO}; ai.allocationSize = req.size; ai.memoryTypeIndex = ti;
++            VkDeviceMemory mem; CHECK(vkAllocateMemory(dv, &ai, nullptr, &mem)); CHECK(vkBindImageMemory(dv, img, mem, 0));
++        }
++        VkQueue q; vkGetDeviceQueue(dv, 0, 0, &q);
++        VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO}; VkCommandPool pool; CHECK(vkCreateCommandPool(dv, &pci, nullptr, &pool));
++        VkCommandBufferAllocateInfo cai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO}; cai.commandPool = pool; cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; cai.commandBufferCount = 1;
++        VkCommandBuffer cb; CHECK(vkAllocateCommandBuffers(dv, &cai, &cb));
++        VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO}; CHECK(vkBeginCommandBuffer(cb, &bi));
++        VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER}; b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; b.newLayout = VK_IMAGE_LAYOUT_GENERAL; b.image = img; b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}; b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
++        VkClearColorValue red{{1, 0, 0, 1}}; VkImageSubresourceRange r{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
++        vkCmdClearColorImage(cb, img, VK_IMAGE_LAYOUT_GENERAL, &red, 1, &r);
++        CHECK(vkEndCommandBuffer(cb));
++        VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO}; si.commandBufferCount = 1; si.pCommandBuffers = &cb; CHECK(vkQueueSubmit(q, 1, &si, VK_NULL_HANDLE)); CHECK(vkQueueWaitIdle(q));
++        [tex getBytes:px.data() bytesPerRow:256 fromRegion:MTLRegionMake2D(0, 0, 64, 64) mipmapLevel:0];
++        printf("pixel after vulkan clear: %08x (want ff0000ff = red)\n", px[100]);
++        return px[100] == 0xFF0000FFu ? 1 : 0;
++    }
++}
 diff --git a/macos/test-driver.cpp b/macos/test-driver.cpp
 new file mode 100644
 index 0000000..49e1b4f

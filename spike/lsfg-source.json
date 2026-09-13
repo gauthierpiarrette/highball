@@ -2,6 +2,5 @@
   "repository": "https://git.lsfg-vk.dev/lsfg-vk.git",
   "commit": "0e7a3898c1285b13df8596f2bd2cbb8f85b4383b",
   "patch": "spike/patches/lsfg-vk-macos.patch",
-  "license": "CC-BY-NC-ND-4.0",
-  "distribution": "Local builds only; publishing the modified port requires separate upstream permission."
+  "license": "CC-BY-NC-ND-4.0"
 }

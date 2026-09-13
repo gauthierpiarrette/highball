@@ -32,6 +32,9 @@ nm -gU "$DYLIB" > "$WORK/symbols"
 for symbol in vkGetInstanceProcAddr vkGetDeviceProcAddr vkCreateMetalSurfaceEXT vkCreateMacOSSurfaceMVK; do
   grep -q " _$symbol$" "$WORK/symbols" || { echo "missing export: $symbol" >&2; exit 1; }
 done
+# the metal front end must be compiled in
+nm "$DYLIB" > "$WORK/symbols-all"
+grep -q "LSFGPendingPresent" "$WORK/symbols-all" || { echo "metal front end missing from the shim" >&2; exit 1; }
 PKG="$WORK/pkg"
 mkdir -p "$PKG/renderers/lsfg" dist
 cp "$DYLIB" "$PKG/renderers/lsfg/libMoltenVK.dylib"
@@ -56,7 +59,7 @@ manifest['id']='x64-sikarugir10.0_6-r3-lsfg-local'
 manifest['displayName']+=' + local lsfg-vk'
 manifest['components']['lsfg']={'kind':'renderer','order':1,'version':archive.stem,
     'url':archive.resolve().as_uri(),'sha256':sha,'size':archive.stat().st_size,
-    'license':'CC-BY-NC-ND-4.0 (local modified build; not approved for redistribution)',
+    'license':'CC-BY-NC-ND-4.0',
     'extract':{'subpath':'renderers/lsfg','into':'renderers/lsfg'}}
 manifest.setdefault('notes',[]).append('LOCAL ONLY: uses an absolute file URL on the build machine. Do not promote this manifest to the bundled public manifest.')
 output=archive.parent/'lsfg-local-engine.json';output.write_text(json.dumps(manifest,indent=2)+'\n')

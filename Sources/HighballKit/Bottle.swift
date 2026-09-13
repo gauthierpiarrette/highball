@@ -54,6 +54,8 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
                 // would come back as the shim (see InstalledEngine.timestampShimDir for the layout).
                 env["HB_D3D12_REAL"] = "Z:" + shim.appending(path: "wine/x86_64-windows/\(InstalledEngine.shimRealName).dll").path.replacingOccurrences(of: "/", with: "\\")
             }
+            // d3dmetal is 64-bit only, so 32-bit d3d10/11 falls through to dxmt instead of wined3d
+            if let dxmt = engine.rendererDir("dxmt") { overlays += ":" + dxmt.appending(path: "wine").path }
             env["WINEDLLPATH_PREPEND"] = Self.withD9VK(overlays, engine: engine)
             env["CX_D3DMETALPATH"] = external
             env["DYLD_FALLBACK_LIBRARY_PATH+"] = external
@@ -531,9 +533,6 @@ public struct Bottle: Sendable {
         guard let shim = engine.lsfgShimDir else {
             return .unavailable("This engine has no usable frame generation component. Build or install the component for this engine.")
         }
-        guard renderer == .dxvk || renderer == .vkd3d else {
-            return .unavailable("Choose DXVK or vkd3d-proton for frame generation. DXMT and D3DMetal use Metal directly.")
-        }
         if let path = env["LSFGVK_MOLTENVK"], !path.isEmpty {
             let driver = frameGenPath(path)
             guard driver.lastPathComponent != "libMoltenVK.dylib", frameGenFile(driver),
@@ -611,6 +610,19 @@ public struct Bottle: Sendable {
            let shim = engine.lsfgShimDir, let dll = losslessScalingDLL(environment: env) {
             let existing = (env["DYLD_LIBRARY_PATH"] ?? "").split(separator: ":").map(String.init)
             env["DYLD_LIBRARY_PATH"] = ([shim.path] + existing.filter { $0 != shim.path }).joined(separator: ":")
+            // metal renderers get the same dylib inserted to hook CAMetalLayer, wined3d moves to vulkan
+            switch r {
+            case .dxmt, .d3dmetal:
+                env["LSFGVK_METAL"] = "1"
+                let dylib = shim.appending(path: "libMoltenVK.dylib").path
+                let inserted = (env["DYLD_INSERT_LIBRARIES"] ?? "").split(separator: ":").map(String.init)
+                env["DYLD_INSERT_LIBRARIES"] = ([dylib] + inserted.filter { $0 != dylib }).joined(separator: ":")
+            case .wined3d:
+                let options = (env["WINE_D3D_CONFIG"] ?? "").split(separator: ",").map(String.init)
+                env["WINE_D3D_CONFIG"] = (["renderer=vulkan"] + options.filter { !$0.hasPrefix("renderer=") }).joined(separator: ",")
+            case .dxvk, .vkd3d:
+                env.removeValue(forKey: "LSFGVK_METAL")
+            }
             env["LSFGVK_MOLTENVK"] = env["LSFGVK_MOLTENVK"].flatMap { $0.isEmpty ? nil : frameGenPath($0).path }
                 ?? shim.appending(path: InstalledEngine.lsfgRealDriverName).path
             env["LSFGVK_ENV"] = "1"
@@ -620,6 +632,7 @@ public struct Bottle: Sendable {
         } else {
             env.removeValue(forKey: "LSFGVK_ENV")
             env.removeValue(forKey: "LSFGVK_PROFILE")
+            env.removeValue(forKey: "LSFGVK_METAL")
             // keep unavailable settings disabled
             env["DISABLE_LSFGVK"] = "1"
             if case .unavailable(let reason) = frameGeneration { env["HB_LSFG_UNAVAILABLE"] = reason }
