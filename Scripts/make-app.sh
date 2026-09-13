@@ -8,9 +8,14 @@ cd "$(dirname "$0")/.."
 CONFIG="${1:-release}"
 VERSION="${2:-0.0.0-dev}"
 FEED_URL="https://raw.githubusercontent.com/gauthierpiarrette/highball/main/appcast.xml"
+AUTO_CHECKS=true
+[ "$CONFIG" = debug ] && AUTO_CHECKS=false
 ED_PUBLIC_KEY="lntI8A+HC5Wo6xb4dZNQ6IYteI771cNybU8XNXmvMd8="
 
-swift build -c "$CONFIG" --product HighballApp
+# allow an older sdk when compiler plugins are missing
+BUILD_ARGS=()
+if [ -n "${HIGHBALL_SDK:-}" ]; then BUILD_ARGS+=(--sdk "$HIGHBALL_SDK"); fi
+swift build -c "$CONFIG" --product HighballApp "${BUILD_ARGS[@]}"
 APP=dist/Highball.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp ".build/$CONFIG/HighballApp" "$APP/Contents/MacOS/Highball"
@@ -36,7 +41,9 @@ if [ -d "$DBDIR" ]; then mkdir -p "$APP/Contents/Resources/db-games"; cp "$DBDIR
 # App icon.
 ICONWORK=.build/icon
 mkdir -p "$ICONWORK/AppIcon.iconset"
-swift Scripts/make-icon.swift "$ICONWORK/AppIcon-1024.png" >/dev/null
+ICON_ARGS=()
+if [ -n "${HIGHBALL_SDK:-}" ]; then ICON_ARGS+=(-sdk "$HIGHBALL_SDK"); fi
+swift "${ICON_ARGS[@]}" Scripts/make-icon.swift "$ICONWORK/AppIcon-1024.png" >/dev/null
 for sz in 16 32 128 256 512; do
   sips -z $sz $sz "$ICONWORK/AppIcon-1024.png" --out "$ICONWORK/AppIcon.iconset/icon_${sz}x${sz}.png" >/dev/null
   d=$((sz*2)); sips -z $d $d "$ICONWORK/AppIcon-1024.png" --out "$ICONWORK/AppIcon.iconset/icon_${sz}x${sz}@2x.png" >/dev/null
@@ -60,7 +67,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>SUFeedURL</key><string>${FEED_URL}</string>
   <key>SUPublicEDKey</key><string>${ED_PUBLIC_KEY}</string>
-  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUEnableAutomaticChecks</key><${AUTO_CHECKS}/>
   <key>SUScheduledCheckInterval</key><integer>86400</integer>
   <key>SUEnableInstallerLauncherService</key><false/>
   <key>NSHumanReadableCopyright</key><string>GPL-3.0 — no paid tier, ever.</string>

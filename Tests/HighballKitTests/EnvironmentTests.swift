@@ -142,6 +142,66 @@ final class EnvironmentTests: XCTestCase {
         XCTAssertEqual(env["WINEDLLPATH_PREPEND"], "\(d9vkWine.path):\(dxvkWine.path)")
     }
 
+    // check frame generation setup and fallback
+    func testFrameGenEnvironment() throws {
+        var (engine, bottle) = try fixtures()
+        let root = FileManager.default.temporaryDirectory.appending(path: "hb-test-fg-\(UUID().uuidString)")
+        bottle = Bottle(url: root, settings: bottle.settings)
+        defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: engine.root) }
+        for dir in ["d9vk/wine", "dxvk/wine", "dxmt/wine"] {
+            try FileManager.default.createDirectory(at: engine.renderersDir.appending(path: dir), withIntermediateDirectories: true)
+        }
+        bottle.settings.frameGen = 2
+
+        // missing shim
+        XCTAssertEqual(bottle.frameGenStatus(renderer: .dxvk, engine: engine), .unavailable("This engine has no usable frame generation component. Build or install the component for this engine."))
+        var env = try bottle.environment(engine: engine, renderer: .dxvk)
+        XCTAssertNil(env["LSFGVK_ENV"])
+
+        // missing shaders
+        let shim = engine.renderersDir.appending(path: "lsfg")
+        try FileManager.default.createDirectory(at: shim, withIntermediateDirectories: true)
+        try Data().write(to: shim.appending(path: "libMoltenVK.dylib"))
+        XCTAssertNil(engine.lsfgShimDir, "a shim without a real driver cannot work")
+        try FileManager.default.createDirectory(at: engine.frameworksDir, withIntermediateDirectories: true)
+        try Data().write(to: engine.frameworksDir.appending(path: "libMoltenVK.dylib"))
+        XCTAssertNotNil(engine.lsfgShimDir)
+        if case .unavailable(let why) = bottle.frameGenStatus(renderer: .dxvk, engine: engine) {
+            XCTAssertTrue(why.contains("Lossless Scaling"), why)
+        } else { XCTFail("expected unavailable without the DLL") }
+
+        // add the shader fixture
+        let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam")
+        let ls = steam.appending(path: "steamapps/common/Lossless Scaling")
+        try FileManager.default.createDirectory(at: ls, withIntermediateDirectories: true)
+        try Data().write(to: steam.appending(path: "steam.exe"))
+        try Data().write(to: ls.appending(path: "lsfg-vk.dll"))
+        XCTAssertEqual(bottle.frameGenStatus(renderer: .dxvk, engine: engine), .active(multiplier: 2))
+        env = try bottle.environment(engine: engine, renderer: .dxvk)
+        XCTAssertEqual(env["LSFGVK_ENV"], "1")
+        XCTAssertEqual(env["LSFGVK_MULTIPLIER"], "2")
+        XCTAssertEqual(env["LSFGVK_DLL_PATH"], ls.appending(path: "lsfg-vk.dll").path)
+        // check driver link repair
+        XCTAssertEqual(env["LSFGVK_MOLTENVK"], shim.appending(path: "libMoltenVK.real.dylib").path)
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: shim.appending(path: "libMoltenVK.real.dylib").path), "../../frameworks/libMoltenVK.dylib")
+        // the shim must take priority over the driver
+        XCTAssertEqual(env["DYLD_LIBRARY_PATH"], shim.path)
+        XCTAssertTrue(env["DYLD_FALLBACK_LIBRARY_PATH"]!.contains(engine.frameworksDir.path), "the runtime's fallback path is untouched")
+
+        // metal rendering bypasses frame generation
+        if case .unavailable(let why) = bottle.frameGenStatus(renderer: .dxmt, engine: engine) {
+            XCTAssertTrue(why.contains("DXMT"), why)
+        } else { XCTFail("expected unavailable on dxmt") }
+        env = try bottle.environment(engine: engine, renderer: .dxmt)
+        XCTAssertNil(env["LSFGVK_ENV"])
+        XCTAssertNil(env["DYLD_LIBRARY_PATH"])
+
+        // off overrides installed components
+        bottle.settings.frameGen = 1
+        XCTAssertEqual(bottle.frameGenStatus(renderer: .dxvk, engine: engine), .off)
+        XCTAssertNil(try bottle.environment(engine: engine, renderer: .dxvk)["LSFGVK_ENV"])
+    }
+
     // A renderer whose overlay is missing must throw, not silently fall back.
     func testMissingRendererThrows() throws {
         let (engine, bottle) = try fixtures()

@@ -76,8 +76,13 @@ public struct WineRunner: Sendable {
         out += "# wine \(args.joined(separator: " "))\n"
         out += "# sync=\(Self.effectiveSync(env: env, settings: bottle.settings))"
         out += " winver=\(bottle.settings.windowsVersion.rawValue) dpi=\(bottle.settings.dpiScale)"
-        out += " dxvkAsync=\(bottle.settings.dxvkAsync)\n"
-        for key in ["WINEDLLPATH_PREPEND", "WINEDLLOVERRIDES", "DXVK_CONFIG_FILE", "DXVK_LOG_PATH"] {
+        out += " dxvkAsync=\(bottle.settings.dxvkAsync)"
+        switch bottle.frameGenStatus(renderer: renderer, engine: engine, environment: env) {
+        case .off: out += " frameGen=off\n"
+        case .active(let m): out += " frameGen=\(m)x(requested)\n"
+        case .unavailable: out += " frameGen=off(unavailable)\n"
+        }
+        for key in ["WINEDLLPATH_PREPEND", "WINEDLLOVERRIDES", "DXVK_CONFIG_FILE", "DXVK_LOG_PATH", "LSFGVK_MULTIPLIER", "LSFGVK_DLL_PATH"] {
             if let value = env[key] { out += "# \(key)=\(value)\n" }
         }
         // The generated dxvk.conf decides per-game behaviour, so quote it rather than making the
@@ -132,12 +137,20 @@ public struct WineRunner: Sendable {
             header += "# note: \(note)\n"
             onOutput?("note: \(note)")
         }
+        // report why frame generation is unavailable
+        if case .unavailable(let why) = bottle.frameGenStatus(renderer: resolved.renderer, engine: engine, environment: env) {
+            header += "# note: frame generation is off: \(why)\n"
+            onOutput?("note: frame generation is off: \(why)")
+        }
         logHandle.write(Data(header.utf8))
 
         let process = Process()
         process.executableURL = engine.wineBinary
         process.arguments = args
-        process.environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
+        let inherited = ProcessInfo.processInfo.environment.filter {
+            !$0.key.hasPrefix("LSFGVK_") && $0.key != "DISABLE_LSFGVK"
+        }
+        process.environment = inherited.merging(env) { $1 }
         // drive_c only exists after the first wineboot — fall back to the bottle root on fresh prefixes.
         process.currentDirectoryURL = workingDirectory
             ?? (FileManager.default.fileExists(atPath: bottle.driveC.path) ? bottle.driveC : bottle.url)

@@ -1,0 +1,2595 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a2865a1..502e62f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -20,6 +20,9 @@ option(LSFGVK_INSTALL_LIBRARIES
+   "Install libraries and include headers" OFF)
+ 
+ include(GNUInstallDirs)
++if(APPLE)
++  enable_testing()
++endif()
+ 
+ set(CMAKE_CXX_STANDARD 20)
+ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+diff --git a/cmake/Version.cmake b/cmake/Version.cmake
+index ab64b36..5b85774 100644
+--- a/cmake/Version.cmake
++++ b/cmake/Version.cmake
+@@ -1,3 +1,9 @@
++# identify the pinned source and patch
++if(DEFINED LSFGVK_VERSION_OVERRIDE)
++  add_compile_definitions(LSFGVK_VERSION="${LSFGVK_VERSION_OVERRIDE}")
++  return()
++endif()
++
+ set(LSFGVK_VERSION "2.0.0")
+ 
+ # Define helper function for executing git commands
+diff --git a/lsfg-vk-cli/src/benchmark.cpp b/lsfg-vk-cli/src/benchmark.cpp
+index f0bce51..32dddbe 100644
+--- a/lsfg-vk-cli/src/benchmark.cpp
++++ b/lsfg-vk-cli/src/benchmark.cpp
+@@ -74,6 +74,7 @@ int cli::benchmark(const BenchmarkOptions& opts) {
+             opts.performanceMode
+         };
+ 
++#ifdef __linux__
+         // Try to get real-time scheduling
+         const sched_param sched{
+             .sched_priority = 40
+@@ -82,6 +83,7 @@ int cli::benchmark(const BenchmarkOptions& opts) {
+             std::cerr << "Warning: Unable to set real-time scheduling. "
+                 << "This may affect benchmark results.\n";
+         }
++#endif
+ 
+         // Benchmark the pipeline
+         const auto startTime{std::chrono::high_resolution_clock::now()};
+diff --git a/lsfg-vk-config/include/lsfg-vk-utils/config.hpp b/lsfg-vk-config/include/lsfg-vk-utils/config.hpp
+index d381bd5..e5060b5 100644
+--- a/lsfg-vk-config/include/lsfg-vk-utils/config.hpp
++++ b/lsfg-vk-config/include/lsfg-vk-utils/config.hpp
+@@ -120,7 +120,11 @@ namespace lsfgvk::utils {
+         [[nodiscard]] std::optional<Configuration> checkAndReload();
+     private:
+         std::filesystem::path m_path;
++#ifdef __APPLE__
++        std::shared_ptr<std::pair<int64_t, int64_t>> m_fd;
++#else
+         std::shared_ptr<std::pair<int, int>> m_fd;
++#endif
+     };
+ 
+     ///
+diff --git a/lsfg-vk-config/src/config.cpp b/lsfg-vk-config/src/config.cpp
+index 1e18d0e..8198edd 100644
+--- a/lsfg-vk-config/src/config.cpp
++++ b/lsfg-vk-config/src/config.cpp
+@@ -17,6 +17,7 @@
+ #include <ios>
+ #include <iostream>
+ #include <memory>
++#include <limits>
+ #include <optional>
+ #include <sstream>
+ #include <stdexcept>
+@@ -25,9 +26,14 @@
+ #include <utility>
+ #include <vector>
+ 
++#ifdef __APPLE__
++#include <sys/stat.h>
++#include <sys/syslimits.h>
++#else
+ #include <linux/limits.h>
+ #include <sys/inotify.h>
+ #include <sys/poll.h>
++#endif
+ #include <sys/types.h>
+ #include <unistd.h>
+ 
+@@ -107,8 +113,13 @@ Configuration utils::getOrDefault() {
+         profile.name = "(environment)";
+ 
+         const char* multiplier{std::getenv("LSFGVK_MULTIPLIER")};
+-        if (multiplier && *multiplier != '\0')
+-            profile.multiplier = static_cast<uint32_t>(std::stoul(multiplier));
++        if (multiplier && *multiplier != '\0') {
++            size_t end = 0;
++            const auto parsed = std::stoul(multiplier, &end);
++            if (end != std::strlen(multiplier) || parsed > std::numeric_limits<uint32_t>::max())
++                throw std::runtime_error("Invalid LSFGVK_MULTIPLIER");
++            profile.multiplier = static_cast<uint32_t>(parsed);
++        }
+         const char* flowScale{std::getenv("LSFGVK_FLOW_SCALE")};
+         if (flowScale && *flowScale != '\0')
+             profile.flowScale = std::stof(flowScale);
+@@ -125,6 +136,10 @@ Configuration utils::getOrDefault() {
+         if (preserveSwapchainImageCount && *preserveSwapchainImageCount != '\0')
+             profile.preserveSwapchainImageCount = std::string(preserveSwapchainImageCount) == "1";
+ 
++#ifdef __APPLE__
++        if (profile.multiplier > 4)
++            throw std::runtime_error("The macOS shim supports multipliers from 2 to 4");
++#endif
+         if (profile.multiplier <= 1) {
+             throw std::runtime_error("LSFGVK_MULTIPLIER must be greater than 1");
+         }
+@@ -287,6 +302,10 @@ Configuration utils::readConfig(const std::filesystem::path& path) {
+                 throw std::runtime_error("Unknown key in profile section: " + std::string(key));
+         }
+ 
++#ifdef __APPLE__
++        if (profile.multiplier > 4)
++            throw std::runtime_error("The macOS shim supports multipliers from 1 to 4");
++#endif
+         if (profile.multiplier < 1) {
+             throw std::runtime_error("Profile '" + profile.name + "' has multiplier < 1");
+         }
+@@ -374,6 +393,32 @@ void utils::writeConfig(const std::filesystem::path& path, const Configuration&
+     file.close();
+ }
+ 
++#ifdef __APPLE__
++namespace {
++    /// config timestamp in seconds and nanoseconds
++    std::pair<int64_t, int64_t> mtimeOf(const std::filesystem::path& path) {
++        struct stat st{};
++        if (stat(path.c_str(), &st) != 0)
++            return { -1, -1 };
++        return { st.st_mtimespec.tv_sec, st.st_mtimespec.tv_nsec };
++    }
++}
++
++// poll config timestamps on macos
++ConfigWatcher::ConfigWatcher(std::filesystem::path path) : m_path(std::move(path)) {
++    this->m_fd = std::make_shared<std::pair<int64_t, int64_t>>(mtimeOf(this->m_path));
++}
++
++std::optional<Configuration> ConfigWatcher::checkAndReload() {
++    const auto now{mtimeOf(this->m_path)};
++    if (now == *this->m_fd || now.first < 0)
++        return std::nullopt;
++    Configuration config{utils::readConfig(this->m_path)};
++    parseGlobalEnv(config);
++    *this->m_fd = now; // retry incomplete writes
++    return config;
++}
++#else
+ ConfigWatcher::ConfigWatcher(std::filesystem::path path) : m_path(std::move(path)) {
+     const auto parentPath{this->m_path.parent_path()};
+ 
+@@ -447,6 +492,7 @@ std::optional<Configuration> ConfigWatcher::checkAndReload() {
+ 
+     return std::nullopt; // No relevant events
+ }
++#endif // __apple__
+ 
+ std::optional<std::filesystem::path> utils::findDll() {
+     const std::vector<std::filesystem::path> steamPaths{{
+@@ -509,6 +555,7 @@ std::optional<std::pair<IdentifyMethod, Profile>> utils::identifyProcess(
+         }
+     }
+ 
++#ifndef __APPLE__ // use environment profiles on macos
+     // Check the executable filename
+     const std::string executable{std::filesystem::read_symlink("/proc/self/exe")};
+     for (const auto& profile : config.profiles) {
+@@ -563,6 +610,7 @@ std::optional<std::pair<IdentifyMethod, Profile>> utils::identifyProcess(
+             }
+         }
+     }
++#endif // !__apple__
+ 
+     // Check for steam appid
+     const char* steamAppId{std::getenv("SteamAppId")};
+diff --git a/lsfg-vk-helper/src/vkhelper.cpp b/lsfg-vk-helper/src/vkhelper.cpp
+index 2704bea..4859b0f 100644
+--- a/lsfg-vk-helper/src/vkhelper.cpp
++++ b/lsfg-vk-helper/src/vkhelper.cpp
+@@ -289,6 +289,9 @@ vk::UniqueImage vkhelper::createImage(
+     const vk::ExternalMemoryImageCreateInfo externalInfo{
+         .handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eOpaqueFd
+     };
++#ifdef __APPLE__
++    external = false; // no fd handle types on moltenvk
++#endif
+     const vk::ImageCreateInfo imageInfo{
+         .pNext = external ? &externalInfo : nullptr,
+         .imageType = vk::ImageType::e2D,
+@@ -555,6 +558,9 @@ vk::UniqueSemaphore vkhelper::createSemaphore(
+     bool timeline,
+     bool external
+ ) {
++#ifdef __APPLE__
++    external = false; // no fd handle types on moltenvk
++#endif
+     const vk::ExportSemaphoreCreateInfo exportInfo{
+         .handleTypes = vk::ExternalSemaphoreHandleTypeFlagBits::eOpaqueFd
+     };
+diff --git a/lsfg-vk-layer/CMakeLists.txt b/lsfg-vk-layer/CMakeLists.txt
+index c42bcf7..337acb8 100644
+--- a/lsfg-vk-layer/CMakeLists.txt
++++ b/lsfg-vk-layer/CMakeLists.txt
+@@ -1,10 +1,45 @@
+-add_library(lsfg-vk-layer SHARED
++set(_layer_sources
+   "src/modes/vsync.cpp"
+   "src/hooks.cpp"
+   "src/logger.cpp"
+   "src/wrapper.cpp"
+   "src/layer.cpp")
+ 
++if(APPLE)
++  find_package(Python3 REQUIRED COMPONENTS Interpreter)
++  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
++    "${CMAKE_SOURCE_DIR}/thirdparty/vulkan/vulkan.hpp"
++    "${CMAKE_SOURCE_DIR}/macos/generate-device-chain.py")
++  execute_process(COMMAND "${Python3_EXECUTABLE}"
++    "${CMAKE_SOURCE_DIR}/macos/generate-device-chain.py"
++    "${CMAKE_SOURCE_DIR}/thirdparty/vulkan/vulkan.hpp"
++    "${CMAKE_CURRENT_BINARY_DIR}/device-chain-sizes.inc"
++    COMMAND_ERROR_IS_FATAL ANY)
++  # build the driver shim used by wine
++  add_library(lsfg-vk-shim SHARED ${_layer_sources})
++  target_include_directories(lsfg-vk-shim PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
++  target_compile_definitions(lsfg-vk-shim PRIVATE LSFGVK_SHIM=1)
++  target_link_libraries(lsfg-vk-shim
++    PRIVATE lsfg-vk-config
++    PRIVATE lsfg-vk-helper
++    PRIVATE lsfg-vk-pipeline)
++  set_target_properties(lsfg-vk-shim PROPERTIES
++    CXX_VISIBILITY_PRESET hidden
++    PREFIX ""
++    OUTPUT_NAME "libMoltenVK"
++    SUFFIX ".dylib")
++  install(TARGETS lsfg-vk-shim
++    LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/lsfg-vk")
++  enable_testing()
++  add_executable(lsfg-vk-macos-check "${CMAKE_SOURCE_DIR}/macos/check-core.cpp")
++  target_include_directories(lsfg-vk-macos-check PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_BINARY_DIR}")
++  target_link_libraries(lsfg-vk-macos-check PRIVATE lsfg-vk-config)
++  add_test(NAME macos-core COMMAND lsfg-vk-macos-check)
++  return()
++endif()
++
++add_library(lsfg-vk-layer SHARED ${_layer_sources})
++
+ target_link_libraries(lsfg-vk-layer
+   PRIVATE lsfg-vk-config
+   PRIVATE lsfg-vk-helper
+diff --git a/lsfg-vk-layer/src/hooks.cpp b/lsfg-vk-layer/src/hooks.cpp
+index d4bc492..3854723 100644
+--- a/lsfg-vk-layer/src/hooks.cpp
++++ b/lsfg-vk-layer/src/hooks.cpp
+@@ -4,6 +4,9 @@
+ #include "logger.hpp"
+ #include "modes/vsync.hpp"
+ #include "wrapper.hpp"
++#ifdef __APPLE__
++#include "device_chain.hpp"
++#endif
+ 
+ #include "lsfg-vk-helper/vkhelper.hpp"
+ #include "lsfg-vk-utils/config.hpp"
+@@ -63,7 +66,8 @@ layer::Layer::Layer() : m_configuration(utils::getOrDefault()) {
+ 
+     if (std::getenv("LSFGVK_ENV")) // No need to watch an environment variable
+         return;
+-    this->m_watcher.emplace(utils::defaultConfigPath());
++    const char* path = std::getenv("LSFGVK_CONFIG");
++    this->m_watcher.emplace(path && *path ? std::filesystem::path(path) : utils::defaultConfigPath());
+ }
+ 
+ bool Layer::update() {
+@@ -81,9 +85,8 @@ bool Layer::update() {
+     for (const auto& profile : config->profiles) {
+         if (profile.name != this->m_profile.name)
+             continue;
+-        this->m_profile.multiplier = profile.multiplier;
+-        this->m_profile.flowScale = profile.flowScale;
+-        this->m_profile.performanceMode = profile.performanceMode;
++        this->m_profile = profile;
++        ++this->m_revision;
+         this->m_configuration = std::move(*config);
+ 
+         layer::setLevel(this->m_configuration.logLevel);
+@@ -222,6 +225,117 @@ layer::Device::Device(
+ ) : m_layer(layerHook), m_instance(instanceHook), m_setDeviceLoaderData(loaderData) {
+     LOG(Info) << "Hooked new Vulkan device creation";
+ 
++#ifdef __APPLE__
++    // enable the features needed by the shared device
++    const vk::PhysicalDevice physdevCpp{physdev};
++    const auto available{physdevCpp.enumerateDeviceExtensionProperties(nullptr, instanceHook.dld())};
++    const auto has{[&](const char* name) {
++        return std::ranges::any_of(available, [name](const auto& ext) {
++            return std::string_view(ext.extensionName) == name;
++        });
++    }};
++    std::vector<const char*> wanted{
++        vk::KHRTimelineSemaphoreExtensionName,
++        vk::KHRSynchronization2ExtensionName
++    };
++    if (has(vk::KHRShaderFloat16Int8ExtensionName))
++        wanted.push_back(vk::KHRShaderFloat16Int8ExtensionName);
++    auto extensions{addExtensions(
++        info.ppEnabledExtensionNames,
++        info.enabledExtensionCount,
++        wanted
++    )};
++    info.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
++    info.ppEnabledExtensionNames = extensions.data();
++
++    const auto families = physdevCpp.getQueueFamilyProperties(instanceHook.dld());
++    uint32_t queueFamily = UINT32_MAX;
++    for (uint32_t i = 0; i < info.queueCreateInfoCount; ++i) {
++        const auto& queue = info.pQueueCreateInfos[i];
++        const auto required = vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute;
++        if (queue.queueCount && !queue.flags && queue.queueFamilyIndex < families.size()
++                && (families[queue.queueFamilyIndex].queueFlags & required) == required) {
++            queueFamily = queue.queueFamilyIndex;
++            break;
++        }
++    }
++    if (queueFamily == UINT32_MAX)
++        throw std::runtime_error("No requested graphics/compute queue; frame generation is unavailable");
++
++    // require synchronization support; use fp16 when available
++    vk::PhysicalDeviceTimelineSemaphoreFeatures timelineQuery{};
++    vk::PhysicalDeviceShaderFloat16Int8FeaturesKHR fp16Query{ .pNext = &timelineQuery };
++    vk::PhysicalDeviceSynchronization2FeaturesKHR sync2Query{ .pNext = &fp16Query };
++    vk::PhysicalDeviceFeatures2KHR featuresQuery{ .pNext = &sync2Query };
++    physdevCpp.getFeatures2KHR(&featuresQuery, instanceHook.dld());
++    if (!timelineQuery.timelineSemaphore)
++        throw std::runtime_error("Device has no timeline semaphore support");
++    if (!sync2Query.synchronization2)
++        throw std::runtime_error("Device has no synchronization2 support");
++    this->m_fp16Enabled = has(vk::KHRShaderFloat16Int8ExtensionName) && fp16Query.shaderFloat16;
++
++    // reuse promoted feature structs to avoid duplicate features
++    DeviceChain ownedFeatures(info.pNext);
++    info.pNext = ownedFeatures.head();
++    bool hasSync2{false};
++    bool hasFp16{false};
++    bool hasTimeline{false};
++    auto* nextInfo0{static_cast<VkBaseOutStructure*>(const_cast<void*>(info.pNext))};
++    while (nextInfo0) {
++        switch (nextInfo0->sType) {
++            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES:
++                reinterpret_cast<VkPhysicalDeviceVulkan13Features*>(nextInfo0)->synchronization2 = VK_TRUE;
++                hasSync2 = true;
++                break;
++            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES: {
++                auto* f{reinterpret_cast<VkPhysicalDeviceVulkan12Features*>(nextInfo0)};
++                f->timelineSemaphore = VK_TRUE;
++                if (this->m_fp16Enabled) f->shaderFloat16 = VK_TRUE;
++                hasTimeline = true;
++                hasFp16 = true;
++                break;
++            }
++            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR:
++                reinterpret_cast<VkPhysicalDeviceSynchronization2FeaturesKHR*>(nextInfo0)->synchronization2 = VK_TRUE;
++                hasSync2 = true;
++                break;
++            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR:
++                if (this->m_fp16Enabled)
++                    reinterpret_cast<VkPhysicalDeviceShaderFloat16Int8FeaturesKHR*>(nextInfo0)->shaderFloat16 = VK_TRUE;
++                hasFp16 = true;
++                break;
++            case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR:
++                reinterpret_cast<VkPhysicalDeviceTimelineSemaphoreFeaturesKHR*>(nextInfo0)->timelineSemaphore = VK_TRUE;
++                hasTimeline = true;
++                break;
++            default:
++                break;
++        }
++        nextInfo0 = nextInfo0->pNext;
++    }
++    VkPhysicalDeviceSynchronization2FeaturesKHR sync2Features{
++        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR,
++        .pNext = const_cast<void*>(info.pNext),
++        .synchronization2 = VK_TRUE
++    };
++    if (!hasSync2)
++        info.pNext = &sync2Features;
++    VkPhysicalDeviceShaderFloat16Int8FeaturesKHR fp16Features{
++        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR,
++        .pNext = const_cast<void*>(info.pNext),
++        .shaderFloat16 = VK_TRUE
++    };
++    if (!hasFp16 && this->m_fp16Enabled)
++        info.pNext = &fp16Features;
++    VkPhysicalDeviceTimelineSemaphoreFeaturesKHR timelineFeaturesApple{
++        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR,
++        .pNext = const_cast<void*>(info.pNext),
++        .timelineSemaphore = VK_TRUE
++    };
++    if (!hasTimeline)
++        info.pNext = &timelineFeaturesApple;
++    const bool hasTimelineSemaphore{true}; // handled above
++#else
+     // Add required extensions
+     auto extensions{addExtensions(
+         info.ppEnabledExtensionNames,
+@@ -236,8 +350,10 @@ layer::Device::Device(
+     )};
+     info.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+     info.ppEnabledExtensionNames = extensions.data();
++#endif
+ 
+     // Enable the timeline semaphore feature
++#ifndef __APPLE__
+     bool hasTimelineSemaphore{false};
+ 
+     auto* nextInfo{static_cast<VkBaseOutStructure*>(const_cast<void*>(info.pNext))};
+@@ -260,6 +376,9 @@ layer::Device::Device(
+     if (!hasTimelineSemaphore) {
+         info.pNext = &timelineFeatures;
+     }
++#else
++    (void)hasTimelineSemaphore;
++#endif
+ 
+     // Create the device
+     const auto result{createFunc(physdev, &info, alloc, device)};
+@@ -274,12 +393,15 @@ layer::Device::Device(
+     this->m_dld.vkGetDeviceProcAddr = gdpa;
+     this->m_dld.init(this->m_device);
+ 
++#ifndef __APPLE__
+     const uint32_t queueFamily{vkhelper::findQueueFamilyIndex(
+         this->m_dld,
+         this->m_physdev,
+         vk::QueueFlagBits::eGraphics,
+         false
+     )};
++#endif
++    this->m_queue = this->m_device.getQueue(queueFamily, 0, this->m_dld);
+     this->m_commandPool = vkhelper::createCommandPool(
+         this->m_dld,
+         this->m_device,
+@@ -290,8 +412,11 @@ layer::Device::Device(
+     // Create lsfg-vk pipeline holder
+     this->m_lsfgvkInstance = std::make_unique<InstanceWrapper>(
+         this->m_dld,
++        instanceHook.instance(),
+         this->m_device,
+         this->m_physdev,
++        queueFamily,
++        this->m_fp16Enabled,
+         layerHook.configuration()
+     );
+ }
+@@ -343,14 +468,7 @@ Swapchain::Swapchain(
+     // Create lsfg-vk pipeline context
+     const auto& profile{layerHook.profile()};
+ 
+-    if (profile.multiplier != 1) {
+-        this->m_lsfgvkContext = deviceHook.lsfgvkInstance()->createPipeline(
+-            profile,
+-            info.imageExtent.width,
+-            info.imageExtent.height
+-        );
+-    }
+-
++    this->m_revision = layerHook.revision();
+     this->m_swapchain = vk::SwapchainKHR(*swapchain);
+     this->m_swapchainImages =
+         deviceHook.device().getSwapchainImagesKHR(this->m_swapchain, deviceHook.dld());
+@@ -366,28 +484,27 @@ VkResult Swapchain::QueuePresentKHR(
+     auto& device{this->m_device.get()};
+ 
+     // Recreate the lsfg-vk context if the profile has changed
+-    const bool isOutOfDate{layer.update()};
+-    if (isOutOfDate) {
+-        const auto& profile{layer.profile()};
+-
+-        if (profile.multiplier == 1) {
+-            LOG(Info) << "  (Disabled)";
+-            this->m_lsfgvkContext.reset();
+-        } else {
+-            LOG(Info) << "  Multiplier: " << profile.multiplier;
+-            LOG(Info) << "  Flow scale: "<< std::fixed << std::setprecision(2)
+-                << profile.flowScale;
+-            LOG(Info) << "  Performance mode: " << (profile.performanceMode ? "true" : "false");
+-
++    try { layer.update(); }
++    catch (const std::exception& error) {
++        LOG(Warning) << "Keeping the previous frame-generation profile: " << error.what();
++    }
++    const bool changed = this->m_revision != layer.revision();
++    if (changed) {
++        this->m_revision = layer.revision();
++        this->m_lsfgvkContext.reset(); // previous present finished gpu work
++        this->m_generationFailed = false;
++    }
++    const auto& profile = layer.profile();
++    if (!this->m_lsfgvkContext && !this->m_generationFailed && profile.multiplier > 1) {
++        try {
+             this->m_lsfgvkContext = device.lsfgvkInstance()->createPipeline(
+-                profile,
+-                this->m_extent.width,
+-                this->m_extent.height
+-            );
++                profile, this->m_extent.width, this->m_extent.height);
++        } catch (const std::exception& error) {
++            this->m_generationFailed = true;
++            LOG(Warning) << "Frame generation disabled; using passthrough: " << error.what();
+         }
+-
+-        return VK_ERROR_OUT_OF_DATE_KHR; // Notify swapchain implementation
+     }
++    if (changed) return VK_ERROR_OUT_OF_DATE_KHR;
+ 
+     return VK_ERROR_UNKNOWN; // This class should never be used directly...
+ }
+diff --git a/lsfg-vk-layer/src/hooks.hpp b/lsfg-vk-layer/src/hooks.hpp
+index d39aa64..63238c2 100644
+--- a/lsfg-vk-layer/src/hooks.hpp
++++ b/lsfg-vk-layer/src/hooks.hpp
+@@ -48,6 +48,7 @@ namespace lsfgvk::layer {
+         // Various getters
+         GETTER(configuration)
+         GETTER(profile)
++        GETTER(revision)
+ 
+         // Non-copyable, non-movable
+         Layer(const Layer&) = delete;
+@@ -60,6 +61,7 @@ namespace lsfgvk::layer {
+         std::optional<utils::ConfigWatcher> m_watcher;
+ 
+         utils::Profile m_profile;
++        uint64_t m_revision{0};
+         bool m_hasProfile{false}; // Always true in Instance / Device / Swapchain
+     };
+ 
+@@ -155,6 +157,7 @@ namespace lsfgvk::layer {
+         GETTER(device)
+         GETTER(physdev)
+         GETTER(commandPool)
++        GETTER(queue)
+ 
+         GETTER(setDeviceLoaderData)
+ 
+@@ -174,8 +177,10 @@ namespace lsfgvk::layer {
+         vk::Device m_device;
+         vk::PhysicalDevice m_physdev;
+         vk::UniqueCommandPool m_commandPool;
++        vk::Queue m_queue;
+ 
+         PFN_vkSetDeviceLoaderData m_setDeviceLoaderData;
++        bool m_fp16Enabled{false};
+ 
+         std::unique_ptr<InstanceWrapper> m_lsfgvkInstance;
+     };
+@@ -213,6 +218,8 @@ namespace lsfgvk::layer {
+         vk::SwapchainKHR m_swapchain;
+         std::vector<vk::Image> m_swapchainImages;
+         vk::Extent2D m_extent;
++        uint64_t m_revision{0};
++        bool m_generationFailed{false};
+ 
+         Swapchain(
+             PFN_vkCreateSwapchainKHR createFunc,
+diff --git a/lsfg-vk-layer/src/layer.cpp b/lsfg-vk-layer/src/layer.cpp
+index 8d98ddd..7bf338d 100644
+--- a/lsfg-vk-layer/src/layer.cpp
++++ b/lsfg-vk-layer/src/layer.cpp
+@@ -18,6 +18,11 @@
+ 
+ #include <vulkan/vulkan_to_string.hpp>
+ 
++#ifdef LSFGVK_SHIM
++#include <dlfcn.h>
++#include <mutex>
++#endif
++
+ using namespace lsfgvk;
+ 
+ namespace {
+@@ -26,6 +31,14 @@ namespace {
+     struct DeviceData;
+     struct SwapchainData;
+ 
++#ifdef LSFGVK_SHIM
++    // lock shared layer state; leave application submits and waits unlocked
++    std::recursive_mutex apiMutex;
++#define SHIM_LOCK const std::lock_guard<std::recursive_mutex> apiLock(apiMutex);
++#else
++#define SHIM_LOCK
++#endif
++
+     /// Layer-wide global info
+     struct GlobalInfo {
+         std::shared_mutex mutex;
+@@ -47,6 +60,19 @@ namespace {
+         std::unique_ptr<layer::Layer> layer;
+     }* global{nullptr}; // NOLINT (global variable)
+ 
++#ifdef LSFGVK_SHIM
++    /// forward unhandled calls to the real driver
++    struct RealDriver {
++        void* handle;
++        PFN_vkGetInstanceProcAddr gipa;
++        PFN_vkGetDeviceProcAddr gdpa;
++    };
++    RealDriver* real{nullptr}; // NOLINT (global variable)
++    bool shimActive{false};    // NOLINT (global variable): profile found, hooks installed
++
++    VkResult noopSetDeviceLoaderData(VkDevice, void*) { return VK_SUCCESS; }
++#endif
++
+ 
+ #define ASSERT_FATAL(cond, msg) \
+     if (!(cond)) { \
+@@ -71,6 +97,11 @@ namespace {
+         const VkAllocationCallbacks* alloc,
+         VkInstance* instance
+     ) noexcept {
++        SHIM_LOCK
++        LOG(Debug) << "vkCreateInstance entered (" << (info ? info->enabledExtensionCount : 0U) << " extensions)";
++#ifdef LSFGVK_SHIM
++        PFN_vkGetInstanceProcAddr gipa{real->gipa};
++#else
+         // Apply layer chaining
+         const auto* chain{static_cast<const VkLayerInstanceCreateInfo*>(info->pNext)};
+         while (chain && (chain->sType != VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO
+@@ -86,6 +117,7 @@ namespace {
+         ASSERT_FATAL(gipa, "Function pointer to vkGetInstanceProcAddr is null")
+ 
+         const_cast<VkLayerInstanceCreateInfo*>(chain)->u.pLayerInfo = layerInfo->pNext;
++#endif
+ 
+         auto* CreateInstance{reinterpret_cast<PFN_vkCreateInstance>(
+             gipa(VK_NULL_HANDLE, "vkCreateInstance"))};
+@@ -193,7 +225,11 @@ namespace {
+         }
+ 
+         if (!instance) {
++#ifdef LSFGVK_SHIM
++            return real->gipa(nullptr, name); // forward instance queries
++#else
+             return nullptr; // Unable to query next layer without instance
++#endif
+         }
+ 
+         // Instance functions
+@@ -208,6 +244,9 @@ namespace {
+ 
+             const auto funcIt{global->funcMap.find(view)};
+             if (funcIt != global->funcMap.end()) {
++#ifdef LSFGVK_SHIM
++                if (!real->gipa(instance, name)) return nullptr;
++#endif
+                 return funcIt->second;
+             }
+ 
+@@ -219,6 +258,7 @@ namespace {
+ 
+     /// Destroy instance
+     void myvkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* alloc) noexcept {
++        SHIM_LOCK
+         PFN_vkDestroyInstance DestroyInstance{nullptr};
+         {
+             const std::unique_lock<std::shared_mutex> lock(global->mutex);
+@@ -255,6 +295,11 @@ namespace {
+         const VkAllocationCallbacks* alloc,
+         VkDevice* device
+     ) noexcept {
++        SHIM_LOCK
++#ifdef LSFGVK_SHIM
++        PFN_vkGetDeviceProcAddr gdpa{real->gdpa};
++        PFN_vkSetDeviceLoaderData SetDeviceLoaderData{noopSetDeviceLoaderData};
++#else
+         // Apply layer chaining
+         const auto* chain{static_cast<const VkLayerDeviceCreateInfo*>(info->pNext)};
+         while (chain && (chain->sType != VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO
+@@ -281,6 +326,7 @@ namespace {
+ 
+         PFN_vkSetDeviceLoaderData SetDeviceLoaderData{chain->u.pfnSetDeviceLoaderData};
+         ASSERT_FATAL(SetDeviceLoaderData, "Function pointer to vkSetDeviceLoaderData is null")
++#endif
+ 
+         // Fetch instance data
+         PFN_vkGetInstanceProcAddr gipa{nullptr};
+@@ -308,6 +354,7 @@ namespace {
+         ASSERT_FATAL(CreateDevice, "Failed to fetch vkCreateDevice")
+ 
+         // Create device
++        *device = VK_NULL_HANDLE;
+         std::unique_ptr<layer::Device> layerDevice;
+         if (layerInstance && layer::supportsDevice(*info)) {
+             try {
+@@ -320,9 +367,19 @@ namespace {
+                 };
+                 layerDevice.swap(newDevice); // Required due to no-move constraint
+             } catch (const std::exception& e) {
+-                LOG(Error) << "An error occured while initializing the lsfg-vk device:";
+-                LOG(Error) << "- " << e.what();
++#ifdef LSFGVK_SHIM
++                LOG(Warning) << "Frame generation unavailable on this device; using passthrough: " << e.what();
++                if (*device) {
++                    auto destroy = reinterpret_cast<PFN_vkDestroyDevice>(gdpa(*device, "vkDestroyDevice"));
++                    if (destroy) destroy(*device, alloc);
++                    *device = VK_NULL_HANDLE;
++                }
++                const auto result = CreateDevice(physicalDevice, info, alloc, device);
++                if (result != VK_SUCCESS) return result;
++#else
++                LOG(Error) << "An error occured while initializing the lsfg-vk device: " << e.what();
+                 return VK_ERROR_INITIALIZATION_FAILED;
++#endif
+             }
+         } else {
+             auto result{CreateDevice(physicalDevice, info, alloc, device)};
+@@ -371,11 +428,18 @@ namespace {
+ 
+             const auto it{global->devices.find(device)};
+             if (it == global->devices.end()) {
++#ifdef LSFGVK_SHIM
++                return real->gdpa(device, name);
++#else
+                 return nullptr;
++#endif
+             }
+ 
+             const auto funcIt{global->funcMap.find(std::string_view(name))};
+             if (funcIt != global->funcMap.end()) {
++#ifdef LSFGVK_SHIM
++                if (!real->gdpa(device, name)) return nullptr;
++#endif
+                 return funcIt->second;
+             }
+ 
+@@ -387,6 +451,7 @@ namespace {
+ 
+     /// Destroy device
+     void myvkDestroyDevice(VkDevice device, const VkAllocationCallbacks* alloc) noexcept {
++        SHIM_LOCK
+         PFN_vkDestroyDevice DestroyDevice{nullptr};
+         {
+             const std::unique_lock<std::shared_mutex> lock(global->mutex);
+@@ -420,6 +485,7 @@ namespace {
+         const VkAllocationCallbacks* alloc,
+         VkSwapchainKHR* swapchain
+     ) noexcept {
++        SHIM_LOCK
+         // Fetch device & instance data
+         PFN_vkGetDeviceProcAddr gdpa{nullptr};
+         layer::Device* layerDevice{};
+@@ -440,7 +506,32 @@ namespace {
+             gdpa(device, "vkCreateSwapchainKHR"))};
+         ASSERT_FATAL(CreateSwapchain, "Failed to fetch vkCreateSwapchainKHR")
+ 
++#ifdef LSFGVK_SHIM
++        const bool sdr = info->imageColorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
++            && (info->imageFormat == VK_FORMAT_B8G8R8A8_UNORM || info->imageFormat == VK_FORMAT_R8G8B8A8_UNORM
++                || info->imageFormat == VK_FORMAT_B8G8R8A8_SRGB || info->imageFormat == VK_FORMAT_R8G8B8A8_SRGB);
++        if (layerDevice && (!sdr || info->imageArrayLayers != 1 || (info->flags & VK_SWAPCHAIN_CREATE_PROTECTED_BIT_KHR))) {
++            LOG(Warning) << "Frame generation disabled for this swapchain format; preserving native presentation";
++            layerDevice = nullptr;
++        }
++#endif
++#ifdef LSFGVK_SHIM
++        if (layerDevice) {
++            try {
++                const auto caps = layerDevice->physdev().getSurfaceCapabilitiesKHR(vk::SurfaceKHR(info->surface), layerDevice->dld());
++                const auto needed = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst;
++                if ((caps.supportedUsageFlags & needed) != needed) {
++                    LOG(Warning) << "Frame generation disabled: surface does not support image transfers";
++                    layerDevice = nullptr;
++                }
++            } catch (const std::exception&) {
++                // let the driver handle the original request
++                layerDevice = nullptr;
++            }
++        }
++#endif
+         // Create swapchain
++        *swapchain = VK_NULL_HANDLE;
+         std::unique_ptr<layer::Swapchain> layerSwapchain;
+         if (layerDevice) {
+             try {
+@@ -451,6 +542,13 @@ namespace {
+             } catch (const std::exception& e) {
+                 LOG(Error) << "An error occured while initializing the lsfg-vk swapchain:";
+                 LOG(Error) << "- " << e.what();
++                if (*swapchain) {
++                    auto destroy = reinterpret_cast<PFN_vkDestroySwapchainKHR>(gdpa(device, "vkDestroySwapchainKHR"));
++                    if (destroy) destroy(device, *swapchain, alloc);
++                    *swapchain = VK_NULL_HANDLE;
++                }
++                if (const auto* error = dynamic_cast<const vk::SystemError*>(&e))
++                    return static_cast<VkResult>(error->code().value());
+                 return VK_ERROR_INITIALIZATION_FAILED;
+             }
+         } else {
+@@ -494,6 +592,7 @@ namespace {
+         VkSwapchainKHR swapchain,
+         const VkAllocationCallbacks* alloc
+     ) noexcept {
++        SHIM_LOCK
+         PFN_vkDestroySwapchainKHR DestroySwapchain{nullptr};
+         {
+             const std::unique_lock<std::shared_mutex> lock(global->mutex);
+@@ -534,6 +633,7 @@ namespace {
+             const char* name, V vktype0, V2 vktype1, Args&&... args) {
+         // NOTE: It is assumed that the Vulkan API externally synchronizes any access
+         // that could modify the objects being used. Therefore, only a shared lock is used.
++        SHIM_LOCK
+         const std::shared_lock<std::shared_mutex> lock(global->mutex);
+ 
+ #define RETURN(val) \
+@@ -580,10 +680,21 @@ namespace {
+                 LOG(Warning) << "A Vulkan error occured while calling " << name;
+                 LOG(Warning) << "- " << vk::to_string(vk::Result(e.code().value()));
+             }
++            if constexpr (std::is_same_v<Ret, VkResult>) {
++                if (e.code().value() < 0) {
++                    if constexpr (std::is_same_v<V2, const VkPresentInfoKHR*>)
++                        if (vktype1->pResults) vktype1->pResults[0] = static_cast<VkResult>(e.code().value());
++                    return static_cast<VkResult>(e.code().value());
++                }
++            }
++            if constexpr (std::is_same_v<V2, const VkPresentInfoKHR*>)
++                if (vktype1->pResults) vktype1->pResults[0] = err;
+             RETURN(err)
+         } catch (const std::exception& e) {
+             LOG(Warning) << "An error occured while calling " << name;
+             LOG(Warning) << "- " << e.what();
++            if constexpr (std::is_same_v<V2, const VkPresentInfoKHR*>)
++                if (vktype1->pResults) vktype1->pResults[0] = err;
+             RETURN(err)
+         }
+ #undef RETURN
+@@ -604,6 +715,147 @@ namespace {
+     #undef ARGS
+ }
+ 
++namespace {
++    /// hooked entry points
++    std::unordered_map<std::string_view, PFN_vkVoidFunction> hookMap() {
++        #define VK(val) reinterpret_cast<PFN_vkVoidFunction>(val)
++        return {
++            { "vkGetDeviceProcAddr", VK(myvkGetDeviceProcAddr) },
++            { "vkDestroyInstance", VK(myvkDestroyInstance) },
++            { "vkCreateDevice",  VK(myvkCreateDevice) },
++            { "vkDestroyDevice", VK(myvkDestroyDevice) },
++            { "vkCreateSwapchainKHR", VK(myvkCreateSwapchainKHR) },
++            { "vkDestroySwapchainKHR", VK(myvkDestroySwapchainKHR) },
++            { "vkGetPhysicalDeviceSurfaceSupportKHR", VK(myvkGetPhysicalDeviceSurfaceSupportKHR) },
++            { "vkQueuePresentKHR", VK(myvkQueuePresentKHR) }
++        };
++        #undef VK
++    }
++}
++
++#ifdef LSFGVK_SHIM
++extern "C" {
++__attribute__((visibility("default")))
++PFN_vkVoidFunction vkGetInstanceProcAddr(VkInstance instance, const char* name);
++__attribute__((visibility("default")))
++PFN_vkVoidFunction vkGetDeviceProcAddr(VkDevice device, const char* name);
++}
++
++namespace {
++    /// load the real driver under a different filename to avoid recursion
++    std::string realDriverPath() {
++        if (const char* env = std::getenv("LSFGVK_MOLTENVK"); env && *env)
++            return env;
++        Dl_info info{};
++        if (dladdr(reinterpret_cast<const void*>(&realDriverPath), &info) && info.dli_fname) {
++            std::string self{info.dli_fname};
++            const auto slash{self.rfind('/')};
++            if (slash != std::string::npos)
++                return self.substr(0, slash) + "/libMoltenVK.real.dylib";
++        }
++        return {};
++    }
++
++    void initShim() {
++        static std::once_flag once;
++        std::call_once(once, []() {
++            const std::string path{realDriverPath()};
++            void* handle{path.empty() ? nullptr : dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL)};
++            if (!handle) {
++                const char* error = dlerror();
++                LOG(Error) << "lsfg-vk shim: cannot load real MoltenVK from '" << path
++                    << "': " << (error ? error : "unknown error");
++                return;
++            }
++            auto* gipa{reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(handle, "vkGetInstanceProcAddr"))};
++            auto* gdpa{reinterpret_cast<PFN_vkGetDeviceProcAddr>(dlsym(handle, "vkGetDeviceProcAddr"))};
++            if (!gipa || !gdpa) {
++                LOG(Error) << "lsfg-vk shim: real MoltenVK lacks vkGet{Instance,Device}ProcAddr";
++                return;
++            }
++            if (gipa == &vkGetInstanceProcAddr) {
++                LOG(Error) << "lsfg-vk shim: '" << path << "' resolved to this shim, not to MoltenVK "
++                    << "(leaf name hijacked by DYLD_LIBRARY_PATH?); refusing to recurse";
++                return;
++            }
++            real = new RealDriver{ handle, gipa, gdpa }; // NOLINT (memory management)
++
++            try {
++                global = new GlobalInfo { // NOLINT (memory management)
++                    .funcMap = hookMap(),
++                    .layer = std::make_unique<layer::Layer>()
++                };
++                if (!global->layer->active()) { // no profile, use passthrough
++                    delete global; // NOLINT (memory management)
++                    global = nullptr;
++                    return;
++                }
++                shimActive = true;
++                LOG(Info) << "lsfg-vk shim active in front of " << path;
++            } catch (const std::exception& e) {
++                LOG(Error) << "lsfg-vk shim: failed to initialize, passing through:";
++                LOG(Error) << "- " << e.what();
++                global = nullptr;
++            }
++        });
++    }
++}
++
++extern "C" {
++
++/// export the entry points wine loads
++__attribute__((visibility("default")))
++PFN_vkVoidFunction vkGetInstanceProcAddr(VkInstance instance, const char* name) {
++    initShim();
++    if (!real)
++        return nullptr;
++    if (!shimActive)
++        return real->gipa(instance, name);
++    auto* fn{myvkGetInstanceProcAddr(instance, name)};
++    LOG(Debug) << "gipa(" << (instance ? "instance" : "null") << ", " << (name ? name : "?")
++        << ") -> " << (fn ? "ok" : "null");
++    return fn;
++}
++
++/// forward the surface entry points required by wine
++using PFN_createSurface = VkResult (*)(VkInstance, const void*, const VkAllocationCallbacks*, VkSurfaceKHR*);
++
++static VkResult forwardCreateSurface(const char* name, VkInstance instance, const void* info,
++                                     const VkAllocationCallbacks* alloc, VkSurfaceKHR* surface) {
++    initShim();
++    if (!real)
++        return VK_ERROR_INITIALIZATION_FAILED;
++    auto* fn{reinterpret_cast<PFN_createSurface>(real->gipa(instance, name))};
++    return fn ? fn(instance, info, alloc, surface) : VK_ERROR_EXTENSION_NOT_PRESENT;
++}
++
++__attribute__((visibility("default")))
++VkResult vkCreateMetalSurfaceEXT(VkInstance instance, const void* info,
++                                 const VkAllocationCallbacks* alloc, VkSurfaceKHR* surface) {
++    return forwardCreateSurface("vkCreateMetalSurfaceEXT", instance, info, alloc, surface);
++}
++
++__attribute__((visibility("default")))
++VkResult vkCreateMacOSSurfaceMVK(VkInstance instance, const void* info,
++                                 const VkAllocationCallbacks* alloc, VkSurfaceKHR* surface) {
++    return forwardCreateSurface("vkCreateMacOSSurfaceMVK", instance, info, alloc, surface);
++}
++
++__attribute__((visibility("default")))
++PFN_vkVoidFunction vkGetDeviceProcAddr(VkDevice device, const char* name) {
++    initShim();
++    if (!real)
++        return nullptr;
++    if (!shimActive)
++        return real->gdpa(device, name);
++    auto* fn{myvkGetDeviceProcAddr(device, name)};
++    LOG(Debug) << "gdpa(" << (device ? "device" : "null") << ", " << (name ? name : "?")
++        << ") -> " << (fn ? "ok" : "null");
++    return fn;
++}
++
++}
++#else
+ /// Vulkan layer entrypoint
+ __attribute__((visibility("default")))
+ VkResult vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVersionStruct) {
+@@ -625,27 +877,7 @@ VkResult vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVers
+     // Initialize global info
+     try {
+         global = new GlobalInfo { // NOLINT (memory management)
+-            #define VK(val) reinterpret_cast<PFN_vkVoidFunction>(val)
+-            .funcMap = {
+-                { "vkGetDeviceProcAddr", VK(
+-                    myvkGetDeviceProcAddr) },
+-
+-                { "vkDestroyInstance", VK(
+-                    myvkDestroyInstance) },
+-                { "vkCreateDevice",  VK(
+-                    myvkCreateDevice) },
+-                { "vkDestroyDevice", VK(
+-                    myvkDestroyDevice) },
+-                { "vkCreateSwapchainKHR", VK(
+-                    myvkCreateSwapchainKHR) },
+-                { "vkDestroySwapchainKHR", VK(
+-                    myvkDestroySwapchainKHR) },
+-
+-                { "vkGetPhysicalDeviceSurfaceSupportKHR", VK(
+-                    myvkGetPhysicalDeviceSurfaceSupportKHR) },
+-                { "vkQueuePresentKHR", VK(
+-                    myvkQueuePresentKHR) }
+-            },
++            .funcMap = hookMap(),
+             .layer = std::make_unique<layer::Layer>()
+         };
+ 
+@@ -668,3 +900,4 @@ VkResult vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* pVers
+     pVersionStruct->pfnGetInstanceProcAddr = myvkGetInstanceProcAddr;
+     return VK_SUCCESS;
+ }
++#endif // lsfgvk_shim
+diff --git a/lsfg-vk-layer/src/modes/vsync.cpp b/lsfg-vk-layer/src/modes/vsync.cpp
+index 7daa4d7..3e22453 100644
+--- a/lsfg-vk-layer/src/modes/vsync.cpp
++++ b/lsfg-vk-layer/src/modes/vsync.cpp
+@@ -2,6 +2,8 @@
+ 
+ #include "vsync.hpp"
+ #include "../hooks.hpp"
++#include "../logger.hpp"
++#include <unistd.h>
+ 
+ #include "lsfg-vk-helper/vkhelper.hpp"
+ 
+@@ -133,45 +135,62 @@ namespace {
+     }
+ }
+ 
++void VsyncSwapchain::recordPresent(bool generated) {
++    if (!this->m_reportStats) return;
++    if (generated) { ++this->m_generatedPresents; return; }
++    ++this->m_originalPresents;
++    if (this->m_originalPresents % 60 == 0) {
++        LOG(Info) << "Frame generation stats pid=" << getpid()
++            << " original=" << this->m_originalPresents
++            << " generated=" << this->m_generatedPresents
++            << " total=" << (this->m_originalPresents + this->m_generatedPresents)
++            << " (successful presents on this swapchain)";
++    }
++}
++
+ VkResult VsyncSwapchain::QueuePresentKHR(
+     PFN_vkQueuePresentKHR fetchFunc,
+     VkQueue queue,
+     const VkPresentInfoKHR* presentInfo
+ ) {
++    auto nativePresent = [&]() {
++        const auto result = fetchFunc(queue, presentInfo);
++        if (result == VK_SUCCESS || result == VK_SUBOPTIMAL_KHR) this->recordPresent(false);
++        return result;
++    };
++    // bypass unsupported presents and queues
++    if (presentInfo->swapchainCount != 1 || presentInfo->pNext
++#ifdef __APPLE__
++            || vk::Queue(queue) != this->m_device.get().queue()
++#endif
++    ) return nativePresent();
++
+     const auto status{Swapchain::QueuePresentKHR(fetchFunc, queue, presentInfo)};
+-    if (!this->m_lsfgvkContext) {
+-        return fetchFunc(queue, presentInfo);
+-    }
++    if (!this->m_lsfgvkContext) return nativePresent();
+ 
+     const auto& layerHook{this->m_layer.get()};
+     const auto& deviceHook{this->m_device.get()};
+-
+     const auto& profile{layerHook.profile()};
+-
+-    if (status == VK_ERROR_OUT_OF_DATE_KHR) {
++    if (status == VK_ERROR_OUT_OF_DATE_KHR)
+         this->resizeInnerSyncPasses(profile.multiplier - 1);
+-    }
++
++#ifdef __APPLE__
++    struct Drain {
++        std::unique_ptr<ContextWrapper>& context;
++        bool& failed;
++        bool completed{false};
++        ~Drain() {
++            try { context->idle(); } catch (...) { }
++            // discard interrupted pipelines with unsignaled fences
++            if (!completed) { context.reset(); failed = true; }
++        }
++    } drain{this->m_lsfgvkContext, this->m_generationFailed};
++#endif
+ 
+     const vk::Queue presentQueue{queue};
+     const auto& presentImage{this->m_swapchainImages.at(*presentInfo->pImageIndices)};
+     const auto& syncPass{this->m_syncPasses.at(*presentInfo->pImageIndices)};
+ 
+-    // Update present mode if requested
+-    const VkPresentModeKHR presentMode{VK_PRESENT_MODE_FIFO_KHR};
+-
+-    if (profile.overridePresentMode) {
+-        auto* nextInfo{static_cast<VkBaseOutStructure*>(const_cast<void*>(presentInfo->pNext))};
+-        while (nextInfo) {
+-            if (nextInfo->sType == VK_STRUCTURE_TYPE_SWAPCHAIN_PRESENT_MODE_INFO_EXT) {
+-                reinterpret_cast<VkSwapchainPresentModeInfoEXT*>(
+-                    nextInfo
+-                )->pPresentModes = &presentMode;
+-            }
+-
+-            nextInfo = nextInfo->pNext;
+-        }
+-    }
+-
+     // Dispatch frame generation
+     const uint32_t imagesToInsert{profile.multiplier - 1};
+ 
+@@ -190,12 +209,15 @@ VkResult VsyncSwapchain::QueuePresentKHR(
+         // Acquire swapchain image
+         const auto acquireResult{deviceHook.device().acquireNextImageKHR(
+            this->m_swapchain,
+-           UINT64_MAX,
++           1'000'000'000,
+            *innerSyncPass.acquireSemaphore,
+            nullptr,
+            deviceHook.dld()
+         )};
+ 
++        if (acquireResult.result != vk::Result::eSuccess && acquireResult.result != vk::Result::eSuboptimalKHR)
++            throw vk::SystemError(acquireResult.result, "Unable to acquire a generated-frame image");
++
+         // Copy generated frame into swapchain image
+         const auto& swapchainImage{this->m_swapchainImages.at(acquireResult.value)};
+ 
+@@ -227,6 +249,7 @@ VkResult VsyncSwapchain::QueuePresentKHR(
+         if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+             throw vk::SystemError(result, vk::errorCategory());
+         }
++        this->recordPresent(true);
+     }
+ 
+     // Present the original image
+@@ -244,5 +267,18 @@ VkResult VsyncSwapchain::QueuePresentKHR(
+         throw vk::SystemError(result, vk::errorCategory());
+     }
+ 
++#ifdef __APPLE__
++    this->m_lsfgvkContext->idle();
++    drain.completed = true;
++#endif
++    this->recordPresent(false);
++    if (presentInfo->pResults) presentInfo->pResults[0] = result;
+     return result;
+ }
++
++VsyncSwapchain::~VsyncSwapchain() {
++    // finish gpu work before releasing copy resources
++    if (this->m_lsfgvkContext) {
++        try { this->m_lsfgvkContext->idle(); } catch (...) { }
++    }
++}
+diff --git a/lsfg-vk-layer/src/modes/vsync.hpp b/lsfg-vk-layer/src/modes/vsync.hpp
+index 0e24f33..376e251 100644
+--- a/lsfg-vk-layer/src/modes/vsync.hpp
++++ b/lsfg-vk-layer/src/modes/vsync.hpp
+@@ -5,6 +5,8 @@
+ #include "../hooks.hpp"
+ 
+ #include <cstddef>
++#include <cstdint>
++#include <cstdlib>
+ #include <vector>
+ #include <vk>
+ 
+@@ -39,6 +41,7 @@ namespace lsfgvk::layer {
+             VkQueue queue,
+             const VkPresentInfoKHR* presentInfo
+         ) override;
++        ~VsyncSwapchain() override;
+     private:
+         struct SyncPass {
+             vk::UniqueCommandBuffer copyCmdbuf;
+@@ -51,6 +54,10 @@ namespace lsfgvk::layer {
+             std::vector<InnerSyncPass> innerSyncPasses;
+         };
+         std::vector<SyncPass> m_syncPasses;
++        bool m_reportStats{std::getenv("LSFGVK_STATS") != nullptr};
++        uint64_t m_originalPresents{0};
++        uint64_t m_generatedPresents{0};
++        void recordPresent(bool generated);
+ 
+         void resizeInnerSyncPasses(size_t minSize);
+     };
+diff --git a/lsfg-vk-layer/src/wrapper.cpp b/lsfg-vk-layer/src/wrapper.cpp
+index f8776c3..ddcae30 100644
+--- a/lsfg-vk-layer/src/wrapper.cpp
++++ b/lsfg-vk-layer/src/wrapper.cpp
+@@ -77,13 +77,23 @@ namespace {
+ 
+ InstanceWrapper::InstanceWrapper(
+     const vk::detail::DispatchLoaderDynamic& dld,
++    const vk::Instance& instance,
+     const vk::Device& device,
+     const vk::PhysicalDevice& physdev,
++    uint32_t queueFamilyIndex,
++    bool fp16Enabled,
+     const utils::Configuration& config
+-) : m_dld(dld), m_device(device), m_physdev(physdev) {
++) : m_dld(dld), m_instance(instance), m_device(device), m_physdev(physdev),
++    m_queueFamilyIndex(queueFamilyIndex), m_fp16Enabled(fp16Enabled) {
+     // Setup lazy initializer for lsfg-vk instance creation
+     this->m_lazyInitializer = [dld, physdev, config, this]() {
+-        setenv("DISABLE_LSFGVK", "1", 1); // NOLINT (broken IWYU)
++#ifndef __APPLE__
++        // avoid recursive layer activation on the private device
++        struct DisableLayer {
++            DisableLayer() { setenv("DISABLE_LSFGVK", "1", 1); }
++            ~DisableLayer() { unsetenv("DISABLE_LSFGVK"); }
++        } disableLayer;
++#endif
+ 
+         std::filesystem::path dllPath{""};
+         if (const auto configDllPath = config.dll)
+@@ -94,6 +104,21 @@ InstanceWrapper::InstanceWrapper(
+         LOG(Info) << "Initializing lsfg-vk instance with half precision "
+             << (config.allowHalfPrecision ? "enabled" : "disabled");
+ 
++#ifdef __APPLE__
++        // use the game device and its presentation queue
++        this->m_lsfgvkInstance = std::make_unique<lsfgvk::Instance>(
++            dld.vkGetInstanceProcAddr,
++            static_cast<VkInstance>(this->m_instance),
++            static_cast<VkPhysicalDevice>(physdev),
++            static_cast<VkDevice>(this->m_device),
++            this->m_queueFamilyIndex,
++            config.allowHalfPrecision && this->m_fp16Enabled,
++            dllPath,
++            [](const std::string& message) {
++                LOG(Debug) << message;
++            }
++        );
++#else
+         this->m_lsfgvkInstance = std::make_unique<lsfgvk::Instance>(
+             identifyDevice(dld, physdev),
+             dllPath,
+@@ -103,8 +128,9 @@ InstanceWrapper::InstanceWrapper(
+                 LOG(Debug) << message;
+             }
+         );
++#endif
++
+ 
+-        unsetenv("DISABLE_LSFGVK"); // NOLINT (broken IWYU)
+     };
+ }
+ 
+@@ -187,6 +213,19 @@ ContextWrapper::ContextWrapper(
+         profile.performanceMode
+     );
+ 
++#ifdef __APPLE__
++    // reuse device-local pipeline resources
++    const auto handles{this->m_lsfgvkContext->_handles()};
++    this->m_sync = vk::Semaphore(handles.sync);
++    this->m_source = vk::Image(handles.source);
++    this->m_destination = vk::Image(handles.destination);
++    this->m_syncSemaphore.second = 0;
++    this->m_completionFence = vkhelper::createFence(
++        instance.m_dld,
++        instance.m_device
++    );
++    return;
++#endif
+     // Import pipeline objects
+     const lsfgvk::FileDescriptors fds{this->m_lsfgvkContext->exportFds()};
+ 
+@@ -232,6 +271,9 @@ ContextWrapper::ContextWrapper(
+         instance.m_dld,
+         instance.m_device
+     );
++    this->m_sync = *this->m_syncSemaphore.first;
++    this->m_source = *this->m_sourceImage.first;
++    this->m_destination = *this->m_destinationImage.first;
+ }
+ 
+ void ContextWrapper::dispatch(
+@@ -245,12 +287,14 @@ void ContextWrapper::dispatch(
+ 
+     // Wait for any previous frame to finish
+     if (this->m_iteration != 0) {
+-        const auto _{instance.m_device.waitForFences(
++        const auto result{instance.m_device.waitForFences(
+             *this->m_completionFence,
+             vk::True,
+-            1'000'000'000, // 1 second timeout
++            UINT64_MAX,
+             instance.m_dld
+         )};
++        if (result != vk::Result::eSuccess)
++            throw vk::SystemError(result, "Frame-generation copy did not complete");
+         instance.m_device.resetFences(
+             *this->m_completionFence,
+             instance.m_dld
+@@ -278,7 +322,7 @@ void ContextWrapper::dispatch(
+                 vk::ImageLayout::eGeneral
+             ),
+             vkhelper::barrier(
+-                *this->m_sourceImage.first,
++                this->m_source,
+                 vk::AccessFlagBits::eNone,
+                 vk::AccessFlagBits::eTransferWrite,
+                 vk::ImageLayout::eUndefined,
+@@ -293,7 +337,7 @@ void ContextWrapper::dispatch(
+         instance.m_dld,
+         cmdbuf,
+         swapchainImage, 0,
+-        *this->m_sourceImage.first, this->m_iteration % 2,
++        this->m_source, this->m_iteration % 2,
+         this->m_extent
+     );
+ 
+@@ -322,7 +366,7 @@ void ContextWrapper::dispatch(
+         waitSemaphores.size(),
+         vk::PipelineStageFlagBits::eTopOfPipe
+     };
+-    const std::vector<vk::Semaphore> signalSemaphores = { *this->m_syncSemaphore.first };
++    const std::vector<vk::Semaphore> signalSemaphores = { this->m_sync };
+ 
+     const vk::TimelineSemaphoreSubmitInfo timelineInfo{
+         .signalSemaphoreValueCount = 1,
+@@ -343,6 +387,7 @@ void ContextWrapper::dispatch(
+         instance.m_dld
+     );
+ 
++    this->m_inFlight = true;
+     // Dispatch lsfg-vk context
+     this->m_lsfgvkContext->dispatch(imagesToInsert);
+ 
+@@ -375,7 +420,7 @@ void ContextWrapper::acquire(
+         {}, {}, {},
+         {
+             vkhelper::barrier(
+-                *this->m_destinationImage.first,
++                this->m_destination,
+                 vk::AccessFlagBits::eNone,
+                 vk::AccessFlagBits::eTransferRead,
+                 vk::ImageLayout::eGeneral,
+@@ -394,7 +439,7 @@ void ContextWrapper::acquire(
+     vkhelper::blitImage(
+         instance.m_dld,
+         cmdbuf,
+-        *this->m_destinationImage.first, 0,
++        this->m_destination, 0,
+         swapchainImage, 0,
+         this->m_extent
+     );
+@@ -417,9 +462,9 @@ void ContextWrapper::acquire(
+     cmdbuf.end(instance.m_dld);
+ 
+     // Submit command buffer when lsfg-vk context is done and signal next frame generation
+-    waitSemaphores.insert(waitSemaphores.begin(), *this->m_syncSemaphore.first);
++    waitSemaphores.insert(waitSemaphores.begin(), this->m_sync);
+     if (this->m_remainingImages > 1) {
+-        signalSemaphores.insert(signalSemaphores.begin(), *this->m_syncSemaphore.first);
++        signalSemaphores.insert(signalSemaphores.begin(), this->m_sync);
+     }
+     const std::vector<vk::PipelineStageFlags> waitStages{
+         waitSemaphores.size(),
+@@ -429,12 +474,21 @@ void ContextWrapper::acquire(
+     const uint64_t nextWaitSyncValue{this->m_syncSemaphore.second + 1};
+     const uint64_t nextSignalSyncValue{this->m_syncSemaphore.second + 2};
+ 
++#ifdef __APPLE__
++    // submit the signal before its waiting copy on the shared queue
++    this->m_lsfgvkContext->acquire();
++#endif
++
++    std::vector<uint64_t> waitValues(waitSemaphores.size(), 0);
++    std::vector<uint64_t> signalValues(signalSemaphores.size(), 0);
++    waitValues.front() = nextWaitSyncValue;
++    if (this->m_remainingImages > 1)
++        signalValues.front() = nextSignalSyncValue;
+     const vk::TimelineSemaphoreSubmitInfo timelineInfo = {
+-        .waitSemaphoreValueCount = static_cast<uint32_t>(waitSemaphores.size()),
+-        .pWaitSemaphoreValues = &nextWaitSyncValue,
+-        .signalSemaphoreValueCount = this->m_remainingImages == 1 ? 0
+-            : static_cast<uint32_t>(signalSemaphores.size()),
+-        .pSignalSemaphoreValues = &nextSignalSyncValue
++        .waitSemaphoreValueCount = static_cast<uint32_t>(waitValues.size()),
++        .pWaitSemaphoreValues = waitValues.data(),
++        .signalSemaphoreValueCount = static_cast<uint32_t>(signalValues.size()),
++        .pSignalSemaphoreValues = signalValues.data()
+     };
+ 
+     queue.submit(
+@@ -452,8 +506,10 @@ void ContextWrapper::acquire(
+         instance.m_dld
+     );
+ 
++#ifndef __APPLE__
+     // Acquire next frame from lsfg-vk context
+     this->m_lsfgvkContext->acquire();
++#endif
+ 
+     // Update state
+     this->m_remainingImages--;
+@@ -462,3 +518,25 @@ void ContextWrapper::acquire(
+         this->m_syncSemaphore.second++;
+     }
+ }
++
++void ContextWrapper::idle() {
++#ifdef __APPLE__
++    if (!this->m_inFlight) return;
++    // drain this queue before returning, including partial iterations
++    const auto& instance{this->m_instance.get()};
++    this->m_inFlight = false;
++    instance.m_device.getQueue(instance.m_queueFamilyIndex, 0, instance.m_dld).waitIdle(instance.m_dld);
++#else
++    this->m_lsfgvkContext->idle();
++    if (this->m_iteration && this->m_remainingImages == 0) {
++        const auto& instance{this->m_instance.get()};
++        const auto result{instance.m_device.waitForFences(*this->m_completionFence, true, UINT64_MAX, instance.m_dld)};
++        if (result != vk::Result::eSuccess)
++            throw vk::SystemError(result, "Frame-generation copy did not complete");
++    }
++#endif
++}
++
++ContextWrapper::~ContextWrapper() {
++    try { this->idle(); } catch (...) { /* release host resources after device loss */ }
++}
+diff --git a/lsfg-vk-layer/src/wrapper.hpp b/lsfg-vk-layer/src/wrapper.hpp
+index 1828bf7..7bd2e3e 100644
+--- a/lsfg-vk-layer/src/wrapper.hpp
++++ b/lsfg-vk-layer/src/wrapper.hpp
+@@ -2,6 +2,7 @@
+ 
+ #pragma once
+ 
++#define LSFGVK_EXPOSE_VULKAN 1
+ #include "lsfg-vk/lsfgvk.hpp"
+ #include "lsfg-vk-utils/config.hpp"
+ 
+@@ -30,8 +31,11 @@ namespace lsfgvk::layer {
+         ///
+         InstanceWrapper(
+             const vk::detail::DispatchLoaderDynamic& dld,
++            const vk::Instance& instance,
+             const vk::Device& device,
+             const vk::PhysicalDevice& physdev,
++            uint32_t queueFamilyIndex,
++            bool fp16Enabled,
+             const utils::Configuration& config
+         );
+ 
+@@ -52,8 +56,11 @@ namespace lsfgvk::layer {
+         ~InstanceWrapper() = default;
+     private:
+         vk::detail::DispatchLoaderDynamic m_dld;
++        vk::Instance m_instance;
+         vk::Device m_device;
+         vk::PhysicalDevice m_physdev;
++        uint32_t m_queueFamilyIndex;
++        bool m_fp16Enabled;
+ 
+         std::unique_ptr<lsfgvk::Instance> m_lsfgvkInstance;
+         std::function<void()> m_lazyInitializer;
+@@ -103,17 +110,23 @@ namespace lsfgvk::layer {
+         ContextWrapper& operator=(const ContextWrapper&) = delete;
+         ContextWrapper(ContextWrapper&&) = delete;
+         ContextWrapper& operator=(ContextWrapper&&) = delete;
+-        ~ContextWrapper() = default;
++        void idle();
++        ~ContextWrapper();
+     private:
+         std::reference_wrapper<InstanceWrapper> m_instance;
+ 
+         std::unique_ptr<lsfgvk::Context> m_lsfgvkContext;
+         uint64_t m_iteration{0};
+         uint32_t m_remainingImages{0};
++        bool m_inFlight{false};
+ 
+         std::pair<vk::UniqueSemaphore, uint64_t> m_syncSemaphore;
+         std::pair<vk::UniqueImage, vk::UniqueDeviceMemory> m_sourceImage;
+         std::pair<vk::UniqueImage, vk::UniqueDeviceMemory> m_destinationImage;
++        // use imported resources on linux and shared resources on macos
++        vk::Semaphore m_sync;
++        vk::Image m_source;
++        vk::Image m_destination;
+         vk::UniqueFence m_completionFence;
+         vk::Extent2D m_extent;
+ 
+diff --git a/lsfg-vk-pipeline/CMakeLists.txt b/lsfg-vk-pipeline/CMakeLists.txt
+index df69cf9..75c2178 100644
+--- a/lsfg-vk-pipeline/CMakeLists.txt
++++ b/lsfg-vk-pipeline/CMakeLists.txt
+@@ -16,7 +16,7 @@ set_target_properties(lsfg-vk-pipeline PROPERTIES
+   POSITION_INDEPENDENT_CODE ON)
+ 
+ target_compile_options(lsfg-vk-pipeline PRIVATE
+-  $<$<CXX_COMPILER_ID:Clang>:-fconstexpr-steps=4290000000>
++  $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fconstexpr-steps=4290000000>
+   $<$<CXX_COMPILER_ID:GNU>:-fconstexpr-ops-limit=4290000000>)
+ 
+ if(LSFGVK_INSTALL_LIBRARIES)
+diff --git a/lsfg-vk-pipeline/include/lsfg-vk/lsfgvk.hpp b/lsfg-vk-pipeline/include/lsfg-vk/lsfgvk.hpp
+index fc5a6f8..f289c8c 100644
+--- a/lsfg-vk-pipeline/include/lsfg-vk/lsfgvk.hpp
++++ b/lsfg-vk-pipeline/include/lsfg-vk/lsfgvk.hpp
+@@ -50,6 +50,18 @@ namespace lsfgvk {
+         );
+ 
+ #ifdef LSFGVK_EXPOSE_VULKAN
++        /// borrow a live device with timeline and synchronization features enabled
++        Instance(
++            PFN_vkGetInstanceProcAddr gipa,
++            VkInstance instance,
++            VkPhysicalDevice physdev,
++            VkDevice device,
++            uint32_t queueFamilyIndex,
++            bool fp16,
++            const std::filesystem::path& lsfgvkDllPath,
++            std::function<void(const std::string&)> logCallback = nullptr
++        );
++
+         /// Get the underlying Vulkan instance handle
+         /// @return Vulkan instance
+         [[nodiscard]] VkInstance _instance() const;
+@@ -127,6 +139,16 @@ namespace lsfgvk {
+         ///
+         [[nodiscard]] FileDescriptors exportFds() const;
+ 
++#ifdef LSFGVK_EXPOSE_VULKAN
++        /// borrow the pipeline resources using the existing layout contract
++        struct Handles {
++            VkImage source;
++            VkImage destination;
++            VkSemaphore sync;
++        };
++        [[nodiscard]] Handles _handles() const;
++#endif // lsfgvk_expose_vulkan
++
+         ///
+         /// Dispatch frame generation
+         ///
+diff --git a/lsfg-vk-pipeline/src/lsfgvk.cpp b/lsfg-vk-pipeline/src/lsfgvk.cpp
+index 27c9d57..aa374ec 100644
+--- a/lsfg-vk-pipeline/src/lsfgvk.cpp
++++ b/lsfg-vk-pipeline/src/lsfgvk.cpp
+@@ -27,11 +27,18 @@ namespace {
+         uint32_t qfi,
+         bool fp16
+     ) {
++#ifdef __APPLE__
++        // keep images device-local on macos
++        constexpr std::array<const char*, 1> EXTENSIONS{
++            vk::KHRSynchronization2ExtensionName
++        };
++#else
+         constexpr std::array<const char*, 3> EXTENSIONS{
+             vk::KHRSynchronization2ExtensionName,
+             vk::KHRExternalMemoryFdExtensionName,
+             vk::KHRExternalSemaphoreFdExtensionName
+         };
++#endif
+ 
+         vk::PhysicalDeviceSynchronization2FeaturesKHR sync2Info{
+             .synchronization2 = vk::True
+@@ -99,12 +106,16 @@ Instance::Instance(
+         logCallback
+     };
+ 
++    const vk::Instance instanceHandle{*instance};
++    const vk::Device deviceHandle{*device};
+     this->m_impl = std::make_unique<impl::Instance>(impl::Instance {
+         .vk = {
+             .dld = std::move(dld),
+-            .instance = std::move(instance),
++            .ownedInstance = std::move(instance),
++            .instance = instanceHandle,
+             .physdev = physdev,
+-            .device = std::move(device),
++            .ownedDevice = std::move(device),
++            .device = deviceHandle,
+             .queue = queue,
+             .qfi = qfi,
+             .fp16 = fp16,
+@@ -115,6 +126,55 @@ Instance::Instance(
+     });
+ }
+ 
++Instance::Instance(
++    PFN_vkGetInstanceProcAddr gipa,
++    VkInstance instance,
++    VkPhysicalDevice physdev,
++    VkDevice device,
++    uint32_t queueFamilyIndex,
++    bool fp16,
++    const std::filesystem::path& lsfgvkDllPath,
++    std::function<void(const std::string&)> logCallback
++) {
++    auto dld{std::make_unique<vk::detail::DispatchLoaderDynamic>(instance, gipa)};
++    dld->init(vk::Device(device));
++
++    ShaderLibrary library{
++        *dld,
++        vk::Device(device),
++        fp16,
++        lsfgvkDllPath,
++        logCallback
++    };
++
++    const vk::Queue queue{vk::Device(device).getQueue(queueFamilyIndex, 0, *dld)};
++    this->m_impl = std::make_unique<impl::Instance>(impl::Instance {
++        .vk = {
++            .dld = std::move(dld),
++            .ownedInstance = {},
++            .instance = vk::Instance(instance),
++            .physdev = vk::PhysicalDevice(physdev),
++            .ownedDevice = {},
++            .device = vk::Device(device),
++            .queue = queue,
++            .qfi = queueFamilyIndex,
++            .fp16 = fp16,
++            .leakInstance = false
++        },
++        .shaderLibrary = std::move(library),
++        .logCallback = std::move(logCallback)
++    });
++}
++
++Context::Handles Context::_handles() const {
++    const auto& pipeline{this->m_impl->pipeline};
++    return{
++        .source = static_cast<VkImage>(pipeline.getExternalInputs().front().image),
++        .destination = static_cast<VkImage>(pipeline.getExternalOutputs().front().image),
++        .sync = static_cast<VkSemaphore>(*this->m_impl->syncSemaphore.first)
++    };
++}
++
+ Context::Context(
+     const Instance& instance,
+     uint32_t width,
+@@ -126,7 +186,7 @@ Context::Context(
+ 
+     Pipeline pipeline{
+         *vk.dld,
+-        *vk.device,
++        vk.device,
+         vk.physdev,
+         vk.queue,
+         vk.qfi,
+@@ -142,9 +202,9 @@ Context::Context(
+     this->m_impl = std::make_unique<impl::Context>(impl::Context {
+         .instance = std::ref(*instance.m_impl),
+         .pipeline = std::move(pipeline),
+-        .syncSemaphore = { vkhelper::createSemaphore(*vk.dld, *vk.device, true, true), 0 },
+-        .internalSemaphores = { vkhelper::createSemaphore(*vk.dld, *vk.device, true), 0 },
+-        .fence = { vkhelper::createFence(*vk.dld, *vk.device), false }
++        .syncSemaphore = { vkhelper::createSemaphore(*vk.dld, vk.device, true, true), 0 },
++        .internalSemaphores = { vkhelper::createSemaphore(*vk.dld, vk.device, true), 0 },
++        .fence = { vkhelper::createFence(*vk.dld, vk.device), false }
+     });
+ }
+ 
+@@ -154,15 +214,15 @@ FileDescriptors Context::exportFds() const {
+ 
+     return{
+         .sourceFd = vkhelper::exportMemoryFd(
+-            *vk.dld, *vk.device,
++            *vk.dld, vk.device,
+             pipeline.getExternalInputs().front().memory
+         ),
+         .destinationFd = vkhelper::exportMemoryFd(
+-            *vk.dld, *vk.device,
++            *vk.dld, vk.device,
+             pipeline.getExternalOutputs().front().memory
+         ),
+         .syncFd = vkhelper::exportSemaphoreFd(
+-            *vk.dld, *vk.device,
++            *vk.dld, vk.device,
+             *this->m_impl->syncSemaphore.first
+         )
+     };
+@@ -178,10 +238,10 @@ void Context::dispatch(uint32_t total, bool unsignaled) {
+         ctx.firstIteration = false;
+         mapped->iteration = 0;
+     } else {
+-        const auto result{vk.device->waitForFences(*ctx.fence.first, true, UINT64_MAX, *vk.dld)};
++        const auto result{vk.device.waitForFences(*ctx.fence.first, true, UINT64_MAX, *vk.dld)};
+         if (result != vk::Result::eSuccess)
+             throw std::runtime_error("Unable to wait for completion of previous iteration");
+-        vk.device->resetFences(*ctx.fence.first, *vk.dld);
++        vk.device.resetFences(*ctx.fence.first, *vk.dld);
+         ctx.fence.second = false;
+ 
+         mapped->iteration++;
+@@ -235,7 +295,7 @@ void Context::acquire(bool unsignaled) {
+ 
+     // Build transition command buffer to transition the timestamp
+     const auto& transCmdbuf{ctx.pipeline.buildTransCmdbuf(
+-        *vk.dld, *vk.device,
++        *vk.dld, vk.device,
+         ctx.iteration,
+         ctx.index, ctx.total
+     )};
+@@ -320,7 +380,7 @@ void Context::idle() {
+     auto& ctx{*this->m_impl};
+     const auto& vk{this->m_impl->instance.get().vk};
+ 
+-    const auto result{vk.device->waitForFences(*ctx.fence.first, true, UINT64_MAX, *vk.dld)};
++    const auto result{vk.device.waitForFences(*ctx.fence.first, true, UINT64_MAX, *vk.dld)};
+     if (result != vk::Result::eSuccess)
+         throw std::runtime_error("Unable to wait for completion of current iteration");
+ }
+@@ -334,11 +394,11 @@ Context::~Context() {
+ }
+ 
+ VkInstance Instance::_instance() const {
+-    return this->m_impl->vk.instance.get();
++    return this->m_impl->vk.instance;
+ }
+ 
+ VkDevice Instance::_device() const {
+-    return *this->m_impl->vk.device;
++    return this->m_impl->vk.device;
+ }
+ 
+ Instance::~Instance() {
+@@ -347,8 +407,8 @@ Instance::~Instance() {
+ 
+     try {
+         new std::unique_ptr<vk::detail::DispatchLoaderDynamic>(std::move(this->m_impl->vk.dld));
+-        new vk::UniqueDevice(std::move(this->m_impl->vk.device));
+-        new vk::UniqueInstance(std::move(this->m_impl->vk.instance));
++        new vk::UniqueDevice(std::move(this->m_impl->vk.ownedDevice));
++        new vk::UniqueInstance(std::move(this->m_impl->vk.ownedInstance));
+     } catch (...) {
+         if (!this->m_impl->logCallback)
+             return;
+diff --git a/lsfg-vk-pipeline/src/lsfgvk.hpp b/lsfg-vk-pipeline/src/lsfgvk.hpp
+index 0905137..92bae30 100644
+--- a/lsfg-vk-pipeline/src/lsfgvk.hpp
++++ b/lsfg-vk-pipeline/src/lsfgvk.hpp
+@@ -11,6 +11,9 @@
+ #include <cstdint>
+ #include <functional>
+ #include <memory>
++#include <ostream>
++#include <sstream>
++#include <string>
+ #include <utility>
+ #include <vk>
+ 
+@@ -22,13 +25,15 @@ namespace lsfgvk::impl {
+         struct Vulkan {
+             /// Vulkan dispatch loader
+             std::unique_ptr<vk::detail::DispatchLoaderDynamic> dld;
+-            /// Vulkan instance (1.2)
+-            vk::UniqueInstance instance;
++            /// instance ownership depends on whether it was adopted
++            vk::UniqueInstance ownedInstance;
++            vk::Instance instance;
+             /// Vulkan physical device
+             vk::PhysicalDevice physdev;
+             /// Vulkan device with synchronization2 (extension), external memory & semaphore
+-            /// fd (extension) and timeline semaphores (core) enabled
+-            vk::UniqueDevice device;
++            /// device ownership depends on whether it was adopted
++            vk::UniqueDevice ownedDevice;
++            vk::Device device;
+             /// Compute queue
+             vk::Queue queue;
+             /// Compute queue family index
+diff --git a/lsfg-vk-pipeline/src/pipeline.cpp b/lsfg-vk-pipeline/src/pipeline.cpp
+index add40d6..d3997cb 100644
+--- a/lsfg-vk-pipeline/src/pipeline.cpp
++++ b/lsfg-vk-pipeline/src/pipeline.cpp
+@@ -179,7 +179,11 @@ Pipeline::Pipeline(
+                     .handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eOpaqueFd
+                 };
+                 const vk::MemoryDedicatedAllocateInfo dedicatedInfo{
++#ifdef __APPLE__
++                    .pNext = nullptr, // no fd export on moltenvk
++#else
+                     .pNext = &exportInfo,
++#endif
+                     .image = *subimage
+                 };
+                 auto allocation{vkhelper::allocateMemory(
+diff --git a/lsfg-vk-layer/src/device_chain.hpp b/lsfg-vk-layer/src/device_chain.hpp
+new file mode 100644
+index 0000000..124b498
+--- /dev/null
++++ b/lsfg-vk-layer/src/device_chain.hpp
+@@ -0,0 +1,38 @@
++/* SPDX-License-Identifier: CC-BY-NC-ND-4.0 */
++#pragma once
++#include <cstring>
++#include <memory>
++#include <stdexcept>
++#include <vector>
++#include <vk>
++
++namespace lsfgvk::layer {
++// copy chain nodes; borrow nested data only during device creation
++class DeviceChain {
++public:
++    explicit DeviceChain(const void* head) {
++        VkBaseOutStructure* tail = nullptr;
++        for (auto* node = static_cast<const VkBaseInStructure*>(head); node; node = node->pNext) {
++            const size_t bytes = size(node->sType);
++            auto storage = std::make_unique<unsigned char[]>(bytes);
++            std::memcpy(storage.get(), node, bytes);
++            auto* copy = reinterpret_cast<VkBaseOutStructure*>(storage.get());
++            copy->pNext = nullptr;
++            if (tail) tail->pNext = copy;
++            else m_head = copy;
++            tail = copy;
++            m_nodes.push_back(std::move(storage));
++        }
++    }
++    void* head() const { return m_head; }
++private:
++    static size_t size(VkStructureType type) {
++        switch (static_cast<vk::StructureType>(type)) {
++#include "device-chain-sizes.inc"
++            default: throw std::runtime_error("Unrecognized device feature chain; using passthrough");
++        }
++    }
++    VkBaseOutStructure* m_head{nullptr};
++    std::vector<std::unique_ptr<unsigned char[]>> m_nodes;
++};
++}
+diff --git a/macos/README.md b/macos/README.md
+new file mode 100644
+index 0000000..ad8cf0e
+--- /dev/null
++++ b/macos/README.md
+@@ -0,0 +1,103 @@
++# lsfg-vk on macOS (MoltenVK shim)
++
++Lossless Scaling frame generation for Windows games running under Wine on Apple Silicon,
++through Highball's DXVK / vkd3d-proton graphics modes. Same pipeline and shaders as the Linux
++layer; what changes is how it attaches to the game and how it shares images.
++
++## Why a shim, not a layer
++
++Wine on macOS does not use the Khronos Vulkan loader. `win32u.so` does
++`dlopen("libMoltenVK.dylib")` and `dlsym`s `vkGetInstanceProcAddr` / `vkGetDeviceProcAddr`;
++`winemac.so` also `dlsym`s `vkCreateMetalSurfaceEXT` and `vkCreateMacOSSurfaceMVK`. There is no
++layer mechanism in that chain. So `lsfg-vk-layer` is built here as `libMoltenVK.dylib`
++(target `lsfg-vk-shim`, `-DLSFGVK_SHIM`): it exports those four symbols, loads the real MoltenVK
++and forwards everything except the hooks the layer already had (instance, device, swapchain,
++present). Without a profile it is a transparent passthrough.
++
++The launcher puts the shim's directory on `DYLD_LIBRARY_PATH` for a launch that wants frame
++generation. Two dyld facts shaped this:
++
++- `DYLD_FALLBACK_LIBRARY_PATH` is not enough: `win32u.so` carries `LC_RPATH @loader_path/../../`
++  and the engine has `engine/lib/libMoltenVK.dylib` there, and rpath is searched before the
++  fallback path.
++- `DYLD_LIBRARY_PATH` overrides *by leaf name, absolute paths included*. The shim therefore must
++  load the real driver under a different name: `libMoltenVK.real.dylib`, a symlink beside it
++  (`$LSFGVK_MOLTENVK` overrides). Loading `.../frameworks/libMoltenVK.dylib` returns the shim
++  itself and recurses until the stack is gone.
++
++## Single-device mode
++
++MoltenVK has no `VK_KHR_external_memory_fd` / `external_semaphore_fd`, so the Linux design of a
++private device sharing images by fd cannot work. On Apple the pipeline adopts the game's device
++(`lsfgvk::Instance` adopt constructor, `Context::_handles()`), and the device hook enables
++`synchronization2`, `timelineSemaphore` and `shaderFloat16` on it, on whatever feature structs
++the game already chains (DXVK uses `VkPhysicalDeviceVulkan12/13Features`).
++
++One queue means in-order execution: `ContextWrapper::acquire` submits the pipeline's main pass
++*before* the copy that waits on it (upstream does the opposite, which is fine across two queues
++and a guaranteed GPU timeout on one).
++
++## Other macOS changes
++
++- `config.cpp`: no inotify (a `stat()` mtime poll), no `/proc` (profiles come from
++  `LSFGVK_ENV` / `LSFGVK_PROFILE` / `SteamAppId`).
++- `vkhelper.cpp` / `pipeline.cpp`: no fd export structs.
++- `CMakeLists`: `AppleClang` gets `-fconstexpr-steps` too (the pipeline signature is consteval).
++
++## Shaders
++
++`lsfg-vk.dll` from the user's Steam install of Lossless Scaling, **`lsfg-vk` beta branch**
++(the regular build's `Lossless.dll` holds DXBC, not SPIR-V). All 99 modules compile through
++MoltenVK; `lsfg-vk-cli benchmark` on an M2 does 1280×720 ×2 at ~8.3 ms per generated frame.
++
++## Build
++
++    cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
++    ninja -C build lsfg-vk-shim lsfg-vk-cli     # build/lsfg-vk-layer/libMoltenVK.dylib
++
++x86_64 because Wine and the engine's MoltenVK run under Rosetta. Highball packages it with
++`Scripts/build-lsfg.sh` into the `lsfg` engine component.
++
++## Testing without a game
++
++- `macos/vkclear.mm` (native) and `macos/vkclear-win32.c`, `macos/d3dclear-win32.c` (Wine,
++  mingw-w64): clear-and-present loops that print their app frame rate. With a vsync-paced
++  swapchain and `LSFGVK_MULTIPLIER=2` the app rate halves; that is the generated frames being
++  presented in between.
++- Run the native one with `DYLD_LIBRARY_PATH=<shim dir>` and `LSFGVK_MOLTENVK=<real dylib>`.
++  Do not wrap it in `arch`, `env`, `perl` or any other system binary: those are SIP-restricted
++  and strip `DYLD_*` from the environment.
++
++## Reliability checks and supported presentation
++
++The shim copies the complete device feature chain before enabling features. It picks a
++requested graphics/compute queue, creates the pipeline lazily inside presentation, and drains
++hidden work before returning from that call. Application queue submissions remain untouched.
++This serializes generation with that queue; no background access to a borrowed application
++queue is permitted. Shader-loading failures keep rendering through passthrough.
++
++Generation currently supports single-layer SDR RGBA8/BGRA8 swapchains on the adopted queue.
++HDR/protected/multilayer swapchains, multi-swapchain presents, other queues, and presentation
++extension payloads retain native presentation. They must not be advertised as tested frame
++generation modes. Multipliers 2–4 are supported; 1 disables generation.
++
++`lsfg-vk-macos-check` / CTest check caller-owned feature chains and configuration reloads
++(including post-2038 timestamps and retrying an invalid file). `macos/vkclear.mm` checks caller
++features, presents, and explicitly destroys Vulkan resources. It accepts `VKTEST_RECREATE=1`,
++`VKTEST_MULTI=1`, and `VKTEST_WIDTH`/`VKTEST_HEIGHT`. `macos/test-driver.cpp` is a test-only proxy
++that validates timeline array counts and can inject an out-of-date acquire with
++`VKTEST_FAIL_ACQUIRE_AT`; do not package that proxy as the engine driver.
++
++The full Xcode application is not required to compile the C++ shim. Highball's app can also be
++built locally with the installed 26.5 SDK when the default 27 SDK needs unavailable SwiftUI
++macro plugins; see Highball's `spike/lsfg-macos.md`.
++
++## Confirming frame generation
++
++Enable `LSFGVK_STATS=1` for diagnostic logs. Every 60 successful original presents,
++the shim logs the process ID and cumulative original/generated/total presents for that
++swapchain. At 2x, 60 originals should accompany 60 generated frames; at 3x, 120 generated.
++These count successful driver present calls, not a claim about interpolation quality.
++Also enable `DXVK_HUD=fps` alongside `MTL_HUD_ENABLED=1` to compare the game's source
++frame rate against Metal presentation FPS. On a vsynced 60 Hz display, 2x typically
++shows about 30 source FPS and 60 presented FPS. A lone 60 FPS counter is not proof.
+diff --git a/macos/build-d3dclear-win32.sh b/macos/build-d3dclear-win32.sh
+new file mode 100755
+index 0000000..fe5dc02
+--- /dev/null
++++ b/macos/build-d3dclear-win32.sh
+@@ -0,0 +1,7 @@
++#!/bin/zsh
++# build the d3d11 smoke test with mingw-w64
++set -euo pipefail
++cd "$(dirname "$0")/.."
++OUT="${1:-$(pwd)/build-macos}"; mkdir -p "$OUT"
++x86_64-w64-mingw32-gcc -O1 -Wall macos/d3dclear-win32.c -o "$OUT/d3dclear-win32.exe" -ld3d11 -ldxgi -ldxguid -lgdi32 -luser32
++echo "$OUT/d3dclear-win32.exe"
+diff --git a/macos/build-vkclear-win32.sh b/macos/build-vkclear-win32.sh
+new file mode 100755
+index 0000000..194cb62
+--- /dev/null
++++ b/macos/build-vkclear-win32.sh
+@@ -0,0 +1,7 @@
++#!/bin/zsh
++# build the windows vulkan smoke test with mingw-w64
++set -euo pipefail
++cd "$(dirname "$0")/.."
++OUT="${1:-$(pwd)/build-macos}"; mkdir -p "$OUT"
++x86_64-w64-mingw32-gcc -O1 -Wall -I thirdparty macos/vkclear-win32.c -o "$OUT/vkclear-win32.exe" -lgdi32 -luser32
++echo "$OUT/vkclear-win32.exe"
+diff --git a/macos/build-vkclear.sh b/macos/build-vkclear.sh
+new file mode 100755
+index 0000000..eb2000c
+--- /dev/null
++++ b/macos/build-vkclear.sh
+@@ -0,0 +1,8 @@
++#!/bin/zsh
++# build the native x86_64 smoke test
++set -euo pipefail
++cd "$(dirname "$0")/.."
++OUT="${1:-$(pwd)/build-macos}"; mkdir -p "$OUT"
++clang++ -arch x86_64 -std=c++20 -ObjC++ -fobjc-arc -O1 -I thirdparty macos/vkclear.mm \
++  -framework Cocoa -framework QuartzCore -framework Metal -o "$OUT/vkclear"
++echo "$OUT/vkclear"
+diff --git a/macos/check-core.cpp b/macos/check-core.cpp
+new file mode 100644
+index 0000000..b1848fb
+--- /dev/null
++++ b/macos/check-core.cpp
+@@ -0,0 +1,55 @@
++// check feature copies and config reloads without a display
++#include "device_chain.hpp"
++#include "lsfg-vk-utils/config.hpp"
++#include <filesystem>
++#include <fstream>
++#include <iostream>
++#include <stdexcept>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <unistd.h>
++
++static void check(bool condition, const char* message) { if (!condition) throw std::runtime_error(message); }
++int main() {
++    using namespace lsfgvk;
++    VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
++    VkPhysicalDeviceSynchronization2Features sync{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES, &f12};
++    layer::DeviceChain copy(&sync);
++    auto* copiedSync = static_cast<VkPhysicalDeviceSynchronization2Features*>(copy.head());
++    auto* copied12 = static_cast<VkPhysicalDeviceVulkan12Features*>(copiedSync->pNext);
++    copiedSync->synchronization2 = VK_TRUE; copied12->timelineSemaphore = VK_TRUE;
++    check(!sync.synchronization2 && !f12.timelineSemaphore && sync.pNext == &f12, "Device chain mutated its caller");
++    check(copiedSync != &sync && copied12 != &f12 && copied12->pNext == nullptr, "Device chain was not fully copied");
++    char dir[] = "/tmp/lsfg-core-XXXXXX";
++    check(mkdtemp(dir), "mkdtemp failed");
++    struct Cleanup { const char* dir; ~Cleanup() { std::filesystem::remove_all(dir); } } cleanup{dir};
++    auto path = std::filesystem::path(dir) / "conf.toml";
++    utils::Configuration config; config.profiles.push_back(utils::Profile{.name = "audit"});
++    utils::writeConfig(path, config);
++    utils::ConfigWatcher watcher(path);
++    check(!watcher.checkAndReload(), "Unchanged configuration reloaded");
++    config.profiles[0].multiplier = 3; utils::writeConfig(path, config);
++    const timespec future[2] = {{2208988800, 0}, {2208988800, 1}};
++    check(utimensat(AT_FDCWD, path.c_str(), future, 0) == 0, "Future mtime failed");
++    auto changed = watcher.checkAndReload();
++    check(changed && changed->profiles[0].multiplier == 3, "Post-2038 configuration was ignored");
++    std::ofstream(path) << "invalid toml = [";
++    bool failed = false;
++    try { (void)watcher.checkAndReload(); } catch (...) { failed = true; }
++    check(failed, "Invalid configuration was accepted");
++    struct stat invalidTime{}; stat(path.c_str(), &invalidTime);
++    config.profiles[0].multiplier = 2; utils::writeConfig(path, config);
++    const timespec same[2] = {invalidTime.st_atimespec, invalidTime.st_mtimespec};
++    check(utimensat(AT_FDCWD, path.c_str(), same, 0) == 0, "mtime restore failed");
++    changed = watcher.checkAndReload();
++    check(changed && changed->profiles[0].multiplier == 2, "Failed reload consumed the update timestamp");
++    setenv("LSFGVK_ENV", "1", 1);
++    for (const char* invalid : {"4294967298", "2junk", "-1", "5"}) {
++        setenv("LSFGVK_MULTIPLIER", invalid, 1);
++        bool rejected = false;
++        try { (void)utils::getOrDefault(); } catch (...) { rejected = true; }
++        check(rejected, "Malformed or unsupported multiplier accepted");
++    }
++    unsetenv("LSFGVK_ENV"); unsetenv("LSFGVK_MULTIPLIER");
++    std::cout << "Device-chain and config-reload regression checks passed\n";
++}
+diff --git a/macos/d3dclear-win32.c b/macos/d3dclear-win32.c
+new file mode 100644
+index 0000000..30268c0
+--- /dev/null
++++ b/macos/d3dclear-win32.c
+@@ -0,0 +1,50 @@
++// test d3d11 presentation through wine and dxvk
++#define WIN32_LEAN_AND_MEAN
++#define COBJMACROS
++#include <windows.h>
++#include <d3d11.h>
++#include <dxgi.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++#define CHECK(x) do { HRESULT hr_ = (x); if (FAILED(hr_)) { fprintf(stderr, "%s failed: 0x%08lx\n", #x, (unsigned long)hr_); fflush(stderr); exit(2); } } while (0)
++
++static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
++    if (m == WM_CLOSE || m == WM_DESTROY) { PostQuitMessage(0); return 0; }
++    return DefWindowProcA(h, m, w, l);
++}
++
++int main(int argc, char** argv) {
++    int frames = argc > 1 ? atoi(argv[1]) : 240;
++    setvbuf(stdout, NULL, _IONBF, 0);
++    WNDCLASSA wc = {0}; wc.lpfnWndProc = wndproc; wc.hInstance = GetModuleHandleA(NULL); wc.lpszClassName = "d3dclear";
++    RegisterClassA(&wc);
++    HWND hwnd = CreateWindowExA(0, "d3dclear", "d3dclear-win32", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100, 640, 480, NULL, NULL, wc.hInstance, NULL);
++
++    DXGI_SWAP_CHAIN_DESC sd = {0};
++    sd.BufferCount = 2; sd.BufferDesc.Width = 640; sd.BufferDesc.Height = 480; sd.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
++    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT; sd.OutputWindow = hwnd; sd.SampleDesc.Count = 1; sd.Windowed = TRUE;
++    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
++    ID3D11Device* dev; ID3D11DeviceContext* ctx; IDXGISwapChain* sc; D3D_FEATURE_LEVEL fl;
++    CHECK(D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, 0, NULL, 0, D3D11_SDK_VERSION, &sd, &sc, &dev, &fl, &ctx));
++    printf("d3d11 device ok, feature level 0x%x\n", fl);
++
++    LARGE_INTEGER freq, t0, t1; QueryPerformanceFrequency(&freq); QueryPerformanceCounter(&t0);
++    int presented = 0;
++    for (int f = 0; f < frames; f++) {
++        MSG msg; while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) { if (msg.message == WM_QUIT) goto done_loop; TranslateMessage(&msg); DispatchMessageA(&msg); }
++        ID3D11Texture2D* bb; CHECK(IDXGISwapChain_GetBuffer(sc, 0, &IID_ID3D11Texture2D, (void**)&bb));
++        ID3D11RenderTargetView* rtv; CHECK(ID3D11Device_CreateRenderTargetView(dev, (ID3D11Resource*)bb, NULL, &rtv));
++        float t = (float)(f % 120) / 120.0f;
++        float color[4] = { t, 1.0f - t, (f & 1) ? 0.9f : 0.1f, 1.0f };
++        ID3D11DeviceContext_ClearRenderTargetView(ctx, rtv, color);
++        ID3D11RenderTargetView_Release(rtv); ID3D11Texture2D_Release(bb);
++        CHECK(IDXGISwapChain_Present(sc, 1, 0));
++        presented++;
++    }
++done_loop:
++    QueryPerformanceCounter(&t1);
++    double secs = (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
++    printf("RESULT app_frames=%d seconds=%.2f app_fps=%.1f\n", presented, secs, presented / secs);
++    return 0;
++}
+diff --git a/macos/generate-device-chain.py b/macos/generate-device-chain.py
+new file mode 100644
+index 0000000..bc52510
+--- /dev/null
++++ b/macos/generate-device-chain.py
+@@ -0,0 +1,19 @@
++#!/usr/bin/env python3
++"""Generate sizes for the pinned Vulkan headers' device-create pNext structures."""
++import pathlib, re, sys
++source = pathlib.Path(sys.argv[1]).read_text().splitlines()
++# preserve guards from the generated declarations
++start = next(i for i, line in enumerate(source) if "struct StructExtends<" in line)
++end = max(i for i, line in enumerate(source) if "struct StructExtends<" in line)
++output = ["// generated from vendored headers"]
++for line in source[start:end + 1]:
++    if re.match(r"\s*#\s*(if|else|elif|endif)\b", line):
++        output.append(line)
++    match = re.search(r"struct StructExtends<([^,]+), DeviceCreateInfo>", line)
++    if match:
++        name = match[1].strip()
++        output.append(f"case vk::{name}::structureType: return sizeof(vk::{name});")
++# close remaining guards
++level = sum(bool(re.match(r"\s*#\s*if(?:def|ndef)?\b", line)) - bool(re.match(r"\s*#\s*endif\b", line)) for line in output)
++output += ["#endif"] * level
++pathlib.Path(sys.argv[2]).write_text("\n".join(output) + "\n")
+diff --git a/macos/test-driver.cpp b/macos/test-driver.cpp
+new file mode 100644
+index 0000000..49e1b4f
+--- /dev/null
++++ b/macos/test-driver.cpp
+@@ -0,0 +1,80 @@
++// check submissions and inject acquire failures
++#include <vulkan/vulkan.h>
++#include <dlfcn.h>
++#include <cstdlib>
++#include <cstring>
++#include <cstdio>
++#include <vector>
++#include <unordered_map>
++static PFN_vkGetInstanceProcAddr driverGIPA;
++static PFN_vkGetDeviceProcAddr driverGDPA;
++static PFN_vkQueueSubmit driverSubmit;
++static PFN_vkAcquireNextImageKHR driverAcquire;
++static PFN_vkCreateSemaphore driverCreateSemaphore;
++static PFN_vkDestroySemaphore driverDestroySemaphore;
++static std::unordered_map<VkSemaphore, bool> timeline;
++extern "C" PFN_vkVoidFunction vkGetInstanceProcAddr(VkInstance, const char*);
++extern "C" PFN_vkVoidFunction vkGetDeviceProcAddr(VkDevice, const char*);
++static void init() {
++    if (driverGIPA) return;
++    auto lib = dlopen(std::getenv("VKTEST_REAL_DRIVER"), RTLD_NOW | RTLD_LOCAL);
++    if (!lib) { std::fprintf(stderr, "test driver load failed: %s\n", dlerror()); std::abort(); }
++    driverGIPA = reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(lib, "vkGetInstanceProcAddr"));
++    driverGDPA = reinterpret_cast<PFN_vkGetDeviceProcAddr>(dlsym(lib, "vkGetDeviceProcAddr"));
++}
++static VkResult createSemaphore(VkDevice device, const VkSemaphoreCreateInfo* info, const VkAllocationCallbacks* alloc, VkSemaphore* semaphore) {
++    const auto result = driverCreateSemaphore(device, info, alloc, semaphore);
++    if (result == VK_SUCCESS) {
++        bool isTimeline = false;
++        for (auto node = static_cast<const VkBaseInStructure*>(info->pNext); node; node = node->pNext)
++            if (node->sType == VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO)
++                isTimeline = reinterpret_cast<const VkSemaphoreTypeCreateInfo*>(node)->semaphoreType == VK_SEMAPHORE_TYPE_TIMELINE;
++        timeline[*semaphore] = isTimeline;
++    }
++    return result;
++}
++static void destroySemaphore(VkDevice device, VkSemaphore semaphore, const VkAllocationCallbacks* alloc) {
++    timeline.erase(semaphore); driverDestroySemaphore(device, semaphore, alloc);
++}
++static VkResult submit(VkQueue queue, uint32_t count, const VkSubmitInfo* submits, VkFence fence) {
++    for (uint32_t i = 0; i < count; ++i) {
++        const auto& info = submits[i];
++        const VkTimelineSemaphoreSubmitInfo* values = nullptr;
++        for (auto node = static_cast<const VkBaseInStructure*>(info.pNext); node; node = node->pNext)
++            if (node->sType == VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO)
++                values = reinterpret_cast<const VkTimelineSemaphoreSubmitInfo*>(node);
++        auto check = [&](uint32_t n, const VkSemaphore* semaphores, uint32_t m, const uint64_t* numbers) {
++            bool anyTimeline = false;
++            for (uint32_t j = 0; j < n; ++j) anyTimeline |= timeline[semaphores[j]];
++            if (anyTimeline && (n != m || !numbers)) { std::fputs("INVALID_TIMELINE_COUNTS\n", stderr); std::abort(); }
++            // read all declared values, including binary entries
++            for (uint32_t j = 0; j < m; ++j) { volatile uint64_t value = numbers[j]; (void)value; }
++        };
++        check(info.waitSemaphoreCount, info.pWaitSemaphores, values ? values->waitSemaphoreValueCount : 0, values ? values->pWaitSemaphoreValues : nullptr);
++        check(info.signalSemaphoreCount, info.pSignalSemaphores, values ? values->signalSemaphoreValueCount : 0, values ? values->pSignalSemaphoreValues : nullptr);
++    }
++    return driverSubmit(queue, count, submits, fence);
++}
++static VkResult acquire(VkDevice device, VkSwapchainKHR chain, uint64_t timeout, VkSemaphore semaphore, VkFence fence, uint32_t* index) {
++    static int calls = 0;
++    ++calls;
++    const char* failAt = std::getenv("VKTEST_FAIL_ACQUIRE_AT");
++    if (failAt && calls == std::atoi(failAt)) {
++        std::fputs("INJECTED_OUT_OF_DATE\n", stderr); return VK_ERROR_OUT_OF_DATE_KHR;
++    }
++    return driverAcquire(device, chain, timeout, semaphore, fence, index);
++}
++static PFN_vkVoidFunction wrap(const char* name, PFN_vkVoidFunction actual) {
++    if (!actual) return nullptr;
++#define WRAP(vkname, variable, wrapper) if (std::strcmp(name, #vkname) == 0) { variable = reinterpret_cast<PFN_##vkname>(actual); return reinterpret_cast<PFN_vkVoidFunction>(wrapper); }
++    WRAP(vkQueueSubmit, driverSubmit, submit)
++    WRAP(vkAcquireNextImageKHR, driverAcquire, acquire)
++    WRAP(vkCreateSemaphore, driverCreateSemaphore, createSemaphore)
++    WRAP(vkDestroySemaphore, driverDestroySemaphore, destroySemaphore)
++#undef WRAP
++    if (std::strcmp(name, "vkGetInstanceProcAddr") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkGetInstanceProcAddr);
++    if (std::strcmp(name, "vkGetDeviceProcAddr") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkGetDeviceProcAddr);
++    return actual;
++}
++extern "C" PFN_vkVoidFunction vkGetInstanceProcAddr(VkInstance instance, const char* name) { init(); return wrap(name, driverGIPA(instance, name)); }
++extern "C" PFN_vkVoidFunction vkGetDeviceProcAddr(VkDevice device, const char* name) { init(); return wrap(name, driverGDPA(device, name)); }
+diff --git a/macos/vkclear-win32.c b/macos/vkclear-win32.c
+new file mode 100644
+index 0000000..626ce21
+--- /dev/null
++++ b/macos/vkclear-win32.c
+@@ -0,0 +1,133 @@
++// test vulkan presentation through wine
++#define WIN32_LEAN_AND_MEAN
++#include <windows.h>
++#include <stdio.h>
++#include <stdlib.h>
++#define VK_NO_PROTOTYPES
++#define VK_USE_PLATFORM_WIN32_KHR
++#include <vulkan/vulkan.h>
++
++#define CHECK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS && r_ != VK_SUBOPTIMAL_KHR) { fprintf(stderr, "%s failed: %d\n", #x, r_); fflush(stderr); exit(2); } } while (0)
++
++static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
++    if (m == WM_CLOSE || m == WM_DESTROY) { PostQuitMessage(0); return 0; }
++    return DefWindowProcA(h, m, w, l);
++}
++
++int main(int argc, char** argv) {
++    int frames = argc > 1 ? atoi(argv[1]) : 240;
++    setvbuf(stdout, NULL, _IONBF, 0);
++
++    HMODULE vk = LoadLibraryA("vulkan-1.dll");
++    if (!vk) { fprintf(stderr, "vulkan-1.dll not found\n"); return 2; }
++    PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)GetProcAddress(vk, "vkGetInstanceProcAddr");
++
++    WNDCLASSA wc = {0}; wc.lpfnWndProc = wndproc; wc.hInstance = GetModuleHandleA(NULL); wc.lpszClassName = "vkclear";
++    RegisterClassA(&wc);
++    HWND hwnd = CreateWindowExA(0, "vkclear", "vkclear-win32", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 100, 100, 640, 480, NULL, NULL, wc.hInstance, NULL);
++
++    VkInstance instance;
++    {
++        PFN_vkCreateInstance vkCreateInstance = (PFN_vkCreateInstance)gipa(NULL, "vkCreateInstance");
++        const char* exts[] = { "VK_KHR_surface", "VK_KHR_win32_surface", "VK_KHR_get_physical_device_properties2" };
++        VkApplicationInfo app = { VK_STRUCTURE_TYPE_APPLICATION_INFO }; app.pApplicationName = "vkclear-win32"; app.apiVersion = VK_API_VERSION_1_2;
++        VkInstanceCreateInfo ci = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO }; ci.pApplicationInfo = &app; ci.enabledExtensionCount = 3; ci.ppEnabledExtensionNames = exts;
++        CHECK(vkCreateInstance(&ci, NULL, &instance));
++    }
++#define I(name) PFN_##name name = (PFN_##name)gipa(instance, #name)
++    I(vkEnumeratePhysicalDevices); I(vkGetPhysicalDeviceQueueFamilyProperties); I(vkCreateDevice); I(vkGetDeviceProcAddr);
++    I(vkCreateWin32SurfaceKHR); I(vkGetPhysicalDeviceSurfaceCapabilitiesKHR); I(vkGetPhysicalDeviceSurfaceFormatsKHR);
++    I(vkGetPhysicalDeviceSurfaceSupportKHR); I(vkGetPhysicalDeviceProperties);
++
++    uint32_t n = 1; VkPhysicalDevice pd;
++    CHECK(vkEnumeratePhysicalDevices(instance, &n, &pd));
++    VkPhysicalDeviceProperties props; vkGetPhysicalDeviceProperties(pd, &props);
++    printf("device: %s (api %u.%u)\n", props.deviceName, VK_VERSION_MAJOR(props.apiVersion), VK_VERSION_MINOR(props.apiVersion));
++
++    VkSurfaceKHR surface;
++    VkWin32SurfaceCreateInfoKHR sci = { VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR }; sci.hinstance = wc.hInstance; sci.hwnd = hwnd;
++    CHECK(vkCreateWin32SurfaceKHR(instance, &sci, NULL, &surface));
++
++    uint32_t qcount = 0; vkGetPhysicalDeviceQueueFamilyProperties(pd, &qcount, NULL);
++    VkQueueFamilyProperties qf[16]; if (qcount > 16) qcount = 16; vkGetPhysicalDeviceQueueFamilyProperties(pd, &qcount, qf);
++    uint32_t qfi = UINT32_MAX;
++    for (uint32_t i = 0; i < qcount; i++) { VkBool32 sup = 0; vkGetPhysicalDeviceSurfaceSupportKHR(pd, i, surface, &sup); if ((qf[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) && sup) { qfi = i; break; } }
++    if (qfi == UINT32_MAX) { fprintf(stderr, "no graphics+present queue\n"); return 2; }
++
++    VkDevice device;
++    {
++        float prio = 1.0f;
++        VkDeviceQueueCreateInfo q = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO }; q.queueFamilyIndex = qfi; q.queueCount = 1; q.pQueuePriorities = &prio;
++        const char* exts[] = { "VK_KHR_swapchain" };
++        VkDeviceCreateInfo ci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO }; ci.queueCreateInfoCount = 1; ci.pQueueCreateInfos = &q; ci.enabledExtensionCount = 1; ci.ppEnabledExtensionNames = exts;
++        CHECK(vkCreateDevice(pd, &ci, NULL, &device));
++    }
++#define D(name) PFN_##name name = (PFN_##name)vkGetDeviceProcAddr(device, #name)
++    D(vkGetDeviceQueue); D(vkCreateSwapchainKHR); D(vkGetSwapchainImagesKHR); D(vkAcquireNextImageKHR); D(vkQueuePresentKHR);
++    D(vkCreateSemaphore); D(vkCreateCommandPool); D(vkAllocateCommandBuffers); D(vkBeginCommandBuffer); D(vkEndCommandBuffer);
++    D(vkCmdPipelineBarrier); D(vkCmdClearColorImage); D(vkQueueSubmit); D(vkQueueWaitIdle); D(vkCreateFence); D(vkWaitForFences); D(vkResetFences); D(vkResetCommandBuffer);
++
++    VkQueue queue; vkGetDeviceQueue(device, qfi, 0, &queue);
++    VkSurfaceCapabilitiesKHR caps; CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(pd, surface, &caps));
++    uint32_t fcount = 0; vkGetPhysicalDeviceSurfaceFormatsKHR(pd, surface, &fcount, NULL);
++    VkSurfaceFormatKHR fmts[32]; if (fcount > 32) fcount = 32; vkGetPhysicalDeviceSurfaceFormatsKHR(pd, surface, &fcount, fmts);
++    printf("surface: min %u max %u images, extent %ux%u, format %d\n", caps.minImageCount, caps.maxImageCount, caps.currentExtent.width, caps.currentExtent.height, fmts[0].format);
++
++    VkSwapchainKHR sc;
++    VkSwapchainCreateInfoKHR sc_ci = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
++    sc_ci.surface = surface; sc_ci.minImageCount = caps.minImageCount; sc_ci.imageFormat = fmts[0].format; sc_ci.imageColorSpace = fmts[0].colorSpace;
++    sc_ci.imageExtent = caps.currentExtent; sc_ci.imageArrayLayers = 1; sc_ci.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
++    sc_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE; sc_ci.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
++    sc_ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; sc_ci.presentMode = VK_PRESENT_MODE_FIFO_KHR; sc_ci.clipped = VK_TRUE;
++    CHECK(vkCreateSwapchainKHR(device, &sc_ci, NULL, &sc));
++    uint32_t icount = 0; vkGetSwapchainImagesKHR(device, sc, &icount, NULL);
++    VkImage images[8]; if (icount > 8) icount = 8; vkGetSwapchainImagesKHR(device, sc, &icount, images);
++    printf("swapchain: %u images\n", icount);
++
++    VkCommandPool pool; VkCommandPoolCreateInfo pci = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO }; pci.queueFamilyIndex = qfi; pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
++    CHECK(vkCreateCommandPool(device, &pci, NULL, &pool));
++    VkCommandBuffer cmd; VkCommandBufferAllocateInfo cai = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO }; cai.commandPool = pool; cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; cai.commandBufferCount = 1;
++    CHECK(vkAllocateCommandBuffers(device, &cai, &cmd));
++    VkSemaphore acq, done; VkSemaphoreCreateInfo semci = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
++    CHECK(vkCreateSemaphore(device, &semci, NULL, &acq)); CHECK(vkCreateSemaphore(device, &semci, NULL, &done));
++    VkFence fence; VkFenceCreateInfo fci = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO }; fci.flags = VK_FENCE_CREATE_SIGNALED_BIT; CHECK(vkCreateFence(device, &fci, NULL, &fence));
++
++    LARGE_INTEGER freq, t0, t1; QueryPerformanceFrequency(&freq); QueryPerformanceCounter(&t0);
++    int presented = 0;
++    for (int f = 0; f < frames; f++) {
++        MSG msg; while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) { if (msg.message == WM_QUIT) goto done_loop; TranslateMessage(&msg); DispatchMessageA(&msg); }
++        CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX)); CHECK(vkResetFences(device, 1, &fence));
++        uint32_t idx; VkResult ar = vkAcquireNextImageKHR(device, sc, UINT64_MAX, acq, VK_NULL_HANDLE, &idx);
++        if (ar == VK_ERROR_OUT_OF_DATE_KHR) { printf("out of date at frame %d\n", f); break; }
++        CHECK(ar);
++        CHECK(vkResetCommandBuffer(cmd, 0));
++        VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO }; bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
++        CHECK(vkBeginCommandBuffer(cmd, &bi));
++        VkImageSubresourceRange range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
++        VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER }; b.image = images[idx]; b.subresourceRange = range;
++        b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &b);
++        float t = (float)(f % 120) / 120.0f;
++        VkClearColorValue color = {{ t, 1.0f - t, (f & 1) ? 0.9f : 0.1f, 1.0f }};
++        vkCmdClearColorImage(cmd, images[idx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range);
++        b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; b.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; b.dstAccessMask = 0;
++        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL, 1, &b);
++        CHECK(vkEndCommandBuffer(cmd));
++        VkPipelineStageFlags wait = VK_PIPELINE_STAGE_TRANSFER_BIT;
++        VkSubmitInfo si = { VK_STRUCTURE_TYPE_SUBMIT_INFO }; si.waitSemaphoreCount = 1; si.pWaitSemaphores = &acq; si.pWaitDstStageMask = &wait;
++        si.commandBufferCount = 1; si.pCommandBuffers = &cmd; si.signalSemaphoreCount = 1; si.pSignalSemaphores = &done;
++        CHECK(vkQueueSubmit(queue, 1, &si, fence));
++        VkPresentInfoKHR pi = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR }; pi.waitSemaphoreCount = 1; pi.pWaitSemaphores = &done; pi.swapchainCount = 1; pi.pSwapchains = &sc; pi.pImageIndices = &idx;
++        VkResult pr = vkQueuePresentKHR(queue, &pi);
++        if (pr == VK_ERROR_OUT_OF_DATE_KHR) { printf("present out of date at frame %d\n", f); break; }
++        CHECK(pr);
++        presented++;
++    }
++done_loop:
++    vkQueueWaitIdle(queue);
++    QueryPerformanceCounter(&t1);
++    double secs = (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart;
++    printf("RESULT app_frames=%d seconds=%.2f app_fps=%.1f\n", presented, secs, presented / secs);
++    return 0;
++}
+diff --git a/macos/vkclear.mm b/macos/vkclear.mm
+new file mode 100644
+index 0000000..a11f6b7
+--- /dev/null
++++ b/macos/vkclear.mm
+@@ -0,0 +1,228 @@
++// test the shim with a native vulkan window
++#import <Cocoa/Cocoa.h>
++#import <QuartzCore/CAMetalLayer.h>
++#include <dlfcn.h>
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <vector>
++#define VK_NO_PROTOTYPES
++#define VK_USE_PLATFORM_METAL_EXT
++#include <vulkan/vulkan.h>
++
++#define CHECK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS && r_ != VK_SUBOPTIMAL_KHR) { fprintf(stderr, "%s failed: %d\n", #x, r_); exit(2); } } while (0)
++
++int main(int argc, char** argv) {
++    const int frames = argc > 1 ? atoi(argv[1]) : 240;
++    const int width = std::getenv("VKTEST_WIDTH") ? atoi(std::getenv("VKTEST_WIDTH")) : 640;
++    const int height = std::getenv("VKTEST_HEIGHT") ? atoi(std::getenv("VKTEST_HEIGHT")) : 480;
++    const bool recreate = std::getenv("VKTEST_RECREATE");
++    const bool multi = std::getenv("VKTEST_MULTI");
++
++    @autoreleasepool {
++        [NSApplication sharedApplication];
++        [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
++        NSWindow* win = [[NSWindow alloc] initWithContentRect:NSMakeRect(100, 100, width, height)
++            styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable) backing:NSBackingStoreBuffered defer:NO];
++        [win setTitle:@"vkclear"];
++        NSView* view = [win contentView];
++        [view setWantsLayer:YES];
++        CAMetalLayer* layer = [CAMetalLayer layer];
++        [view setLayer:layer];
++        [win makeKeyAndOrderFront:nil];
++        [NSApp activateIgnoringOtherApps:YES];
++        NSWindow* second = nil;
++        CAMetalLayer* secondLayer = nil;
++        if (multi) {
++            second = [[NSWindow alloc] initWithContentRect:NSMakeRect(200, 200, width, height)
++                styleMask:NSWindowStyleMaskTitled backing:NSBackingStoreBuffered defer:NO];
++            [[second contentView] setWantsLayer:YES];
++            secondLayer = [CAMetalLayer layer];
++            [[second contentView] setLayer:secondLayer];
++            [second setTitle:@"vkclear second swapchain"]; [second makeKeyAndOrderFront:nil];
++        }
++
++        void* lib = dlopen("libMoltenVK.dylib", RTLD_NOW | RTLD_LOCAL);
++        if (!lib) { fprintf(stderr, "dlopen libMoltenVK.dylib: %s\n", dlerror()); return 2; }
++        Dl_info info{}; dladdr(dlsym(lib, "vkGetInstanceProcAddr"), &info);
++        printf("libMoltenVK.dylib resolved to: %s\n", info.dli_fname ? info.dli_fname : "?");
++        auto gipa = (PFN_vkGetInstanceProcAddr)dlsym(lib, "vkGetInstanceProcAddr");
++        auto gdpa = (PFN_vkGetDeviceProcAddr)dlsym(lib, "vkGetDeviceProcAddr");
++        if (!gipa || !gdpa) { fprintf(stderr, "missing entry points\n"); return 2; }
++#define I(name) auto name = (PFN_##name)gipa(instance, #name)
++#define D(name) auto name = (PFN_##name)gdpa(device, #name)
++
++        VkInstance instance = VK_NULL_HANDLE;
++        {
++            auto vkCreateInstance = (PFN_vkCreateInstance)gipa(nullptr, "vkCreateInstance");
++            const char* exts[] = { "VK_KHR_surface", "VK_EXT_metal_surface", "VK_KHR_get_physical_device_properties2" };
++            VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO}; app.pApplicationName = "vkclear"; app.apiVersion = VK_API_VERSION_1_2;
++            VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO}; ci.pApplicationInfo = &app; ci.enabledExtensionCount = 3; ci.ppEnabledExtensionNames = exts;
++            CHECK(vkCreateInstance(&ci, nullptr, &instance));
++        }
++        I(vkEnumeratePhysicalDevices); I(vkGetPhysicalDeviceQueueFamilyProperties); I(vkCreateDevice);
++        I(vkCreateMetalSurfaceEXT); I(vkGetPhysicalDeviceSurfaceCapabilitiesKHR); I(vkGetPhysicalDeviceSurfaceFormatsKHR);
++        I(vkGetPhysicalDeviceSurfaceSupportKHR); I(vkGetPhysicalDeviceProperties);
++
++        uint32_t n = 1; VkPhysicalDevice pd;
++        CHECK(vkEnumeratePhysicalDevices(instance, &n, &pd));
++        VkPhysicalDeviceProperties props; vkGetPhysicalDeviceProperties(pd, &props);
++        printf("device: %s\n", props.deviceName);
++
++        VkSurfaceKHR surface;
++        VkMetalSurfaceCreateInfoEXT sci{VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT}; sci.pLayer = layer;
++        CHECK(vkCreateMetalSurfaceEXT(instance, &sci, nullptr, &surface));
++        VkSurfaceKHR secondSurface = VK_NULL_HANDLE;
++        if (multi) { sci.pLayer = secondLayer; CHECK(vkCreateMetalSurfaceEXT(instance, &sci, nullptr, &secondSurface)); }
++
++        uint32_t qcount = 0; vkGetPhysicalDeviceQueueFamilyProperties(pd, &qcount, nullptr);
++        std::vector<VkQueueFamilyProperties> qf(qcount); vkGetPhysicalDeviceQueueFamilyProperties(pd, &qcount, qf.data());
++        uint32_t qfi = UINT32_MAX;
++        for (uint32_t i = 0; i < qcount; i++) {
++            VkBool32 sup = 0; vkGetPhysicalDeviceSurfaceSupportKHR(pd, i, surface, &sup);
++            if ((qf[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) && sup) { qfi = i; break; }
++        }
++        if (qfi == UINT32_MAX) { fprintf(stderr, "no graphics+present queue\n"); return 2; }
++
++        VkDevice device;
++        {
++            float prio = 1.0f;
++            VkDeviceQueueCreateInfo q{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO}; q.queueFamilyIndex = qfi; q.queueCount = 1; q.pQueuePriorities = &prio;
++            const char* exts[] = { "VK_KHR_swapchain" };
++            VkDeviceCreateInfo ci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO}; ci.queueCreateInfoCount = 1; ci.pQueueCreateInfos = &q; ci.enabledExtensionCount = 1; ci.ppEnabledExtensionNames = exts;
++            VkPhysicalDeviceVulkan12Features app12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
++            ci.pNext = &app12;
++            CHECK(vkCreateDevice(pd, &ci, nullptr, &device));
++            printf("CALLER_FEATURES timeline=%u fp16=%u (both were zero)\n", app12.timelineSemaphore, app12.shaderFloat16); if (app12.timelineSemaphore || app12.shaderFloat16) return 3;
++        }
++        D(vkGetDeviceQueue); D(vkCreateSwapchainKHR); D(vkGetSwapchainImagesKHR); D(vkAcquireNextImageKHR); D(vkQueuePresentKHR);
++        D(vkCreateSemaphore); D(vkCreateCommandPool); D(vkAllocateCommandBuffers); D(vkBeginCommandBuffer); D(vkEndCommandBuffer);
++        D(vkCmdPipelineBarrier); D(vkCmdClearColorImage); D(vkQueueSubmit); D(vkQueueWaitIdle); D(vkCreateFence); D(vkWaitForFences); D(vkResetFences);
++        D(vkResetCommandBuffer); D(vkDestroySwapchainKHR);
++
++        VkQueue queue; vkGetDeviceQueue(device, qfi, 0, &queue);
++        VkSurfaceCapabilitiesKHR caps; CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(pd, surface, &caps));
++        uint32_t fcount = 0; vkGetPhysicalDeviceSurfaceFormatsKHR(pd, surface, &fcount, nullptr);
++        std::vector<VkSurfaceFormatKHR> fmts(fcount); vkGetPhysicalDeviceSurfaceFormatsKHR(pd, surface, &fcount, fmts.data());
++        VkFormat fmt = fmts[0].format;
++        printf("surface: min %u max %u images, extent %ux%u, format %d\n", caps.minImageCount, caps.maxImageCount, caps.currentExtent.width, caps.currentExtent.height, fmt);
++
++        VkSwapchainKHR sc;
++        VkSwapchainCreateInfoKHR sc_ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
++        sc_ci.surface = surface; sc_ci.minImageCount = caps.minImageCount; sc_ci.imageFormat = fmt; sc_ci.imageColorSpace = fmts[0].colorSpace;
++        sc_ci.imageExtent = caps.currentExtent; sc_ci.imageArrayLayers = 1; sc_ci.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
++        sc_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE; sc_ci.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
++        sc_ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; sc_ci.presentMode = VK_PRESENT_MODE_FIFO_KHR; sc_ci.clipped = VK_TRUE;
++        CHECK(vkCreateSwapchainKHR(device, &sc_ci, nullptr, &sc));
++        uint32_t icount = 0; vkGetSwapchainImagesKHR(device, sc, &icount, nullptr);
++        std::vector<VkImage> images(icount); vkGetSwapchainImagesKHR(device, sc, &icount, images.data());
++        printf("swapchain: %u images\n", icount);
++        VkSwapchainKHR secondChain = VK_NULL_HANDLE;
++        std::vector<VkImage> secondImages;
++        if (multi) {
++            auto ci2 = sc_ci; ci2.surface = secondSurface;
++            CHECK(vkCreateSwapchainKHR(device, &ci2, nullptr, &secondChain));
++            uint32_t count = 0; CHECK(vkGetSwapchainImagesKHR(device, secondChain, &count, nullptr));
++            secondImages.resize(count); CHECK(vkGetSwapchainImagesKHR(device, secondChain, &count, secondImages.data()));
++        }
++        auto recreateChain = [&]() {
++            CHECK(vkQueueWaitIdle(queue));
++            CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(pd, surface, &caps));
++            sc_ci.imageExtent = caps.currentExtent;
++            sc_ci.oldSwapchain = sc;
++            VkSwapchainKHR fresh;
++            CHECK(vkCreateSwapchainKHR(device, &sc_ci, nullptr, &fresh));
++            vkDestroySwapchainKHR(device, sc, nullptr); sc = fresh; sc_ci.oldSwapchain = VK_NULL_HANDLE;
++            CHECK(vkGetSwapchainImagesKHR(device, sc, &icount, nullptr)); images.resize(icount);
++            CHECK(vkGetSwapchainImagesKHR(device, sc, &icount, images.data()));
++            puts("SWAPCHAIN_RECREATED");
++        };
++
++        VkCommandPool pool; VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO}; pci.queueFamilyIndex = qfi; pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
++        CHECK(vkCreateCommandPool(device, &pci, nullptr, &pool));
++        VkCommandBuffer cmd; VkCommandBufferAllocateInfo cai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO}; cai.commandPool = pool; cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; cai.commandBufferCount = 1;
++        CHECK(vkAllocateCommandBuffers(device, &cai, &cmd));
++        VkSemaphore acq, done; VkSemaphoreCreateInfo semci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
++        CHECK(vkCreateSemaphore(device, &semci, nullptr, &acq)); CHECK(vkCreateSemaphore(device, &semci, nullptr, &done));
++        VkSemaphore secondAcquire = VK_NULL_HANDLE;
++        if (multi) CHECK(vkCreateSemaphore(device, &semci, nullptr, &secondAcquire));
++        VkFence fence; VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO}; fci.flags = VK_FENCE_CREATE_SIGNALED_BIT; CHECK(vkCreateFence(device, &fci, nullptr, &fence));
++
++        auto t0 = std::chrono::steady_clock::now();
++        int presented = 0;
++        for (int f = 0; f < frames; f++) {
++            NSEvent* ev; while ((ev = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES])) [NSApp sendEvent:ev];
++
++            CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
++            if (recreate && f && f % 20 == 0) {
++                [win setContentSize:NSMakeSize(width + (f % 40 ? 32 : 0), height)];
++                recreateChain();
++            }
++            CHECK(vkResetFences(device, 1, &fence));
++            uint32_t idx; VkResult ar = vkAcquireNextImageKHR(device, sc, UINT64_MAX, acq, VK_NULL_HANDLE, &idx);
++            if (ar == VK_ERROR_OUT_OF_DATE_KHR) { printf("out of date at frame %d\n", f); break; }
++            CHECK(ar);
++            uint32_t secondIndex = 0;
++            if (multi) CHECK(vkAcquireNextImageKHR(device, secondChain, UINT64_MAX, secondAcquire, VK_NULL_HANDLE, &secondIndex));
++
++            CHECK(vkResetCommandBuffer(cmd, 0));
++            VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO}; bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
++            CHECK(vkBeginCommandBuffer(cmd, &bi));
++            VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
++            VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER}; b.image = images[idx]; b.subresourceRange = range;
++            b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++            b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
++            // use motion to make generated frames visible
++            float t = (float)(f % 120) / 120.0f;
++            VkClearColorValue color{{ t, 1.0f - t, (f & 1) ? 0.9f : 0.1f, 1.0f }};
++            vkCmdClearColorImage(cmd, images[idx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range);
++            b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; b.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; b.dstAccessMask = 0;
++            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
++            if (multi) {
++                b.image = secondImages[secondIndex]; b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
++                b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; b.srcAccessMask = 0; b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
++                vkCmdClearColorImage(cmd, b.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color, 1, &range);
++                b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; b.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
++                b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; b.dstAccessMask = 0;
++                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
++            }
++            CHECK(vkEndCommandBuffer(cmd));
++
++            VkPipelineStageFlags wait = VK_PIPELINE_STAGE_TRANSFER_BIT;
++            VkPipelineStageFlags waits[2] = {wait, wait};
++            VkSemaphore acquires[2] = {acq, secondAcquire};
++            VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO}; si.waitSemaphoreCount = 1; si.pWaitSemaphores = &acq; si.pWaitDstStageMask = &wait;
++            si.commandBufferCount = 1; si.pCommandBuffers = &cmd; si.signalSemaphoreCount = 1; si.pSignalSemaphores = &done;
++            if (multi) { si.waitSemaphoreCount = 2; si.pWaitSemaphores = acquires; si.pWaitDstStageMask = waits; }
++            CHECK(vkQueueSubmit(queue, 1, &si, fence));
++            VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR}; pi.waitSemaphoreCount = 1; pi.pWaitSemaphores = &done; pi.swapchainCount = 1; pi.pSwapchains = &sc; pi.pImageIndices = &idx;
++            VkSwapchainKHR chains[2] = {sc, secondChain}; uint32_t indices[2] = {idx, secondIndex};
++            VkResult results[2] = {VK_ERROR_UNKNOWN, VK_ERROR_UNKNOWN};
++            if (multi) { pi.swapchainCount = 2; pi.pSwapchains = chains; pi.pImageIndices = indices; pi.pResults = results; }
++            VkResult pr = vkQueuePresentKHR(queue, &pi);
++            if (multi) { CHECK(results[0]); CHECK(results[1]); }
++
++            if (pr == VK_ERROR_OUT_OF_DATE_KHR) { printf("present out of date at frame %d\n", f); recreateChain(); continue; }
++            CHECK(pr);
++            presented++;
++        }
++        vkQueueWaitIdle(queue);
++        double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
++        printf("RESULT app_frames=%d seconds=%.2f app_fps=%.1f\n", presented, secs, presented / secs);
++        D(vkDeviceWaitIdle); D(vkDestroyDevice); D(vkDestroyCommandPool);
++        D(vkDestroySemaphore); D(vkDestroyFence); I(vkDestroySurfaceKHR); I(vkDestroyInstance);
++        CHECK(vkDeviceWaitIdle(device));
++        vkDestroyFence(device, fence, nullptr); vkDestroySemaphore(device, acq, nullptr); vkDestroySemaphore(device, done, nullptr);
++        vkDestroyCommandPool(device, pool, nullptr); vkDestroySwapchainKHR(device, sc, nullptr);
++        if (multi) {
++            vkDestroySemaphore(device, secondAcquire, nullptr); vkDestroySwapchainKHR(device, secondChain, nullptr);
++            vkDestroySurfaceKHR(instance, secondSurface, nullptr); puts("MULTI_SWAPCHAIN_COMPLETE");
++        }
++        vkDestroyDevice(device, nullptr); vkDestroySurfaceKHR(instance, surface, nullptr); vkDestroyInstance(instance, nullptr);
++        puts("TEARDOWN_COMPLETE");
++    }
++    return 0;
++}

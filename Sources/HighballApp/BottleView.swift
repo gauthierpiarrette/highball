@@ -264,8 +264,9 @@ struct BottleSettingsSheet: View {
     @State private var dpiDraft: Double? = nil
 
     private var currentDpi: Int { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.dpiScale }
-    private var currentRenderer: Renderer { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.renderer }
-    private var engine: InstalledEngine? { state.engine(for: bottle) }
+    private var liveBottle: Bottle { state.bottles.first { $0.name == bottle.name } ?? bottle }
+    private var currentRenderer: Renderer { liveBottle.settings.renderer }
+    private var engine: InstalledEngine? { state.engine(for: liveBottle) }
     private var d3dmetalAvailable: Bool { engine?.rendererDir("d3dmetal") != nil }
     private var vkd3dAvailable: Bool { engine?.rendererDir("vkd3d") != nil }
     private var d3dmetalPossible: Bool {
@@ -319,6 +320,22 @@ struct BottleSettingsSheet: View {
                                     state.showGPTKLicense = true
                                 }
                             }.controlSize(.small)
+                        }
+                    }
+                    // keep unavailable settings visible
+                    if let engine {
+                        Picker(L("Frame generation (Lossless Scaling)"), selection: binding(\.frameGen)) {
+                            Text(L("Off")).tag(1)
+                            Text("2×").tag(2)
+                            Text("3×").tag(3)
+                            Text("4×").tag(4)
+                        }
+                        if case .unavailable(let why) = liveBottle.frameGenStatus(renderer: currentRenderer, engine: engine) {
+                            Text(String(format: L("Frame generation stays off: %@"), L(why)))
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else if case .active = liveBottle.frameGenStatus(renderer: currentRenderer, engine: engine) {
+                            Text(L("Generated frames are paced by vsync: works best when the game holds a steady frame rate that divides the display's refresh rate (60 fps → 120 Hz). A Steam game picks this up after the environment is stopped and Steam restarted."))
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     Toggle(L("Metal performance HUD"), isOn: binding(\.metalHUD))

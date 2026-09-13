@@ -9,6 +9,15 @@ func L(_ en: String) -> String {
 
 enum L10n {
     static let fr: [String: String] = [
+        "Frame generation (Lossless Scaling)": "Génération d’images (Lossless Scaling)",
+        "Frame generation stays off: %@": "La génération d’images reste désactivée : %@",
+        "Frame generation requires a multiplier from 1 to 4.": "La génération d’images nécessite un multiplicateur de 1 à 4.",
+        "This engine has no usable frame generation component. Build or install the component for this engine.": "Ce moteur ne dispose pas d’un composant de génération d’images utilisable. Compilez ou installez le composant pour ce moteur.",
+        "Choose DXVK or vkd3d-proton for frame generation. DXMT and D3DMetal use Metal directly.": "Choisissez DXVK ou vkd3d-proton pour la génération d’images. DXMT et D3DMetal utilisent Metal directement.",
+        "The real MoltenVK override is unusable. Use a readable driver with a different filename from libMoltenVK.dylib.": "Le chemin personnalisé du véritable pilote MoltenVK est inutilisable. Utilisez un pilote lisible dont le nom diffère de libMoltenVK.dylib.",
+        "The shader DLL override is not a readable file. Correct LSFGVK_DLL_PATH or remove the override.": "Le chemin personnalisé de la DLL de shaders ne désigne pas un fichier lisible. Corrigez LSFGVK_DLL_PATH ou supprimez cette valeur.",
+        "Install Lossless Scaling from Steam in this environment and select its lsfg-vk beta branch (Properties → Betas).": "Installez Lossless Scaling depuis Steam dans cet environnement et sélectionnez sa branche bêta lsfg-vk (Propriétés → Bêtas).",
+        "Generated frames are paced by vsync: works best when the game holds a steady frame rate that divides the display's refresh rate (60 fps → 120 Hz). A Steam game picks this up after the environment is stopped and Steam restarted.": "Les images générées suivent la synchronisation verticale. Le résultat est meilleur avec une fréquence stable divisant celle de l’écran (60 i/s → 120 Hz). Pour un jeu Steam, arrêtez l’environnement puis redémarrez Steam pour appliquer ce réglage.",
         // Sidebar & shell
         "Update engine": "Mettre à jour le moteur",
         "Installs the newer engine this version of Highball ships. Bottles on the same Wine build move to it; the others stay on their engine until you switch them in the bottle's settings. Only changed components are downloaded.": "Installe le moteur plus récent livré avec cette version de Highball. Les bouteilles sur la même version de Wine y passent ; les autres gardent leur moteur jusqu'à ce que vous le changiez dans les réglages de la bouteille. Seuls les composants modifiés sont téléchargés.",
