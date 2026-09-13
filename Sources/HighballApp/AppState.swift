@@ -1161,9 +1161,13 @@ final class AppState {
 
     /// Opens highball-db's report form prefilled from the session. The rating is theirs to give.
     func reportPlay(_ record: SessionRecord) {
-        let engine = bottles.first { $0.name == record.bottle }?.settings.engineID ?? "?"
+        let bottle = bottles.first { $0.name == record.bottle }
+        let engine = bottle?.settings.engineID ?? "?"
+        // A game with no mode of its own ran on the environment's mode, so the report says that
+        // one: two of three app-sent reports on 2026-09-13 arrived with the mode empty.
+        let renderer = record.renderer ?? bottle?.settings.renderer.rawValue
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
-        NSWorkspace.shared.open(PlayReport.url(title: record.title, appid: record.appid, renderer: record.renderer,
+        NSWorkspace.shared.open(PlayReport.url(title: record.title, appid: record.appid, renderer: renderer,
                                                chip: Machine.chip(), macos: Machine.macOSVersion(), engine: engine,
                                                minutes: record.seconds / 60, version: version))
         postPlay = nil
