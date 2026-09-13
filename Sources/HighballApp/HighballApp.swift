@@ -94,7 +94,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         super.init()
     }
     /// Set from the App's onAppear so quit-time can reach the bottles.
-    weak var appState: AppState?
+    weak var appState: AppState? { didSet { flushPendingOpens() } }
+    /// Files Finder asked us to open before the window existed (a double-click that launched the app).
+    private var pendingOpens: [URL] = []
+
+    /// Finder's double-click and Open With land here (issue #90); the app declares .exe, .msi and
+    /// .bat in its Info.plist. A cold launch delivers them before the state is wired, so they wait.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        pendingOpens += urls
+        flushPendingOpens()
+    }
+
+    private func flushPendingOpens() {
+        guard let state = appState, !pendingOpens.isEmpty else { return }
+        let urls = pendingOpens; pendingOpens = []
+        Task { @MainActor in for url in urls { state.open(url: url) } }
+    }
 
     /// Wine processes survive the app (they're not children of its lifetime), so quitting while a
     /// game or Steam runs would strand them with no UI attached. Ask instead of leaking.

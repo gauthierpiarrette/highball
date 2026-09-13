@@ -69,6 +69,21 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleURLName</key><string>Highball play link</string>
     <key>CFBundleURLSchemes</key><array><string>highball</string></array>
   </dict></array>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>Windows program</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Default</string>
+      <key>LSItemContentTypes</key><array><string>com.microsoft.windows-executable</string></array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key><string>Windows installer or batch file</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>CFBundleTypeExtensions</key><array><string>msi</string><string>bat</string></array>
+    </dict>
+  </array>
   <key>NSLocalNetworkUsageDescription</key><string>Steam and some games look for other players and devices on your network. macOS asks the first time one does.</string>
   <key>NSMicrophoneUsageDescription</key><string>Windows games and apps running in a bottle need the microphone for voice chat and recording. macOS asks the first time one uses it.</string>
 </dict></plist>

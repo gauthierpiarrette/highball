@@ -360,6 +360,21 @@ final class AppState {
     /// The environment a dropped program runs in: the page it was dropped on, else the default.
     var pendingRunBottle: String?
 
+    /// A Windows program double-clicked in Finder, or opened with Highball from Open With
+    /// (issue #90). Same dialog as a dropped or chosen file: run it in the default environment,
+    /// or run and keep it in Programs. Anything that is not a program says so instead of doing nothing.
+    func openFile(_ url: URL) {
+        guard ["exe", "msi", "bat"].contains(url.pathExtension.lowercased()) else {
+            fail(HighballError.failed(String(format: L("'%@' isn't a Windows program. Highball opens .exe, .msi and .bat files."), url.lastPathComponent)))
+            return
+        }
+        if pendingRun == url { return }   // macOS can deliver the same open twice
+        refresh()
+        pendingRunBottle = nil
+        pendingRun = url
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     func chooseProgramToRun(in bottle: String? = nil) {
         let panel = NSOpenPanel()
         panel.title = L("Choose a Windows program")
@@ -972,6 +987,7 @@ final class AppState {
     @ObservationIgnored private var deferredPlayLink: (request: PlayLink.Request, at: Date)?
 
     func open(url: URL) {
+        if url.isFileURL { openFile(url); return }
         guard let request = PlayLink.parse(url) else { return }
         refresh()
         if case let .launcher(id) = request.target {
