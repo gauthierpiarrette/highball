@@ -5,6 +5,13 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.10</title>
+      <description><![CDATA[Dependencies gain Microsoft's core fonts for games whose menus come up blank, and a report from a game on the environment's mode names that mode.]]></description>
+      <pubDate>Sun, 13 Sep 2026 21:39:23 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.10/Highball-0.9.10.zip" sparkle:version="0.9.10" sparkle:shortVersionString="0.9.10" sparkle:edSignature="rAzU42fSa7fMWORaE+xMo7loAW5KFb+42jOJ9PG8foO5ehKx8qCLA/c0sjzDdmeAdOhzgIYLrCN/GVrBqWInDg==" length="3438613" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.9</title>
       <description><![CDATA[Metaphor: ReFantazio's recipe reaches the app again (0.9.8 bundled it in a shape the app dropped), so Play moves the environment to engine r8.]]></description>
       <pubDate>Sat, 12 Sep 2026 22:50:19 +0200</pubDate>
