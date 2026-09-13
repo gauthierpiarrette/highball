@@ -25,7 +25,7 @@ swift build && swift test                    # from the repo root
 .build/debug/highball bottle kill <bottle>   # stop the wineserver before poking a prefix
 ```
 
-`highball run` always exits 0. Assert on its output, never on `$?`.
+`highball run` propagates the Windows process exit code. Check both `$?` and the log footer.
 
 ## Smoke tests
 
