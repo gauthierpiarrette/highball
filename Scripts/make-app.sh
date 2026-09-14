@@ -124,6 +124,11 @@ if [ -n "$IDENTITY" ]; then
   codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
   codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app"
   codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework"
+  # Bundled command-line tools are Mach-O executables too: notarization rejects them unsigned
+  # (cabextract, 2026-09-14: "not signed with a valid Developer ID", no hardened runtime).
+  for tool in "$APP"/Contents/Resources/tools/*; do
+    case "$tool" in *.LICENSE) ;; *) codesign --force --options runtime --timestamp -s "$IDENTITY" "$tool" ;; esac
+  done
   codesign --force --options runtime --timestamp --entitlements dist/entitlements.plist -s "$IDENTITY" "$APP"
 else
   codesign --force --deep -s - "$APP"
