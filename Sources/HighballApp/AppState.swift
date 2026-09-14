@@ -303,7 +303,8 @@ final class AppState {
             launchGame(game, in: bottle, renderer: renderer)
         case .epic:
             guard let game = epicOwned.first(where: { $0.app_name == item.epicAppName }) else { return }
-            epicPlay(game, in: bottle, renderer: renderer)
+            epicPlay(game, in: bottle, renderer: renderer,
+                     throughEpicLauncherStandIn: fixRecipe(for: item)?.requires?.contains("rockstar") == true)
         case .pin:
             guard let pin = bottle.settings.pins.first(where: { $0.id == item.pinID }) else { return }
             launch(pin: pin, in: bottle)
@@ -1653,7 +1654,13 @@ final class AppState {
     }
 
     // renderer nil = the bottle's own renderer (the old hardcoded .dxvk default ignored it).
-    func epicPlay(_ game: EpicStore.Game, in bottle: Bottle, renderer: Renderer? = nil) {
+    /// `throughEpicLauncherStandIn`: a Rockstar game bought on Epic (its recipe requires the
+    /// Rockstar launcher) starts through a stand-in named EpicGamesLauncher.exe placed in the
+    /// game folder, because the Rockstar launcher accepts the Epic entitlement only while a
+    /// process of that name exists (highball#93). The stand-in ships in the app bundle, built
+    /// from spike/epic-stub; it starts the real executable with Legendary's arguments and lives
+    /// as long as the game.
+    func epicPlay(_ game: EpicStore.Game, in bottle: Bottle, renderer: Renderer? = nil, throughEpicLauncherStandIn: Bool = false) {
         guard let engine = engine(for: bottle) else { return }
         if runningSessions.contains(where: { $0.title == game.app_title && $0.bottleName == bottle.name }) {
             fail(HighballError.failed("\(game.app_title) is already running."))
@@ -1666,8 +1673,18 @@ final class AppState {
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             let box = LaunchOutcome()
             let log = logLine(box)
+            var executable = info.executable, arguments = info.arguments
+            if throughEpicLauncherStandIn {
+                if let standIn = Self.placeEpicLauncherStandIn(in: info.executable.deletingLastPathComponent()) {
+                    appendLog("\(game.app_title): Rockstar game bought on Epic, starting through the EpicGamesLauncher.exe stand-in")
+                    executable = standIn
+                    arguments = [info.executable.lastPathComponent] + info.arguments
+                } else {
+                    appendLog("\(game.app_title): this build has no EpicGamesLauncher.exe stand-in, the Rockstar launcher may not accept the Epic copy")
+                }
+            }
             watchedLaunch(box) {
-                try await runner.start(info.executable, arguments: info.arguments,
+                try await runner.start(executable, arguments: arguments,
                                        renderer: renderer, extraEnvironment: info.environment,
                                        workingDirectory: info.workingDirectory, onOutput: log)
             }
@@ -1685,6 +1702,18 @@ final class AppState {
             beginSession(GameSession(title: game.app_title, bottleName: bottle.name, appid: nil, markers: markers,
                                      renderer: (renderer ?? bottle.settings.renderer).rawValue))
         }
+    }
+
+    /// Copies the bundled EpicGamesLauncher.exe stand-in into the game folder when it is missing
+    /// or differs, and returns its location. Nil when this build has none (a debug build without
+    /// mingw) or the folder cannot be written.
+    nonisolated static func placeEpicLauncherStandIn(in gameDir: URL) -> URL? {
+        guard let bundled = Bundle.main.url(forResource: "EpicGamesLauncher", withExtension: "exe"),
+              let data = try? Data(contentsOf: bundled) else { return nil }
+        let target = gameDir.appending(path: "EpicGamesLauncher.exe")
+        if let existing = try? Data(contentsOf: target), existing == data { return target }
+        do { try data.write(to: target, options: .atomic) } catch { return nil }
+        return target
     }
 
     func setDpi(_ scale: Int, in bottle: Bottle) {

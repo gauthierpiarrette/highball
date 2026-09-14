@@ -24,6 +24,17 @@ cp spike/engine-manifest.json "$APP/Contents/Resources/engine-manifest.json"
 # Other engines the app can offer (previous ones for rollback, candidates for Advanced).
 if ls spike/engines/*.json >/dev/null 2>&1; then mkdir -p "$APP/Contents/Resources/engines"; cp spike/engines/*.json "$APP/Contents/Resources/engines/"; fi
 cp spike/d3dmetal-license.txt "$APP/Contents/Resources/d3dmetal-license.txt"
+# The EpicGamesLauncher.exe stand-in for Rockstar games bought on Epic (highball#93), built from
+# spike/epic-stub/EpicGamesLauncher.c with mingw. A release must carry it; a debug build without
+# mingw goes on without it and the Epic launch path says so in the log.
+if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
+  spike/epic-stub/build.sh >/dev/null
+  cp spike/epic-stub/EpicGamesLauncher.exe "$APP/Contents/Resources/EpicGamesLauncher.exe"
+elif [ "$CONFIG" = release ]; then
+  echo "error: release build needs mingw-w64 (brew install mingw-w64) to build spike/epic-stub" >&2; exit 1
+else
+  echo "note: no mingw-w64, the Epic launcher stand-in is not bundled (debug build)"
+fi
 RECIPES="../highball-db/recipes"
 if [ ! -d "$RECIPES" ]; then
   RECIPES=".build/highball-db/recipes"
