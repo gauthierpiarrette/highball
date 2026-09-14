@@ -367,6 +367,10 @@ struct Run: AsyncParsableCommand {
                 print("hint: exited within 10 s; try another renderer (--renderer dxmt|d3dmetal|dxvk|wined3d)")
             }
         }
+        // The status Wine reports for the program becomes the CLI's, so scripts can assert on $?
+        // (Scripts/test-cli-exit.sh) instead of grepping the exit= line. Wine keeps the low 8 bits
+        // of the Windows code: 0 only for 0, but 3010 arrives as 194 and 256 as 1.
+        throw ExitCode(result.exitStatus)
     }
 }
 

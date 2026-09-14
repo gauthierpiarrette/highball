@@ -104,8 +104,9 @@ fi
 "$HB" recipe apply e2e "$DB/recipes/tweaks/vcrun2022.json"
 test -f "$B/drive_c/windows/system32/vcruntime140.dll" || { echo "vcruntime140 (x64) missing"; exit 1; }
 test -f "$B/drive_c/windows/syswow64/vcruntime140.dll" || { echo "vcruntime140 (x86) missing"; exit 1; }
-# NOTE: 'highball run' always exits 0 — assert on its output, never on $?.
-out=$("$HB" run e2e reg --verbose -- query 'HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64' /v Installed)
+# NOTE: 'highball run' exits with the status Wine reports for the program, and reg query exits 1
+# when the key is missing. `|| true` keeps set -e from aborting before the checks below print its output.
+out=$("$HB" run e2e reg --verbose -- query 'HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\X64' /v Installed) || true
 echo "$out" | grep -qE 'Installed[[:space:]]+REG_DWORD[[:space:]]+0x1' || { echo "VC++ x64 marker missing:"; echo "$out"; exit 1; }
 echo "$out" | grep -q 'exit=0' || { echo "reg query wine process failed:"; echo "$out"; exit 1; }
 echo "vcrun2022 ok"
@@ -114,7 +115,7 @@ if [ "$WITH_DOTNET" -eq 1 ]; then
   step "dotnet48 recipe (winetricks through bash — the #16 chain; 5-40 min depending on cache)"
   "$HB" recipe apply e2e "$DB/recipes/tweaks/dotnet48.json"
   # 0x80eb1 = 528049 = .NET Framework 4.8's release id (update if the recipe ever targets a newer 4.x).
-  out=$("$HB" run e2e reg --verbose -- query 'HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' /v Release)
+  out=$("$HB" run e2e reg --verbose -- query 'HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full' /v Release) || true
   echo "$out" | grep -qi '0x80eb1' || { echo ".NET 4.8 marker (528049) missing:"; echo "$out"; exit 1; }
   echo "dotnet48 ok"
 fi
