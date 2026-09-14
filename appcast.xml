@@ -7,9 +7,9 @@
     <item>
       <title>Highball 0.9.15</title>
       <description><![CDATA[A Mac without working Rosetta gets a clear message and the install command instead of Bad CPU type in executable.]]></description>
-      <pubDate>Mon, 14 Sep 2026 23:08:30 +0200</pubDate>
+      <pubDate>Mon, 14 Sep 2026 23:09:27 +0200</pubDate>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
       <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.15/Highball-0.9.15.zip" sparkle:version="0.9.15" sparkle:shortVersionString="0.9.15" sparkle:edSignature="93jh89yb6wlHWyq/JQlW6fv9TulHuHGGav6IOTstGLSkKUl8Y34F3Lqf0DNj+68ryHEWdKMF6u29rBNJx0l9DQ==" length="3535450" type="application/octet-stream"/>
     </item>
     <item>
