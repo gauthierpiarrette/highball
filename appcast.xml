@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.14</title>
+      <description><![CDATA[The Microsoft core fonts dependency installs on any Mac: Highball now bundles the cabextract tool winetricks needs.]]></description>
+      <pubDate>Mon, 14 Sep 2026 20:46:13 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.14/Highball-0.9.14.zip" sparkle:version="0.9.14" sparkle:shortVersionString="0.9.14" sparkle:edSignature="Tm+COj5WvUJ2h2S0IrPdBaLBngwwnrmcktTe9Pw7dWdg96r7FDZVp/OpSAqQoG0wczrOm39u+1jLgpK0yLrDCA==" length="3535100" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.13</title>
       <description><![CDATA[Remove a shortcut from the game's page, and uninstall Windows programs from the environment's settings.]]></description>
       <pubDate>Mon, 14 Sep 2026 14:57:21 +0200</pubDate>
