@@ -72,6 +72,7 @@ final class RegressionTests: XCTestCase {
         XCTAssertEqual(s.dpiScale, 96, "no dpi field on an old bottle must default to 96 (100%)")
         XCTAssertEqual(s.dllOverrides, "", "field added in 0.7.2 must default empty")
         XCTAssertEqual(s.fpsCap, 0)
+        XCTAssertEqual(s.frameGen, 1, "frame generation added in 0.9.x must default to off")
         // That fixture predates formatVersion 2, so it exercises the migration below.
         XCTAssertEqual(s.dxvkAsync, false)
         XCTAssertEqual(s.pins.first?.arguments, [], "pin arguments default to empty")

@@ -218,6 +218,15 @@ public struct EngineStore: Sendable {
     /// stalled connection from hanging forever.
     public func download(_ component: EngineManifest.Component, name: String, progress: DownloadProgress? = nil) async throws -> URL {
         try paths.ensure()
+        // verify local archives too
+        if component.url.isFileURL {
+            let actual = try sha256(of: component.url)
+            guard actual == component.sha256.lowercased() else {
+                throw HighballError.checksumMismatch(file: component.url.lastPathComponent,
+                    expected: component.sha256, actual: actual)
+            }
+            return component.url
+        }
         let dest = paths.downloads.appending(path: component.url.lastPathComponent)
         if FileManager.default.fileExists(atPath: dest.path), try sha256(of: dest) == component.sha256.lowercased() {
             return dest
@@ -446,6 +455,35 @@ public struct InstalledEngine: Sendable {
     }
     public var isComplete: Bool { missingFiles.isEmpty }
 
+    /// return the usable frame generation shim directory
+    public var lsfgShimDir: URL? {
+        let dir = renderersDir.appending(path: "lsfg", directoryHint: .isDirectory)
+        let shim = dir.appending(path: "libMoltenVK.dylib")
+        guard (try? shim.resolvingSymlinksInPath().resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+              FileManager.default.isReadableFile(atPath: shim.path) else { return nil }
+        // use a different filename to avoid loading the shim recursively
+        let fm = FileManager.default
+        let driver = frameworksDir.appending(path: "libMoltenVK.dylib")
+        guard (try? driver.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+              fm.isReadableFile(atPath: driver.path) else { return nil }
+        let link = dir.appending(path: Self.lsfgRealDriverName)
+        let target = "../../frameworks/libMoltenVK.dylib"
+        let current = try? fm.destinationOfSymbolicLink(atPath: link.path)
+        // repair links without replacing regular files
+        if current != target && (current != nil || !fm.fileExists(atPath: link.path)) {
+            do {
+                if current != nil { try fm.removeItem(at: link) }
+                try fm.createSymbolicLink(atPath: link.path, withDestinationPath: target)
+            } catch { return nil }
+        }
+        guard fm.isReadableFile(atPath: link.path),
+              (try? link.resolvingSymlinksInPath().resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+              link.resolvingSymlinksInPath() != dir.appending(path: "libMoltenVK.dylib").resolvingSymlinksInPath() else { return nil }
+        return dir
+    }
+
+    /// alternate filename for the real driver
+    public static let lsfgRealDriverName = "libMoltenVK.real.dylib"
     public var winetricks: URL? {
         let t = root.appending(path: "tools/winetricks")
         return FileManager.default.fileExists(atPath: t.path) ? t : nil

@@ -264,13 +264,15 @@ struct BottleSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let bottle: Bottle
     @State private var confirmDelete = false
+    @State private var showFrameGenInfo = false
     /// Live slider value while dragging; nil means "read the saved dpiScale". Applied on release
     /// only, so dragging doesn't fire a wine registry write on every step.
     @State private var dpiDraft: Double? = nil
 
     private var currentDpi: Int { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.dpiScale }
-    private var currentRenderer: Renderer { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.renderer }
-    private var engine: InstalledEngine? { state.engine(for: bottle) }
+    private var liveBottle: Bottle { state.bottles.first { $0.name == bottle.name } ?? bottle }
+    private var currentRenderer: Renderer { liveBottle.settings.renderer }
+    private var engine: InstalledEngine? { state.engine(for: liveBottle) }
     private var d3dmetalAvailable: Bool { engine?.rendererDir("d3dmetal") != nil }
     private var vkd3dAvailable: Bool { engine?.rendererDir("vkd3d") != nil }
     private var d3dmetalPossible: Bool {
@@ -324,6 +326,41 @@ struct BottleSettingsSheet: View {
                                     state.showGPTKLicense = true
                                 }
                             }.controlSize(.small)
+                        }
+                    }
+                    // only engines that ship the shim get the control
+                    if let engine, engine.lsfgShimDir != nil {
+                        Picker(L("Frame generation (Lossless Scaling, beta)"), selection: Binding(
+                            get: { liveBottle.settings.frameGen },
+                            set: { newValue in
+                                let turnedOn = liveBottle.settings.frameGen <= 1 && newValue > 1
+                                var copy = state.bottles.first { $0.name == bottle.name } ?? bottle
+                                copy.settings.frameGen = newValue
+                                Task { @MainActor in state.update(copy) }
+                                if turnedOn { showFrameGenInfo = true }
+                            })) {
+                            Text(L("Off")).tag(1)
+                            Text("2×").tag(2)
+                            Text("3×").tag(3)
+                            Text("4×").tag(4)
+                        }
+                        Button(L("How frame generation works")) { showFrameGenInfo = true }
+                            .buttonStyle(.link).controlSize(.small)
+                        if liveBottle.settings.frameGen > 1 {
+                            Toggle(L("Adaptive pacing (fill the display rate, up to the multiplier)"), isOn: binding(\.frameGenAdaptive))
+                            Toggle(L("Performance mode (cheaper generation, lower quality)"), isOn: binding(\.frameGenPerformance))
+                            Picker(L("Motion estimation resolution"), selection: binding(\.frameGenFlowScale)) {
+                                Text("100%").tag(100)
+                                Text("75%").tag(75)
+                                Text("50%").tag(50)
+                            }
+                        }
+                        if case .unavailable(let why) = liveBottle.frameGenStatus(renderer: currentRenderer, engine: engine) {
+                            Text(String(format: L("Frame generation stays off: %@"), L(why)))
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else if case .active = liveBottle.frameGenStatus(renderer: currentRenderer, engine: engine) {
+                            Text(L("After changing this, stop the environment and relaunch so a Steam game picks it up."))
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     Toggle(L("Metal performance HUD"), isOn: binding(\.metalHUD))
@@ -433,6 +470,11 @@ struct BottleSettingsSheet: View {
                             isPresented: $confirmDelete, titleVisibility: .visible) {
             Button(L("Delete"), role: .destructive) { dismiss(); state.deleteBottle(bottle.name) }
             Button(L("Cancel"), role: .cancel) {}
+        }
+        .alert(L("About frame generation"), isPresented: $showFrameGenInfo) {
+            Button(L("Got it"), role: .cancel) {}
+        } message: {
+            Text(L("Lossless Scaling inserts interpolated frames between the game's real frames to make motion look smoother. The generated frames are paced to your display, so it can never present more frames than your screen's refresh rate.\n\nThat means it only helps when a game runs BELOW your refresh rate, for example a demanding game locked at 30 fps smoothed up to 60. On the built-in 60 Hz display, a game already running above 60 gets capped to 60 and feels worse, not better.\n\nIt pays off on an external high-refresh monitor (120 Hz or more), where a 60 fps game becomes 120. It also adds a little input lag, because a real frame is held back to interpolate.\n\nAdaptive pacing measures the game's own frame rate and inserts only as many frames as it takes to fill the display, up to the multiplier: a 45 fps game gets one extra frame every other frame, and a game already at the refresh rate is left alone. It works on every graphics mode.\n\nFrame generation works with every graphics mode: DXVK and vkd3d-proton through Vulkan, DXMT and D3DMetal through Metal, and WineD3D by switching it to its Vulkan renderer. After changing it, stop the environment and relaunch so a Steam game picks up the new setting.\n\nThis is a beta feature: some games may show artifacts, stutter or not start with it on. Turn it off if a game misbehaves."))
         }
     }
 
