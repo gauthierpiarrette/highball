@@ -274,7 +274,9 @@ struct LibraryTile: View {
             if let appid = item.steamAppID, let running = state.session(forAppID: appid) {
                 Button(L("Stop")) { state.stopSession(running) }
             } else if playable { Button(L("Play")) { state.play(item) } }
-            if playable, PlayLink.target(for: item) != nil {
+            if MacAppStub.existing(for: item.title) != nil {
+                Button(L("Remove the shortcut")) { state.removeMacApp(title: item.title) }
+            } else if playable, PlayLink.target(for: item) != nil {
                 Button(L("Make a shortcut…")) { state.makeMacApp(for: item) }
             }
             Button(L("Choose cover image…")) { state.chooseCover(for: item) }

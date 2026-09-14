@@ -242,7 +242,10 @@ struct GameDetailView: View {
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(L("Files")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
                             Button(L("Show the Windows drive")) { NSWorkspace.shared.open(bottle.driveC) }.controlSize(.small)
-                            if PlayLink.target(for: item) != nil {
+                            if MacAppStub.existing(for: item.title) != nil {
+                                Button(L("Remove the shortcut")) { state.removeMacApp(title: item.title) }.controlSize(.small)
+                                    .help(L("Moves this game's shortcut app in ~/Applications/Highball to the Trash."))
+                            } else if PlayLink.target(for: item) != nil {
                                 Button(L("Make a shortcut…")) { state.makeMacApp(for: item) }.controlSize(.small)
                                     .help(L("A small app in ~/Applications/Highball that starts this game without opening Highball first."))
                             }

@@ -51,6 +51,18 @@ public enum MacAppStub {
     /// Writes (or rewrites) the bundle and returns its location. `cover` is any image file; it
     /// becomes the icon when sips and iconutil can convert it, and the stub still works without.
     @discardableResult
+    /// The shortcut app for a title, if one was made.
+    public static func existing(for title: String) -> URL? {
+        let app = folder().appending(path: "\(appName(for: title)).app", directoryHint: .isDirectory)
+        return FileManager.default.fileExists(atPath: app.path) ? app : nil
+    }
+
+    /// Moves the title's shortcut app to the Trash (issue #97). Nothing else references it.
+    public static func remove(for title: String) throws {
+        guard let app = existing(for: title) else { return }
+        try FileManager.default.trashItem(at: app, resultingItemURL: nil)
+    }
+
     public static func write(title: String, libraryID: String, url: URL, cover: URL?, icon: URL? = nil) throws -> URL {
         let fm = FileManager.default
         let name = appName(for: title)

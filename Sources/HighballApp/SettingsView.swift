@@ -196,8 +196,13 @@ struct EnvironmentsPane: View {
             row(L("Windows components")) { WindowsComponentsRow(bottle: bottle) }
             Divider().padding(.vertical, 8)
             row(L("Files")) {
-                Button(L("Show the Windows drive")) { NSWorkspace.shared.open(bottle.driveC) }
-                    .buttonStyle(.link)
+                HStack(spacing: 14) {
+                    Button(L("Show the Windows drive")) { NSWorkspace.shared.open(bottle.driveC) }
+                        .buttonStyle(.link)
+                    Button(L("Uninstall Windows programs…")) { state.openUninstaller(in: bottle) }
+                        .buttonStyle(.link)
+                        .help(L("Opens Windows' Add/Remove Programs for this environment, for programs you installed into it."))
+                }
             }
         }
         .padding(14)

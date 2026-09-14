@@ -1065,6 +1065,25 @@ final class AppState {
         } catch { fail(error) }
     }
 
+    /// Trashes the shortcut app for a game or a launcher (issue #97).
+    func removeMacApp(title: String) {
+        do {
+            try MacAppStub.remove(for: title)
+            appendLog("removed the shortcut for \(title) from ~/Applications/Highball")
+        } catch { fail(error) }
+    }
+
+    /// Opens Wine's Add/Remove Programs in the environment, the way to uninstall a Windows
+    /// program that was installed into it (issue #97). Nothing here is Highball's own data.
+    func openUninstaller(in bottle: Bottle) {
+        guard let engine = engine(for: bottle) else { return }
+        let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
+        appendLog("\(bottle.name): opening Add/Remove Programs")
+        Task.detached {
+            _ = try? await runner.run(["uninstaller"], renderer: .wined3d, label: "uninstaller")
+        }
+    }
+
     // MARK: Install funnel (UX plan 0.7)
 
     /// Local only. Nothing leaves the Mac unless the person reads the aggregate and sends it.

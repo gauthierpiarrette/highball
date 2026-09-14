@@ -74,6 +74,7 @@ struct BottleView: View {
                     .help(L("Renderer, synchronization, Windows version…"))
                 Menu {
                     Button(L("Show the Windows drive")) { NSWorkspace.shared.open(bottle.driveC) }
+                    Button(L("Uninstall Windows programs…")) { state.openUninstaller(in: bottle) }
                     Button(L("Stop all processes")) { state.killBottle(bottle) }
                 } label: { Label(L("More"), systemImage: "ellipsis.circle") }
             }
@@ -113,7 +114,11 @@ struct BottleView: View {
                             else { state.applyRecipe(meta.id, to: bottle) }
                         }
                         .contextMenu {
-                            Button(L("Make a shortcut…")) { state.makeMacApp(forLauncher: meta.id, short: meta.short) }
+                            if MacAppStub.existing(for: meta.short) != nil {
+                                Button(L("Remove the shortcut")) { state.removeMacApp(title: meta.short) }
+                            } else {
+                                Button(L("Make a shortcut…")) { state.makeMacApp(forLauncher: meta.id, short: meta.short) }
+                            }
                             if installed, let pin {
                                 Button(L("Open")) { state.launch(pin: pin, in: bottle) }
                                 Button(L("Program settings…")) { editingPin = pin }
