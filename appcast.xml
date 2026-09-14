@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.13</title>
+      <description><![CDATA[Remove a shortcut from the game's page, and uninstall Windows programs from the environment's settings.]]></description>
+      <pubDate>Mon, 14 Sep 2026 14:38:59 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.13/Highball-0.9.13.zip" sparkle:version="0.9.13" sparkle:shortVersionString="0.9.13" sparkle:edSignature="eevtl0PaUkmrxTsXIreiuREp+wInQwjtOl8zH+Xao8yY8h3Z7PMLeF8e2O2IAbihcWB9F3lmoFBl28BG/WBPDA==" length="3466881" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.12</title>
       <description><![CDATA[Red Dead Redemption 2 and GTA V bought on Epic now start through a stand-in for Epic's launcher, so the Rockstar launcher accepts the copy instead of showing Buy Now.]]></description>
       <pubDate>Mon, 14 Sep 2026 11:03:46 +0200</pubDate>
