@@ -7,9 +7,9 @@
     <item>
       <title>Highball 0.9.13</title>
       <description><![CDATA[Remove a shortcut from the game's page, and uninstall Windows programs from the environment's settings.]]></description>
-      <pubDate>Mon, 14 Sep 2026 14:38:59 +0200</pubDate>
+      <pubDate>Mon, 14 Sep 2026 14:57:21 +0200</pubDate>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
       <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.13/Highball-0.9.13.zip" sparkle:version="0.9.13" sparkle:shortVersionString="0.9.13" sparkle:edSignature="eevtl0PaUkmrxTsXIreiuREp+wInQwjtOl8zH+Xao8yY8h3Z7PMLeF8e2O2IAbihcWB9F3lmoFBl28BG/WBPDA==" length="3466881" type="application/octet-stream"/>
     </item>
     <item>
