@@ -24,6 +24,12 @@ cp spike/engine-manifest.json "$APP/Contents/Resources/engine-manifest.json"
 # Other engines the app can offer (previous ones for rollback, candidates for Advanced).
 if ls spike/engines/*.json >/dev/null 2>&1; then mkdir -p "$APP/Contents/Resources/engines"; cp spike/engines/*.json "$APP/Contents/Resources/engines/"; fi
 cp spike/d3dmetal-license.txt "$APP/Contents/Resources/d3dmetal-license.txt"
+# cabextract for winetricks (the core fonts tweak needs it and macOS has none, highball#96), built
+# from its pinned source by spike/tools/build-cabextract.sh, GPL-3.0-or-later, licence shipped beside it.
+spike/tools/build-cabextract.sh >/dev/null 2>&1 || { echo "error: could not build cabextract (spike/tools/build-cabextract.sh)" >&2; exit 1; }
+mkdir -p "$APP/Contents/Resources/tools"
+cp spike/tools/cabextract "$APP/Contents/Resources/tools/cabextract"
+cp spike/tools/cabextract.LICENSE "$APP/Contents/Resources/tools/cabextract.LICENSE"
 # The EpicGamesLauncher.exe stand-in for Rockstar games bought on Epic (highball#93), built from
 # spike/epic-stub/EpicGamesLauncher.c with mingw. A release must carry it; a debug build without
 # mingw goes on without it and the Epic launch path says so in the log.

@@ -411,13 +411,22 @@ public struct RecipeRunner: Sendable {
                 // its binary detection fails; without them dotnet48 and friends abort on this engine
                 // (verified 2026-08-25, issue #16). bash rather than sh for the same reason winetricks
                 // documents on macOS.
-                let env = try bottle.environment(engine: engine, renderer: .wined3d, extra: [
+                var env = try bottle.environment(engine: engine, renderer: .wined3d, extra: [
                     "WINE": engine.wineBinary.path,
                     "WINESERVER": engine.wineserverBinary.path,
                     "WINE_BIN": engine.wineBinary.path,
                     "WINESERVER_BIN": engine.wineserverBinary.path,
                     "WINE_BINDIR": engine.wineBinary.deletingLastPathComponent().path,
                 ])
+                // winetricks shells out to cabextract for Microsoft's cabinet installers (the core
+                // fonts among them) and macOS does not ship it, so the app bundles one under
+                // Resources/tools (highball#96). HIGHBALL_TOOLS names another directory, for the CLI.
+                let tools = [ProcessInfo.processInfo.environment["HIGHBALL_TOOLS"].map { URL(fileURLWithPath: $0) },
+                             Bundle.main.resourceURL?.appending(path: "tools", directoryHint: .isDirectory)]
+                    .compactMap { $0 }.filter { FileManager.default.fileExists(atPath: $0.path) }
+                if !tools.isEmpty {
+                    env["PATH"] = (tools.map(\.path) + [env["PATH"] ?? ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"]).joined(separator: ":")
+                }
                 try Shell.run("/bin/bash", [wt.path, "--unattended"] + verbs, env: env)
             case let .environment(name, value):
                 bottle.settings.environment[name] = value
