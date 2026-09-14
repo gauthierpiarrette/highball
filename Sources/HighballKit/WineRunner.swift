@@ -146,7 +146,15 @@ public struct WineRunner: Sendable {
         process.standardError = pipe
 
         let start = Date()
-        do { try process.run() } catch { try? logHandle.close(); throw error }
+        do { try process.run() } catch {
+            try? logHandle.close()
+            // EBADARCH: macOS will not run Intel code, so Rosetta is missing or broken. Say that,
+            // not "Bad CPU type in executable" (issue #101).
+            if (error as NSError).code == 86 || error.localizedDescription.contains("Bad CPU type") {
+                throw HighballError.failed("Rosetta, Apple's layer for Intel programs, is not working on this Mac, and Highball's Wine engine needs it. In Terminal run: softwareupdate --install-rosetta --agree-to-license, then try again.")
+            }
+            throw error
+        }
 
         let reader = pipe.fileHandleForReading
         // The exit code used to be computed and thrown away: a failed install produced a log

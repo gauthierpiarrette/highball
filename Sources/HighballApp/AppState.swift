@@ -492,7 +492,7 @@ final class AppState {
         bottles = (try? bottleStore.list()) ?? []
         damagedBottles = (try? bottleStore.damaged()) ?? []
         needsOnboarding = engines.isEmpty && homeUnavailable == nil   // an unplugged drive is not a first run
-        rosettaInstalled = FileManager.default.fileExists(atPath: "/Library/Apple/usr/share/rosetta/rosetta")
+        rosettaInstalled = Self.rosettaWorks()
         // Drop a selection whose bottle is gone, not merely a nil one: a delete that threw after
         // the bottle had in fact been removed (the losing side of a race) left the selection
         // pinned to a name nothing could resolve.
@@ -787,6 +787,19 @@ final class AppState {
         }
     }
 
+    /// Whether Intel code runs on this Mac: an actual Intel program is executed rather than a
+    /// file looked for, because a Mac on macOS 27 reported "Bad CPU type in executable" on every
+    /// Wine launch while the old file check said Rosetta was there (issue #101).
+    nonisolated static func rosettaWorks() -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/arch")
+        p.arguments = ["-x86_64", "/usr/bin/true"]
+        p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return false }
+        p.waitUntilExit()
+        return p.terminationStatus == 0
+    }
+
     /// `softwareupdate` installs Rosetta for a normal user on Apple silicon; when it cannot,
     /// the error names the one command that does, so the recovery card can show it.
     static func installRosetta() async throws {
@@ -797,7 +810,7 @@ final class AppState {
             try p.run(); p.waitUntilExit()
             return (p.terminationStatus, String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
         }.value
-        let installed = FileManager.default.fileExists(atPath: "/Library/Apple/usr/share/rosetta/rosetta")
+        let installed = rosettaWorks()
         guard out.0 == 0 || installed else {
             throw HighballError.failed("Rosetta did not install. In Terminal, run: softwareupdate --install-rosetta --agree-to-license, then press Get started again. (\(out.1.trimmingCharacters(in: .whitespacesAndNewlines).suffix(200)))")
         }
