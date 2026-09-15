@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.17</title>
+      <description><![CDATA[A changed AVX or Metal HUD toggle now restarts the Steam client, and the launch log records both]]></description>
+      <pubDate>Tue, 15 Sep 2026 13:46:46 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.17/Highball-0.9.17.zip" sparkle:version="0.9.17" sparkle:shortVersionString="0.9.17" sparkle:edSignature="Y7ucwhRApMQrqcbILj4JBu7M3fmb4NaxXKY4pgPrYAyg5ItnU7eopSm+6Uh2A31d+kZlBisdJ3Xr7hhC7BkFCg==" length="3549619" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.16</title>
       <description><![CDATA[If Rosetta stops working, after a macOS update for instance, Highball offers to install it instead of failing every launch.]]></description>
       <pubDate>Tue, 15 Sep 2026 10:35:53 +0200</pubDate>
