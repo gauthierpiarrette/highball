@@ -9,8 +9,11 @@ import Foundation
 /// wrong renderer, while its log header claims otherwise (UX plan 0.6, issue #54).
 public enum SteamRestart {
     /// Pure: why the running client (environment `live`) cannot serve a launch that needs
-    /// `wanted`, in words for the log, or nil when it can. Only the renderer overlay path and
-    /// the sync mode matter; everything else in the environment is per-launch noise.
+    /// `wanted`, in words for the log, or nil when it can. The renderer overlay path, the sync mode
+    /// and the inherited per-process toggles matter; everything else in the environment is per-launch noise.
+    /// Per-process settings the game inherits from the client and cannot change afterwards.
+    static let inherited: [(String, String)] = [("ROSETTA_ADVERTISE_AVX", "AVX advertised"), ("MTL_HUD_ENABLED", "the Metal HUD")]
+
     public static func reason(live: [String: String], wanted: [String: String], wantedRenderer: String) -> String? {
         var reasons: [String] = []
         if live["WINEDLLPATH_PREPEND"] != wanted["WINEDLLPATH_PREPEND"] {
@@ -19,6 +22,12 @@ public enum SteamRestart {
         let liveSync = SyncMode(environment: live), wantedSync = SyncMode(environment: wanted)
         if liveSync != wantedSync {
             reasons.append("it runs with sync \(liveSync.rawValue) and the game wants \(wantedSync.rawValue)")
+        }
+        // Rosetta reads these at process start and the game inherits them from the client, so a
+        // toggle flipped while the client runs would otherwise never reach the game while the
+        // settings page says it is on (highball-db#48, Hogwarts Legacy crashed on the "AVX" run).
+        for (key, what) in inherited where (live[key] == "1") != (wanted[key] == "1") {
+            reasons.append("it runs with \(what) \(live[key] == "1" ? "on" : "off") and the game wants it \(wanted[key] == "1" ? "on" : "off")")
         }
         return reasons.isEmpty ? nil : reasons.joined(separator: "; ")
     }

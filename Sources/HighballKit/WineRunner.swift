@@ -77,7 +77,7 @@ public struct WineRunner: Sendable {
         out += "# sync=\(Self.effectiveSync(env: env, settings: bottle.settings))"
         out += " winver=\(bottle.settings.windowsVersion.rawValue) dpi=\(bottle.settings.dpiScale)"
         out += " dxvkAsync=\(bottle.settings.dxvkAsync)\n"
-        for key in ["WINEDLLPATH_PREPEND", "WINEDLLOVERRIDES", "DXVK_CONFIG_FILE", "DXVK_LOG_PATH"] {
+        for key in ["WINEDLLPATH_PREPEND", "WINEDLLOVERRIDES", "ROSETTA_ADVERTISE_AVX", "MTL_HUD_ENABLED", "DXVK_CONFIG_FILE", "DXVK_LOG_PATH"] {
             if let value = env[key] { out += "# \(key)=\(value)\n" }
         }
         // The generated dxvk.conf decides per-game behaviour, so quote it rather than making the

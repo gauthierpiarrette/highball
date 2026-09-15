@@ -36,4 +36,19 @@ final class SteamRestartTests: XCTestCase {
         var live = dxvk; live["DXVK_LOG_PATH"] = "C:\\other"; live["STEAM_COMPAT"] = "1"
         XCTAssertNil(SteamRestart.reason(live: live, wanted: dxvk, wantedRenderer: "dxvk"))
     }
+
+    func testAVXToggleFlippedWhileTheClientRunsRestartsIt() {
+        var wanted = dxvk; wanted["ROSETTA_ADVERTISE_AVX"] = "1"
+        XCTAssertEqual(SteamRestart.reason(live: dxvk, wanted: wanted, wantedRenderer: "dxvk"),
+                       "it runs with AVX advertised off and the game wants it on")
+        XCTAssertEqual(SteamRestart.reason(live: wanted, wanted: dxvk, wantedRenderer: "dxvk"),
+                       "it runs with AVX advertised on and the game wants it off")
+        XCTAssertNil(SteamRestart.reason(live: wanted, wanted: wanted, wantedRenderer: "dxvk"))
+    }
+
+    func testMetalHUDToggleFlippedWhileTheClientRunsRestartsIt() {
+        var wanted = dxvk; wanted["MTL_HUD_ENABLED"] = "1"
+        XCTAssertEqual(SteamRestart.reason(live: dxvk, wanted: wanted, wantedRenderer: "dxvk"),
+                       "it runs with the Metal HUD off and the game wants it on")
+    }
 }
