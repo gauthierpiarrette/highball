@@ -77,7 +77,7 @@ public struct WineRunner: Sendable {
         out += "# sync=\(Self.effectiveSync(env: env, settings: bottle.settings))"
         out += " winver=\(bottle.settings.windowsVersion.rawValue) dpi=\(bottle.settings.dpiScale)"
         out += " dxvkAsync=\(bottle.settings.dxvkAsync)"
-        switch bottle.frameGenStatus(renderer: renderer, engine: engine, environment: env) {
+        switch bottle.frameGenStatus(engine: engine, environment: env) {
         case .off: out += " frameGen=off\n"
         case .active(let m): out += " frameGen=\(m)x(requested\(env["LSFGM_PACING_MODE"] == "adaptive" ? ", adaptive" : "")\(env["LSFGM_FLOW_SCALE"].map { ", flow \($0)" } ?? "")\(env["LSFGM_PERFORMANCE_MODE"] == "1" ? ", performance" : ""))\n"
         case .unavailable: out += " frameGen=off(unavailable)\n"
@@ -142,7 +142,7 @@ public struct WineRunner: Sendable {
         // what a report quotes, so the truth about the stack the game got must be in it.
         if let headerNote { header += "# note: \(headerNote)\n" }
         // report why frame generation is unavailable
-        if case .unavailable(let why) = bottle.frameGenStatus(renderer: resolved.renderer, engine: engine, environment: env) {
+        if case .unavailable(let why) = bottle.frameGenStatus(engine: engine, environment: env) {
             header += "# note: frame generation is off: \(why)\n"
             onOutput?("note: frame generation is off: \(why)")
         }

@@ -25,21 +25,21 @@ private func frameGenerationChecks() throws {
     let shim = engine.renderersDir.appending(path: "lsfg")
     let driver = engine.frameworksDir.appending(path: "libMoltenVK.dylib")
     try file(shim.appending(path: "libMoltenVK.dylib"))
-    try check(engine.lsfgShimDir == nil, "Missing real driver was reported available")
+    try check(engine.resolveLsfgShimDir() == nil, "Missing real driver was reported available")
     try file(driver)
     try fm.removeItem(at: shim.appending(path: "libMoltenVK.dylib"))
     try fm.createDirectory(at: shim.appending(path: "libMoltenVK.dylib"), withIntermediateDirectories: false)
-    try check(engine.lsfgShimDir == nil, "A directory was accepted as the shim")
+    try check(engine.resolveLsfgShimDir() == nil, "A directory was accepted as the shim")
     try fm.removeItem(at: shim.appending(path: "libMoltenVK.dylib"))
     try file(shim.appending(path: "libMoltenVK.dylib"))
-    try check(engine.lsfgShimDir?.path == shim.path, "Driver link was not healed")
+    try check(engine.resolveLsfgShimDir()?.path == shim.path, "Driver link was not healed")
     let real = shim.appending(path: InstalledEngine.lsfgRealDriverName)
     try fm.removeItem(at: real)
     try fm.createSymbolicLink(atPath: real.path, withDestinationPath: "/missing-driver")
-    try check(engine.lsfgShimDir?.path == shim.path, "Broken driver link was not healed")
+    try check(engine.resolveLsfgShimDir()?.path == shim.path, "Broken driver link was not healed")
     try fm.removeItem(at: real)
     try file(real, "keep this user file")
-    _ = engine.lsfgShimDir
+    _ = engine.resolveLsfgShimDir()
     let userFile = try String(contentsOf: real, encoding: .utf8)
     try check(userFile == "keep this user file", "Driver repair deleted a regular user file")
 
@@ -58,7 +58,7 @@ private func frameGenerationChecks() throws {
         extra: ["LSFGM_MULTIPLIER": "3", "DYLD_LIBRARY_PATH": "/custom/lib"])
     try check(env["LSFGM_MULTIPLIER"] == "3", "Launch multiplier override was ignored")
     try check(env["DYLD_LIBRARY_PATH"] == shim.path + ":/custom/lib", "Shim priority or custom search path lost")
-    try check(bottle.frameGenStatus(renderer: .dxvk, engine: engine, environment: env) == .active(multiplier: 3), "Status disagrees with environment")
+    try check(bottle.frameGenStatus(engine: engine, environment: env) == .active(multiplier: 3), "Status disagrees with environment")
     try check(WineRunner.launchHeader(engine: engine, bottle: bottle, renderer: .dxvk, env: env, args: []).contains("frameGen=3x(requested)"), "Header uses bottle value instead of launch multiplier")
     bottle.settings.environment["LSFGM_DLL_PATH"] = "Z:" + dll.path.replacingOccurrences(of: "/", with: "\\")
     try check(bottle.losslessScalingDLL == dll, "Windows override was not translated")
@@ -70,7 +70,7 @@ private func frameGenerationChecks() throws {
     env = try bottle.environment(engine: engine, renderer: .dxvk, extra: ["LSFGM_MOLTENVK": driver.path])
     try check(env["LSFGM_ENV"] == nil, "Recursive driver leaf name was accepted")
     env = try bottle.environment(engine: engine, renderer: .dxvk, extra: ["DISABLE_LSFGM": "1"])
-    try check(bottle.frameGenStatus(renderer: .dxvk, engine: engine, environment: env) == .off, "Explicit disable was ignored")
+    try check(bottle.frameGenStatus(engine: engine, environment: env) == .off, "Explicit disable was ignored")
     for multiplier in [2, 3, 4] {
         bottle.settings.frameGen = multiplier
         env = try bottle.environment(engine: engine, renderer: .dxvk)
@@ -79,6 +79,15 @@ private func frameGenerationChecks() throws {
     try check(env["LSFGM_PACING_MODE"] == "vsync", "Default pacing is not fixed vsync")
     try check(env["LSFGM_FLOW_SCALE"] == nil, "Full flow scale was exported")
     try check(env["LSFGM_PERFORMANCE_MODE"] == nil, "Performance mode exported by default")
+    try check(env["LSFGM_OVERRIDE_PRESENT_MODE"] == nil, "Present-mode override exported while forcing vsync")
+    bottle.settings.frameGenForceVsync = false
+    env = try bottle.environment(engine: engine, renderer: .dxvk)
+    try check(env["LSFGM_OVERRIDE_PRESENT_MODE"] == "0", "Turning off forced vsync did not release the present mode")
+    bottle.settings.frameGenForceVsync = true
+    env = try bottle.environment(engine: engine, renderer: .dxvk)
+    try check(env["LSFGM_OVERRIDE_PRESENT_MODE"] == nil, "Forced vsync did not return to the default")
+    let vsyncDefault = try JSONDecoder.highball.decode(BottleSettings.self, from: Data(#"{"name":"old","engineID":"e"}"#.utf8))
+    try check(vsyncDefault.frameGenForceVsync, "A bottle saved before this setting existed did not default to forcing vsync")
     bottle.settings.frameGenAdaptive = true
     bottle.settings.frameGenFlowScale = 50
     bottle.settings.frameGenPerformance = true
@@ -119,7 +128,7 @@ private func frameGenerationChecks() throws {
     let legacy = try JSONDecoder.highball.decode(BottleSettings.self, from: Data(#"{"name":"old","engineID":"e"}"#.utf8))
     try check(legacy.frameGen == 1, "Legacy bottle did not default to off")
     try fm.removeItem(at: driver)
-    try check(engine.lsfgShimDir == nil, "Removed driver was reported available")
+    try check(engine.resolveLsfgShimDir() == nil, "Removed driver was reported available")
 }
 
 private func localComponentChecks() async throws {

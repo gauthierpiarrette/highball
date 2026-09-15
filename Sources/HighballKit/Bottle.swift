@@ -341,6 +341,9 @@ public struct BottleSettings: Codable, Sendable {
     public var frameGenFlowScale: Int = 100
     /// lossless scaling's performance shader set: cheaper, lower quality
     public var frameGenPerformance: Bool = false
+    /// force FIFO on wrapped swapchains. Off lets the game's own present mode through, so
+    /// presentation can exceed the refresh rate; only useful above 60 Hz, and it can tear.
+    public var frameGenForceVsync: Bool = true
     /// Map the Mac Command keys to Windows Ctrl, so Cmd+C/Cmd+V/Cmd+A do what a Mac user expects
     /// inside Windows apps. Wine's default leaves Command as Alt, which is why pasting into Steam
     /// beeps instead of pasting. Option is mapped to Alt alongside it — without that, mapping both
@@ -371,7 +374,7 @@ public struct BottleSettings: Codable, Sendable {
     public var recipes: [String] = []
     public var created: Date = Date()
 
-    enum CodingKeys: String, CodingKey { case formatVersion, name, engineID, renderer, rendererExplicit, windowsVersion, sync, metalHUD, advertiseAVX, dxvkAsync, fpsCap, frameGen, frameGenAdaptive, frameGenFlowScale, frameGenPerformance, commandIsControl, commandIsControlSynced, dpiScale, dllOverrides, dxvkAppConfig, dllOverridesSynced, environment, pins, recipes, created }
+    enum CodingKeys: String, CodingKey { case formatVersion, name, engineID, renderer, rendererExplicit, windowsVersion, sync, metalHUD, advertiseAVX, dxvkAsync, fpsCap, frameGen, frameGenAdaptive, frameGenFlowScale, frameGenPerformance, frameGenForceVsync, commandIsControl, commandIsControlSynced, dpiScale, dllOverrides, dxvkAppConfig, dllOverridesSynced, environment, pins, recipes, created }
 
     public init(name: String, engineID: String) {
         self.name = name
@@ -398,6 +401,7 @@ public struct BottleSettings: Codable, Sendable {
         let decodedFlow = try c.decodeIfPresent(Int.self, forKey: .frameGenFlowScale) ?? 100
         frameGenFlowScale = (25...100).contains(decodedFlow) ? decodedFlow : 100
         frameGenPerformance = try c.decodeIfPresent(Bool.self, forKey: .frameGenPerformance) ?? false
+        frameGenForceVsync = try c.decodeIfPresent(Bool.self, forKey: .frameGenForceVsync) ?? true
         // dpiScale supersedes the old retinaMode toggle (on == 200% == LogPixels 192).
         if let dpi = try c.decodeIfPresent(Int.self, forKey: .dpiScale) {
             dpiScale = dpi
@@ -545,7 +549,7 @@ public struct Bottle: Sendable {
     }
 
     /// derive status from the final launch environment
-    public func frameGenStatus(renderer: Renderer, engine: InstalledEngine,
+    public func frameGenStatus(engine: InstalledEngine,
                                environment: [String: String]? = nil) -> FrameGenStatus {
         guard settings.frameGen > 1 else { return .off }
         let env = environment ?? settings.environment
@@ -556,7 +560,7 @@ public struct Bottle: Sendable {
             return .unavailable("Frame generation requires a multiplier from 1 to 4.")
         }
         if multiplier == 1 || env["DISABLE_LSFGM"] != nil { return .off }
-        guard let shim = engine.lsfgShimDir else {
+        guard let shim = engine.resolveLsfgShimDir() else {
             return .unavailable("This engine has no usable frame generation component. Build or install the component for this engine.")
         }
         if let path = env["LSFGM_MOLTENVK"], !path.isEmpty {
@@ -637,9 +641,9 @@ public struct Bottle: Sendable {
         merge(&env, extra)
         // apply frame generation after all overrides
         env.removeValue(forKey: "HB_LSFG_UNAVAILABLE")
-        let frameGeneration = frameGenStatus(renderer: r, engine: engine, environment: env)
+        let frameGeneration = frameGenStatus(engine: engine, environment: env)
         if case .active(let multiplier) = frameGeneration,
-           let shim = engine.lsfgShimDir, let dll = losslessScalingDLL(environment: env) {
+           let shim = engine.resolveLsfgShimDir(), let dll = losslessScalingDLL(environment: env) {
             let existing = (env["DYLD_LIBRARY_PATH"] ?? "").split(separator: ":").map(String.init)
             env["DYLD_LIBRARY_PATH"] = ([shim.path] + existing.filter { $0 != shim.path }).joined(separator: ":")
             // metal renderers get the same dylib inserted to hook CAMetalLayer, wined3d moves to vulkan
@@ -663,6 +667,7 @@ public struct Bottle: Sendable {
             if env["LSFGM_PACING_MODE"] == nil { env["LSFGM_PACING_MODE"] = settings.frameGenAdaptive ? "adaptive" : "vsync" }
             if env["LSFGM_FLOW_SCALE"] == nil, settings.frameGenFlowScale < 100 { env["LSFGM_FLOW_SCALE"] = String(format: "%.2f", Double(settings.frameGenFlowScale) / 100) }
             if env["LSFGM_PERFORMANCE_MODE"] == nil, settings.frameGenPerformance { env["LSFGM_PERFORMANCE_MODE"] = "1" }
+            if env["LSFGM_OVERRIDE_PRESENT_MODE"] == nil, !settings.frameGenForceVsync { env["LSFGM_OVERRIDE_PRESENT_MODE"] = "0" }
             if env["LSFGM_LOG_FILE"] == nil { env["LSFGM_LOG_FILE"] = dxvkLogURL.appending(path: "lsfg-metal.log").path }
         } else {
             env.removeValue(forKey: "LSFGM_ENV")

@@ -135,7 +135,7 @@ struct Bottle: AsyncParsableCommand {
     }
 
     struct Set: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Change a bottle setting: engine, renderer, winver, sync, hud, avx, dpi, dxvkasync, framegen, framegenadaptive, framegenflow, framegenperformance, dlloverrides, env KEY=VALUE (empty VALUE removes)")
+        static let configuration = CommandConfiguration(abstract: "Change a bottle setting: engine, renderer, winver, sync, hud, avx, dpi, dxvkasync, framegen, framegenadaptive, framegenflow, framegenperformance, framegenforcevsync, dlloverrides, env KEY=VALUE (empty VALUE removes)")
         @Argument var name: String
         @Argument var setting: String
         @Argument var value: String
@@ -167,6 +167,7 @@ struct Bottle: AsyncParsableCommand {
                 b.settings.frameGen = m
             case "framegenadaptive": b.settings.frameGenAdaptive = (value == "1" || value == "true")
             case "framegenperformance": b.settings.frameGenPerformance = (value == "1" || value == "true")
+            case "framegenforcevsync": b.settings.frameGenForceVsync = (value == "1" || value == "true")
             case "framegenflow":
                 guard let f = Int(value), (25...100).contains(f) else { fail("framegenflow expects a percentage 25..100") }
                 b.settings.frameGenFlowScale = f
