@@ -7,9 +7,9 @@
     <item>
       <title>Highball 0.9.17</title>
       <description><![CDATA[A changed AVX or Metal HUD toggle now restarts the Steam client, and the launch log records both]]></description>
-      <pubDate>Tue, 15 Sep 2026 13:46:46 +0200</pubDate>
+      <pubDate>Tue, 15 Sep 2026 13:47:42 +0200</pubDate>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
       <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.17/Highball-0.9.17.zip" sparkle:version="0.9.17" sparkle:shortVersionString="0.9.17" sparkle:edSignature="Y7ucwhRApMQrqcbILj4JBu7M3fmb4NaxXKY4pgPrYAyg5ItnU7eopSm+6Uh2A31d+kZlBisdJ3Xr7hhC7BkFCg==" length="3549619" type="application/octet-stream"/>
     </item>
     <item>
