@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.18</title>
+      <description><![CDATA[A Steam client kept with another graphics mode is now said out loud, in the activity log, the launch log and the session]]></description>
+      <pubDate>Tue, 15 Sep 2026 15:28:41 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.18/Highball-0.9.18.zip" sparkle:version="0.9.18" sparkle:shortVersionString="0.9.18" sparkle:edSignature="tMyNAVIJk476mfHH9fmF0u3Fn2nSoZhc5AmvkAnHaiiZ5sgR9aYtD4JoOcZxjfswaVZh0AmSVE+C7n31XwVGCA==" length="3555188" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.17</title>
       <description><![CDATA[A changed AVX or Metal HUD toggle now restarts the Steam client, and the launch log records both]]></description>
       <pubDate>Tue, 15 Sep 2026 13:47:42 +0200</pubDate>
