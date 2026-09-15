@@ -465,5 +465,11 @@ enum L10n {
         "An environment needs attention — Highball can't read its settings, so its games aren't showing.": "Un environnement nécessite votre attention — Highball ne peut pas lire ses réglages, donc ses jeux n'apparaissent pas.",
         "Some environments need attention — Highball can't read their settings, so their games aren't showing.": "Certains environnements nécessitent votre attention — Highball ne peut pas lire leurs réglages, donc leurs jeux n'apparaissent pas.",
         "Open Troubleshooting": "Ouvrir le dépannage",
+        // Added 2026-09-15: every L() key must have a French line (make-app refuses to build otherwise)
+        "New environment": "Nouvel environnement",
+        "'%@' isn't a Windows program. Highball opens .exe, .msi and .bat files.": "« %@ » n'est pas un programme Windows. Highball ouvre les fichiers .exe, .msi et .bat.",
+        "Programs here start with %@ until this is resolved: %@": "Les programmes d'ici démarrent avec %@ tant que ce n'est pas résolu : %@",
+        "-dx11 -skiplauncher \"an argument with spaces\"": "-dx11 -skiplauncher \"un argument avec des espaces\"",
+        "authorizationCode": "authorizationCode",
     ]
 }

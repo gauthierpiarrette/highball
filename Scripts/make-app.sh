@@ -16,6 +16,15 @@ import re, collections
 keys = re.findall(r'^\s*"((?:[^"\\]|\\.)*)"\s*:\s*"', open("Sources/HighballApp/L10n.swift").read(), re.M)
 dups = [k for k, c in collections.Counter(keys).items() if c > 1]
 if dups: print("error: duplicate L10n keys:", dups); raise SystemExit(1)
+# Every string the interface passes through L() must have a French line: a French Mac must
+# never see English (2026-09-15). Kit-side error texts are out of this net for now.
+import glob
+used = set()
+for f in glob.glob("Sources/HighballApp/*.swift"):
+    if f.endswith("L10n.swift"): continue
+    used |= set(re.findall(r'\bL\("((?:[^"\\]|\\.)*)"\)', open(f).read()))
+missing = sorted(used - set(keys))
+if missing: print("error: L() keys without a French translation:", missing); raise SystemExit(1)
 PY
 swift build -c "$CONFIG" --product HighballApp
 APP=dist/Highball.app
