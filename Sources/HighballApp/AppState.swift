@@ -1511,18 +1511,32 @@ final class AppState {
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             // A running client would serve the launch with its own environment; when that is
             // not the game's, cold-start first: never under a running game, Steam's or not.
-            if !sessionRuns(in: bottle), let why = try await runner.restartSteamIfMismatched(renderer: renderer) {
+            // A kept client is said out loud, in the activity log and in the launch log's header:
+            // the game runs on the client's stack, and a report must not claim otherwise.
+            var headerNote: String?
+            var served = renderer ?? bottle.settings.renderer
+            switch try await runner.restartSteamIfMismatched(renderer: renderer, mayRestart: !sessionRuns(in: bottle)) {
+            case .restarted(let why):
                 await MainActor.run { self.appendLog("Restarting Steam before \(game.name): \(why).") }
+            case .kept(let why, let live):
+                let liveName = Renderer(rawValue: live).map(Renderer.displayName) ?? live
+                let text = "Steam keeps running as it is because a game is still open in \(bottle.name): \(why). \(game.name) gets the client's \(liveName) stack, not \(Renderer.displayName(served)). Quit the open game or crash window, or press Stop all processes, then Play again."
+                headerNote = text
+                if let r = Renderer(rawValue: live) { served = r }
+                await MainActor.run { self.appendLog(text) }
+            case .noClient, .serves:
+                break
             }
+            let note = headerNote, servedRenderer = served
             let box = LaunchOutcome()
             let log = logLine(box)
             watchedLaunch(box) {
-                try await runner.start(steam, arguments: ["-silent", "-applaunch", String(game.appid)] + extraArgs, renderer: renderer, onOutput: log)
+                try await runner.start(steam, arguments: ["-silent", "-applaunch", String(game.appid)] + extraArgs, renderer: renderer, headerNote: note, onOutput: log)
             }
             let handedOff = try await awaitHandoff(box, program: game.name, timeout: 360, exitEndsWait: false) {
                 SessionWatch.isAlive(markers: markers, ps: await Self.processList())
             } crashed: { result in
-                let current = renderer ?? bottle.settings.renderer
+                let current = servedRenderer
                 self.crashSuggestion = CrashSuggestion(program: game.name, bottleName: bottle.name,
                                                        renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil, vkd3dAvailable: engine.rendererDir("vkd3d") != nil),
                                                        logPath: result.log.path, current: current, seconds: Int(result.duration),
@@ -1530,7 +1544,7 @@ final class AppState {
             }
             guard handedOff else { return }
             beginSession(GameSession(title: game.name, bottleName: bottle.name, appid: game.appid, markers: markers,
-                                     renderer: (renderer ?? bottle.settings.renderer).rawValue))
+                                     renderer: servedRenderer.rawValue))
         }
     }
 

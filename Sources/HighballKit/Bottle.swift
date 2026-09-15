@@ -154,7 +154,7 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
         fallbackOrder.first { $0 != wanted && $0.availability(in: engine) == .available } ?? .wined3d
     }
 
-    static func displayName(_ r: Renderer) -> String {
+    public static func displayName(_ r: Renderer) -> String {
         switch r {
         case .wined3d: return "WineD3D"
         case .dxmt: return "DXMT"

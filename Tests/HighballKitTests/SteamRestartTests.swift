@@ -51,4 +51,13 @@ final class SteamRestartTests: XCTestCase {
         XCTAssertEqual(SteamRestart.reason(live: dxvk, wanted: wanted, wantedRenderer: "dxvk"),
                        "it runs with the Metal HUD off and the game wants it on")
     }
+
+    func testRendererNameComesFromTheOverlayPath() {
+        let base = "/e/x64-crossover26.3-r8/frameworks/renderer"
+        XCTAssertEqual(SteamRestart.rendererName(ofLive: ["WINEDLLPATH_PREPEND": "/e/x/renderers/d3dmetal-tsshim/wine:\(base)/d3dmetal/wine:\(base)/d9vk/wine"]), "d3dmetal")
+        XCTAssertEqual(SteamRestart.rendererName(ofLive: ["WINEDLLPATH_PREPEND": "\(base)/d9vk/wine:\(base)/dxmt/wine"]), "dxmt")
+        XCTAssertEqual(SteamRestart.rendererName(ofLive: ["WINEDLLPATH_PREPEND": "\(base)/d9vk/wine:\(base)/dxvk/wine"]), "dxvk")
+        XCTAssertEqual(SteamRestart.rendererName(ofLive: ["WINEDLLPATH_PREPEND": "/e/x/renderers/dxmt/wine:\(base)/d9vk/wine"]), "dxmt")
+        XCTAssertEqual(SteamRestart.rendererName(ofLive: [:]), "wined3d")
+    }
 }

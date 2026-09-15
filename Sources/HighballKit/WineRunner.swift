@@ -98,6 +98,7 @@ public struct WineRunner: Sendable {
         label: String? = nil,
         workingDirectory: URL? = nil,
         restoreMscoreeFirst: Bool = true,
+        headerNote: String? = nil,
         onOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> LaunchResult {
         try paths.ensure()
@@ -132,6 +133,9 @@ public struct WineRunner: Sendable {
             header += "# note: \(note)\n"
             onOutput?("note: \(note)")
         }
+        // The caller's own caveat, e.g. a Steam client kept with another renderer: the header is
+        // what a report quotes, so the truth about the stack the game got must be in it.
+        if let headerNote { header += "# note: \(headerNote)\n" }
         logHandle.write(Data(header.utf8))
 
         let process = Process()
@@ -209,10 +213,10 @@ public struct WineRunner: Sendable {
     /// Runs the executable directly under `wine` (not `start /unix`) so the process stays attached and
     /// everything it and its children print lands in the log. The call returns when the program exits.
     @discardableResult
-    public func start(_ executable: URL, arguments: [String] = [], renderer: Renderer? = nil, extraEnvironment: [String: String] = [:], workingDirectory: URL? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
+    public func start(_ executable: URL, arguments: [String] = [], renderer: Renderer? = nil, extraEnvironment: [String: String] = [:], workingDirectory: URL? = nil, headerNote: String? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
         await syncDllOverridesRegistry()
         await syncKeyboardRegistry()
-        return try await run([executable.path] + arguments, renderer: renderer, extraEnvironment: extraEnvironment, label: executable.lastPathComponent, workingDirectory: workingDirectory, onOutput: onOutput)
+        return try await run([executable.path] + arguments, renderer: renderer, extraEnvironment: extraEnvironment, label: executable.lastPathComponent, workingDirectory: workingDirectory, headerNote: headerNote, onOutput: onOutput)
     }
 
     /// Runs the pinned program, honouring its own renderer/env/args.

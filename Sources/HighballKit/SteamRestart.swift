@@ -14,6 +14,31 @@ public enum SteamRestart {
     /// Per-process settings the game inherits from the client and cannot change afterwards.
     static let inherited: [(String, String)] = [("ROSETTA_ADVERTISE_AVX", "AVX advertised"), ("MTL_HUD_ENABLED", "the Metal HUD")]
 
+    /// What became of the running client before a launch.
+    public enum Outcome: Equatable {
+        /// No client runs; the launch cold-starts one with its own environment.
+        case noClient
+        /// The running client serves the launch as asked.
+        case serves
+        /// The client was cold-restarted; why, for the log.
+        case restarted(String)
+        /// The client does not match but a game is still open in the environment, so it stays,
+        /// and the launch gets the client's stack. `live` names the client's renderer.
+        case kept(String, live: String)
+    }
+
+    /// The renderer a running client was started with, read off its overlay path: each entry is
+    /// `<...>/<renderer>/wine`, under `frameworks/renderer/` or `renderers/`. "wined3d" when it
+    /// has no overlay. The d9vk entry rides along with every renderer and names none.
+    public static func rendererName(ofLive env: [String: String]) -> String {
+        let dirs = (env["WINEDLLPATH_PREPEND"] ?? "").split(separator: ":").compactMap { entry -> String? in
+            let parts = entry.split(separator: "/")
+            return parts.count >= 2 && parts.last == "wine" ? String(parts[parts.count - 2]) : nil
+        }
+        for name in ["d3dmetal", "dxmt", "vkd3d", "dxvk"] where dirs.contains(name) { return name }
+        return "wined3d"
+    }
+
     public static func reason(live: [String: String], wanted: [String: String], wantedRenderer: String) -> String? {
         var reasons: [String] = []
         if live["WINEDLLPATH_PREPEND"] != wanted["WINEDLLPATH_PREPEND"] {
@@ -64,20 +89,22 @@ extension WineRunner {
         }
     }
 
-    /// Cold-starts the bottle when its running Steam client could not serve a launch with
-    /// `renderer` (see `SteamRestart`), so the launch that follows starts a fresh client with
-    /// the right environment. Never while a game runs in the bottle: a wrong environment
-    /// beats killing someone's game. Returns the reason for the log, nil when nothing was done.
-    public func restartSteamIfMismatched(renderer: Renderer?) async throws -> String? {
-        guard let live = runningSteamEnvironment() else { return nil }
+    /// Whether the running Steam client can serve a launch with `renderer`, restarting it when
+    /// it cannot (see `SteamRestart`), so the launch that follows starts a fresh client with the
+    /// right environment. Never while a game runs in the bottle (`mayRestart` false, or a prefix
+    /// process working in a game folder): a wrong environment beats killing someone's game. That
+    /// case comes back as `.kept` so the caller can say so; silently launching under the client's
+    /// stack cost highball-db#48 six rounds, the game ran on DXMT while every log said D3DMetal.
+    public func restartSteamIfMismatched(renderer: Renderer?, mayRestart: Bool = true) async throws -> SteamRestart.Outcome {
+        guard let live = runningSteamEnvironment() else { return .noClient }
         let wanted = try bottle.environment(engine: engine, renderer: renderer)
         guard let why = SteamRestart.reason(live: live, wanted: wanted,
-                                            wantedRenderer: (renderer ?? bottle.settings.renderer).rawValue),
-              !steamGameIsRunning() else { return nil }
+                                            wantedRenderer: (renderer ?? bottle.settings.renderer).rawValue) else { return .serves }
+        if !mayRestart || steamGameIsRunning() { return .kept(why, live: SteamRestart.rendererName(ofLive: live)) }
         try kill()
         // `kill` waits for the server; give the client's own exit a moment too, so the launch
         // that follows does not forward to a client on its way out.
         for _ in 0..<50 where runningSteamEnvironment() != nil { try await Task.sleep(for: .milliseconds(100)) }
-        return why
+        return .restarted(why)
     }
 }
