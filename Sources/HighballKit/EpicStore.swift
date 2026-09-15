@@ -177,13 +177,21 @@ public struct EpicStore: Sendable {
         return p.hasPrefix(c)
     }
 
+    /// The install command line. Legendary runs without a terminal here, so every prompt must
+    /// be answered on the command line: `-y` covers the confirmations, and `--skip-sdl` the
+    /// selective-download prompt (optional language packs), which `-y` does not cover and which
+    /// otherwise dies with EOFError the moment it reads stdin (Hogwarts Legacy on Epic, #110).
+    /// The defaults install the required data only; language packs can be added later.
+    static func installArguments(appName: String, basePath: String) -> [String] {
+        ["install", appName, "--platform", "Windows", "--base-path", basePath, "-y", "--skip-sdl"]
+    }
+
     /// Installs a game's Windows build into the bottle at drive_c/Games/<folder>.
     @discardableResult
     public func install(_ appName: String, into bottle: Bottle, onLine: (@Sendable (String) -> Void)? = nil) throws -> Int32 {
         let base = bottle.driveC.appending(path: "Games", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return try runStreaming(["install", appName, "--platform", "Windows",
-                                 "--base-path", base.path, "-y"], onLine: onLine)
+        return try runStreaming(Self.installArguments(appName: appName, basePath: base.path), onLine: onLine)
     }
 
     public struct LaunchInfo: Sendable {
