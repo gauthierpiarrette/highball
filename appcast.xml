@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.20</title>
+      <description><![CDATA[Candidate engine r10 with MoltenVK 1.4.2 under Advanced, for Red Dead Redemption 2's tree pop-in]]></description>
+      <pubDate>Tue, 15 Sep 2026 19:34:03 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.20/Highball-0.9.20.zip" sparkle:version="0.9.20" sparkle:shortVersionString="0.9.20" sparkle:edSignature="J0Q30JQS2IWmXu0yRCfIbN1dsnURWQBDsmdPx2vgJi8pvdGt/FBMhL2rh4dVKWb+ZTVk4mAKqypVyGKWs2NtDg==" length="3578179" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.19</title>
       <description><![CDATA[Engines r3 and r9: the DirectX 12 timestamp shim now carries the real d3d12 export ordinals, so games that bind them by number (Path of Exile 2) start on D3DMetal]]></description>
       <pubDate>Tue, 15 Sep 2026 16:14:17 +0200</pubDate>
