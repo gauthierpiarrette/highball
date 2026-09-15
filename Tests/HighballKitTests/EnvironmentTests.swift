@@ -154,7 +154,7 @@ final class EnvironmentTests: XCTestCase {
         bottle.settings.frameGen = 2
 
         // missing shim
-        XCTAssertEqual(bottle.frameGenStatus(renderer: .dxvk, engine: engine), .unavailable("This engine has no usable frame generation component. Build or install the component for this engine."))
+        XCTAssertEqual(bottle.frameGenStatus(engine: engine), .unavailable("This engine has no usable frame generation component. Build or install the component for this engine."))
         var env = try bottle.environment(engine: engine, renderer: .dxvk)
         XCTAssertNil(env["LSFGM_ENV"])
 
@@ -162,11 +162,11 @@ final class EnvironmentTests: XCTestCase {
         let shim = engine.renderersDir.appending(path: "lsfg")
         try FileManager.default.createDirectory(at: shim, withIntermediateDirectories: true)
         try Data().write(to: shim.appending(path: "libMoltenVK.dylib"))
-        XCTAssertNil(engine.lsfgShimDir, "a shim without a real driver cannot work")
+        XCTAssertNil(engine.resolveLsfgShimDir(), "a shim without a real driver cannot work")
         try FileManager.default.createDirectory(at: engine.frameworksDir, withIntermediateDirectories: true)
         try Data().write(to: engine.frameworksDir.appending(path: "libMoltenVK.dylib"))
-        XCTAssertNotNil(engine.lsfgShimDir)
-        if case .unavailable(let why) = bottle.frameGenStatus(renderer: .dxvk, engine: engine) {
+        XCTAssertNotNil(engine.resolveLsfgShimDir())
+        if case .unavailable(let why) = bottle.frameGenStatus(engine: engine) {
             XCTAssertTrue(why.contains("Lossless Scaling"), why)
         } else { XCTFail("expected unavailable without the DLL") }
 
@@ -176,7 +176,7 @@ final class EnvironmentTests: XCTestCase {
         try FileManager.default.createDirectory(at: ls, withIntermediateDirectories: true)
         try Data().write(to: steam.appending(path: "steam.exe"))
         try Data().write(to: ls.appending(path: "lsfg-vk.dll"))
-        XCTAssertEqual(bottle.frameGenStatus(renderer: .dxvk, engine: engine), .active(multiplier: 2))
+        XCTAssertEqual(bottle.frameGenStatus(engine: engine), .active(multiplier: 2))
         env = try bottle.environment(engine: engine, renderer: .dxvk)
         XCTAssertEqual(env["LSFGM_ENV"], "1")
         XCTAssertEqual(env["LSFGM_MULTIPLIER"], "2")
@@ -188,17 +188,17 @@ final class EnvironmentTests: XCTestCase {
         XCTAssertEqual(env["DYLD_LIBRARY_PATH"], shim.path)
         XCTAssertTrue(env["DYLD_FALLBACK_LIBRARY_PATH"]!.contains(engine.frameworksDir.path), "the runtime's fallback path is untouched")
 
-        // metal rendering bypasses frame generation
-        if case .unavailable(let why) = bottle.frameGenStatus(renderer: .dxmt, engine: engine) {
-            XCTAssertTrue(why.contains("DXMT"), why)
-        } else { XCTFail("expected unavailable on dxmt") }
+        // a Metal renderer generates through the Metal hook instead of the Vulkan one
+        XCTAssertEqual(bottle.frameGenStatus(engine: engine), .active(multiplier: 2))
         env = try bottle.environment(engine: engine, renderer: .dxmt)
-        XCTAssertNil(env["LSFGM_ENV"])
-        XCTAssertNil(env["DYLD_LIBRARY_PATH"])
+        XCTAssertEqual(env["LSFGM_ENV"], "1")
+        XCTAssertEqual(env["LSFGM_METAL"], "1")
+        XCTAssertTrue(env["DYLD_INSERT_LIBRARIES"]!.contains(shim.appending(path: "libMoltenVK.dylib").path),
+                      "the Metal hook must be injected")
 
         // off overrides installed components
         bottle.settings.frameGen = 1
-        XCTAssertEqual(bottle.frameGenStatus(renderer: .dxvk, engine: engine), .off)
+        XCTAssertEqual(bottle.frameGenStatus(engine: engine), .off)
         XCTAssertNil(try bottle.environment(engine: engine, renderer: .dxvk)["LSFGM_ENV"])
     }
 
