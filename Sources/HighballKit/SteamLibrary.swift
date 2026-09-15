@@ -145,6 +145,9 @@ public struct GameDB: Sendable {
     public let byEpicAppName: [String: GameDBEntry]
     /// Rows by normalized title, the fallback for a copy from a store the row does not name.
     public let byTitle: [String: GameDBEntry]
+    /// Rows by title with the spaces removed too: a program added from its executable is named
+    /// after the file, "HogwartsLegacy", not "Hogwarts Legacy" (highball-db#48).
+    public let byCompactTitle: [String: GameDBEntry]
 
     /// Default lookup locations for a CLI/dev context: a sibling highball-db checkout, or ./db/games.
     public static func defaultDirectories() -> [URL] {
@@ -165,6 +168,9 @@ public struct GameDB: Sendable {
             }
         }
         byAppID = index; byEpicAppName = epic; byTitle = titles
+        var compact: [String: GameDBEntry] = [:]
+        for (key, entry) in titles { let c = key.replacingOccurrences(of: " ", with: ""); if compact[c] == nil { compact[c] = entry } }
+        byCompactTitle = compact
     }
 
     public subscript(appid: Int) -> GameDBEntry? { byAppID[appid] }
@@ -186,6 +192,8 @@ public struct GameDB: Sendable {
     public func entry(for item: LibraryItem) -> GameDBEntry? {
         if let appid = item.steamAppID, let e = byAppID[appid] { return e }
         if let name = item.epicAppName, let e = byEpicAppName[name] { return e }
-        return byTitle[Self.normalizedTitle(item.title)]
+        let normalized = Self.normalizedTitle(item.title)
+        if let e = byTitle[normalized] { return e }
+        return byCompactTitle[normalized.replacingOccurrences(of: " ", with: "")]
     }
 }
