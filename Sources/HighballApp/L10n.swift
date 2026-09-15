@@ -219,7 +219,6 @@ enum L10n {
         "Remove the shortcut": "Supprimer le raccourci",
         "Rosetta is not working on this Mac": "Rosetta ne fonctionne pas sur ce Mac",
         "Install Rosetta": "Installer Rosetta",
-        "Installing Rosetta, Apple's compatibility layer": "Installation de Rosetta, la couche de compatibilité d'Apple",
         "a minute or two": "une minute ou deux",
         "Highball's Wine engine is Intel code and needs Rosetta, Apple's translation layer. A macOS update can remove it. Highball can install it now, or run in Terminal: softwareupdate --install-rosetta --agree-to-license": "Le moteur Wine de Highball est du code Intel et a besoin de Rosetta, la couche de traduction d'Apple. Une mise à jour de macOS peut la retirer. Highball peut l'installer maintenant, ou lancez dans le Terminal : softwareupdate --install-rosetta --agree-to-license",
         "Moves this game's shortcut app in ~/Applications/Highball to the Trash.": "Place le raccourci de ce jeu (dans ~/Applications/Highball) dans la corbeille.",

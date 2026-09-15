@@ -10,6 +10,13 @@ VERSION="${2:-0.0.0-dev}"
 FEED_URL="https://raw.githubusercontent.com/gauthierpiarrette/highball/main/appcast.xml"
 ED_PUBLIC_KEY="lntI8A+HC5Wo6xb4dZNQ6IYteI771cNybU8XNXmvMd8="
 
+# A duplicate key in L10n's dictionary literal crashes the app at launch (2026-09-15); refuse to build one.
+python3 - <<'PY' || exit 1
+import re, collections
+keys = re.findall(r'^\s*"((?:[^"\\]|\\.)*)"\s*:\s*"', open("Sources/HighballApp/L10n.swift").read(), re.M)
+dups = [k for k, c in collections.Counter(keys).items() if c > 1]
+if dups: print("error: duplicate L10n keys:", dups); raise SystemExit(1)
+PY
 swift build -c "$CONFIG" --product HighballApp
 APP=dist/Highball.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
