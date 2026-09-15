@@ -1,0 +1,130 @@
+{
+  "$schema": "https://highball.app/schemas/engine-manifest/v0",
+  "arch": "x86_64",
+  "baseEnv": {
+    "DYLD_FALLBACK_FRAMEWORK_PATH": "${frameworks}",
+    "DYLD_FALLBACK_LIBRARY_PATH": "${frameworks}:${frameworks}/GStreamer.framework/Versions/1.0/lib",
+    "GST_PLUGIN_PATH": "${frameworks}/GStreamer.framework/Versions/1.0/lib/gstreamer-1.0",
+    "WINEDEBUG": "fixme-all"
+  },
+  "components": {
+    "d3dmetal-tsshim": {
+      "extract": {
+        "into": "renderers/d3dmetal-tsshim/wine",
+        "subpath": "renderers/d3dmetal-tsshim/wine"
+      },
+      "kind": "renderer",
+      "layout": [
+        "x86_64-windows/d3d12.dll"
+      ],
+      "license": "MIT",
+      "note": "A d3d12.dll in front of D3DMetal's that serves DirectX 12 timestamp queries (D3DMetal 3.0 resolves them to zero at a reported 60 Hz). Exports carry Microsoft's d3d12 ordinals (D3D12CreateDevice at 101), which D3DMetal mirrors, so games that bind d3d12 imports by ordinal load through it. Kill switch HB_D3D12_TSSHIM=0 idles the patches; the DLL stays in front. Source: spike/tsshim, Scripts/build-tsshim.sh.",
+      "order": 1,
+      "sha256": "453f33ef1442ec8d24e9a44d901d35d4d07431c05ae8318c30567facc78d9ef3",
+      "size": 46116,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/d3dmetal-tsshim-20260915/d3dmetal-tsshim-20260915.tar.xz",
+      "version": "20260915"
+    },
+    "dxmt": {
+      "extract": {
+        "into": "renderers/dxmt/wine",
+        "subpath": "highball"
+      },
+      "kind": "renderer",
+      "license": "MIT (Highball branch of DXMT: SwapDeviceContextState, cross-process opt-in)",
+      "sha256": "0b86f0c793e99ae88bb4ff5f8575403ad138598a44a90248c71d6bc3ec18923b",
+      "size": 18922634,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/dxmt-highball-20260904T194518Z-7421db2/dxmt-highball-20260904T194518Z-7421db2.tar.gz"
+    },
+    "moltenvk": {
+      "extract": {
+        "into": "frameworks/libMoltenVK.dylib",
+        "subpath": "libMoltenVK.dylib"
+      },
+      "kind": "runtime",
+      "license": "Apache-2.0",
+      "note": "MoltenVK 1.4.2 rebuilt with two Highball patches (spike/patches/moltenvk-shadow-import.patch and moltenvk-linear-fallback.patch, Scripts/build-moltenvk.sh). Shadow import is off unless a launch sets MVK_SHADOW_IMPORT=1 (32-bit native-Vulkan games such as The Sims Legacy Collection). Linear fallback is always on: a linear-tiled image that Metal cannot back with linear memory (3D, mipmapped or array images) is created with optimal tiling instead of failing vkCreateImage, which is what takes Red Dead Redemption 2 from an exit at 98 per cent to the main menu and the story.",
+      "order": 1,
+      "sha256": "d54eda91b65a8aa72a5242a87181394495b5cc88ea3d58ef1a5ce8240a2bc447",
+      "size": 1728530,
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/moltenvk-1.4.2-shadow-import-1-linear-fallback-1-x86_64.tar.gz",
+      "version": "1.4.2+shadow-import-1+linear-fallback-1"
+    },
+    "runtime": {
+      "extract": {
+        "into": "frameworks",
+        "subpath": "Template-1.0.11.app/Contents/Frameworks"
+      },
+      "kind": "frameworks",
+      "license": "mixed (LGPL-2.1 GStreamer, Apache-2.0 MoltenVK, LGPL gnutls, ...)",
+      "sha256": "9fa15479e7ff6abd99c1d07be285fb95f41fc6991586502427152b1f7d6ccb8a",
+      "size": 84533420,
+      "url": "https://github.com/Sikarugir-App/Wrapper/releases/download/v1.0/Template-1.0.11.tar.xz"
+    },
+    "wine": {
+      "extract": {
+        "into": "engine",
+        "subpath": "engine"
+      },
+      "kind": "engine",
+      "license": "LGPL-2.1+",
+      "note": "Built from CodeWeavers' crossover-sources-26.3.0.tar.gz (sha pinned in highball-engine/inputs.json) by highball-engine's build workflow with patches 0001, 0002, 0003, 0005, 0006, 0007, 0008 and 0009. 0009 swaps %gs:0x20 between Tib.FiberData (what PE code reads as GetCurrentFiber()) and the pthread QoS class (what macOS's libdispatch and pthread read) at every crossing between PE and unix code, so a fiber-based game no longer corrupts the scheduling slot: with 0008 alone Metaphor: ReFantazio opened a black window and hung in libdispatch. Stripped; Wine Mono 10.4.1 and Gecko 2.47.4 included.",
+      "sha256": "a89627957e03ee06ccc6ede36a2ba050e9fbd5fe9ca74efed1a4bd3066391950",
+      "size": 334861285,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/engine-wine-11.0-20260912T175843Z-fiberqos0009b/engine-wine-11.0-20260912T175843Z-fiberqos0009b.tar.gz",
+      "version": "wine-11.0 (CrossOver 26.3 tree) Highball build 2026-09-12, fiber and QoS slot swap"
+    },
+    "winetricks": {
+      "kind": "tool",
+      "license": "LGPL-2.1",
+      "note": "Pinned to upstream commit 5a59ea07 (20260125+dev, 2026-08-07) — the exact bytes 0.7.x verified with dotnet48. The old branch URL drifted and broke every fresh engine install (issues #27/#28); URLs here must be immutable.",
+      "sha256": "f35c29737ca08a583569e6a3752d52fbe23333c5acfad5f16c4177d25eaf3f4b",
+      "url": "https://raw.githubusercontent.com/Winetricks/winetricks/5a59ea07513b24093bd90fad943ecf9543cf05bc/src/winetricks"
+    },
+    "nvapi-stub": {
+      "extract": {
+        "into": "engine/lib/wine/i386-windows/nvapi.dll",
+        "subpath": "nvapi.dll"
+      },
+      "kind": "runtime",
+      "license": "MIT (Highball)",
+      "order": 1,
+      "note": "A 32-bit nvapi.dll stub (spike/nvapi-stub, 40 lines of C) placed in the engine's i386 DLL directory with Wine's builtin marker. Games that see an NVIDIA adapter insist on NVIDIA's driver library and load it from the system directory only, so a stub beside the game does nothing; this one answers NvAPI_Initialize with OK and everything else with 'not implemented'. It only matters for a bottle or application given an NVIDIA identity (Highball's default is AMD), which is what lets legacy CS:GO pass its shadow-map check on wined3d.",
+      "sha256": "cbda8aeee87e84ecf98c06759d2123b073dc99a7aa1c639480fade33383d18a2",
+      "size": 1759,
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/nvapi-stub-2-i386.tar.gz",
+      "version": "2",
+      "refreshesPrefix": true
+    }
+  },
+  "displayName": "Wine 11.0 (CrossOver 26.3 tree, Highball build) + DXMT (Highball branch) + D3DMetal 3.0 + MoltenVK 1.4.2",
+  "id": "x64-crossover26.3-r10",
+  "licenses": {
+    "apple-gptk-license-2023-08-17": {
+      "applies": [
+        "renderers/d3dmetal (bundled in the Sikarugir Template: D3DMetal.framework sha1 1405e5c6… identical to GPTK 3.0-3)"
+      ],
+      "summary": "Apple Game Porting Toolkit license: non-commercial use/distribution only; no modification; use scoped to developing, testing or evaluating games on Apple hardware.",
+      "text": "spike/d3dmetal-license.txt"
+    }
+  },
+  "minMacOS": "14.0",
+  "notes": [
+    "r10 (2026-09-15): r9 with MoltenVK 1.4.2 (July 2026) in place of 1.4.1, same two Highball patches. 1.4.2 fixes heap placement checks, imported texture residency, cached texture invalidation and an occlusion query crash, all candidates for Red Dead Redemption 2's trees popping in and out on Apple Silicon (highball#93). A candidate engine, not the default: pick it under Advanced. Everything else is byte-identical to r9.",
+    "r9 (2026-09-15): r8 with the d3dmetal-tsshim component rebuilt so its exports carry Microsoft's d3d12 ordinals (D3D12CreateDevice at 101), which D3DMetal mirrors. The earlier shim numbered them from 1, so a game that binds d3d12 imports by ordinal (Path of Exile 2 delay-loads D3D12CreateDevice as ordinal 101) died at startup with 'ordinal 101 out of range' and Wine's exception 0xc06d007f (highball-db#53). The Wine build and every other component are byte-identical to r8, so existing downloads are reused; only the 46 KB shim tarball is new.",
+    "r8 (2026-09-12): r7 plus patch 0009, the fiber and QoS slot swap. On r5 to r7 a game whose job threads switch fibers and also drive the window could hang black at full CPU, because the fiber pointer the 0008 mirror keeps in the thread slot is what macOS reads there as the thread's QoS class (Metaphor: ReFantazio, highball#80, measured with its free demo). r8 gives the slot to whichever side is running. Nothing else changed from r7.",
+    "r7 (2026-09-11): r6 plus a 32-bit NVAPI stub in the engine. With it, legacy CS:GO plays on macOS 26 through wined3d with an NVIDIA identity scoped to csgo.exe (the csgo-legacy recipe), the route CrossOver users take: DXVK's D3D9 on this Mac either loses the device on Source's HDR pass or stalls after the map load, and wined3d needs the NVIDIA shadow-map path, which needs NVAPI to answer. Nothing else changed from r6.",
+    "r6 (2026-09-11): r5 plus the MoltenVK linear-fallback patch. Red Dead Redemption 2 loads, reaches its main menu and starts the story on this engine (M1 Pro, macOS 26.6.2, 1280x720 windowed, about 60 fps in menus); every earlier engine exits at 98 per cent of the first load because MoltenVK refuses the game's linear 3D, mipmapped and array images. Nothing else changed from r5.",
+    "r5 (2026-09-09): r4 plus patch 0008, the fiber mirror. Marvel's Guardians of the Galaxy reaches gameplay on this engine and crashes on Play Game on every earlier one, verified twice from a clean start on an M1 Pro, macOS 26.6.2, at 27.5 fps in the opening scene. A reproducer that needs no game (private/notes/fibertest4.c) faults identically to the game on r4 and runs clean here.",
+    "Cost of 0008, measured: offset 0x20 holds the thread's pthread QoS class on macOS, so a thread that uses fibers loses that scheduling hint. Windows and macOS both fix that offset, so a correct GetCurrentFiber() and an intact QoS cache cannot coexist. Confined to threads that call the fiber APIs, and a stress run of 8 threads and 6.4M switches showed TLS and thread creation unaffected (320000 wrong fiber values on r4, 0 here).",
+    "Optional engine (2026-09-07): Highball's own build of the CrossOver 26.3 Wine tree (Wine 11.0) with the same DXMT, D3DMetal, MoltenVK and Template runtime as the default engine. Not the default: a bottle moves to it from its Advanced settings, or Highball offers it when a launcher's recipe names it (the EA app). Verified here: EA app install and sign-in, The Sims 4 through it (DXMT, 128 fps on an M1 Pro), Steam with GTA V install, Rockstar launcher sign-in window, Ubisoft Connect window.",
+    "Games were not re-verified on this engine (CS:GO's cascaded shadow maps are known to differ), which is why it is offered for the launchers that need it, one environment at a time, and never becomes the default on its own. Steam's own client renders here (CEF), as do the Rockstar and Ubisoft sign-in windows; their account services were the wall in testing, not the engine.",
+    "Why it exists: Wine 10 (the default engine) cannot start the EA app's vital background service or run its .NET setup steps, and its winemac lacks the cross-process remote-layer route that the Rockstar and Ubisoft launchers' browsers need (highball#15, #56, #60). This tree carries Highball's patches for both.",
+    "Three patches make the tree behave like the default engine: the Windows user follows the macOS user (CrossOver hack 12735 reverted), WINEDLLPATH_PREPEND is honoured so the renderer overlays apply, and wined3d's automatic renderer is OpenGL first as upstream. winemac.so exports macdrv_functions, so the DXMT and D3DMetal bridges work. This engine ships no winemetal.dll of its own; the DXMT overlay carries it. Wine Mono and Gecko are included.",
+    "DXMT here is Highball's branch (cross-process swapchains, DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1), needed by the EA client. D3DMetal is the Template's 3.0 with the timestamp shim in front, as on the default engine. Accepted licences carry over when a bottle moves.",
+    "Moving a bottle here re-runs the Windows setup (different Wine build); moving back is the same step. Nothing installed in the bottle is removed either way."
+  ],
+  "requires": [
+    "rosetta2"
+  ]
+}

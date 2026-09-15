@@ -20,7 +20,9 @@ done
 ./fetchDependencies --macos
 xcodebuild build -project MoltenVKPackaging.xcodeproj -scheme "MoltenVK Package (macOS only)" \
   -destination "generic/platform=macOS" -configuration Release ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO -quiet
-DYLIB="$(find Package/Release -name libMoltenVK.dylib -path '*macOS*' | head -1)"
+# The dynamic dylib, explicitly: 1.4.2's package also carries static and xcframework copies
+# under Package/Release, and `find | head -1` picked one without the patch markers.
+DYLIB="Package/Release/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib"
 test -f "$DYLIB"
 for MARK in "HIGHBALL shadow-import" "HIGHBALL linear-fallback"; do
   strings "$DYLIB" | grep -q "$MARK" || { echo "patch missing from build: $MARK"; exit 1; }
