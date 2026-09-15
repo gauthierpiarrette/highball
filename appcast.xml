@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.19</title>
+      <description><![CDATA[Engines r3 and r9: the DirectX 12 timestamp shim now carries the real d3d12 export ordinals, so games that bind them by number (Path of Exile 2) start on D3DMetal]]></description>
+      <pubDate>Tue, 15 Sep 2026 16:13:24 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.19/Highball-0.9.19.zip" sparkle:version="0.9.19" sparkle:shortVersionString="0.9.19" sparkle:edSignature="VoUe06PcYMQCP70GhvsR7qKlEgq+Gq6XlnCZM+IFSPEDTdjReVqgFb8WOD+1QqlW64ZlxyIwBhhaQdOdW5PCBA==" length="3567455" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.18</title>
       <description><![CDATA[A Steam client kept with another graphics mode is now said out loud, in the activity log, the launch log and the session]]></description>
       <pubDate>Tue, 15 Sep 2026 15:29:33 +0200</pubDate>
