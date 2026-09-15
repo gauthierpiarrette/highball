@@ -7,9 +7,9 @@
     <item>
       <title>Highball 0.9.16</title>
       <description><![CDATA[If Rosetta stops working, after a macOS update for instance, Highball offers to install it instead of failing every launch.]]></description>
-      <pubDate>Tue, 15 Sep 2026 10:35:02 +0200</pubDate>
+      <pubDate>Tue, 15 Sep 2026 10:35:53 +0200</pubDate>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
       <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.16/Highball-0.9.16.zip" sparkle:version="0.9.16" sparkle:shortVersionString="0.9.16" sparkle:edSignature="If5ZapFY0/pbtI12XdqjaC00qDxUim8R333h8YT3tW5Ccq/22zDVmqcN0VQE90HFR1hNxtPn48Qyuj1GvKUsBg==" length="3544395" type="application/octet-stream"/>
     </item>
     <item>
