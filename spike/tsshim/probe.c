@@ -25,6 +25,12 @@ int main(void) {
     if (real) { GetModuleFileNameA(real, path, sizeof path); say("  shim active, real: %s", path); }
     else say("  no apd12.dll in the process (shim absent or idle)");
 
+    // Some engines bind d3d12 imports by ordinal, Microsoft's numbering (D3D12CreateDevice is 101,
+    // which Apple's D3DMetal mirrors). A DLL in front that numbers from 1 breaks their delay-load
+    // with 0xc06d007f (Path of Exile 2, highball-db#53).
+    say("  GetProcAddress by ordinal 101: %s, by ordinal 100: %s",
+        GetProcAddress(m, MAKEINTRESOURCEA(101)) == GetProcAddress(m, "D3D12CreateDevice") && GetProcAddress(m, "D3D12CreateDevice") ? "D3D12CreateDevice, correct" : "NOT D3D12CreateDevice (ordinal-bound games fail here)",
+        GetProcAddress(m, MAKEINTRESOURCEA(100)) == GetProcAddress(m, "GetBehaviorValue") && GetProcAddress(m, "GetBehaviorValue") ? "GetBehaviorValue, correct" : "wrong");
     typedef HRESULT (WINAPI *create_t)(IUnknown *, D3D_FEATURE_LEVEL, REFIID, void **);
     create_t create = (create_t)GetProcAddress(m, "D3D12CreateDevice");
     if (!create) { say("  no D3D12CreateDevice export, error %lu", GetLastError()); return 2; }
