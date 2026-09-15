@@ -79,6 +79,17 @@ final class AppState {
 
     // Onboarding
     var rosettaInstalled = true
+    /// Rosetta stopped working on a Mac that already has an engine: the app asks to install it.
+    var rosettaMissing = false
+
+    /// Installs Rosetta for an existing install, from the ask that rosettaMissing raises.
+    func installRosettaNow() {
+        rosettaMissing = false
+        runBusy(L("Installing Rosetta, Apple's compatibility layer"), expected: L("a minute or two")) { [self] in
+            try await Self.installRosetta()
+            await MainActor.run { self.rosettaInstalled = true; self.appendLog("Rosetta installed"); self.refresh() }
+        }
+    }
     var needsOnboarding = false
     var showGPTKLicense = false
     var gptkLicenseText = ""
@@ -493,6 +504,9 @@ final class AppState {
         damagedBottles = (try? bottleStore.damaged()) ?? []
         needsOnboarding = engines.isEmpty && homeUnavailable == nil   // an unplugged drive is not a first run
         rosettaInstalled = Self.rosettaWorks()
+        // An existing install can lose Rosetta (two Macs did after the macOS 27 update, #101 and
+        // #106) and onboarding is the only place that used to install it. Offer it here instead.
+        rosettaMissing = !rosettaInstalled && !engines.isEmpty
         // Drop a selection whose bottle is gone, not merely a nil one: a delete that threw after
         // the bottle had in fact been removed (the losing side of a race) left the selection
         // pinned to a name nothing could resolve.

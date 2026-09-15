@@ -23,6 +23,11 @@ struct HighballApp: App {
                 .frame(minWidth: 820, minHeight: 560)
                 .onAppear { state.refresh(); state.sweepTrash(); delegate.appState = state }
                 .onOpenURL { url in state.open(url: url) }
+                .alert(L("Rosetta is not working on this Mac"),
+                       isPresented: Binding(get: { state.rosettaMissing }, set: { if !$0 { state.rosettaMissing = false } })) {
+                    Button(L("Install Rosetta")) { state.installRosettaNow() }
+                    Button(L("Not now"), role: .cancel) { state.rosettaMissing = false }
+                } message: { Text(L("Highball's Wine engine is Intel code and needs Rosetta, Apple's translation layer. A macOS update can remove it. Highball can install it now, or run in Terminal: softwareupdate --install-rosetta --agree-to-license")) }
                 .alert(String(format: L("Open %@ in Highball?"), state.pendingPlayLink?.title ?? ""),
                        isPresented: Binding(get: { state.pendingPlayLink != nil }, set: { if !$0 { state.pendingPlayLink = nil } })) {
                     Button(L("Play")) { if let item = state.pendingPlayLink { state.pendingPlayLink = nil; state.play(item) } }
