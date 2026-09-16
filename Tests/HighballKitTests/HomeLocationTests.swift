@@ -86,11 +86,22 @@ final class HomeLocationTests: XCTestCase {
     }
 
     func testMoveCopiesChecksThenRemovesAndKeepsLinks() throws {
-        let src = tmp.appending(path: "src"), dst = tmp.appending(path: "dst")
+        XCTAssertTrue(HomeMove.sameLocalVolume(tmp, tmp), "this disk is the clonefile path")
+        try assertMoveCopiesChecksThenRemovesAndKeepsLinks(clone: true)
+    }
+
+    func testMoveStreamsACompleteTreeWhenCloneIsOff() throws {
+        try assertMoveCopiesChecksThenRemovesAndKeepsLinks(clone: false)
+    }
+
+    private func assertMoveCopiesChecksThenRemovesAndKeepsLinks(clone: Bool) throws {
+        let src = tmp.appending(path: clone ? "src-clone" : "src-stream")
+        let dst = tmp.appending(path: clone ? "dst-clone" : "dst-stream")
         let fm = FileManager.default
         try fm.createDirectory(at: src.appending(path: "bottles/Games/dosdevices"), withIntermediateDirectories: true)
         try fm.createDirectory(at: src.appending(path: "engines/e/wine"), withIntermediateDirectories: true)
         try Data(repeating: 7, count: 5000).write(to: src.appending(path: "bottles/Games/system.reg"))
+        try Data().write(to: src.appending(path: "bottles/Games/empty.dat"))
         try Data("x".utf8).write(to: src.appending(path: "engines/e/wine/w"))
         try Data("{}".utf8).write(to: src.appending(path: "library.json"))
         try Data("{\"home\":\"/x\"}".utf8).write(to: src.appending(path: "config.json"))
@@ -99,7 +110,7 @@ final class HomeLocationTests: XCTestCase {
         var seen: [String] = []
         var lastCopied: Int64 = 0
         var lastItems = 0
-        try HomeMove.move(from: src, to: dst) { name, copied, items in
+        try HomeMove.move(from: src, to: dst, clone: clone) { name, copied, items in
             if seen.last != name { seen.append(name) }
             lastCopied = copied
             lastItems = items
@@ -109,6 +120,7 @@ final class HomeLocationTests: XCTestCase {
         XCTAssertGreaterThan(lastCopied, 0, "byte progress has to move or a network copy looks stuck")
         XCTAssertGreaterThan(lastItems, 0, "file count has to move or a tree of tiny files looks stuck")
         XCTAssertTrue(fm.fileExists(atPath: dst.appending(path: "bottles/Games/system.reg").path))
+        XCTAssertEqual(try Data(contentsOf: dst.appending(path: "bottles/Games/empty.dat")).count, 0)
         let after = try HomeMove.tally(dst.appending(path: "bottles"))
         XCTAssertEqual(after.files, before.files); XCTAssertEqual(after.bytes, before.bytes)
         XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: dst.appending(path: "bottles/Games/dosdevices/c:").path), "../drive_c", "links travel as links")

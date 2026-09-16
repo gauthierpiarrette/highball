@@ -47,13 +47,22 @@ public enum HomeMove {
         // "bottles" would then replace the folder name and write into the share's root.
         let source = URL(fileURLWithPath: source.path, isDirectory: true)
         let target = URL(fileURLWithPath: target.path, isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        // Decide clone after the destination exists: a missing path makes statfs fail closed,
+        // which would stream a same-disk copy.
+        try move(from: source, to: target, clone: sameLocalVolume(source, target), progress: progress)
+    }
+
+    /// `clone` is the same-disk APFS fast path. Tests pass `false` to prove the stream copy
+    /// (network shares, and clonefile falling back) still lands a complete tree on this disk.
+    static func move(from source: URL, to target: URL, clone: Bool,
+                     progress: (_ entry: String, _ copied: Int64, _ items: Int) -> Void) throws {
         let fm = FileManager.default
         try fm.createDirectory(at: target, withIntermediateDirectories: true)
         // Plant the marker before the bulk copy so Spotlight does not start on a 90 GB tree mid-move.
         // A share that vetoes the name is fine: ensure() retries after relaunch, and a missing
         // marker must not block the move (that is the bug).
         HighballPaths(home: target).excludeFromSpotlight()
-        let clone = sameLocalVolume(source, target)
         let entries = try fm.contentsOfDirectory(atPath: source.path)
             .filter { !skipped.contains($0) && !isEphemeral($0) }
             .sorted()
