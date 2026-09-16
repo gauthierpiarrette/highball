@@ -11,6 +11,8 @@ Every recipe carries `lastVerified` so stale data is visible rather than silentl
 bundle. Match the style around you. By contributing you license your work under GPL-3.0 (code) or
 CC0 (data).
 
+Everyone here follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 **Automated verification** (`highball verify`): tests only games *you already installed*, one at a
 time, exactly as a player launching them would — via Steam's own documented `-applaunch` flag. It
 never touches the store, never installs anything, and skips anti-cheat titles by default. Keep it
