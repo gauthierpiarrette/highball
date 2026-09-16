@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 @testable import HighballKit
 
@@ -96,14 +97,115 @@ final class HomeLocationTests: XCTestCase {
         try fm.createSymbolicLink(atPath: src.appending(path: "bottles/Games/dosdevices/c:").path, withDestinationPath: "../drive_c")
         let before = try HomeMove.tally(src.appending(path: "bottles"))
         var seen: [String] = []
-        try HomeMove.move(from: src, to: dst) { seen.append($0) }
+        var lastCopied: Int64 = 0
+        var lastItems = 0
+        try HomeMove.move(from: src, to: dst) { name, copied, items in
+            if seen.last != name { seen.append(name) }
+            lastCopied = copied
+            lastItems = items
+            XCTAssertGreaterThanOrEqual(items, 0)
+        }
         XCTAssertEqual(seen, ["bottles", "engines", "library.json"], "the pointer file is not data")
+        XCTAssertGreaterThan(lastCopied, 0, "byte progress has to move or a network copy looks stuck")
+        XCTAssertGreaterThan(lastItems, 0, "file count has to move or a tree of tiny files looks stuck")
         XCTAssertTrue(fm.fileExists(atPath: dst.appending(path: "bottles/Games/system.reg").path))
         let after = try HomeMove.tally(dst.appending(path: "bottles"))
         XCTAssertEqual(after.files, before.files); XCTAssertEqual(after.bytes, before.bytes)
         XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: dst.appending(path: "bottles/Games/dosdevices/c:").path), "../drive_c", "links travel as links")
         XCTAssertFalse(fm.fileExists(atPath: src.appending(path: "bottles").path), "removed at the source only after the check")
         XCTAssertTrue(fm.fileExists(atPath: src.appending(path: "config.json").path), "the pointer stays put")
+        XCTAssertTrue(fm.fileExists(atPath: dst.appending(path: ".metadata_never_index").path),
+                      "Spotlight stays off at the destination even when the source marker is not copied")
+    }
+
+    /// FileManager.copyItem follows nothing on APFS, but on SMB it often cannot recreate a
+    /// symlink named `z:` and falls back to copying the target — `/` — or it tries to plant
+    /// Spotlight's `.metadata_never_index` inside `drive_c` and the share refuses. The mover
+    /// must copy those links as links, skip the marker, and never read the user's real files.
+    func testMoveDoesNotFollowOutboundLinksOrCopySpotlightMarkers() throws {
+        let src = tmp.appending(path: "src"), dst = tmp.appending(path: "dst")
+        let outside = tmp.appending(path: "precious")
+        let fm = FileManager.default
+        try fm.createDirectory(at: outside, withIntermediateDirectories: true)
+        try "secret".write(to: outside.appending(path: "canary.txt"), atomically: true, encoding: .utf8)
+
+        let bottle = src.appending(path: "bottles/Games")
+        try fm.createDirectory(at: bottle.appending(path: "dosdevices"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: bottle.appending(path: "drive_c/users/tester"), withIntermediateDirectories: true)
+        try Data("reg".utf8).write(to: bottle.appending(path: "system.reg"))
+        try fm.createSymbolicLink(atPath: bottle.appending(path: "dosdevices/c:").path, withDestinationPath: "../drive_c")
+        try fm.createSymbolicLink(atPath: bottle.appending(path: "dosdevices/z:").path, withDestinationPath: "/")
+        try fm.createSymbolicLink(atPath: bottle.appending(path: "drive_c/users/tester/Documents").path,
+                                  withDestinationPath: outside.path)
+        XCTAssertTrue(fm.createFile(atPath: src.appending(path: ".metadata_never_index").path, contents: nil))
+        XCTAssertTrue(fm.createFile(atPath: bottle.appending(path: "drive_c/.metadata_never_index").path, contents: nil))
+        let fifo = bottle.appending(path: "drive_c/run.sock")
+        guard mkfifo(fifo.path, 0o644) == 0 else { return XCTFail("mkfifo: \(errno)") }
+
+        try HomeMove.move(from: src, to: dst)
+
+        XCTAssertTrue(fm.fileExists(atPath: src.appending(path: ".metadata_never_index").path),
+                      "the source marker is not data and is left in place")
+        XCTAssertTrue(fm.fileExists(atPath: dst.appending(path: ".metadata_never_index").path))
+        XCTAssertFalse(fm.fileExists(atPath: dst.appending(path: "bottles/Games/drive_c/.metadata_never_index").path),
+                       "a marker inside drive_c is Spotlight junk, not Windows data")
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: dst.appending(path: "bottles/Games/dosdevices/z:").path), "/")
+        var zst = stat()
+        XCTAssertEqual(lstat(dst.appending(path: "bottles/Games/dosdevices/z:").path, &zst), 0)
+        XCTAssertEqual(zst.st_mode & S_IFMT, S_IFLNK, "z: must be a link, not a copy of /")
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: dst.appending(path: "bottles/Games/dosdevices/c:").path), "../drive_c")
+        var dstSt = stat()
+        XCTAssertEqual(lstat(dst.appending(path: "bottles/Games/drive_c/users/tester/Documents").path, &dstSt), 0)
+        XCTAssertEqual(dstSt.st_mode & S_IFMT, S_IFLNK)
+        XCTAssertEqual(try fm.destinationOfSymbolicLink(atPath: dst.appending(path: "bottles/Games/drive_c/users/tester/Documents").path),
+                       outside.path)
+        XCTAssertEqual(try String(contentsOf: outside.appending(path: "canary.txt"), encoding: .utf8), "secret")
+        XCTAssertTrue(fm.fileExists(atPath: "/usr"), "/ must be untouched")
+        var fifoSt = stat()
+        XCTAssertNotEqual(lstat(dst.appending(path: "bottles/Games/drive_c/run.sock").path, &fifoSt), 0,
+                          "runtime sockets and FIFOs are not environment data")
+    }
+
+    func testTallySkipsSpotlightMarker() throws {
+        let root = tmp.appending(path: "bottle")
+        try FileManager.default.createDirectory(at: root.appending(path: "drive_c"), withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: root.appending(path: "drive_c/f"))
+        XCTAssertTrue(FileManager.default.createFile(atPath: root.appending(path: "drive_c/.metadata_never_index").path, contents: nil))
+        let t = try HomeMove.tally(root)
+        XCTAssertEqual(t.files, 1)
+        XCTAssertEqual(t.bytes, 1)
+    }
+
+    func testSameLocalVolumeIsTrueOnTheSameFolder() throws {
+        XCTAssertTrue(HomeMove.sameLocalVolume(tmp, tmp),
+                      "a copy on this disk may clone; a network share must not")
+    }
+
+    func testSameLocalVolumeFailsClosedWhenTheDestinationIsMissing() {
+        let missing = URL(fileURLWithPath: "/Volumes/HighballMissingVolume", isDirectory: true)
+        XCTAssertFalse(HomeMove.sameLocalVolume(tmp, missing),
+                       "a path that cannot be probed must not clonefile")
+    }
+
+    func testSameLocalVolumeIsFalseOnANetworkVolume() throws {
+        guard let remote = firstNetworkVolume() else {
+            throw XCTSkip("no network volume mounted")
+        }
+        XCTAssertFalse(HomeMove.sameLocalVolume(tmp, remote),
+                       "a network share must stream bytes, never clonefile")
+    }
+
+    /// Any non-local mount under /Volumes, so the test does not name a particular share.
+    private func firstNetworkVolume() -> URL? {
+        let root = URL(fileURLWithPath: "/Volumes", isDirectory: true)
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: root.path) else { return nil }
+        for name in names {
+            let url = root.appending(path: name, directoryHint: .isDirectory)
+            var st = statfs()
+            guard statfs(url.path, &st) == 0 else { continue }
+            if UInt32(st.f_flags) & UInt32(MNT_LOCAL) == 0 { return url }
+        }
+        return nil
     }
 
     func testHasData() throws {

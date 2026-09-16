@@ -67,6 +67,10 @@ public struct HighballPaths: Sendable {
     /// refusal the release notes promised never happened. Measured 2026-09-09 on an exFAT volume:
     /// the flag reads true, links are created, and a bottle moved there launches and runs. Asking
     /// the volume directly also catches what a format name never could.
+    ///
+    /// A network share can pass the generic symlink and execute-bit checks and still be unable to
+    /// hold an environment: Wine's drive letters are files named `c:`, and some SMB servers refuse
+    /// a colon. That is probed with the same name Wine uses, not with a harmless `link`.
     public static func locationProblem(_ url: URL, defaultHome: URL = defaultHome) -> String? {
         let fm = FileManager.default
         var isDir: ObjCBool = false
@@ -99,6 +103,15 @@ public struct HighballPaths: Sendable {
         catch {
             return "That drive cannot hold a Windows environment: an environment's drive letters are symbolic links, and this volume does not support them. Format it as APFS, or pick another drive."
         }
+        // Wine's C: is the file `dosdevices/c:` pointing at `drive_c`. A share can allow a
+        // symlink named `link` and still reject a colon (Windows SMB, some Samba `mangled names`
+        // setups). Fail here so the picker says so, instead of dying later on `c:`.
+        do {
+            try fm.createDirectory(at: probe.appending(path: "drive_c"), withIntermediateDirectories: true)
+            try fm.createSymbolicLink(atPath: probe.appending(path: "c:").path, withDestinationPath: "drive_c")
+        } catch {
+            return "That drive cannot hold a Windows environment: an environment's drive letters are files named c:, and this volume does not allow a colon in a name. Pick a folder on this Mac, an APFS disk, or a network share that keeps Unix file names."
+        }
         let bin = probe.appending(path: "bin")
         guard fm.createFile(atPath: bin.path, contents: Data("#!/bin/sh\nexit 0\n".utf8),
                             attributes: [.posixPermissions: 0o755]) else {
@@ -107,6 +120,22 @@ public struct HighballPaths: Sendable {
         let mode = ((try? fm.attributesOfItem(atPath: bin.path))?[.posixPermissions] as? NSNumber)?.uint16Value ?? 0
         guard mode & 0o100 != 0 else {
             return "That drive cannot hold a Windows environment: Highball runs its engine from here, and this volume does not keep the execute permission. Format it as APFS, or pick another drive."
+        }
+        // The mode bit can survive on a `noexec` mount while the kernel still refuses to run
+        // anything from it. Engines live in this folder, so actually run the probe.
+        let run = Process()
+        run.executableURL = bin
+        run.standardInput = FileHandle.nullDevice
+        run.standardOutput = FileHandle.nullDevice
+        run.standardError = FileHandle.nullDevice
+        do {
+            try run.run()
+            run.waitUntilExit()
+        } catch {
+            return "That drive cannot hold a Windows environment: Highball runs its engine from here, and this volume will not run a program. Pick a folder on this Mac or an APFS disk."
+        }
+        guard run.terminationStatus == 0 else {
+            return "That drive cannot hold a Windows environment: Highball runs its engine from here, and this volume will not run a program. Pick a folder on this Mac or an APFS disk."
         }
         return nil
     }
@@ -148,45 +177,6 @@ public struct HighballPaths: Sendable {
     public var hasData: Bool {
         let fm = FileManager.default
         return [engines, bottles].contains { (try? fm.contentsOfDirectory(atPath: $0.path))?.contains { !$0.hasPrefix(".") } == true }
-    }
-}
-
-/// Moves Highball's data between homes (#24, #68): every top-level entry except the pointer file
-/// and the trash is copied, checked file by file for count and bytes, and only then removed at
-/// the source, so a failure part way leaves the old home intact. Symbolic links are copied as
-/// links; the engine's absolute ones are re-made by the engine on its next use.
-public enum HomeMove {
-    public static let skipped: Set<String> = ["config.json", ".trash", ".DS_Store"]
-
-    public static func move(from source: URL, to target: URL, progress: (String) -> Void = { _ in }) throws {
-        let fm = FileManager.default
-        try fm.createDirectory(at: target, withIntermediateDirectories: true)
-        let entries = try fm.contentsOfDirectory(atPath: source.path).filter { !skipped.contains($0) }.sorted()
-        for name in entries {
-            let from = source.appending(path: name), to = target.appending(path: name)
-            progress(name)
-            if fm.fileExists(atPath: to.path) { try fm.removeItem(at: to) }
-            try fm.copyItem(at: from, to: to)
-            let a = try tally(from), b = try tally(to)
-            guard a == b else { throw HighballError.failed("'\(name)' did not copy completely (\(a.files) files, \(a.bytes) bytes at the source, \(b.files) files, \(b.bytes) bytes at the destination); nothing was removed") }
-        }
-        for name in entries { try fm.removeItem(at: source.appending(path: name)) }
-    }
-
-    /// File count and byte total under a path, links counted as themselves and not followed.
-    public static func tally(_ root: URL) throws -> (files: Int, bytes: Int64) {
-        let fm = FileManager.default
-        var files = 0, bytes: Int64 = 0
-        let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
-        guard let rootValues = try? root.resourceValues(forKeys: Set(keys + [.isDirectoryKey])) else { return (0, 0) }
-        if rootValues.isDirectory != true { return (1, Int64(rootValues.fileSize ?? 0)) }
-        guard let e = fm.enumerator(at: root, includingPropertiesForKeys: keys, options: []) else { return (0, 0) }
-        for case let url as URL in e {
-            let v = try url.resourceValues(forKeys: Set(keys))
-            if v.isSymbolicLink == true { files += 1; continue }
-            if v.isRegularFile == true { files += 1; bytes += Int64(v.fileSize ?? 0) }
-        }
-        return (files, bytes)
     }
 }
 

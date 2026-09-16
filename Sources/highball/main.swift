@@ -636,7 +636,7 @@ extension HighballKit.Renderer: ExpressibleByArgument {}
 struct Config: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Where Highball keeps engines and environments (#24): `config` shows it, `config home <folder>` moves there, `config home --default` goes back.")
     @Argument(help: "'home' to change the location.") var setting: String?
-    @Argument(help: "A folder on any APFS volume, or --default.") var value: String?
+    @Argument(help: "A folder that can hold an environment (this Mac, an APFS disk, or a suitable network share), or --default.") var value: String?
     @Flag(name: .customLong("default"), help: "Back to ~/Library/Application Support/Highball.") var useDefault = false
 
     func run() async throws {
@@ -650,7 +650,11 @@ struct Config: AsyncParsableCommand {
         if useDefault {
             let target = HighballPaths.defaultHome
             if paths.home.standardizedFileURL != target.standardizedFileURL, paths.hasData {
-                print("moving data back to \(target.path)…"); try HomeMove.move(from: paths.home, to: target) { print("  \($0)") }
+                print("moving data back to \(target.path)…")
+                var last = ""
+                try HomeMove.move(from: paths.home, to: target) { name, _, _ in
+                    if name != last { last = name; print("  \(name)") }
+                }
             }
             try HighballPaths.setConfiguredHome(nil); print("home: \(target.path) (default)"); return
         }
@@ -659,7 +663,10 @@ struct Config: AsyncParsableCommand {
         if let why = HighballPaths.locationProblem(target) { throw ValidationError(why) }
         if paths.hasData, target.standardizedFileURL != paths.home.standardizedFileURL {
             print("moving engines, environments and downloads to \(target.path)…")
-            try HomeMove.move(from: paths.home, to: target) { print("  \($0)") }
+            var last = ""
+            try HomeMove.move(from: paths.home, to: target) { name, _, _ in
+                if name != last { last = name; print("  \(name)") }
+            }
         }
         try HighballPaths.setConfiguredHome(target)
         print("home: \(target.path). Relaunch the Highball app to use it.")
