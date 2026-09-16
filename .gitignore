@@ -11,6 +11,8 @@ private/
 *.o
 *.d
 *.swiftdeps
+*.swiftdeps~
+*~
 Scripts/winlist
 spike/epic-stub/EpicGamesLauncher.exe
 spike/tools/cabextract
