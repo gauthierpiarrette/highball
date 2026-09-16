@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.22</title>
+      <description><![CDATA[Candidate engine r4 under Advanced: Direct3D 9 from the DXVK 3.1 macOS fork, for RaceRoom, FNAF 2 and Left 4 Dead]]></description>
+      <pubDate>Wed, 16 Sep 2026 10:20:04 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.22/Highball-0.9.22.zip" sparkle:version="0.9.22" sparkle:shortVersionString="0.9.22" sparkle:edSignature="ka+MXk4Z9LBiytbHEIIKiGwZAAumguSlCsTEzXZgsi5ocGLEpwPQx5tuf+2tyHiPDZlsvIcOfCtRNdbfVpV+Bw==" length="3596439" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.21</title>
       <description><![CDATA[Epic installs no longer die on the language-pack prompt; candidate engine r10 with MoltenVK 1.4.2 under Advanced]]></description>
       <pubDate>Tue, 15 Sep 2026 19:56:16 +0200</pubDate>
