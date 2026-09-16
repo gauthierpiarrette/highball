@@ -201,6 +201,9 @@ int main(void) {
                 D3D12_FEATURE_DATA_D3D12_OPTIONS4 o4 = {0};
                 r = ID3D12Device_CheckFeatureSupport(d, D3D12_FEATURE_D3D12_OPTIONS4, &o4, sizeof o4);
                 say("OPTIONS4: 0x%08lx, Native16Bit %d, SharedResourceCompat %d", (unsigned long)r, o4.Native16BitShaderOpsSupported, o4.SharedResourceCompatibilityTier);
+                D3D12_FEATURE_DATA_D3D12_OPTIONS11 o11 = {0};
+                r = ID3D12Device_CheckFeatureSupport(d, D3D12_FEATURE_D3D12_OPTIONS11, &o11, sizeof o11);
+                say("OPTIONS11: 0x%08lx, AtomicInt64OnDescriptorHeapResource %d (Capcom's RE Engine refuses the adapter without it, highball-db#69)", (unsigned long)r, o11.AtomicInt64OnDescriptorHeapResourceSupported);
                 D3D12_FEATURE_DATA_D3D12_OPTIONS6 o6 = {0};
                 r = ID3D12Device_CheckFeatureSupport(d, D3D12_FEATURE_D3D12_OPTIONS6, &o6, sizeof o6);
                 say("OPTIONS6: 0x%08lx, VariableShadingRateTier %d, BackgroundProcessing %d", (unsigned long)r, o6.VariableShadingRateTier, o6.BackgroundProcessingSupported);
