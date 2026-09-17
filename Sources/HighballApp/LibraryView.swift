@@ -283,6 +283,15 @@ struct LibraryTile: View {
             if state.coverStore.coverURL(for: item.id) != nil {
                 Button(L("Reset cover")) { state.resetCover(for: item) }
             }
+            // A program someone added by hand leaves the library from its tile, not only from
+            // the environment's programs list (highball-db#68). Steam and Epic entries follow
+            // their stores' libraries, so they have no such button.
+            if item.source == .pin, let bottleName = item.bottleName,
+               let bottle = state.bottles.first(where: { $0.name == bottleName }),
+               let pin = bottle.settings.pins.first(where: { $0.id == item.pinID }) {
+                Divider()
+                Button(L("Remove from list"), role: .destructive) { state.removePin(pin, from: bottle) }
+            }
         }
         .accessibilityLabel("\(item.title), \(item.source.rawValue)\(item.installed ? "" : ", " + L("Not installed"))")
     }
