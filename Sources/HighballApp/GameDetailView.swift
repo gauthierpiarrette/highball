@@ -230,6 +230,18 @@ struct GameDetailView: View {
                                 GraphicsModePicker(bottle: bottle)
                             }
                         }
+                        if let emulated = state.displayModeEmulation(for: item) {
+                            HStack(alignment: .top, spacing: 12) {
+                                Text(L("Display mode")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 2)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Toggle(L("Emulate display mode changes"), isOn: Binding(
+                                        get: { emulated }, set: { state.setDisplayModeEmulation($0, for: item) }))
+                                        .toggleStyle(.checkbox)
+                                    Text(L("For a game that opens small, off-centre, or refuses its fullscreen mode. The Mac cannot switch its display for it, so Wine pretends and scales the picture instead. A fix from the database may have set this already."))
+                                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
                         row(L("Engine"), (state.engine(for: bottle)?.displayName).map { "\($0) · \(bottle.settings.engineID)" } ?? bottle.settings.engineID)
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(L("Environment")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)

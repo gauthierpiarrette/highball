@@ -532,6 +532,7 @@ final class AppState {
     }
 
     func refresh() {
+        executableCache.removeAll()
         if !prunedLogsThisRun {
             prunedLogsThisRun = true
             let n = LogPruner.prune(directory: paths.logs)
@@ -1099,7 +1100,16 @@ final class AppState {
     }
 
     /// The program an item runs: the largest .exe in a Steam or Epic game's folder, a pin's own.
+    /// Finding it walks the game's folder, so the answer is kept per item until the next
+    /// library refresh: views ask on every evaluation.
+    private var executableCache: [String: URL] = [:]
     func programExecutable(for item: LibraryItem) -> URL? {
+        if let hit = executableCache[item.id] { return hit }
+        let found = findProgramExecutable(for: item)
+        if let found { executableCache[item.id] = found }
+        return found
+    }
+    private func findProgramExecutable(for item: LibraryItem) -> URL? {
         guard let bottleName = item.bottleName, let bottle = bottles.first(where: { $0.name == bottleName }) else { return nil }
         switch item.source {
         case .steam:
@@ -1110,6 +1120,45 @@ final class AppState {
         case .pin:
             return item.pinID.flatMap { id in bottle.settings.pins.first { $0.id == id } }.map { $0.executableURL(driveC: bottle.driveC) }
         }
+    }
+
+    /// Emulated display mode changes for a program (`DisplayModeEmulation`): the bottle's
+    /// registry is the state, `registryVersion` makes views re-read it after a write.
+    private(set) var registryVersion = 0
+    /// user.reg is a megabyte in a used bottle; keep the answer until the file changes.
+    private var displayModeCache: [String: (modified: Date, on: Bool)] = [:]
+    func displayModeEmulation(in bottle: Bottle, executable exe: URL) -> Bool {
+        _ = registryVersion
+        let reg = bottle.url.appending(path: "user.reg")
+        let modified = (try? reg.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        let key = bottle.name + "|" + exe.lastPathComponent
+        if let hit = displayModeCache[key], hit.modified == modified { return hit.on }
+        let on = DisplayModeEmulation.isOn(in: bottle, executable: exe)
+        displayModeCache[key] = (modified, on)
+        return on
+    }
+    func displayModeEmulation(for item: LibraryItem) -> Bool? {
+        guard let bottleName = item.bottleName, let bottle = bottles.first(where: { $0.name == bottleName }),
+              let exe = programExecutable(for: item) else { return nil }
+        return displayModeEmulation(in: bottle, executable: exe)
+    }
+    func setDisplayModeEmulation(_ on: Bool, in bottle: Bottle, executable exe: URL) {
+        guard let engine = engine(for: bottle) else { return }
+        Task { @MainActor in
+            let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
+            do {
+                try await DisplayModeEmulation.set(on, in: runner, executable: exe)
+                appendLog("\(exe.lastPathComponent): emulated display mode changes \(on ? "on" : "off") in \(bottle.name); the next launch uses it.")
+            } catch {
+                fail(error, bottle: bottle)
+            }
+            registryVersion += 1
+        }
+    }
+    func setDisplayModeEmulation(_ on: Bool, for item: LibraryItem) {
+        guard let bottleName = item.bottleName, let bottle = bottles.first(where: { $0.name == bottleName }),
+              let exe = programExecutable(for: item) else { return }
+        setDisplayModeEmulation(on, in: bottle, executable: exe)
     }
 
     /// Whether the item's program needs Direct3D 12 (`ProgramNeeds.wantsDirect3D12`), remembered

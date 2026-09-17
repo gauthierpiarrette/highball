@@ -595,6 +595,16 @@ struct PinSettingsSheet: View {
                 }
             }
             .pickerStyle(.menu)
+            // The registry is the state for this one, so it applies as soon as it is toggled,
+            // not on Save: the same value a database fix writes.
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(L("Emulate display mode changes"), isOn: Binding(
+                    get: { state.displayModeEmulation(in: bottle, executable: pin.executableURL(driveC: bottle.driveC)) },
+                    set: { state.setDisplayModeEmulation($0, in: bottle, executable: pin.executableURL(driveC: bottle.driveC)) }))
+                    .toggleStyle(.checkbox)
+                Text(L("For a game that opens small, off-centre, or refuses its fullscreen mode. The Mac cannot switch its display for it, so Wine pretends and scales the picture instead. A fix from the database may have set this already."))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Spacer()
                 Button(L("Cancel")) { dismiss() }
