@@ -166,4 +166,32 @@ final class EnvironmentTests: XCTestCase {
         // The fixture engine has no renderer overlays on disk, so wined3d is the mode that resolves.
         XCTAssertEqual(try bottle.environment(engine: engine, renderer: .wined3d)["CX_FWD_COMPAT_GL_CTX"], "1")
     }
+
+    // an engine with the d3dmetal licence accepted and its overlay plus d9vk on disk
+    private func d3dmetalEngine() throws -> InstalledEngine {
+        var manifest = EngineManifest(id: "d3dmetal-test", displayName: "D3DMetal test",
+                                      arch: "x86_64", minMacOS: "14.0", components: [:])
+        manifest.acceptedLicenses = Array(EngineManifest.gatedRenderers.values)
+        let engine = InstalledEngine(manifest: manifest,
+                                     root: FileManager.default.temporaryDirectory.appending(path: "hb-test-d3dmetal-\(UUID().uuidString)"))
+        for r in ["d3dmetal", "d9vk"] {
+            try FileManager.default.createDirectory(at: engine.frameworksDir.appending(path: "renderer/\(r)/wine"),
+                                                    withIntermediateDirectories: true)
+        }
+        return engine
+    }
+
+    // d3dmetal ships 64-bit only, so 32-bit direct3d 10/11 goes to dxmt after it, not to wined3d
+    func testD3DMetalFallsBackToDXMTFor32BitGames() throws {
+        let engine = try d3dmetalEngine()
+        defer { try? FileManager.default.removeItem(at: engine.root) }
+        let d3dmetal = engine.frameworksDir.appending(path: "renderer/d3dmetal/wine").path
+        let d9vk = engine.frameworksDir.appending(path: "renderer/d9vk/wine").path
+        XCTAssertEqual(try Renderer.d3dmetal.environment(engine: engine)["WINEDLLPATH_PREPEND"], "\(d3dmetal):\(d9vk)",
+                       "an engine without dxmt keeps the search path as it was")
+        let dxmt = engine.frameworksDir.appending(path: "renderer/dxmt/wine")
+        try FileManager.default.createDirectory(at: dxmt, withIntermediateDirectories: true)
+        XCTAssertEqual(try Renderer.d3dmetal.environment(engine: engine)["WINEDLLPATH_PREPEND"], "\(d3dmetal):\(dxmt.path):\(d9vk)",
+                       "dxmt comes after d3dmetal, so d3dmetal still serves everything it ships")
+    }
 }
