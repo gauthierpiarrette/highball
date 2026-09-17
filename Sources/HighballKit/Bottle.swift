@@ -646,18 +646,20 @@ public struct Bottle: Sendable {
            let shim = engine.resolveLsfgShimDir(), let dll = losslessScalingDLL(environment: env) {
             let existing = (env["DYLD_LIBRARY_PATH"] ?? "").split(separator: ":").map(String.init)
             env["DYLD_LIBRARY_PATH"] = ([shim.path] + existing.filter { $0 != shim.path }).joined(separator: ":")
-            // metal renderers get the same dylib inserted to hook CAMetalLayer, wined3d moves to vulkan
+            // every renderer gets the same dylib inserted: metal renderers to hook CAMetalLayer, the rest for OpenGL games
+            let dylib = shim.appending(path: "libMoltenVK.dylib").path
+            let inserted = (env["DYLD_INSERT_LIBRARIES"] ?? "").split(separator: ":").map(String.init)
+            env["DYLD_INSERT_LIBRARIES"] = ([dylib] + inserted.filter { $0 != dylib }).joined(separator: ":")
             switch r {
             case .dxmt, .d3dmetal:
                 env["LSFGM_METAL"] = "1"
-                let dylib = shim.appending(path: "libMoltenVK.dylib").path
-                let inserted = (env["DYLD_INSERT_LIBRARIES"] ?? "").split(separator: ":").map(String.init)
-                env["DYLD_INSERT_LIBRARIES"] = ([dylib] + inserted.filter { $0 != dylib }).joined(separator: ":")
+                env.removeValue(forKey: "LSFGM_OPENGL")
             case .wined3d:
-                let options = (env["WINE_D3D_CONFIG"] ?? "").split(separator: ",").map(String.init)
-                env["WINE_D3D_CONFIG"] = (["renderer=vulkan"] + options.filter { !$0.hasPrefix("renderer=") }).joined(separator: ",")
+                env.removeValue(forKey: "LSFGM_METAL")
+                env["LSFGM_OPENGL"] = "1"
             case .dxvk, .vkd3d:
                 env.removeValue(forKey: "LSFGM_METAL")
+                env["LSFGM_OPENGL"] = "1"
             }
             env["LSFGM_MOLTENVK"] = env["LSFGM_MOLTENVK"].flatMap { $0.isEmpty ? nil : frameGenPath($0).path }
                 ?? shim.appending(path: InstalledEngine.lsfgRealDriverName).path
@@ -673,6 +675,7 @@ public struct Bottle: Sendable {
             env.removeValue(forKey: "LSFGM_ENV")
             env.removeValue(forKey: "LSFGM_PROFILE")
             env.removeValue(forKey: "LSFGM_METAL")
+            env.removeValue(forKey: "LSFGM_OPENGL")
             // keep unavailable settings disabled
             env["DISABLE_LSFGM"] = "1"
             if case .unavailable(let reason) = frameGeneration { env["HB_LSFG_UNAVAILABLE"] = reason }
