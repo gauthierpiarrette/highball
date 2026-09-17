@@ -16,15 +16,17 @@ import re, collections
 keys = re.findall(r'^\s*"((?:[^"\\]|\\.)*)"\s*:\s*"', open("Sources/HighballApp/L10n.swift").read(), re.M)
 dups = [k for k, c in collections.Counter(keys).items() if c > 1]
 if dups: print("error: duplicate L10n keys:", dups); raise SystemExit(1)
-# Every string the interface passes through L() must have a French line: a French Mac must
-# never see English (2026-09-15). Kit-side error texts are out of this net for now.
+# English is the source language and French is the one translation kept complete; a string
+# without a French line shows English on a French Mac (L() falls back), which is fine for a
+# contributor's change, so this warns rather than refusing (2026-09-17). Translations are
+# optional for contributors; the maintainer fills the French in before a release.
 import glob
 used = set()
 for f in glob.glob("Sources/HighballApp/*.swift"):
     if f.endswith("L10n.swift"): continue
     used |= set(re.findall(r'\bL\("((?:[^"\\]|\\.)*)"\)', open(f).read()))
 missing = sorted(used - set(keys))
-if missing: print("error: L() keys without a French translation:", missing); raise SystemExit(1)
+if missing: print(f"warning: {len(missing)} L() strings without a French line (English shows instead):", missing)
 PY
 swift build -c "$CONFIG" --product HighballApp
 APP=dist/Highball.app

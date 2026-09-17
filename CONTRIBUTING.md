@@ -8,8 +8,9 @@ engine and renderer are captured automatically.
 Every recipe carries `lastVerified` so stale data is visible rather than silently wrong.
 
 **Code**: `swift build && swift test` is the whole loop; `Scripts/make-app.sh debug` builds the app
-bundle. Match the style around you. By contributing you license your work under GPL-3.0 (code) or
-CC0 (data).
+bundle. Match the style around you. Interface text is English; a French line in `L10n.swift` is
+welcome but optional, English shows until someone adds it. By contributing you license your work
+under GPL-3.0 (code) or CC0 (data).
 
 Everyone here follows the [code of conduct](CODE_OF_CONDUCT.md).
 
