@@ -84,14 +84,18 @@ final class RecipeDBTests: XCTestCase {
         }
     }
 
-    // The Rockstar db entry must stay blocked until the engine fix lands.
-    func testRockstarRecipeIsBlocked() throws {
+    // The Rockstar launcher runs on the Wine 11 engines (verified 2026-09-05, GTA V and RDR2 play
+    // through it), so the recipe must not be blocked, it must ask for that engine instead: a
+    // `blocked` recipe refuses on every engine, and it refused the Wine 10 default with a message
+    // saying the Wine 11 engine was not installable yet (highball#124).
+    func testRockstarRecipeAsksForTheWine11EngineInsteadOfBlocking() throws {
         let f = dbRoot.appending(path: "recipes/launchers/rockstar.json")
         guard FileManager.default.fileExists(atPath: f.path) else {
             throw XCTSkip("highball-db checkout not found next to the repo")
         }
         let r = try JSONDecoder.highball.decode(Recipe.self, from: Data(contentsOf: f))
-        XCTAssertNotNil(r.blocked, "unblock only after verifying the launcher actually runs (Sikarugir#258)")
+        XCTAssertNil(r.blocked, "a blocked recipe refuses on every engine, including the one it works on")
+        XCTAssertEqual(r.engine?.hasPrefix("x64-crossover26.3-"), true, "the launcher needs the Wine 11 tree")
     }
 
     // Issue #36 tripwire: the VC++ installers must stay pinned to an immutable versioned URL
