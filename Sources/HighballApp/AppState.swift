@@ -245,9 +245,20 @@ final class AppState {
         if let engine = engine(for: bottle) {
             let entry = gameDB.entry(for: item)
             let pinMode = item.pinID.flatMap { id in bottle.settings.pins.first { $0.id == id }?.renderer }
-            let wanted = Renderer.choose(requested: renderer, gameOverride: rendererOverride(for: item), row: entry?.effectiveRenderer(),
+            var wanted = Renderer.choose(requested: renderer, gameOverride: rendererOverride(for: item), row: entry?.effectiveRenderer(),
                                          environmentExplicit: bottle.settings.rendererExplicit, pin: pinMode,
                                          environment: bottle.settings.renderer, nativeVulkan: entry?.nativeVulkan == true)
+            // A program with only Direct3D 12 cannot run on DXMT, DXVK or Wine's Direct3D, so a
+            // mode that has it takes over before the launch, and the log says so (Farming
+            // Simulator 22 stopped at "Shader model 6.0 is required" on DXMT, highball#139).
+            if !wanted.servesDirect3D12, entry?.nativeVulkan != true, programNeedsDirect3D12Only(item) {
+                let instead = Renderer.forDirect3D12Only(chosen: wanted, engine: engine)
+                if instead != wanted {
+                    appendLog("\(item.title) only has Direct3D 12 and \(GamePageCopy.plainName(wanted)) has none, playing with \(GamePageCopy.plainName(instead)).")
+                    wanted = instead
+                    renderer = instead
+                }
+            }
             switch wanted.availability(in: engine) {
             case .available:
                 break
@@ -1058,21 +1069,36 @@ final class AppState {
         } catch { fail(error) }
     }
 
-    /// The game's own icon as a PNG under covers/icons, read from its executable (the largest
-    /// .exe in its folder, or a pin's own), or nil when there is none to read.
-    func programIcon(for item: LibraryItem) -> URL? {
+    /// The program an item runs: the largest .exe in a Steam or Epic game's folder, a pin's own.
+    func programExecutable(for item: LibraryItem) -> URL? {
         guard let bottleName = item.bottleName, let bottle = bottles.first(where: { $0.name == bottleName }) else { return nil }
-        let exe: URL?
         switch item.source {
         case .steam:
             guard let game = gamesByBottle[bottleName]?.first(where: { $0.appid == item.steamAppID }), !game.installdir.isEmpty else { return nil }
-            exe = PEIcon.bestExecutable(in: bottle.driveC.appending(path: "Program Files (x86)/Steam/steamapps/common/\(game.installdir)"))
+            return PEIcon.bestExecutable(in: bottle.driveC.appending(path: "Program Files (x86)/Steam/steamapps/common/\(game.installdir)"))
         case .epic:
-            exe = item.epicAppName.flatMap { epicInstalls[$0] }.flatMap { PEIcon.bestExecutable(in: URL(fileURLWithPath: $0)) }
+            return item.epicAppName.flatMap { epicInstalls[$0] }.flatMap { PEIcon.bestExecutable(in: URL(fileURLWithPath: $0)) }
         case .pin:
-            exe = item.pinID.flatMap { id in bottle.settings.pins.first { $0.id == id } }.map { $0.executableURL(driveC: bottle.driveC) }
+            return item.pinID.flatMap { id in bottle.settings.pins.first { $0.id == id } }.map { $0.executableURL(driveC: bottle.driveC) }
         }
-        guard let exe, let png = PEIcon.png(from: exe) else { return nil }
+    }
+
+    /// Whether the item's program links Direct3D 12 and nothing else to draw with, remembered
+    /// per executable and modification date: finding the executable walks the game's folder.
+    private var direct3D12OnlyCache: [String: (exe: URL, modified: Date, verdict: Bool)] = [:]
+    func programNeedsDirect3D12Only(_ item: LibraryItem) -> Bool {
+        guard let exe = programExecutable(for: item) else { return false }
+        let modified = (try? exe.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        if let hit = direct3D12OnlyCache[item.id], hit.exe == exe, hit.modified == modified { return hit.verdict }
+        let verdict = ProgramNeeds.direct3D12Only(program: exe)
+        direct3D12OnlyCache[item.id] = (exe, modified, verdict)
+        return verdict
+    }
+
+    /// The game's own icon as a PNG under covers/icons, read from its executable (the largest
+    /// .exe in its folder, or a pin's own), or nil when there is none to read.
+    func programIcon(for item: LibraryItem) -> URL? {
+        guard let exe = programExecutable(for: item), let png = PEIcon.png(from: exe) else { return nil }
         let dir = paths.home.appending(path: "covers/icons", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = dir.appending(path: MacAppStub.bundleID(for: item.id) + ".png")

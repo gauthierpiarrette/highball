@@ -46,6 +46,23 @@ final class RendererAvailabilityTests: XCTestCase {
         return b
     }
 
+    // MARK: Direct3D 12-only programs (highball#139)
+
+    func testADirect3D12OnlyProgramGetsAModeThatHasIt() throws {
+        let full = try engine(accepted: true)
+        XCTAssertEqual(Renderer.forDirect3D12Only(chosen: .dxmt, engine: full), .d3dmetal)
+        XCTAssertEqual(Renderer.forDirect3D12Only(chosen: .dxvk, engine: full), .d3dmetal)
+        XCTAssertEqual(Renderer.forDirect3D12Only(chosen: .wined3d, engine: full), .d3dmetal)
+        XCTAssertEqual(Renderer.forDirect3D12Only(chosen: .d3dmetal, engine: full), .d3dmetal, "already serves it")
+        XCTAssertEqual(Renderer.forDirect3D12Only(chosen: .vkd3d, engine: full), .vkd3d, "already serves it")
+        // The licence still to accept is the caller's ask, not a reason to pick something else.
+        XCTAssertEqual(Renderer.forDirect3D12Only(chosen: .dxmt, engine: try engine(accepted: false)), .d3dmetal)
+        // No D3DMetal at all: vkd3d when the engine carries it, else the choice stands and the
+        // launch fails the way it did.
+        XCTAssertEqual(Renderer.forDirect3D12Only(chosen: .dxmt, engine: try engine(ships: ["dxmt", "dxvk", "d9vk", "vkd3d"], accepted: true)), .vkd3d)
+        XCTAssertEqual(Renderer.forDirect3D12Only(chosen: .dxmt, engine: try engine(ships: ["dxmt", "dxvk", "d9vk"], accepted: true)), .dxmt)
+    }
+
     // MARK: Availability
 
     func testAvailabilityTellsLicenceFromAbsence() throws {

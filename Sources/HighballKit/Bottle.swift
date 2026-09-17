@@ -95,6 +95,22 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
         return [path, d9vk.appending(path: "wine").path].joined(separator: ":")
     }
 
+    /// Whether this mode has a Direct3D 12 a game can use. Wine's own d3d12 (vkd3d over
+    /// MoltenVK) creates no device on a Mac, so only the two overlays count.
+    public var servesDirect3D12: Bool { self == .d3dmetal || self == .vkd3d }
+
+    /// The mode for a program that only has Direct3D 12 (`ProgramNeeds.direct3D12Only`) when
+    /// `chosen` cannot serve it: D3DMetal when the engine ships it, licence accepted or still to
+    /// ask for (the caller's licence flow handles that), else vkd3d, else `chosen` unchanged so
+    /// the launch fails the way it did rather than in a new way. A program with a Direct3D 11
+    /// path never comes here; the environment's choice stands for it.
+    public static func forDirect3D12Only(chosen: Renderer, engine: InstalledEngine) -> Renderer {
+        if chosen.servesDirect3D12 { return chosen }
+        if Renderer.d3dmetal.availability(in: engine) != .notShipped { return .d3dmetal }
+        if Renderer.vkd3d.availability(in: engine) == .available { return .vkd3d }
+        return chosen
+    }
+
     /// The backend to offer after `current` failed on launch, cycling through the Metal-backed
     /// options. Direct3D 9 no longer constrains this: `withD9VK` attaches DXVK's d3d9 to every
     /// renderer, so switching backend can't drop D3D9 support the way it could before 0.7.17.
