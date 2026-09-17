@@ -194,4 +194,17 @@ final class EnvironmentTests: XCTestCase {
         XCTAssertEqual(try Renderer.d3dmetal.environment(engine: engine)["WINEDLLPATH_PREPEND"], "\(d3dmetal):\(dxmt.path):\(d9vk)",
                        "dxmt comes after d3dmetal, so d3dmetal still serves everything it ships")
     }
+
+    // the fps cap reaches the 32-bit games dxmt serves on a d3dmetal environment
+    func testD3DMetalPassesTheFpsCapToDXMT() throws {
+        let engine = try d3dmetalEngine()
+        defer { try? FileManager.default.removeItem(at: engine.root) }
+        var bottle = Bottle(url: URL(fileURLWithPath: "/tmp/hb-test-bottle"),
+                            settings: BottleSettings(name: "t", engineID: engine.id))
+        XCTAssertNil(try bottle.environment(engine: engine, renderer: .d3dmetal)["DXMT_CONFIG"], "uncapped sets nothing")
+        bottle.settings.fpsCap = 45
+        let env = try bottle.environment(engine: engine, renderer: .d3dmetal)
+        XCTAssertEqual(env["DXMT_CONFIG"], "d3d11.preferredMaxFrameRate=45;")
+        XCTAssertNil(env["DXVK_FRAME_RATE"], "d3dmetal has no dxvk cap channel")
+    }
 }

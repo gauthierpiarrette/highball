@@ -501,7 +501,7 @@ public struct Bottle: Sendable {
             switch r {
             case .dxvk: env["DXVK_FRAME_RATE"] = String(settings.fpsCap)
             case .vkd3d: env["DXVK_FRAME_RATE"] = String(settings.fpsCap); env["VKD3D_FRAME_RATE"] = String(settings.fpsCap)
-            case .dxmt: env["DXMT_CONFIG"] = "d3d11.preferredMaxFrameRate=\(settings.fpsCap);"
+            case .dxmt, .d3dmetal: env["DXMT_CONFIG"] = "d3d11.preferredMaxFrameRate=\(settings.fpsCap);" // 32-bit titles on d3dmetal run on dxmt
             default: break
             }
         }
