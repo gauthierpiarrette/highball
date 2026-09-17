@@ -22,7 +22,7 @@ git diff-index --quiet HEAD -- || echo "note: tracked files modified, so this re
 # screen check "fails" (2026-09-08, gate run 5): say so and stop instead of recording a regression.
 if Scripts/winlist 2>/dev/null | grep -qE "loginwindow[[:space:]]+\|\|[[:space:]]+0,0 [0-9]+x[0-9]+[[:space:]]+layer=20[0-9]{2}[[:space:]]+on=true"; then   # the lock screen: full size, layer 2000-2099, fields tab separated
   echo "gate: the screen is locked; unlock it and run again (nothing was tested)" >&2
-  python3 -c "import json,time;json.dump({'passed':False,'locked':True,'epoch':int(time.time()),'date':time.strftime('%Y-%m-%d'),'commit':'$COMMIT','required':['upgrade','firstrun','launch-window'],'checks':{}},open('$OUT/latest.json','w'),indent=2)"
+  python3 -c "import json,time;json.dump({'passed':False,'locked':True,'epoch':int(time.time()),'date':time.strftime('%Y-%m-%d'),'commit':'$COMMIT','required':['unit','upgrade','firstrun','launch-window'],'checks':{}},open('$OUT/latest.json','w'),indent=2)"
   exit 3
 fi
 echo "gate: building dist/Highball.app from the working tree"
@@ -37,6 +37,9 @@ run() {
   printf '  %-14s %s (%ss)\n' "$name" "${R[$name]}" "${T[$name]}"
 }
 echo "gate: required checks"
+# The unit tests first: a beta once shipped over a failing suite because only the smokes ran
+# here (2026-09-17). Ten seconds, and it covers the db checkout next to the repo too.
+run unit swift test
 run upgrade Scripts/upgrade-smoke.sh --screen
 run firstrun Scripts/firstrun-smoke.sh --screen
 run launch-window Scripts/launch-window-smoke.sh
@@ -45,14 +48,14 @@ run game Scripts/game-smoke.sh
 [ $WITH_RENDER = 1 ] && run render Scripts/render-smoke.sh
 
 passed=true
-for n in upgrade firstrun launch-window; do [ "${R[$n]}" = pass ] || passed=false; done
+for n in unit upgrade firstrun launch-window; do [ "${R[$n]}" = pass ] || passed=false; done
 json="{"
 for n in ${(k)R}; do json+="\"$n\":{\"result\":\"${R[$n]}\",\"seconds\":${T[$n]}},"; done
 json="${json%,}}"
 HB_JSON="$json" HB_COMMIT="$COMMIT" HB_PASSED="$passed" python3 - "$OUT/latest.json" <<'PY'
 import json, os, sys, time
 json.dump({"passed": os.environ['HB_PASSED'] == 'true', "epoch": int(time.time()), "date": time.strftime('%Y-%m-%d'),
-           "commit": os.environ['HB_COMMIT'], "required": ["upgrade", "firstrun", "launch-window"],
+           "commit": os.environ['HB_COMMIT'], "required": ["unit", "upgrade", "firstrun", "launch-window"],
            "checks": json.loads(os.environ['HB_JSON'])}, open(sys.argv[1], 'w'), indent=2)
 PY
 if [ $passed = true ]; then echo "GATE PASSED for ${COMMIT:0:7} ($OUT/latest.json)"; else echo "GATE FAILED for ${COMMIT:0:7}: see $OUT/*.log"; exit 1; fi
