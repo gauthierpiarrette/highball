@@ -254,6 +254,13 @@ public struct Recipe: Codable, Sendable, Identifiable {
     public var knownIssues: [KnownIssue]?
     public var lastVerified: Verification?
     public var blocked: Blocked?
+    /// True for a fix Play must never apply on its own: it helps some Macs and breaks others,
+    /// so the page offers it under Advanced and the notes say when to try it. The first one is
+    /// RaceRoom's newer Direct3D 9 layer (highball-db#60): it rendered the game for one reporter
+    /// and drew it in grayscale for another. An opt-in recipe still counts as the game's fix
+    /// for the page's wording and for artifact checks once applied.
+    public var optIn: Bool?
+    public var isOptIn: Bool { optIn ?? false }
     /// What an installed runtime leaves behind, so the Dependencies panel can tell "installed"
     /// from "our recipe ran": a file under drive_c, or a registry value in system.reg (exact
     /// match or a minimum for dword values). Any one marker satisfied means installed. Data, so

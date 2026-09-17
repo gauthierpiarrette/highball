@@ -38,6 +38,30 @@ final class GamePageCopyTests: XCTestCase {
         XCTAssertEqual(GamePageCopy.verdict(e, myChip: "Apple M1", today: today).headline, "Can't run: Vanguard.")
     }
 
+    /// An opt-in fix is never Play's to apply (highball-db#60): the page says so instead of
+    /// listing steps Play will not take, and decoding keeps the flag.
+    func testAnOptInFixIsLeftToTheOwner() throws {
+        let e = try entry(#"{"id":"x","title":"X","steam_appid":1,"status":"community","renderer":"dxvk"}"#)
+        var recipe = Recipe(id: "x", kind: .game, title: "Modern Direct3D 9", steps: [
+            .copy(from: "renderers/d9vk-modern/wine/x86_64-windows/d3d9.dll", to: "game/d3d9.dll", asNative: true),
+        ])
+        recipe.optIn = true
+        XCTAssertTrue(recipe.isOptIn)
+        let items = GamePageCopy.willDo(e, recipe: recipe, applied: false, bottleRenderer: .dxvk, osMajor: 26)
+        XCTAssertEqual(items.map(\.text), [
+            "Use DXVK (Vulkan on Metal), the way it was verified",
+            "Leave the optional Modern Direct3D 9 fix alone; it is under Advanced for when the notes say your Mac needs it",
+        ])
+        let done = GamePageCopy.willDo(e, recipe: recipe, applied: true, bottleRenderer: .dxvk, osMajor: 26)
+        XCTAssertEqual(done[1].text, "Keep the Modern Direct3D 9 fix you applied under Advanced")
+        XCTAssertTrue(done[1].done)
+        let json = #"{"id":"x","kind":"game","title":"t","optIn":true,"steps":[{"type":"note","text":"n"}]}"#
+        let decoded = try JSONDecoder.highball.decode(Recipe.self, from: Data(json.utf8))
+        XCTAssertTrue(decoded.isOptIn)
+        let plain = try JSONDecoder.highball.decode(Recipe.self, from: Data(#"{"id":"y","kind":"game","title":"t","steps":[{"type":"note","text":"n"}]}"#.utf8))
+        XCTAssertFalse(plain.isOptIn, "absent means Play applies it, as every recipe before")
+    }
+
     func testWillDoListsRendererArgsAndRecipeSteps() throws {
         let e = try entry(#"{"id":"x","title":"X","steam_appid":1,"status":"verified-local","renderer":"dxmt","launchArgs":["-windowed"]}"#)
         let recipe = Recipe(id: "x", kind: .game, title: "X fix", steps: [

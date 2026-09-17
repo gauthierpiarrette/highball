@@ -274,7 +274,9 @@ final class AppState {
                 renderer = instead
             }
         }
-        if let recipe = fixRecipe(for: item),
+        // An opt-in fix is the owner's call from the page, never Play's: it helps some Macs and
+        // breaks others (RaceRoom's newer Direct3D 9, highball-db#60). Play leaves it alone.
+        if let recipe = fixRecipe(for: item), !recipe.isOptIn,
            !bottle.settings.recipes.contains(recipe.id) || !recipe.artifactsPresent(driveC: bottle.driveC),
            let engine = engine(for: bottle) {
             // The engine comes first, whatever the steps: a recipe of plain notes that names r7
