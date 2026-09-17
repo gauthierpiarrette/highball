@@ -22,7 +22,7 @@ if [ ! -f "$DL" ] || [ "$(shasum -a 256 "$DL" | awk '{print $1}')" != "$HEAVEN_S
   curl -fSL --retry 3 -o "$DL" "$HEAVEN_URL"
 fi
 "$HB" bottle create probe 2>&1 | tail -1
-"$HB" run probe "$DL" -- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- 2>&1 | tail -1
+"$HB" run probe "$DL" -- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- 2>&1 | tail -1 || true   # the installer's status is Wine's now (#102); Heaven.exe below is the check
 EXE="$HIGHBALL_HOME/bottles/probe/drive_c/Program Files (x86)/Unigine/Heaven Benchmark 4.0/bin/Heaven.exe"
 test -f "$EXE" || { log "FATAL: Heaven install failed"; exit 1; }
 ARGS=(-project_name Heaven -data_path ../ -engine_config ../data/heaven_4.0.cfg
