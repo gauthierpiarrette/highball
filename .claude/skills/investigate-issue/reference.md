@@ -25,7 +25,10 @@ swift build && swift test                    # from the repo root
 .build/debug/highball bottle kill <bottle>   # stop the wineserver before poking a prefix
 ```
 
-`highball run` always exits 0. Assert on its output, never on `$?`.
+`highball run` exits with the status Wine reports for the program, the low 8 bits of the Windows
+code (3010 arrives as 194), after printing `exit=N` and the log path. A CLI error such as a missing
+bottle also exits nonzero, so read the output to tell the two apart. `Scripts/test-cli-exit.sh
+.build/debug/highball <disposable bottle>` checks this contract.
 
 ## Smoke tests
 

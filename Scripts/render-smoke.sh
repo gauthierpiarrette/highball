@@ -31,7 +31,7 @@ fi
 
 "$HB" bottle delete "$BOTTLE" 2>/dev/null || true
 "$HB" bottle create "$BOTTLE" ${ENGINE:+--engine "$ENGINE"}
-"$HB" run "$BOTTLE" "$DL" -- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+"$HB" run "$BOTTLE" "$DL" -- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- || echo "Heaven installer exited $?; checking for Heaven.exe"
 EXE="$HOME/Library/Application Support/Highball/bottles/$BOTTLE/drive_c/Program Files (x86)/Unigine/Heaven Benchmark 4.0/bin/Heaven.exe"
 test -f "$EXE" || { echo "Heaven install failed"; exit 1; }
 ARGS_COMMON=(-project_name Heaven -data_path ../ -engine_config ../data/heaven_4.0.cfg
