@@ -54,6 +54,8 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
                 // would come back as the shim (see InstalledEngine.timestampShimDir for the layout).
                 env["HB_D3D12_REAL"] = "Z:" + shim.appending(path: "wine/x86_64-windows/\(InstalledEngine.shimRealName).dll").path.replacingOccurrences(of: "/", with: "\\")
             }
+            // d3dmetal is 64-bit only, so 32-bit d3d10/11 falls through to dxmt instead of wined3d
+            if let dxmt = engine.rendererDir("dxmt") { overlays += ":" + dxmt.appending(path: "wine").path }
             env["WINEDLLPATH_PREPEND"] = Self.withD9VK(overlays, engine: engine)
             env["CX_D3DMETALPATH"] = external
             env["DYLD_FALLBACK_LIBRARY_PATH+"] = external
@@ -515,7 +517,7 @@ public struct Bottle: Sendable {
             switch r {
             case .dxvk: env["DXVK_FRAME_RATE"] = String(settings.fpsCap)
             case .vkd3d: env["DXVK_FRAME_RATE"] = String(settings.fpsCap); env["VKD3D_FRAME_RATE"] = String(settings.fpsCap)
-            case .dxmt: env["DXMT_CONFIG"] = "d3d11.preferredMaxFrameRate=\(settings.fpsCap);"
+            case .dxmt, .d3dmetal: env["DXMT_CONFIG"] = "d3d11.preferredMaxFrameRate=\(settings.fpsCap);" // 32-bit titles on d3dmetal run on dxmt
             default: break
             }
         }
