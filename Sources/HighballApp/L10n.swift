@@ -124,6 +124,10 @@ enum L10n {
         "Move Highball's data to %@?": "Déplacer les données de Highball vers %@ ?",
         "Moving Highball's data to %@": "Déplacement des données de Highball vers %@",
         "Copying %@…": "Copie de %@…",
+        "Copying %@ — 1 file": "Copie de %@ — 1 fichier",
+        "Copying %@ — %d files": "Copie de %@ — %d fichiers",
+        "This folder is on a network share. Games can be slower there, and file locks sometimes get in the way. You can still use it.":
+            "Ce dossier est sur un partage réseau. Les jeux peuvent y être plus lents, et les verrous de fichiers gênent parfois. Vous pouvez tout de même l'utiliser.",
         "Relaunch": "Relancer",
         "Use the default location": "Utiliser l'emplacement par défaut",
         "Your Highball folder is not connected": "Votre dossier Highball n'est pas connecté",

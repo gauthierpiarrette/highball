@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// GitHub repo that receives community compatibility reports (owner/name).
@@ -67,6 +68,9 @@ public struct HighballPaths: Sendable {
     /// refusal the release notes promised never happened. Measured 2026-09-09 on an exFAT volume:
     /// the flag reads true, links are created, and a bottle moved there launches and runs. Asking
     /// the volume directly also catches what a format name never could.
+    ///
+    /// A network share is not refused. Prefixes there have locking and speed problems of their
+    /// own, so `locationWarning` tells the picker; the folder can still be used.
     public static func locationProblem(_ url: URL, defaultHome: URL = defaultHome) -> String? {
         let fm = FileManager.default
         var isDir: ObjCBool = false
@@ -85,6 +89,20 @@ public struct HighballPaths: Sendable {
             return "That drive cannot store a file larger than \(max >> 30) GB, and game files are often bigger. Format it as APFS, or pick another drive."
         }
         return volumeProblem(url)
+    }
+
+    /// Why a usable folder is still a poor place for a prefix, or nil. Shown before the move,
+    /// never as a hard stop.
+    public static func locationWarning(_ url: URL) -> String? {
+        guard isNetworkVolume(url) else { return nil }
+        return "This folder is on a network share. Games can be slower there, and file locks sometimes get in the way. You can still use it."
+    }
+
+    /// Unknown paths fail closed as local, so a missing folder is not a scare.
+    static func isNetworkVolume(_ url: URL) -> Bool {
+        var st = statfs()
+        guard statfs(url.path, &st) == 0 else { return false }
+        return UInt32(st.f_flags) & UInt32(MNT_LOCAL) == 0
     }
 
     /// Makes and removes a scratch folder inside `url` to check what Wine actually needs from the
@@ -155,45 +173,6 @@ public struct HighballPaths: Sendable {
     public var hasData: Bool {
         let fm = FileManager.default
         return [engines, bottles].contains { (try? fm.contentsOfDirectory(atPath: $0.path))?.contains { !$0.hasPrefix(".") } == true }
-    }
-}
-
-/// Moves Highball's data between homes (#24, #68): every top-level entry except the pointer file
-/// and the trash is copied, checked file by file for count and bytes, and only then removed at
-/// the source, so a failure part way leaves the old home intact. Symbolic links are copied as
-/// links; the engine's absolute ones are re-made by the engine on its next use.
-public enum HomeMove {
-    public static let skipped: Set<String> = ["config.json", ".trash", ".DS_Store"]
-
-    public static func move(from source: URL, to target: URL, progress: (String) -> Void = { _ in }) throws {
-        let fm = FileManager.default
-        try fm.createDirectory(at: target, withIntermediateDirectories: true)
-        let entries = try fm.contentsOfDirectory(atPath: source.path).filter { !skipped.contains($0) }.sorted()
-        for name in entries {
-            let from = source.appending(path: name), to = target.appending(path: name)
-            progress(name)
-            if fm.fileExists(atPath: to.path) { try fm.removeItem(at: to) }
-            try fm.copyItem(at: from, to: to)
-            let a = try tally(from), b = try tally(to)
-            guard a == b else { throw HighballError.failed("'\(name)' did not copy completely (\(a.files) files, \(a.bytes) bytes at the source, \(b.files) files, \(b.bytes) bytes at the destination); nothing was removed") }
-        }
-        for name in entries { try fm.removeItem(at: source.appending(path: name)) }
-    }
-
-    /// File count and byte total under a path, links counted as themselves and not followed.
-    public static func tally(_ root: URL) throws -> (files: Int, bytes: Int64) {
-        let fm = FileManager.default
-        var files = 0, bytes: Int64 = 0
-        let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
-        guard let rootValues = try? root.resourceValues(forKeys: Set(keys + [.isDirectoryKey])) else { return (0, 0) }
-        if rootValues.isDirectory != true { return (1, Int64(rootValues.fileSize ?? 0)) }
-        guard let e = fm.enumerator(at: root, includingPropertiesForKeys: keys, options: []) else { return (0, 0) }
-        for case let url as URL in e {
-            let v = try url.resourceValues(forKeys: Set(keys))
-            if v.isSymbolicLink == true { files += 1; continue }
-            if v.isRegularFile == true { files += 1; bytes += Int64(v.fileSize ?? 0) }
-        }
-        return (files, bytes)
     }
 }
 
