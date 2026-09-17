@@ -158,4 +158,13 @@ final class EnvironmentTests: XCTestCase {
         XCTAssertThrowsError(try bottle.environment(engine: engine, renderer: .dxvk),
                              "dxvk present but d9vk missing must throw, not fall back to wined3d")
     }
+
+    /// OpenGL games asking for a 3.2+ core context without the forward-compatible bit crash on
+    /// macOS unless Wine adds it; the engine's Mac driver reads this switch (highball#136).
+    func testForwardCompatibleGLContextsAreOnForEveryLaunch() throws {
+        let (engine, bottle) = try fixtures()
+        for r in [Renderer.dxvk, .dxmt, .wined3d] {
+            XCTAssertEqual(try bottle.environment(engine: engine, renderer: r)["CX_FWD_COMPAT_GL_CTX"], "1", "\(r)")
+        }
+    }
 }

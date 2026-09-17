@@ -469,6 +469,12 @@ public struct Bottle: Sendable {
         }
         if settings.metalHUD { env["MTL_HUD_ENABLED"] = "1" }
         if settings.advertiseAVX { env["ROSETTA_ADVERTISE_AVX"] = "1" }
+        // OpenGL games that ask for a 3.2+ core context without the forward-compatible bit get NULL
+        // from Wine's Mac driver ("OS X only supports forward-compatible 3.2+ contexts") and crash
+        // on the first GL call. macOS makes every 3.2+ core context forward-compatible anyway, so the
+        // CrossOver switch the engine's winemac.so carries adds the bit for them (Tomb Raider IV-VI
+        // Remastered, highball#136). It touches nothing that succeeded before.
+        env["CX_FWD_COMPAT_GL_CTX"] = "1"
         let r = effective
         // The async toggle travels in the generated dxvk.conf, NOT the DXVK_ASYNC env var:
         // the async fork reads `env == "1" || config.enableAsync`, so an env 1 can never be
