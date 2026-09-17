@@ -309,6 +309,7 @@ enum L10n {
         "%@ quit after %d seconds": "%@ s'est fermé après %d secondes",
         "%@ quit right away": "%@ s'est fermé tout de suite",
         "%d min": "%d min",
+        "%d sec": "%d s",
         "A Windows program I have": "Un programme Windows que j'ai",
         "A Windows program I have…": "Un programme Windows que j'ai…",
         "A few counts from this Mac, no game names; you read the text before it is sent.": "Quelques comptages depuis ce Mac, sans nom de jeu ; vous lisez le texte avant l'envoi.",
