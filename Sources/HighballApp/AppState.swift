@@ -1535,6 +1535,7 @@ final class AppState {
                 done: .handedOff,
                 stop: .killBottle(bottle, label: L("Stop"))) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
+            await adoptRuntimesInstalledByGames(in: bottle, engine: engine)
             // A running client would serve the launch with its own environment; when that is
             // not the game's, cold-start first: never under a running game, Steam's or not.
             // A kept client is said out loud, in the activity log and in the launch log's header:
@@ -1882,6 +1883,36 @@ final class AppState {
         let ids = Set(Self.tweakRecipes().filter { $0.isInstalled(in: bottle) }.map(\.id))
         installedTweaksCache[bottle.name] = (modified, ids)
         return ids.contains(recipe.id)
+    }
+
+    /// A runtime a game's own first-run setup installed (Steam runs the Visual C++ redist for
+    /// most games) registers itself like Highball's install does, but leaves Wine's built-in
+    /// copies of its DLLs in front of the real ones, and a launcher that checks those files
+    /// says the runtime is missing (Meccha Chameleon's, highball-db#105). Highball's own
+    /// install sets overrides for that; this sets the same ones, once, for a runtime the
+    /// checklist sees installed without Highball having installed it. Registry only: nothing
+    /// is downloaded, and the game's processes read the registry at their start, so a running
+    /// Steam client does not need restarting.
+    func adoptRuntimesInstalledByGames(in bottle: Bottle, engine: InstalledEngine) async {
+        for tweak in Self.tweakRecipes() where !bottle.settings.recipes.contains(tweak.id) && tweakIsInstalled(tweak, in: bottle) {
+            var registryOnly = tweak
+            registryOnly.steps = tweak.steps.filter { step in
+                switch step {
+                case .registry, .dllOverride: return true
+                default: return false
+                }
+            }
+            registryOnly.requires = nil
+            registryOnly.renderer = nil
+            guard !registryOnly.steps.isEmpty else { continue }
+            var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
+            do {
+                _ = try await runner.apply(registryOnly)
+                appendLog("\(tweak.title) was installed by a game's own setup; set the overrides Highball's install sets, so programs find the real files.")
+            } catch {
+                appendLog("\(tweak.title) is installed but its overrides could not be set: \(error.localizedDescription)")
+            }
+        }
     }
 
     /// What the bottle's Engine picker lists: installed engines, then known ones to download.
