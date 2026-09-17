@@ -12,7 +12,8 @@ public enum SteamRestart {
     /// `wanted`, in words for the log, or nil when it can. The renderer overlay path, the sync mode
     /// and the inherited per-process toggles matter; everything else in the environment is per-launch noise.
     /// Per-process settings the game inherits from the client and cannot change afterwards.
-    static let inherited: [(String, String)] = [("ROSETTA_ADVERTISE_AVX", "AVX advertised"), ("MTL_HUD_ENABLED", "the Metal HUD")]
+    static let inherited: [(String, String)] = [("ROSETTA_ADVERTISE_AVX", "AVX advertised"), ("MTL_HUD_ENABLED", "the Metal HUD"),
+                                                ("CX_FWD_COMPAT_GL_CTX", "forward-compatible OpenGL contexts")]
 
     /// What became of the running client before a launch.
     public enum Outcome: Equatable {
@@ -39,7 +40,11 @@ public enum SteamRestart {
         return "wined3d"
     }
 
-    public static func reason(live: [String: String], wanted: [String: String], wantedRenderer: String) -> String? {
+    /// `custom` names the variables the environment sets on its own, from its settings or a
+    /// recipe; each one the game inherits from the client, so a value that differs from the
+    /// client's restarts it too (highball#136: CX_FWD_COMPAT_GL_CTX set while Steam ran, and
+    /// -applaunch handed the game to the old client without it).
+    public static func reason(live: [String: String], wanted: [String: String], wantedRenderer: String, custom: [String] = []) -> String? {
         var reasons: [String] = []
         if live["WINEDLLPATH_PREPEND"] != wanted["WINEDLLPATH_PREPEND"] {
             reasons.append("it runs with a different renderer than \(wantedRenderer)")
@@ -53,6 +58,14 @@ public enum SteamRestart {
         // settings page says it is on (highball-db#48, Hogwarts Legacy crashed on the "AVX" run).
         for (key, what) in inherited where (live[key] == "1") != (wanted[key] == "1") {
             reasons.append("it runs with \(what) \(live[key] == "1" ? "on" : "off") and the game wants it \(wanted[key] == "1" ? "on" : "off")")
+        }
+        for key in custom.sorted() where !inherited.contains(where: { $0.0 == key }) && live[key] != wanted[key] {
+            switch (live[key], wanted[key]) {
+            case (nil, let want?): reasons.append("it runs without \(key)=\(want)")
+            case (let have?, nil): reasons.append("it runs with \(key)=\(have) and the game does not set it")
+            case (let have?, let want?): reasons.append("it runs with \(key)=\(have) and the game wants \(want)")
+            case (nil, nil): break
+            }
         }
         return reasons.isEmpty ? nil : reasons.joined(separator: "; ")
     }
@@ -99,7 +112,8 @@ extension WineRunner {
         guard let live = runningSteamEnvironment() else { return .noClient }
         let wanted = try bottle.environment(engine: engine, renderer: renderer)
         guard let why = SteamRestart.reason(live: live, wanted: wanted,
-                                            wantedRenderer: (renderer ?? bottle.settings.renderer).rawValue) else { return .serves }
+                                            wantedRenderer: (renderer ?? bottle.settings.renderer).rawValue,
+                                            custom: Array(bottle.settings.environment.keys)) else { return .serves }
         if !mayRestart || steamGameIsRunning() { return .kept(why, live: SteamRestart.rendererName(ofLive: live)) }
         try kill()
         // `kill` waits for the server; give the client's own exit a moment too, so the launch

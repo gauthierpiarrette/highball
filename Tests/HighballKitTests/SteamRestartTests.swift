@@ -52,6 +52,25 @@ final class SteamRestartTests: XCTestCase {
                        "it runs with the Metal HUD off and the game wants it on")
     }
 
+    func testGLContextSwitchMissingFromAnOlderClientRestartsIt() {
+        // 0.9.24 sets CX_FWD_COMPAT_GL_CTX on every launch; a client started by 0.9.23 lacks it.
+        var wanted = dxvk; wanted["CX_FWD_COMPAT_GL_CTX"] = "1"
+        XCTAssertEqual(SteamRestart.reason(live: dxvk, wanted: wanted, wantedRenderer: "dxvk"),
+                       "it runs with forward-compatible OpenGL contexts off and the game wants it on")
+    }
+
+    func testCustomVariablesTheEnvironmentSetsRestartTheClientWhenTheyDiffer() {
+        var wanted = dxvk; wanted["MVK_SHADOW_IMPORT"] = "1"
+        XCTAssertEqual(SteamRestart.reason(live: dxvk, wanted: wanted, wantedRenderer: "dxvk", custom: ["MVK_SHADOW_IMPORT"]),
+                       "it runs without MVK_SHADOW_IMPORT=1")
+        var live = dxvk; live["MVK_SHADOW_IMPORT"] = "0"
+        XCTAssertEqual(SteamRestart.reason(live: live, wanted: wanted, wantedRenderer: "dxvk", custom: ["MVK_SHADOW_IMPORT"]),
+                       "it runs with MVK_SHADOW_IMPORT=0 and the game wants 1")
+        XCTAssertNil(SteamRestart.reason(live: wanted, wanted: wanted, wantedRenderer: "dxvk", custom: ["MVK_SHADOW_IMPORT"]))
+        // Not listed as custom: still per-launch noise.
+        XCTAssertNil(SteamRestart.reason(live: dxvk, wanted: wanted, wantedRenderer: "dxvk"))
+    }
+
     func testRendererNameComesFromTheOverlayPath() {
         let base = "/e/x64-crossover26.3-r8/frameworks/renderer"
         XCTAssertEqual(SteamRestart.rendererName(ofLive: ["WINEDLLPATH_PREPEND": "/e/x/renderers/d3dmetal-tsshim/wine:\(base)/d3dmetal/wine:\(base)/d9vk/wine"]), "d3dmetal")
