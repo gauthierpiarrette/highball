@@ -7,9 +7,9 @@
     <item>
       <title>Highball 0.9.23</title>
       <description><![CDATA[Candidate engine r4 withdrawn (it broke RaceRoom and FNAF); the Rockstar launcher recipe asks for the Wine 11 engine instead of refusing]]></description>
-      <pubDate>Wed, 16 Sep 2026 20:38:05 +0200</pubDate>
+      <pubDate>Thu, 17 Sep 2026 09:20:42 +0200</pubDate>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
       <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.23/Highball-0.9.23.zip" sparkle:version="0.9.23" sparkle:shortVersionString="0.9.23" sparkle:edSignature="mijp3RYlKcC7BiNlGjtRWVgqI1gouownPxSjh61GlDPcCIcwtMvKSa8yZ+lT7sxUHIeH2F9TezR7FG7ZoIZpAQ==" length="3604729" type="application/octet-stream"/>
     </item>
     <item>
