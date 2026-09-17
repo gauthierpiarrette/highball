@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.24</title>
+      <description><![CDATA[OpenGL games that open a core context (Tomb Raider IV-VI Remastered) no longer crash at launch; a failed winetricks step says what it was installing and why; new game rows and recipes]]></description>
+      <pubDate>Thu, 17 Sep 2026 09:52:54 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.24/Highball-0.9.24.zip" sparkle:version="0.9.24" sparkle:shortVersionString="0.9.24" sparkle:edSignature="hc3ZceateCCNXJqcidG9AF2ZeYuNTc/xh8lwHMREgjQou7jn2sIQUEmg8igSGogJhoUBwI1MsSumZ0th/jS/BA==" length="3616849" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.23</title>
       <description><![CDATA[Candidate engine r4 withdrawn (it broke RaceRoom and FNAF); the Rockstar launcher recipe asks for the Wine 11 engine instead of refusing]]></description>
       <pubDate>Thu, 17 Sep 2026 09:20:42 +0200</pubDate>
