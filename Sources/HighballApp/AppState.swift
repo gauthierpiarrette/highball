@@ -248,13 +248,16 @@ final class AppState {
             var wanted = Renderer.choose(requested: renderer, gameOverride: rendererOverride(for: item), row: entry?.effectiveRenderer(),
                                          environmentExplicit: bottle.settings.rendererExplicit, pin: pinMode,
                                          environment: bottle.settings.renderer, nativeVulkan: entry?.nativeVulkan == true)
-            // A program with only Direct3D 12 cannot run on DXMT, DXVK or Wine's Direct3D, so a
+            // A program that needs Direct3D 12 cannot run on DXMT, DXVK or Wine's Direct3D, so a
             // mode that has it takes over before the launch, and the log says so (Farming
-            // Simulator 22 stopped at "Shader model 6.0 is required" on DXMT, highball#139).
-            if !wanted.servesDirect3D12, entry?.nativeVulkan != true, programNeedsDirect3D12Only(item) {
+            // Simulator 22 stopped at "Shader model 6.0 is required" on DXMT, highball#139;
+            // Unreal 5 titles stop before their menu, highball#138). Only when nothing more
+            // specific chose the mode: a row's verified mode or a per-game choice stands.
+            if !wanted.servesDirect3D12, renderer == nil, rendererOverride(for: item) == nil, entry?.effectiveRenderer() == nil,
+               entry?.nativeVulkan != true, programNeedsDirect3D12(item) {
                 let instead = Renderer.forDirect3D12Only(chosen: wanted, engine: engine)
                 if instead != wanted {
-                    appendLog("\(item.title) only has Direct3D 12 and \(GamePageCopy.plainName(wanted)) has none, playing with \(GamePageCopy.plainName(instead)).")
+                    appendLog("\(item.title) needs Direct3D 12 and \(GamePageCopy.plainName(wanted)) has none, playing with \(GamePageCopy.plainName(instead)).")
                     wanted = instead
                     renderer = instead
                 }
@@ -1085,15 +1088,15 @@ final class AppState {
         }
     }
 
-    /// Whether the item's program links Direct3D 12 and nothing else to draw with, remembered
+    /// Whether the item's program needs Direct3D 12 (`ProgramNeeds.wantsDirect3D12`), remembered
     /// per executable and modification date: finding the executable walks the game's folder.
-    private var direct3D12OnlyCache: [String: (exe: URL, modified: Date, verdict: Bool)] = [:]
-    func programNeedsDirect3D12Only(_ item: LibraryItem) -> Bool {
+    private var direct3D12Cache: [String: (exe: URL, modified: Date, verdict: Bool)] = [:]
+    func programNeedsDirect3D12(_ item: LibraryItem) -> Bool {
         guard let exe = programExecutable(for: item) else { return false }
         let modified = (try? exe.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-        if let hit = direct3D12OnlyCache[item.id], hit.exe == exe, hit.modified == modified { return hit.verdict }
-        let verdict = ProgramNeeds.direct3D12Only(program: exe)
-        direct3D12OnlyCache[item.id] = (exe, modified, verdict)
+        if let hit = direct3D12Cache[item.id], hit.exe == exe, hit.modified == modified { return hit.verdict }
+        let verdict = ProgramNeeds.wantsDirect3D12(program: exe)
+        direct3D12Cache[item.id] = (exe, modified, verdict)
         return verdict
     }
 

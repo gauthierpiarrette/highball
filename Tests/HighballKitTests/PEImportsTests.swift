@@ -87,6 +87,30 @@ final class PEImportsTests: XCTestCase {
         XCTAssertFalse(ProgramNeeds.direct3D12Only(program: dir.appending(path: "missing.exe")))
     }
 
+    func testUnreal5LayoutCountsAsDirect3D12() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "hb-ue5-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fm = FileManager.default
+        let exe = root.appending(path: "Voyage/Binaries/Win64/VoyageSteam-Win64-Shipping.exe")
+        try fm.createDirectory(at: exe.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // Unreal's executable names dxgi and opengl32 only; d3d12.dll is loaded at run time.
+        try Self.makePE(imports: ["KERNEL32.dll", "dxgi.dll", "OPENGL32.dll"]).write(to: exe)
+        XCTAssertFalse(ProgramNeeds.direct3D12Only(program: exe), "imports alone say nothing")
+        XCTAssertFalse(ProgramNeeds.isUnreal5Build(program: exe), "no engine tree yet")
+        try fm.createDirectory(at: root.appending(path: "Engine/Binaries/Win64"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: root.appending(path: "Voyage/Content/Paks"), withIntermediateDirectories: true)
+        try Data().write(to: root.appending(path: "Voyage/Content/Paks/pakchunk0-Windows.pak"))
+        XCTAssertFalse(ProgramNeeds.isUnreal5Build(program: exe), "a pak without IoStore is Unreal 4's layout, Direct3D 11 by default")
+        try Data().write(to: root.appending(path: "Voyage/Content/Paks/pakchunk0-Windows.utoc"))
+        XCTAssertTrue(ProgramNeeds.isUnreal5Build(program: exe))
+        XCTAssertTrue(ProgramNeeds.wantsDirect3D12(program: exe))
+        // A Unity build in a similar-looking folder is not Unreal.
+        let unity = root.appending(path: "Other/Binaries/Win64/Game.exe")
+        try fm.createDirectory(at: unity.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Self.makePE(imports: ["UnityPlayer.dll"]).write(to: unity)
+        XCTAssertFalse(ProgramNeeds.isUnreal5Build(program: unity), "no Paks with IoStore under it")
+    }
+
     func testRealBinariesOnThisMac() throws {
         // GameOverlayRenderer64.dll delay-loads KERNEL32; UnityPlayer.dll (PEAK) links Direct3D 11 and OpenGL.
         let steam = URL(fileURLWithPath: NSHomeDirectory()).appending(path: "Library/Application Support/Highball/bottles/Gaming/drive_c/Program Files (x86)/Steam")
@@ -97,7 +121,15 @@ final class PEImportsTests: XCTestCase {
         let peak = steam.appending(path: "steamapps/common/PEAK/PEAK.exe")
         if FileManager.default.fileExists(atPath: peak.path) {
             XCTAssertFalse(ProgramNeeds.direct3D12Only(program: peak))
+            XCTAssertFalse(ProgramNeeds.wantsDirect3D12(program: peak), "Unity with a Direct3D 11 player")
             XCTAssertTrue(PEImports.dllNames(of: peak).contains("UnityPlayer.dll"))
+        }
+        // The Last Caretaker demo (Unreal 5, highball#138): imports say dxgi and opengl32 only, the layout says Unreal 5.
+        let caretaker = steam.appending(path: "steamapps/common/TheLastCaretakerDemo/Voyage/Binaries/Win64/VoyageSteam-Win64-Shipping.exe")
+        if FileManager.default.fileExists(atPath: caretaker.path) {
+            XCTAssertFalse(ProgramNeeds.direct3D12Only(program: caretaker))
+            XCTAssertTrue(ProgramNeeds.isUnreal5Build(program: caretaker))
+            XCTAssertTrue(ProgramNeeds.wantsDirect3D12(program: caretaker))
         }
     }
 }

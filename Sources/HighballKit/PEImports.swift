@@ -93,4 +93,32 @@ public enum ProgramNeeds {
         }
         return names.contains(direct3D12) && names.isDisjoint(with: otherGraphics)
     }
+
+    /// An Unreal Engine 5 packaged build: `<root>/<Game>/Binaries/Win64/<exe>` with the engine's
+    /// own `Engine/Binaries` beside it and IoStore containers (`.utoc`) under the game's Paks.
+    /// Unreal links every renderer into one executable and loads d3d12.dll at run time, so its
+    /// imports say nothing (The Last Caretaker's name dxgi and opengl32 only), and its choice of
+    /// API sits in a config file inside the pak. Unreal 5 defaults to Direct3D 12 with Shader
+    /// Model 6 and most titles ship no Direct3D 11 shaders, so on a mode without Direct3D 12
+    /// they stop before the menu (highball#138, highball-db#105). Unreal 4 packages without
+    /// IoStore and defaults to Direct3D 11, so it is left alone.
+    public static func isUnreal5Build(program exe: URL) -> Bool {
+        let win64 = exe.deletingLastPathComponent()
+        let binaries = win64.deletingLastPathComponent()
+        guard win64.lastPathComponent.lowercased() == "win64", binaries.lastPathComponent.lowercased() == "binaries" else { return false }
+        let game = binaries.deletingLastPathComponent()
+        let root = game.deletingLastPathComponent()
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: root.appending(path: "Engine/Binaries").path) else { return false }
+        let paks = game.appending(path: "Content/Paks")
+        let entries = (try? fm.contentsOfDirectory(at: paks, includingPropertiesForKeys: nil)) ?? []
+        return entries.contains { $0.pathExtension.lowercased() == "utoc" }
+    }
+
+    /// Whether the program needs a mode with Direct3D 12: its imports say so, or it is an
+    /// Unreal 5 build. Used only when nothing more specific (a row, a per-game choice) says
+    /// which mode to run.
+    public static func wantsDirect3D12(program exe: URL) -> Bool {
+        direct3D12Only(program: exe) || isUnreal5Build(program: exe)
+    }
 }
