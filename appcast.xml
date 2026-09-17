@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.26</title>
+      <description><![CDATA[Unreal 5 games pick D3DMetal before launch; copying a home onto a network share streams and warns instead of failing (s3lverd); the activity strip counts KB and seconds; the CLI's run exits with Wine's status (ihelfrich); Remove from list on a program's tile]]></description>
+      <pubDate>Thu, 17 Sep 2026 23:17:22 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.26/Highball-0.9.26.zip" sparkle:version="0.9.26" sparkle:shortVersionString="0.9.26" sparkle:edSignature="qgawiImlWUQv+g7AGKrJAe42+D0lmHWNcmFL4AVBSdFS1Nk9xZr5TTc5yX/VhGi9MtaBK1tID3f1d1jlTcf9CA==" length="3656802" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.25</title>
       <description><![CDATA[Direct3D 12-only games pick D3DMetal before launch; a runtime a game's own setup installed gets its overrides; an incomplete engine refuses to install and the bundled one repairs itself; Steam restarts for a changed variable; DXMT serves 32-bit Direct3D 10/11 on D3DMetal (itsOwen)]]></description>
       <pubDate>Thu, 17 Sep 2026 20:32:54 +0200</pubDate>
