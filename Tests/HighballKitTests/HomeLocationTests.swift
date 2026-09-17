@@ -73,7 +73,7 @@ final class HomeLocationTests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         XCTAssertNil(HighballPaths.volumeProblem(dir, uuid: "fixed-uuid"))
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path), [],
-                       "the probe cleans up after itself, including the symlink and the executable")
+                       "the probe cleans up after itself, including the c: link and the executable")
     }
 
     func testVolumeProbeReportsAnUnwritableFolder() throws {

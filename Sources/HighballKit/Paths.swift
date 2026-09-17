@@ -99,6 +99,13 @@ public struct HighballPaths: Sendable {
         catch {
             return "That drive cannot hold a Windows environment: an environment's drive letters are symbolic links, and this volume does not support them. Format it as APFS, or pick another drive."
         }
+        // Wine's C: is dosdevices/c: → drive_c. A share can allow `link` and still reject a colon.
+        do {
+            try fm.createDirectory(at: probe.appending(path: "drive_c"), withIntermediateDirectories: true)
+            try fm.createSymbolicLink(atPath: probe.appending(path: "c:").path, withDestinationPath: "drive_c")
+        } catch {
+            return "That drive cannot hold a Windows environment: an environment's drive letters are files named c:, and this volume does not allow a colon in a name. Pick a folder on this Mac, an APFS disk, or a network share that keeps Unix file names."
+        }
         let bin = probe.appending(path: "bin")
         guard fm.createFile(atPath: bin.path, contents: Data("#!/bin/sh\nexit 0\n".utf8),
                             attributes: [.posixPermissions: 0o755]) else {
