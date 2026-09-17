@@ -182,6 +182,17 @@ public struct EngineStore: Sendable {
         saved.acceptedLicenses = Self.acceptances(requested: accepted, installed: (try? installedEngines()) ?? [])
         try saved.save(to: staging.appending(path: "manifest.json"))
         try linkRuntime(staging)
+        // The unpacked tree must be a whole engine before it replaces anything: an archive that
+        // unpacked short (a full disk, a file the archive lacks) used to install all the same and
+        // fail every launch afterwards (highball#118). The archive was checksummed, so the fault
+        // is local; the staging tree goes and the next attempt starts over.
+        if manifest.components["wine"] != nil {
+            let missing = InstalledEngine(manifest: saved, root: staging).missingFiles
+            if !missing.isEmpty {
+                try? FileManager.default.removeItem(at: staging)
+                throw HighballError.failed("The engine unpacked incomplete, \(missing.joined(separator: ", ")) missing. Check the free space on this disk and try again.")
+            }
+        }
         try? FileManager.default.removeItem(at: root)
         try FileManager.default.moveItem(at: staging, to: root)
         try stripQuarantine(root)
@@ -419,6 +430,22 @@ public struct InstalledEngine: Sendable {
     public var renderersDir: URL { root.appending(path: "renderers", directoryHint: .isDirectory) }
     public var wineBinary: URL { engineDir.appending(path: "bin/wine") }
     public var wineserverBinary: URL { engineDir.appending(path: "bin/wineserver") }
+
+    /// Files no engine runs without: the Wine loader, its server, the kernel DLLs of both
+    /// halves and the Unix side of ntdll. An engine missing any of them fails every launch
+    /// with "could not load kernel32.dll" (highball#118, an unpack that stopped early), so an
+    /// install refuses to finish without them and the app reinstalls its own when they are gone.
+    public static let requiredFiles = [
+        "engine/bin/wine", "engine/bin/wineserver",
+        "engine/lib/wine/x86_64-windows/kernel32.dll", "engine/lib/wine/x86_64-windows/ntdll.dll",
+        "engine/lib/wine/i386-windows/kernel32.dll", "engine/lib/wine/x86_64-unix/ntdll.so",
+    ]
+    /// Which of `requiredFiles` are absent, relative to the engine's root.
+    public var missingFiles: [String] {
+        Self.requiredFiles.filter { !FileManager.default.fileExists(atPath: root.appending(path: $0).path) }
+    }
+    public var isComplete: Bool { missingFiles.isEmpty }
+
     public var winetricks: URL? {
         let t = root.appending(path: "tools/winetricks")
         return FileManager.default.fileExists(atPath: t.path) ? t : nil

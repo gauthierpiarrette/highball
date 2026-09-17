@@ -46,7 +46,8 @@ struct Engine: AsyncParsableCommand {
                     case .notShipped: return nil
                     }
                 }.joined(separator: ",")
-                print("\(e.id)\t\(v)\trenderers: \(renderers)")
+                let health = e.isComplete ? "" : "\tINCOMPLETE, missing: \(e.missingFiles.joined(separator: ", "))"
+                print("\(e.id)\t\(v)\trenderers: \(renderers)\(health)")
             }
         }
     }

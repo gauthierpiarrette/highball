@@ -566,7 +566,9 @@ final class AppState {
     var engineUpdate: EngineManifest? {
         guard !engines.isEmpty, let url = Self.bundledManifest,
               let m = try? EngineManifest.load(from: url),
-              !engines.contains(where: { $0.id == m.id }) else { return nil }
+              // An installed copy missing its Wine files counts as not installed: it fails every
+              // launch (highball#118), and installing it again over itself is the repair.
+              !engines.contains(where: { $0.id == m.id && $0.isComplete }) else { return nil }
         return m
     }
 

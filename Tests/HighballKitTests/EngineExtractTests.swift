@@ -19,3 +19,23 @@ final class EngineExtractTests: XCTestCase {
         XCTAssertNil(EngineStore.directoryCollision(at: empty, sourceIsDirectory: true), "an empty directory is just a placeholder")
     }
 }
+
+/// An engine missing its Wine files fails every launch with "could not load kernel32.dll"
+/// (highball#118), so it must never count as installed.
+final class EngineCompletenessTests: XCTestCase {
+    func testMissingFilesNamesWhatAnEngineCannotRunWithout() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "engine-complete-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let engine = InstalledEngine(manifest: EngineManifest(id: "t", displayName: "t", arch: "x86_64", minMacOS: "14.0", components: [:]), root: root)
+        XCTAssertEqual(engine.missingFiles, InstalledEngine.requiredFiles, "an empty root lacks everything")
+        XCTAssertFalse(engine.isComplete)
+        for f in InstalledEngine.requiredFiles {
+            let url = root.appending(path: f)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data().write(to: url)
+        }
+        XCTAssertTrue(engine.isComplete)
+        try FileManager.default.removeItem(at: root.appending(path: "engine/lib/wine/x86_64-windows/kernel32.dll"))
+        XCTAssertEqual(engine.missingFiles, ["engine/lib/wine/x86_64-windows/kernel32.dll"])
+    }
+}
