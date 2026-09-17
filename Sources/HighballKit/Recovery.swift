@@ -53,6 +53,15 @@ public struct Recovery: Equatable, Sendable {
             return Recovery(headline: "The Windows environment didn't finish setting up.",
                             meaning: "Highball can run the setup again.",
                             actionTitle: "Repair", action: .repairBottle)
+        case let .processFailed(command, _, _) where command.contains("winetricks"):
+            // The command is "/bin/bash <winetricks> --unattended <verbs>": naming bash helps
+            // nobody (highball#135 read "/bin/bash didn't finish" and offered a fresh download).
+            let words = command.split(separator: " ").map(String.init)
+            let verbs = words.drop(while: { $0 != "--unattended" }).dropFirst().joined(separator: " ")
+            let what = verbs.isEmpty ? "The winetricks step" : "Installing \(verbs) with winetricks"
+            return Recovery(headline: "\(what) didn't finish.",
+                            meaning: "It downloads its files from the internet as it runs, and those servers refuse now and then, so trying again in a few minutes often works. Details has the reason it gave.",
+                            actionTitle: "Try again", action: .retry)
         case let .processFailed(command, _, _):
             let name = command.split(separator: " ").first.map(String.init) ?? "The installer"
             return Recovery(headline: "\(name) didn't finish.",
