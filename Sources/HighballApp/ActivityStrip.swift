@@ -50,7 +50,7 @@ struct ActivityStrip: View {
                     }
                 }
                 Spacer(minLength: 12)
-                TimelineView(.periodic(from: .now, by: 15)) { ctx in
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
                     Text(measurements(at: ctx.date))
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -76,9 +76,16 @@ struct ActivityStrip: View {
     /// Bytes and rate when a download runs, elapsed always, the stated range when there is one.
     private func measurements(at now: Date) -> String {
         var parts: [String] = []
-        if let p = state.busyProgress { parts.append(ActivityText.transfer(received: p.received, total: p.total, rate: state.transferRate)) }
+        if let p = state.busyProgress, p.received > 0 {
+            parts.append(ActivityText.transfer(received: p.received, total: p.total, rate: state.transferRate))
+        }
         if let started = state.busyStartedAt {
-            parts.append(ActivityText.minutes(since: started, now: now).map { String(format: L("%d min"), $0) } ?? L("just started"))
+            let e = ActivityText.elapsed(since: started, now: now)
+            if e.asSeconds, e.amount == 0 {
+                parts.append(L("just started"))
+            } else {
+                parts.append(String(format: e.asSeconds ? L("%d sec") : L("%d min"), e.amount))
+            }
         }
         if let expected = state.busyExpected { parts.append(expected) }
         if state.busyProgress == nil, let last = state.lastOutputAt, now.timeIntervalSince(last) >= 90, state.stageHint.isEmpty {

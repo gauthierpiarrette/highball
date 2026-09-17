@@ -31,6 +31,8 @@ final class ActivityTextTests: XCTestCase {
         XCTAssertEqual(ActivityText.transfer(received: 164 << 20, total: 270 << 20, rate: 2.4 * 1_048_576), "164 of 270 MB · 2.4 MB/s")
         XCTAssertEqual(ActivityText.transfer(received: 164 << 20, total: nil, rate: nil), "164 MB")
         XCTAssertEqual(ActivityText.transfer(received: 5 << 20, total: 0, rate: 640 * 1024), "5 MB · 640 KB/s")
+        XCTAssertEqual(ActivityText.transfer(received: 240 * 1024, total: nil, rate: nil), "240 KB")
+        XCTAssertEqual(ActivityText.transfer(received: 0, total: nil, rate: nil), "0 KB")
     }
 
     func testFractionAndSteps() {
@@ -46,5 +48,13 @@ final class ActivityTextTests: XCTestCase {
         XCTAssertNil(ActivityText.minutes(since: t0, now: t0.addingTimeInterval(59)))
         XCTAssertEqual(ActivityText.minutes(since: t0, now: t0.addingTimeInterval(61)), 1)
         XCTAssertEqual(ActivityText.minutes(since: t0, now: t0.addingTimeInterval(12 * 60 + 30)), 12)
+        XCTAssertEqual(ActivityText.elapsed(since: t0, now: t0).amount, 0)
+        XCTAssertTrue(ActivityText.elapsed(since: t0, now: t0).asSeconds)
+        XCTAssertEqual(ActivityText.elapsed(since: t0, now: t0.addingTimeInterval(12)).amount, 12)
+        XCTAssertTrue(ActivityText.elapsed(since: t0, now: t0.addingTimeInterval(12)).asSeconds)
+        XCTAssertEqual(ActivityText.elapsed(since: t0, now: t0.addingTimeInterval(59)).amount, 59)
+        XCTAssertTrue(ActivityText.elapsed(since: t0, now: t0.addingTimeInterval(59)).asSeconds)
+        XCTAssertEqual(ActivityText.elapsed(since: t0, now: t0.addingTimeInterval(90)).amount, 1)
+        XCTAssertFalse(ActivityText.elapsed(since: t0, now: t0.addingTimeInterval(90)).asSeconds)
     }
 }
