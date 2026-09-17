@@ -13,9 +13,8 @@ private func frameGenerationChecks() throws {
         try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(data.utf8).write(to: url)
     }
-    let manifest = try EngineManifest.load(from: URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .appending(path: "spike/engine-manifest.json"))
+    let manifest = EngineManifest(id: "framegen-test", displayName: "Frame generation test",
+                                  arch: "x86_64", minMacOS: "14.0", components: [:])
     let engine = InstalledEngine(manifest: manifest, root: root.appending(path: "engine"))
     var bottle = Bottle(url: root.appending(path: "bottle"), settings: BottleSettings(name: "audit", engineID: manifest.id))
     for renderer in ["dxvk", "d9vk", "dxmt", "vkd3d"] {
