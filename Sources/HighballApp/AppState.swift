@@ -416,16 +416,18 @@ final class AppState {
     /// A location chosen in Settings, waiting for the move to be confirmed.
     var pendingHome: URL?
 
-    /// Settings › Environments › Change…: a folder on any APFS volume, checked before anything moves.
+    /// Settings › Environments › Change…: a folder that can hold an environment, checked before
+    /// anything moves. A network share is allowed and warned about, not refused.
     func chooseHome() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
         panel.prompt = L("Use this folder")
         panel.message = L("Highball will keep its engines and environments in this folder. Pick a drive with room to spare: Highball checks the folder before moving anything, and says so if the drive cannot hold an environment.")
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        if let why = HighballPaths.locationProblem(url) { errorMessage = why; return }
-        if url.standardizedFileURL == paths.home.standardizedFileURL { return }
-        pendingHome = url
+        let folder = URL(fileURLWithPath: url.path, isDirectory: true)
+        if let why = HighballPaths.locationProblem(folder) { errorMessage = why; return }
+        if folder.standardizedFileURL == paths.home.standardizedFileURL { return }
+        pendingHome = folder
     }
 
     /// Moves everything, records the location, then relaunches: the running app keeps its old paths.
@@ -436,8 +438,8 @@ final class AppState {
                 expected: L("as long as copying your games takes; nothing is removed until the copy checks out"),
                 done: DoneState(title: L("Moved. Highball needs a relaunch to use the new location."), ctaTitle: L("Relaunch"), cta: { Self.relaunch() })) { [self] in
             try await Task.detached {
-                try HomeMove.move(from: source, to: target) { name in
-                    Task { @MainActor in self.stage = String(format: L("Copying %@…"), name) }
+                try HomeMove.move(from: source, to: target) { name, copied, items in
+                    Task { @MainActor in self.reportHomeCopy(name: name, copied: copied, items: items) }
                 }
                 try HighballPaths.setConfiguredHome(target)
             }.value
@@ -453,8 +455,30 @@ final class AppState {
         }
         pendingHome = nil
         runBusy(L("Moving Highball's data back to the default location"), done: DoneState(title: L("Moved. Highball needs a relaunch."), ctaTitle: L("Relaunch"), cta: { Self.relaunch() })) { [self] in
-            try await Task.detached { try HomeMove.move(from: self.paths.home, to: target); try HighballPaths.setConfiguredHome(nil) }.value
+            try await Task.detached {
+                try HomeMove.move(from: self.paths.home, to: target) { name, copied, items in
+                    Task { @MainActor in self.reportHomeCopy(name: name, copied: copied, items: items) }
+                }
+                try HighballPaths.setConfiguredHome(nil)
+            }.value
         }
+    }
+
+    /// File count in the stage line so a tree of tiny files is not stuck on "0 MB".
+    private func reportHomeCopy(name: String, copied: Int64, items: Int) {
+        stage = items <= 0
+            ? String(format: L("Copying %@…"), name)
+            : items == 1
+                ? String(format: L("Copying %@ — 1 file"), name)
+                : String(format: L("Copying %@ — %d files"), name, items)
+        lastOutputAt = Date()
+        if let last = transferSamples.last, copied < last.bytes { transferSamples = [] }
+        transferSamples.append(.init(bytes: copied, at: Date()))
+        if transferSamples.count > 40 {
+            transferSamples.removeFirst(transferSamples.count - 40)
+        }
+        transferRate = ActivityText.rate(transferSamples)
+        busyProgress = Transfer(received: copied, total: nil)
     }
 
     static func relaunch() {

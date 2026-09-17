@@ -266,6 +266,12 @@ struct ContentView: View {
     }
 }
 
+private func homeMoveAskMessage(to target: URL, from source: URL) -> String {
+    let copy = String(format: L("Engines, environments and downloads copy to %@, get checked, and are then removed from %@. Highball relaunches when it is done. Nothing is removed until the copy checks out."), target.path, source.path)
+    guard let warning = HighballPaths.locationWarning(target) else { return copy }
+    return L(warning) + "\n\n" + copy
+}
+
 // The main window's dialogs, one function each. Chained in `body` they were a single
 // expression that Xcode 16's type checker gave up on ("unable to type-check this expression
 // in reasonable time", CI and the nightly E2E on 2026-09-08) while Xcode 26 took it fine.
@@ -336,7 +342,7 @@ private extension View {
             Button(L("Move now")) { state.moveHome(to: target) }
             Button(L("Cancel"), role: .cancel) { state.pendingHome = nil }
         } message: { target in
-            Text(String(format: L("Engines, environments and downloads copy to %@, get checked, and are then removed from %@. Highball relaunches when it is done. Nothing is removed until the copy checks out."), target.path, state.paths.home.path))
+            Text(homeMoveAskMessage(to: target, from: state.paths.home))
         }
     }
     @MainActor func errorAlert(_ state: AppState) -> some View {
