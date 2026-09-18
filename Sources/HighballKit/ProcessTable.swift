@@ -145,6 +145,17 @@ public enum ProcessTable {
         }
     }
 
+    /// Whether a prefix process is Wine's own plumbing (or the server) rather than a program:
+    /// plumbing works in `drive_c/windows`, the server in its `/tmp` server directory. The
+    /// rule `bottle ps` prints and the environment invariant asserts against. Pure.
+    public static func isPlumbing(executable exe: String, workingDirectory cwd: String, prefix: String) -> Bool {
+        let root = prefix.hasSuffix("/") ? prefix : prefix + "/"
+        let windows = root + "drive_c/windows"
+        if cwd == windows || cwd.hasPrefix(windows + "/") { return true }
+        let name = exe.replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map(String.init) ?? exe
+        return name == "wineserver" || name.hasSuffix("/wineserver")
+    }
+
     public static func isIdle(prefix: URL) -> Bool {
         let root = canonical(prefix.path)
         let server = serverDirectory(forPrefix: prefix).map { canonical($0.path) }

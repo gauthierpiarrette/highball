@@ -45,6 +45,9 @@ run firstrun Scripts/firstrun-smoke.sh --screen
 run launch-window Scripts/launch-window-smoke.sh
 echo "gate: advisory checks"
 run game Scripts/game-smoke.sh
+# Advisory until its false-fail rate is zero, like every new check: the process-environment
+# invariant behind the 2026-09-18 launcher fixes (see Scripts/env-invariant-smoke.sh).
+run env-invariant Scripts/env-invariant-smoke.sh
 [ $WITH_RENDER = 1 ] && run render Scripts/render-smoke.sh
 
 passed=true

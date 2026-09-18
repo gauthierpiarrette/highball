@@ -35,6 +35,11 @@ GAMES=(
   "230410|dxmt|Warframe|warframe|"
   "3314060|dxvk|Sims|sims|"
   "319510|dxvk|Five Nights|fnaf|"
+  # Canary set (2026-09-18): one title per graphics path, all installed here as demos or
+  # verified rows, so a renderer or engine change cannot slip through on a path nobody ran.
+  "3916150|d3dmetal|Caretaker|caretaker|"
+  "1773210|d3dmetal|HumanitZ|humanitz|"
+  "3527290|dxvk|PEAK|peak|"
 )
 only=("$@")
 results=(); passed=true

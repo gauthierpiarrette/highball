@@ -585,6 +585,21 @@ public struct Bottle: Sendable {
         return .active(multiplier: multiplier)
     }
 
+    /// The pin a running program belongs to, by folder: a program whose Windows path lies under
+    /// a pinned program's folder (Steam's steamwebhelper.exe under Program Files (x86)\Steam) is
+    /// launched by that pin or by something the pin started, so it carries the pin's
+    /// environment, not the environment's defaults (the Steam pin forces sync off for its
+    /// browser). Pure; `argv0` is the Windows path as the process reports it.
+    public static func pin(owning argv0: String, in pins: [Pin]) -> Pin? {
+        let norm = { (p: String) -> String in p.replacingOccurrences(of: "\\", with: "/").lowercased() }
+        let program = norm(argv0)
+        // Longest folder wins when pins nest.
+        return pins.filter { pin in
+            let folder = norm(pin.path).split(separator: "/").dropLast().joined(separator: "/")
+            return !folder.isEmpty && program.contains("/" + folder + "/")
+        }.max { a, b in a.path.count < b.path.count }
+    }
+
     public func environment(engine: InstalledEngine, renderer: Renderer? = nil, extra: [String: String] = [:]) throws -> [String: String] {
         let effective = try effectiveRenderer(requested: renderer, engine: engine).renderer
         var env = engine.baseEnvironment()

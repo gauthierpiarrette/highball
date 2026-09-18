@@ -77,7 +77,7 @@ struct Engine: AsyncParsableCommand {
 // MARK: - highball bottle
 
 struct Bottle: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(abstract: "Manage bottles (Wine prefixes).", subcommands: [List.self, Create.self, Delete.self, Set.self, Kill.self, Duplicate.self, Repair.self])
+    static let configuration = CommandConfiguration(abstract: "Manage bottles (Wine prefixes).", subcommands: [List.self, Create.self, Delete.self, Set.self, Kill.self, Duplicate.self, Repair.self, Ps.self])
 
     struct List: AsyncParsableCommand {
         func run() async throws {
@@ -215,6 +215,59 @@ struct Bottle: AsyncParsableCommand {
             // (#37): wineboot exits 0 even when it skipped building syswow64.
             try await BottleStore.refreshPrefix(runner: runner, bottle: b)
             print("repaired \(name)")
+        }
+    }
+
+    /// What is really running in a bottle, and with which stack. Every launch bug of 2026-09-18
+    /// (services booted under a setup-time environment, an installer's agent spawning the client
+    /// without the renderer overlay, a sync mode adopted silently) was invisible in the launch
+    /// log and obvious in the process environment. This prints that, and with --expect it fails
+    /// when a program runs with a different stack than the bottle would launch it with, which
+    /// is what the smokes assert after a fresh install and first Play.
+    struct Ps: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "List the bottle's processes with the renderer, sync mode and custom variables each one actually got. --expect fails (exit 1) when a program's stack differs from the bottle's launch environment.")
+        @Argument var name: String
+        @Flag(name: .long, help: "Fail when any program (not Wine's plumbing) runs with a stack that differs from what the bottle would launch it with.") var expect = false
+        func run() async throws {
+            let b = try BottleStore().get(name)
+            let eng = try EngineStore().engine(b.settings.engineID)
+            let wanted = try b.environment(engine: eng)
+            let wantedRenderer = SteamRestart.rendererName(ofLive: wanted)
+            let custom = Array(b.settings.environment.keys).sorted()
+            let root = b.url.resolvingSymlinksInPath().path
+            var mismatches = 0
+            let rows = ProcessTable.processes(ofPrefix: b.url).compactMap { pid -> (pid_t, String, String, String, String, String, String?)? in
+                guard let info = ProcessTable.commandLineAndEnvironment(of: pid) else { return nil }
+                let argv0 = info.arguments.first ?? "?"
+                let exe = argv0.replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map(String.init) ?? argv0
+                let cwd = ProcessTable.workingDirectory(of: pid).map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } ?? ""
+                let kind = ProcessTable.isPlumbing(executable: argv0, workingDirectory: cwd, prefix: root) ? "plumbing" : "program"
+                let env = info.environment
+                let renderer = env["WINEDLLPATH_PREPEND"] == nil && env["WINEPREFIX"] == nil ? "?" : SteamRestart.rendererName(ofLive: env)
+                let sync = SyncMode(environment: env).rawValue
+                let vars = custom.map { "\($0)=\(env[$0] ?? "-")" }.joined(separator: " ")
+                var why: String? = nil
+                if kind == "program", env["WINEPREFIX"] != nil {
+                    // A program under a pinned program's folder is judged against that pin's
+                    // environment (renderer and variables), which is what launched it.
+                    var expected = wanted, expectedRenderer = wantedRenderer
+                    if let pin = HighballKit.Bottle.pin(owning: argv0, in: b.settings.pins),
+                       let e = try? b.environment(engine: eng, renderer: pin.renderer, extra: pin.environment) {
+                        expected = e; expectedRenderer = SteamRestart.rendererName(ofLive: e)
+                    }
+                    why = SteamRestart.reason(live: env, wanted: expected, wantedRenderer: expectedRenderer, custom: custom)
+                    if why != nil { mismatches += 1 }
+                }
+                return (pid, kind, exe, renderer, sync, vars, why)
+            }
+            if rows.isEmpty { print("no processes in \(name)"); return }
+            for r in rows {
+                print("\(r.0)\t\(r.1)\t\(r.2)\trenderer=\(r.3)\tsync=\(r.4)\(r.5.isEmpty ? "" : "\t" + r.5)\(r.6.map { "\tMISMATCH: " + $0 } ?? "")")
+            }
+            if expect && mismatches > 0 {
+                print("\(mismatches) program\(mismatches == 1 ? "" : "s") run with a different stack than \(name) would launch them with")
+                throw ExitCode(1)
+            }
         }
     }
 

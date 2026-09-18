@@ -55,6 +55,24 @@ VERSION="${1:?usage: release.sh [--beta|--hotfix] <version> <summary> [notes.md]
 SUMMARY="${2:?summary required}"
 NOTES_FILE="${3:-}"
 export HB_CHANNEL="$CHANNEL"
+# Beta cadence (2026-09-18): three betas in one day is churn for testers and for the owner. A
+# beta waits two days after the previous one unless it fixes a regression (say "regression" in
+# the summary) or HB_CADENCE_OK=1 says so.
+if [ "$CHANNEL" = beta ]; then
+  HB_SUMMARY="${2:-}" python3 - <<'PY' || { echo "set HB_CADENCE_OK=1 to cut it anyway, or put 'regression' in the summary if it fixes one" >&2; exit 1; }
+import os, re, sys, time
+from email.utils import parsedate_to_datetime
+if os.environ.get('HB_CADENCE_OK') == '1' or 'regression' in os.environ.get('HB_SUMMARY', '').lower(): sys.exit(0)
+s = open('appcast.xml').read()
+last = None
+for item in re.findall(r'<item>.*?</item>', s, re.S):
+    if '<sparkle:channel>beta</sparkle:channel>' in item:
+        m = re.search(r'<pubDate>(.*?)</pubDate>', item)
+        if m: last = max(last or 0, parsedate_to_datetime(m.group(1)).timestamp())
+if last and time.time() - last < 2 * 86400:
+    print(f"release cadence: the previous beta was {(time.time() - last) / 3600:.1f} hours ago; betas wait two days unless they fix a regression.", file=sys.stderr); sys.exit(1)
+PY
+fi
 
 # The tag below marks HEAD as the source of this build, so the tree must be clean.
 git diff-index --quiet HEAD -- || { echo "tracked files modified; commit before releasing" >&2; exit 1; }
