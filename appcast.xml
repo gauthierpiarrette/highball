@@ -7,9 +7,9 @@
     <item>
       <title>Highball 0.9.28</title>
       <description><![CDATA[Fresh-install launchers get the right graphics stack (Rockstar sign-in no longer empty on first launch), frame generation changes restart the Steam client]]></description>
-      <pubDate>Fri, 18 Sep 2026 15:30:29 +0200</pubDate>
+      <pubDate>Fri, 18 Sep 2026 19:20:56 +0200</pubDate>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
       <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.28/Highball-0.9.28.zip" sparkle:version="0.9.28" sparkle:shortVersionString="0.9.28" sparkle:edSignature="/nBY/mlBa1wXdlAYLlsDXOyj+4djSEhVb91aJq07qzxQaJ8w5O1X96no9GMqLblGehSrlXBGpo6Fnc7IldNFDg==" length="3749264" type="application/octet-stream"/>
     </item>
     <item>
