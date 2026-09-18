@@ -37,7 +37,9 @@ GAMES=(
   "319510|dxvk|Five Nights|fnaf|"
   # Canary set (2026-09-18): one title per graphics path, all installed here as demos or
   # verified rows, so a renderer or engine change cannot slip through on a path nobody ran.
-  "3916150|d3dmetal|Caretaker|caretaker|"
+  # Not The Last Caretaker demo: after its first run it comes back fullscreen and black on
+  # D3DMetal, windowed arguments or not (three runs 2026-09-18, screen unlocked, 1% lit at
+  # display size), so it cannot be a canary; the finding lives in its db row.
   "1773210|d3dmetal|HumanitZ|humanitz|"
   "3527290|dxvk|PEAK|peak|"
 )
