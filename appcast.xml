@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.29</title>
+      <description><![CDATA[Installers no longer leave background agents running with the setup-time graphics stack (Battle.net, Rockstar first launch), and a failed fonts or runtime install now says why]]></description>
+      <pubDate>Fri, 18 Sep 2026 20:25:45 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.29/Highball-0.9.29.zip" sparkle:version="0.9.29" sparkle:shortVersionString="0.9.29" sparkle:edSignature="1XCmSzsg2yLHfEBtg3Tys3jsnehABoV8vJKjHXfW4f4ZzSRy9HzHc47LmouG4fMYeaF5dTM+GAjYBIVzIjjaBw==" length="3758124" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.28</title>
       <description><![CDATA[Fresh-install launchers get the right graphics stack (Rockstar sign-in no longer empty on first launch), frame generation changes restart the Steam client]]></description>
       <pubDate>Fri, 18 Sep 2026 19:20:56 +0200</pubDate>
