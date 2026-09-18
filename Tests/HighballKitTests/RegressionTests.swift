@@ -1123,6 +1123,12 @@ extension RegressionTests {
         XCTAssertEqual(tricks.action, .retry)
         XCTAssertEqual(tricks.headline, "Installing corefonts with winetricks didn't finish.", "not '/bin/bash didn't finish' (highball#135)")
         XCTAssertFalse(tricks.meaning.contains("fresh copy"))
+        XCTAssertFalse(tricks.meaning.contains("It said"), "no reason line when winetricks printed nothing")
+        // The reason is the script's own last real line, ahead of asking for Details (highball#135).
+        let out = "warning: taskset/cpuset not available on your platform!\nExecuting mkdir -p /e/cache\n------------------------------------------------------\nwarning: /usr/bin/curl failed to download arial32.exe: SourceForge returned 503\n------------------------------------------------------\n"
+        let said = Recovery.describe(HighballError.processFailed(command: "/bin/bash /e/tools/winetricks --unattended corefonts", status: 1, output: out))
+        XCTAssertTrue(said.meaning.hasSuffix("It said: warning: /usr/bin/curl failed to download arial32.exe: SourceForge returned 503"), said.meaning)
+        XCTAssertNil(Recovery.winetricksReason("Executing x\n------\n"), "noise-only output gives no reason")
         let wow = Recovery.describe(HighballError.invalid("Windows 32-bit support couldn't be set up in this bottle"))
         XCTAssertEqual(wow.action, .repairBottle)
         let net = Recovery.describe(URLError(.timedOut))

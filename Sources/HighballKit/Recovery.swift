@@ -53,14 +53,17 @@ public struct Recovery: Equatable, Sendable {
             return Recovery(headline: "The Windows environment didn't finish setting up.",
                             meaning: "Highball can run the setup again.",
                             actionTitle: "Repair", action: .repairBottle)
-        case let .processFailed(command, _, _) where command.contains("winetricks"):
+        case let .processFailed(command, _, output) where command.contains("winetricks"):
             // The command is "/bin/bash <winetricks> --unattended <verbs>": naming bash helps
             // nobody (highball#135 read "/bin/bash didn't finish" and offered a fresh download).
             let words = command.split(separator: " ").map(String.init)
             let verbs = words.drop(while: { $0 != "--unattended" }).dropFirst().joined(separator: " ")
             let what = verbs.isEmpty ? "The winetricks step" : "Installing \(verbs) with winetricks"
-            return Recovery(headline: "\(what) didn't finish.",
-                            meaning: "It downloads its files from the internet as it runs, and those servers refuse now and then, so trying again in a few minutes often works. Details has the reason it gave.",
+            // The reason is the script's own last line, and asking for it under Details cost
+            // #135 two rounds with nothing pasted back. Say it up front.
+            var meaning = "It downloads its files from the internet as it runs, and those servers refuse now and then, so trying again in a few minutes often works."
+            if let reason = Self.winetricksReason(output) { meaning += " It said: \(reason)" }
+            return Recovery(headline: "\(what) didn't finish.", meaning: meaning,
                             actionTitle: "Try again", action: .retry)
         case let .processFailed(command, _, _):
             let name = command.split(separator: " ").first.map(String.init) ?? "The installer"
@@ -76,5 +79,18 @@ public struct Recovery: Equatable, Sendable {
         case let .invalid(what), let .failed(what):
             return Recovery(headline: what, meaning: "")
         }
+    }
+}
+
+
+extension Recovery {
+    /// The last line of a winetricks run that says something, skipping its progress noise and
+    /// the shell's own "exited with" footer. Nil when the output is empty.
+    static func winetricksReason(_ output: String) -> String? {
+        let noise = ["warning: taskset", "Executing", "------", "[mvk-", "fixme:", "exited with"]
+        let lines = output.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        return lines.last { line in
+            !line.isEmpty && !noise.contains { line.hasPrefix($0) || line.contains($0) }
+        }.map { String($0.prefix(200)) }
     }
 }
