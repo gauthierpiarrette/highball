@@ -15,6 +15,10 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 OUT=private/gate; mkdir -p "$OUT"
 WITH_RENDER=0; [ "${1:-}" = "--with-render" ] && WITH_RENDER=1
+# This Mac's display sleeps after two minutes idle and the session locks with it; every smoke
+# that looks at a window then sees nothing (2026-09-18, three gate runs). Hold the display for
+# as long as this gate runs.
+caffeinate -disu -w $$ >/dev/null 2>&1 &
 COMMIT=$(git rev-parse HEAD)
 git diff-index --quiet HEAD -- || echo "note: tracked files modified, so this result is for $COMMIT plus local changes" >&2
 
