@@ -335,7 +335,7 @@ struct BottleSettingsSheet: View {
                         }
                     }
                     // only engines that ship the shim get the control
-                    if let engine, engine.resolveLsfgShimDir() != nil {
+                    if let engine, let shim = state.lsfgShimDirs[engine.id] {
                         Picker(L("Frame generation (Lossless Scaling, beta)"), selection: Binding(
                             get: { liveBottle.settings.frameGen },
                             set: { newValue in
@@ -381,7 +381,7 @@ struct BottleSettingsSheet: View {
                                 infoIcon("Resolution used to estimate motion, as a percentage of the frame. Lower is cheaper and can help a GPU-bound game, at the cost of accuracy around small or fast-moving detail.")
                             }
                         }
-                        switch liveBottle.frameGenStatus(engine: engine) {
+                        switch liveBottle.frameGenStatus(shim: shim) {
                         case .unavailable(let why):
                             Text(String(format: L("Frame generation stays off: %@"), L(why)))
                                 .font(.caption).foregroundStyle(.secondary)
@@ -503,7 +503,7 @@ struct BottleSettingsSheet: View {
         .alert(L("About frame generation"), isPresented: $showFrameGenInfo) {
             Button(L("Got it"), role: .cancel) {}
         } message: {
-            Text(L("Lossless Scaling inserts interpolated frames between the game's real frames to make motion look smoother.\n\nBy default the generated frames are paced to your display, so it never presents more than your screen's refresh rate. It therefore helps most when a game runs BELOW your refresh rate, for example a demanding game locked at 30 fps smoothed up to 60. On the built-in 60 Hz display a game already running above 60 is capped to 60 and feels worse, not better. It pays off on an external high-refresh monitor (120 Hz or more), where a 60 fps game becomes 120.\n\nIt also adds a little input lag, because a real frame is held back to interpolate.\n\nIt works with every graphics mode: DXVK and vkd3d-proton through Vulkan, DXMT and D3DMetal through Metal, and WineD3D by switching it to its Vulkan renderer.\n\nAfter changing any of these settings, stop the environment and relaunch so a Steam game picks up the new one.\n\nThis is a beta feature: some games may show artifacts, stutter or not start with it on. Turn it off if a game misbehaves.\n\nClick the ⓘ beside each setting to see what that one does."))
+            Text(L("Lossless Scaling inserts interpolated frames between the game's real frames to make motion look smoother.\n\nBy default the generated frames are paced to your display, so it never presents more than your screen's refresh rate. It therefore helps most when a game runs BELOW your refresh rate, for example a demanding game locked at 30 fps smoothed up to 60. On the built-in 60 Hz display a game already running above 60 is capped to 60 and feels worse, not better. It pays off on an external high-refresh monitor (120 Hz or more), where a 60 fps game becomes 120.\n\nIt also adds a little input lag, because a real frame is held back to interpolate.\n\nIt works with every graphics mode: DXVK and vkd3d-proton through Vulkan, DXMT and D3DMetal through Metal, and WineD3D on its own renderer, OpenGL or Vulkan.\n\nAfter changing any of these settings, stop the environment and relaunch so a Steam game picks up the new one.\n\nThis is a beta feature: some games may show artifacts, stutter or not start with it on. Turn it off if a game misbehaves.\n\nClick the ⓘ beside each setting to see what that one does."))
         }
     }
 

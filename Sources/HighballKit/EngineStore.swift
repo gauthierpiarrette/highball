@@ -455,10 +455,7 @@ public struct InstalledEngine: Sendable {
     }
     public var isComplete: Bool { missingFiles.isEmpty }
 
-    /// return the usable frame generation shim directory
-    /// Resolve the frame-generation shim directory, repairing the real-driver symlink if a
-    /// component update replaced it. This touches the filesystem, so it is a func rather
-    /// than a property: do not call it from a SwiftUI body on every evaluation.
+    /// resolves the shim directory and repairs the real-driver link; it touches the disk, so the app caches it per engine
     public func resolveLsfgShimDir() -> URL? {
         let dir = renderersDir.appending(path: "lsfg", directoryHint: .isDirectory)
         let shim = dir.appending(path: "libMoltenVK.dylib")

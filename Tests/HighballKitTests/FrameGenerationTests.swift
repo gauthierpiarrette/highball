@@ -58,6 +58,8 @@ private func frameGenerationChecks() throws {
     try check(env["LSFGM_MULTIPLIER"] == "3", "Launch multiplier override was ignored")
     try check(env["DYLD_LIBRARY_PATH"] == shim.path + ":/custom/lib", "Shim priority or custom search path lost")
     try check(bottle.frameGenStatus(engine: engine, environment: env) == .active(multiplier: 3), "Status disagrees with environment")
+    try check(bottle.frameGenStatus(shim: shim, environment: env) == .active(multiplier: 3), "Cached shim status disagrees")
+    try check(bottle.frameGenStatus(shim: nil, environment: env) == .unavailable("This engine has no usable frame generation component. Build or install the component for this engine."), "Missing cached shim was reported active")
     try check(WineRunner.launchHeader(engine: engine, bottle: bottle, renderer: .dxvk, env: env, args: []).contains("frameGen=3x(requested)"), "Header uses bottle value instead of launch multiplier")
     bottle.settings.environment["LSFGM_DLL_PATH"] = "Z:" + dll.path.replacingOccurrences(of: "/", with: "\\")
     try check(bottle.losslessScalingDLL == dll, "Windows override was not translated")

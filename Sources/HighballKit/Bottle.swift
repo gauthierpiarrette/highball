@@ -551,6 +551,12 @@ public struct Bottle: Sendable {
     /// derive status from the final launch environment
     public func frameGenStatus(engine: InstalledEngine,
                                environment: [String: String]? = nil) -> FrameGenStatus {
+        frameGenStatus(shim: engine.resolveLsfgShimDir(), environment: environment)
+    }
+
+    /// same, with the shim directory already resolved, so a view can pass a cached one
+    public func frameGenStatus(shim shimDir: URL?,
+                               environment: [String: String]? = nil) -> FrameGenStatus {
         guard settings.frameGen > 1 else { return .off }
         let env = environment ?? settings.environment
         if let reason = env["HB_LSFG_UNAVAILABLE"] { return .unavailable(reason) }
@@ -560,7 +566,7 @@ public struct Bottle: Sendable {
             return .unavailable("Frame generation requires a multiplier from 1 to 4.")
         }
         if multiplier == 1 || env["DISABLE_LSFGM"] != nil { return .off }
-        guard let shim = engine.resolveLsfgShimDir() else {
+        guard let shim = shimDir else {
             return .unavailable("This engine has no usable frame generation component. Build or install the component for this engine.")
         }
         if let path = env["LSFGM_MOLTENVK"], !path.isEmpty {
@@ -641,9 +647,10 @@ public struct Bottle: Sendable {
         merge(&env, extra)
         // apply frame generation after all overrides
         env.removeValue(forKey: "HB_LSFG_UNAVAILABLE")
-        let frameGeneration = frameGenStatus(engine: engine, environment: env)
+        let shimDir = engine.resolveLsfgShimDir()
+        let frameGeneration = frameGenStatus(shim: shimDir, environment: env)
         if case .active(let multiplier) = frameGeneration,
-           let shim = engine.resolveLsfgShimDir(), let dll = losslessScalingDLL(environment: env) {
+           let shim = shimDir, let dll = losslessScalingDLL(environment: env) {
             let existing = (env["DYLD_LIBRARY_PATH"] ?? "").split(separator: ":").map(String.init)
             env["DYLD_LIBRARY_PATH"] = ([shim.path] + existing.filter { $0 != shim.path }).joined(separator: ":")
             // every renderer gets the same dylib inserted: metal renderers to hook CAMetalLayer, the rest for OpenGL games

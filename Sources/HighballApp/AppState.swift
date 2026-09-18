@@ -9,6 +9,8 @@ enum SettingsTab: Hashable { case environments, engine, troubleshooting }
 @Observable @MainActor
 final class AppState {
     var engines: [InstalledEngine] = []
+    /// frame generation shim directory per engine id, resolved once in refresh() so the settings view does not repair links on every redraw
+    var lsfgShimDirs: [String: URL] = [:]
     var bottles: [Bottle] = []
     /// Directories under bottles/ that aren't loadable bottles. Shown alongside the real
     /// ones so a bottle whose settings file is gone still has somewhere to be acted on (#38).
@@ -541,6 +543,7 @@ final class AppState {
             if n > 0 { appendLog("pruned \(n) old log file(s)") }
         }
         engines = (try? engineStore.installedEngines()) ?? []
+        lsfgShimDirs = Dictionary(engines.compactMap { e in e.resolveLsfgShimDir().map { (e.id, $0) } }, uniquingKeysWith: { a, _ in a })
         bottles = (try? bottleStore.list()) ?? []
         damagedBottles = (try? bottleStore.damaged()) ?? []
         needsOnboarding = engines.isEmpty && homeUnavailable == nil   // an unplugged drive is not a first run
