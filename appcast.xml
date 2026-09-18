@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.27</title>
+      <description><![CDATA[Emulate display mode changes as a per-program setting; optional fixes offered under Advanced (RaceRoom's newer Direct3D 9); engine r5 carries that layer for opt-in use; a Steam restart stops the client alone; Apple's DirectX 12 support listed before its licence; frame generation groundwork (itsOwen)]]></description>
+      <pubDate>Fri, 18 Sep 2026 10:13:16 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.27/Highball-0.9.27.zip" sparkle:version="0.9.27" sparkle:shortVersionString="0.9.27" sparkle:edSignature="ixpSZ+E+/FNDOIaJdabeZo5szak/V3YSdX2MGzn6LUHHhw20wDToxf/9lp2jAktfOi83uTjwR4K5GRSLdIC2Aw==" length="3738026" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.26</title>
       <description><![CDATA[Unreal 5 games pick D3DMetal before launch; copying a home onto a network share streams and warns instead of failing (s3lverd); the activity strip counts KB and seconds; the CLI's run exits with Wine's status (ihelfrich); Remove from list on a program's tile]]></description>
       <pubDate>Thu, 17 Sep 2026 23:17:22 +0200</pubDate>
