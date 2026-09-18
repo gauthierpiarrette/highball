@@ -77,9 +77,12 @@ for row in "${GAMES[@]}"; do
     elif [ "${h[1]}" = "${h[2]}" ] && [ "${h[2]}" = "${h[3]}" ]; then echo "  FAIL: window frozen or blank (3 identical captures)"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"frozen\"}"); passed=false
     else echo "  ok: window after ~$((n*3))s, drawing"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"ok\",\"windowAfter\":$((n*3))}"); fi
   fi
-  pkill -9 -f -iE "steamapps/common/[^ ]*($winre|$name)" 2>/dev/null; pkill -9 -f winedbg 2>/dev/null; sleep 2
+  # Games started through Steam show Windows paths in the process list (steamapps\common\...),
+  # so both separators must match; with "/" only, The Last Caretaker demo outlived three runs
+  # (2026-09-18) and sat fullscreen under everything that followed.
+  pkill -9 -f -iE "steamapps[/\\\\]common[/\\\\][^ ]*($winre|$name)" 2>/dev/null; pkill -9 -f winedbg 2>/dev/null; sleep 2
   # kill the game by its window-owning wine process if still up (generic)
-  for p in $(ps -axo pid,command | grep -E 'steamapps/common' | grep -vE 'grep|steam\.exe|steamwebhelper|gameoverlayui' | awk '{print $1}'); do kill -9 $p 2>/dev/null; done
+  for p in $(ps -axo pid,command | grep -E 'steamapps[/\\\\]common' | grep -vE 'grep|steam\.exe|steamwebhelper|gameoverlayui' | awk '{print $1}'); do kill -9 $p 2>/dev/null; done
 done
 pkill -9 -f 'Steam.steam\.exe' 2>/dev/null; pkill -9 -f steamwebhelper 2>/dev/null
 # Nothing installed is not a pass: say so and exit 3 so Scripts/gate.sh records "skipped".
