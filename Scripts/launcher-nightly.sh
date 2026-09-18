@@ -48,9 +48,10 @@ PY
   crash=$(grep -cE 'int3|Unhandled exception|page fault' "$OUT/$id-launch.log")
   win="none"; lit="n/a"
   if [ -n "$winlist" ]; then
-    row=$($winlist 2>/dev/null | grep -i "owner=wine" | grep -i "$winre" | head -1); [ -n "$row" ] && win="yes"
+    # Scripts/winlist prints "<id> pid=<n> wine |<title>| x,y wxh layer=<l> on=<bool>".
+    row=$($winlist 2>/dev/null | grep -E "pid=[0-9]+[[:space:]]+wine[[:space:]]" | grep -i "$winre" | head -1); [ -n "$row" ] && win="yes"
     if [ "$win" = yes ] && [ "$locked" = false ]; then
-      wid=$(echo "$row" | sed -n 's/^id=\([0-9]*\).*/\1/p')
+      wid=$(echo "$row" | awk '{print $1}')
       screencapture -l "$wid" -o -x "$OUT/$id.png" 2>/dev/null && lit=$(python3 -c "
 from PIL import Image; im=Image.open('$OUT/$id.png').convert('RGBA'); px=list(im.getdata()); n=len(px)
 print('%.2f'%(sum(1 for q in px if q[3]>200 and (q[0]+q[1]+q[2])>90)/n))" 2>/dev/null || echo "n/a")
