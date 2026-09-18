@@ -395,7 +395,25 @@ public struct RecipeRunner: Sendable {
                 }
                 let isMSI = file.pathExtension.lowercased() == "msi" || url.lastPathComponent.lowercased().contains(".msi")
                 let wineArgs = isMSI ? ["msiexec", "/i", file.path, "/qn"] + arguments : [file.path] + arguments
+                let before = Set(ProcessTable.processes(ofPrefix: bottle.url))
                 let result = try await runner.run(wineArgs, renderer: .wined3d, label: label, onOutput: log)
+                // An installer must not leave processes behind. Battle.net's setup leaves its
+                // Agent running and Rockstar's starts its service, both under the setup-time
+                // environment (no renderer overlay, the sync mode the first boot had), and the
+                // first Play then hands the real client to that agent, which spawns it with the
+                // stale stack (measured 2026-09-18: the Battle.net client ran with WINEMSYNC=1
+                // and no WINEDLLPATH_PREPEND under a DXMT pin). Ending them here, and the server
+                // with them when nothing else runs, makes the next launch a cold start with the
+                // recipe's final settings.
+                let leftovers = ProcessTable.processes(ofPrefix: bottle.url).filter { !before.contains($0) }
+                if !leftovers.isEmpty {
+                    ProcessTable.terminate(leftovers)
+                    log?("[\(recipe.id)] ended \(leftovers.count) process\(leftovers.count == 1 ? "" : "es") the installer left running")
+                }
+                if ProcessTable.isIdle(prefix: bottle.url), ProcessTable.liveServer(forPrefix: bottle.url) != nil {
+                    _ = try? runner.kill()
+                    log?("[\(recipe.id)] stopped the environment so the next launch starts it with the recipe's settings")
+                }
                 guard step.accepts(exitStatus: result.exitStatus) else {
                     throw HighballError.processFailed(command: label, status: result.exitStatus,
                                                       output: WineRunner.exitCodeNote(for: result.exitStatus).isEmpty
