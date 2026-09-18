@@ -31,6 +31,14 @@ public enum SteamRestart {
     /// The renderer a running client was started with, read off its overlay path: each entry is
     /// `<...>/<renderer>/wine`, under `frameworks/renderer/` or `renderers/`. "wined3d" when it
     /// has no overlay. The d9vk entry rides along with every renderer and names none.
+    /// Whether a prefix process belongs to the Steam client itself: the client, its browser
+    /// helpers, its service and its overlay. Games the client started are not in this list,
+    /// which is the point: stopping the client must never take a running game with it.
+    public static func isClientProcess(argv0: String) -> Bool {
+        let name = argv0.replacingOccurrences(of: "\\", with: "/").lowercased().split(separator: "/").last.map(String.init) ?? ""
+        return ["steam.exe", "steamwebhelper.exe", "steamservice.exe", "steamerrorreporter.exe", "steamerrorreporter64.exe", "gameoverlayui.exe"].contains(name)
+    }
+
     public static func rendererName(ofLive env: [String: String]) -> String {
         let dirs = (env["WINEDLLPATH_PREPEND"] ?? "").split(separator: ":").compactMap { entry -> String? in
             let parts = entry.split(separator: "/")
@@ -115,10 +123,27 @@ extension WineRunner {
                                             wantedRenderer: (renderer ?? bottle.settings.renderer).rawValue,
                                             custom: Array(bottle.settings.environment.keys)) else { return .serves }
         if !mayRestart || steamGameIsRunning() { return .kept(why, live: SteamRestart.rendererName(ofLive: live)) }
-        try kill()
-        // `kill` waits for the server; give the client's own exit a moment too, so the launch
-        // that follows does not forward to a client on its way out.
-        for _ in 0..<50 where runningSteamEnvironment() != nil { try await Task.sleep(for: .milliseconds(100)) }
+        try await stopSteam()
         return .restarted(why)
+    }
+
+    /// Stops the Steam client and nothing else. Until 2026-09-18 this killed the whole
+    /// wineserver, which took every other program running in the environment down with the
+    /// client (highball#152: launching a second program ended the first). Steam's own
+    /// `-shutdown` closes the client cleanly; when it does not go within thirty seconds, its
+    /// processes alone are signalled. Games and other programs keep running throughout.
+    public func stopSteam() async throws {
+        let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
+        _ = try? await run([steam.path, "-shutdown"], renderer: nil, label: "steam-shutdown")
+        for _ in 0..<300 where runningSteamEnvironment() != nil { try await Task.sleep(for: .milliseconds(100)) }
+        guard runningSteamEnvironment() != nil else { return }
+        let clientPIDs = ProcessTable.processes(ofPrefix: bottle.url).filter { pid in
+            guard let first = ProcessTable.commandLineAndEnvironment(of: pid)?.arguments.first else { return false }
+            return SteamRestart.isClientProcess(argv0: first)
+        }
+        for pid in clientPIDs { Darwin.kill(pid, SIGTERM) }
+        for _ in 0..<50 where runningSteamEnvironment() != nil { try await Task.sleep(for: .milliseconds(100)) }
+        for pid in clientPIDs where Darwin.kill(pid, 0) == 0 { Darwin.kill(pid, SIGKILL) }
+        for _ in 0..<20 where runningSteamEnvironment() != nil { try await Task.sleep(for: .milliseconds(100)) }
     }
 }

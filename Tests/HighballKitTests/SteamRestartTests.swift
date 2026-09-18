@@ -71,6 +71,15 @@ final class SteamRestartTests: XCTestCase {
         XCTAssertNil(SteamRestart.reason(live: dxvk, wanted: wanted, wantedRenderer: "dxvk"))
     }
 
+    func testOnlyTheClientsOwnProcessesCountAsTheClient() {
+        XCTAssertTrue(SteamRestart.isClientProcess(argv0: "C:\\Program Files (x86)\\Steam\\steam.exe"))
+        XCTAssertTrue(SteamRestart.isClientProcess(argv0: "C:\\Program Files (x86)\\Steam\\bin\\cef\\cef.win7x64\\steamwebhelper.exe"))
+        XCTAssertTrue(SteamRestart.isClientProcess(argv0: "/b/drive_c/Program Files (x86)/Steam/GameOverlayUI.exe"))
+        XCTAssertFalse(SteamRestart.isClientProcess(argv0: "C:\\Program Files (x86)\\Steam\\steamapps\\common\\PEAK\\PEAK.exe"), "a game the client started")
+        XCTAssertFalse(SteamRestart.isClientProcess(argv0: "C:\\Games\\Tool\\steam_helper_for_mods.exe"), "a name that merely contains steam")
+        XCTAssertFalse(SteamRestart.isClientProcess(argv0: ""))
+    }
+
     func testRendererNameComesFromTheOverlayPath() {
         let base = "/e/x64-crossover26.3-r8/frameworks/renderer"
         XCTAssertEqual(SteamRestart.rendererName(ofLive: ["WINEDLLPATH_PREPEND": "/e/x/renderers/d3dmetal-tsshim/wine:\(base)/d3dmetal/wine:\(base)/d9vk/wine"]), "d3dmetal")

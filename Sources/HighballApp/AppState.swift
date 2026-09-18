@@ -295,10 +295,10 @@ final class AppState {
                     }
                     if recipe.changesLaunchEnvironment {
                         // A running Steam keeps the environment it started with; the game we are
-                        // about to launch through it would never see the recipe's settings.
-                        try? WineRunner(paths: paths, engine: engine, bottle: bottle).kill()
-                        try? await Task.sleep(for: .seconds(2))
-                        logLines.append("stopped the bottle so the new settings apply to this launch")
+                        // about to launch through it would never see the recipe's settings. Only
+                        // the client stops: other programs in the environment keep running.
+                        try? await WineRunner(paths: paths, engine: engine, bottle: bottle).stopSteam()
+                        logLines.append("stopped the Steam client so the new settings apply to this launch")
                     }
                     refresh()
                     let fresh = bottles.first { $0.name == bottleName } ?? runner.bottle
