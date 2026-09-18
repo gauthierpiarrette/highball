@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.30</title>
+      <description><![CDATA[Installer cleanup only when the environment was idle before the step, so a running game's own processes are never ended; CI now runs the database tests]]></description>
+      <pubDate>Fri, 18 Sep 2026 21:00:31 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.30/Highball-0.9.30.zip" sparkle:version="0.9.30" sparkle:shortVersionString="0.9.30" sparkle:edSignature="q1d7ESxr5/Dhz+DYZ2ONYj1LFj2jBTtaGN9+PDuKQRCukXvh9TTFojOzHthefGEhoDBe7EV0NQpE9UnzhILQDQ==" length="3757513" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.29</title>
       <description><![CDATA[Installers no longer leave background agents running with the setup-time graphics stack (Battle.net, Rockstar first launch), and a failed fonts or runtime install now says why]]></description>
       <pubDate>Fri, 18 Sep 2026 20:25:45 +0200</pubDate>
