@@ -341,6 +341,14 @@ public struct RecipeRunner: Sendable {
         return r
     }
 
+    /// The processes an installer left behind: those that appeared during the step, and only
+    /// when the environment was idle before it. A busy environment gets none, because a new
+    /// pid there may belong to the running program, not the installer. Pure, for the tests.
+    public static func installerLeftovers(before: Set<pid_t>, after: [pid_t], wasIdle: Bool) -> [pid_t] {
+        guard wasIdle else { return [] }
+        return after.filter { !before.contains($0) }
+    }
+
     /// Runs every step. Returns the notes the UI should show afterwards.
     public mutating func apply(_ recipe: Recipe,
                                resolve: (@Sendable (String) -> Recipe?)? = nil,
@@ -396,6 +404,7 @@ public struct RecipeRunner: Sendable {
                 let isMSI = file.pathExtension.lowercased() == "msi" || url.lastPathComponent.lowercased().contains(".msi")
                 let wineArgs = isMSI ? ["msiexec", "/i", file.path, "/qn"] + arguments : [file.path] + arguments
                 let before = Set(ProcessTable.processes(ofPrefix: bottle.url))
+                let wasIdle = ProcessTable.isIdle(prefix: bottle.url)
                 let result = try await runner.run(wineArgs, renderer: .wined3d, label: label, onOutput: log)
                 // An installer must not leave processes behind. Battle.net's setup leaves its
                 // Agent running and Rockstar's starts its service, both under the setup-time
@@ -405,12 +414,18 @@ public struct RecipeRunner: Sendable {
                 // and no WINEDLLPATH_PREPEND under a DXMT pin). Ending them here, and the server
                 // with them when nothing else runs, makes the next launch a cold start with the
                 // recipe's final settings.
-                let leftovers = ProcessTable.processes(ofPrefix: bottle.url).filter { !before.contains($0) }
+                // Only when nothing a person started was running before the installer: a pid that
+                // is new since then can otherwise be a running game's own child (a launcher it
+                // spawned, a crash handler), and a pid difference cannot tell the two apart. In
+                // that case the leftovers stay, and the note says so.
+                let leftovers = Self.installerLeftovers(before: before, after: ProcessTable.processes(ofPrefix: bottle.url), wasIdle: wasIdle)
                 if !leftovers.isEmpty {
                     ProcessTable.terminate(leftovers)
                     log?("[\(recipe.id)] ended \(leftovers.count) process\(leftovers.count == 1 ? "" : "es") the installer left running")
+                } else if !wasIdle {
+                    log?("[\(recipe.id)] a program was running before the installer, so anything it left running stays; stop the environment before the next launch if it misbehaves")
                 }
-                if ProcessTable.isIdle(prefix: bottle.url), ProcessTable.liveServer(forPrefix: bottle.url) != nil {
+                if wasIdle, ProcessTable.isIdle(prefix: bottle.url), ProcessTable.liveServer(forPrefix: bottle.url) != nil {
                     _ = try? runner.kill()
                     log?("[\(recipe.id)] stopped the environment so the next launch starts it with the recipe's settings")
                 }
