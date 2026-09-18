@@ -39,6 +39,13 @@ public enum SteamRestart {
         return ["steam.exe", "steamwebhelper.exe", "steamservice.exe", "steamerrorreporter.exe", "steamerrorreporter64.exe", "gameoverlayui.exe"].contains(name)
     }
 
+    /// "off", or the multiplier ("2x"). Pacing, flow scale and the rest still count as a
+    /// difference in `reason`; the words only name the multiplier.
+    static func frameGenerationName(of env: [String: String]) -> String {
+        guard let m = env["LSFGM_MULTIPLIER"], m != "1" else { return "off" }
+        return "\(m)x"
+    }
+
     public static func rendererName(ofLive env: [String: String]) -> String {
         let dirs = (env["WINEDLLPATH_PREPEND"] ?? "").split(separator: ":").compactMap { entry -> String? in
             let parts = entry.split(separator: "/")
@@ -66,6 +73,13 @@ public enum SteamRestart {
         // settings page says it is on (highball-db#48, Hogwarts Legacy crashed on the "AVX" run).
         for (key, what) in inherited where (live[key] == "1") != (wanted[key] == "1") {
             reasons.append("it runs with \(what) \(live[key] == "1" ? "on" : "off") and the game wants it \(wanted[key] == "1" ? "on" : "off")")
+        }
+        // Frame generation is a family of LSFGM_ variables the shim reads when the game starts,
+        // so a toggle flipped while the client runs would otherwise leave the game where the
+        // client was (highball#109 follow-up). Any difference in the family restarts the client.
+        let liveFrameGen = live.filter { $0.key.hasPrefix("LSFGM_") }, wantedFrameGen = wanted.filter { $0.key.hasPrefix("LSFGM_") }
+        if liveFrameGen != wantedFrameGen {
+            reasons.append("it runs with frame generation \(frameGenerationName(of: live)) and the game wants \(frameGenerationName(of: wanted))")
         }
         for key in custom.sorted() where !inherited.contains(where: { $0.0 == key }) && live[key] != wanted[key] {
             switch (live[key], wanted[key]) {

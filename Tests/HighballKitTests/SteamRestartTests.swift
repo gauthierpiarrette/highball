@@ -52,6 +52,20 @@ final class SteamRestartTests: XCTestCase {
                        "it runs with the Metal HUD off and the game wants it on")
     }
 
+    func testFrameGenerationToggledWhileTheClientRunsRestartsIt() {
+        var wanted = dxvk
+        wanted["LSFGM_ENV"] = "1"; wanted["LSFGM_MULTIPLIER"] = "2"; wanted["LSFGM_DLL_PATH"] = "/e/lsfg/Lossless.dll"; wanted["LSFGM_PACING_MODE"] = "vsync"
+        XCTAssertEqual(SteamRestart.reason(live: dxvk, wanted: wanted, wantedRenderer: "dxvk"),
+                       "it runs with frame generation off and the game wants 2x")
+        XCTAssertEqual(SteamRestart.reason(live: wanted, wanted: dxvk, wantedRenderer: "dxvk"),
+                       "it runs with frame generation 2x and the game wants off")
+        XCTAssertNil(SteamRestart.reason(live: wanted, wanted: wanted, wantedRenderer: "dxvk"))
+        // Same multiplier, different pacing: the shim reads it at start, so it restarts too.
+        var adaptive = wanted; adaptive["LSFGM_PACING_MODE"] = "adaptive"
+        XCTAssertEqual(SteamRestart.reason(live: wanted, wanted: adaptive, wantedRenderer: "dxvk"),
+                       "it runs with frame generation 2x and the game wants 2x")
+    }
+
     func testGLContextSwitchMissingFromAnOlderClientRestartsIt() {
         // 0.9.24 sets CX_FWD_COMPAT_GL_CTX on every launch; a client started by 0.9.23 lacks it.
         var wanted = dxvk; wanted["CX_FWD_COMPAT_GL_CTX"] = "1"
