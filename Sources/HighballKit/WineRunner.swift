@@ -76,8 +76,13 @@ public struct WineRunner: Sendable {
         out += "# wine \(args.joined(separator: " "))\n"
         out += "# sync=\(Self.effectiveSync(env: env, settings: bottle.settings))"
         out += " winver=\(bottle.settings.windowsVersion.rawValue) dpi=\(bottle.settings.dpiScale)"
-        out += " dxvkAsync=\(bottle.settings.dxvkAsync)\n"
-        for key in ["WINEDLLPATH_PREPEND", "WINEDLLOVERRIDES", "ROSETTA_ADVERTISE_AVX", "MTL_HUD_ENABLED", "CX_FWD_COMPAT_GL_CTX", "DXVK_CONFIG_FILE", "DXVK_LOG_PATH"] {
+        out += " dxvkAsync=\(bottle.settings.dxvkAsync)"
+        switch bottle.frameGenStatus(engine: engine, environment: env) {
+        case .off: out += " frameGen=off\n"
+        case .active(let m): out += " frameGen=\(m)x(requested\(env["LSFGM_PACING_MODE"] == "adaptive" ? ", adaptive" : "")\(env["LSFGM_FLOW_SCALE"].map { ", flow \($0)" } ?? "")\(env["LSFGM_PERFORMANCE_MODE"] == "1" ? ", performance" : ""))\n"
+        case .unavailable: out += " frameGen=off(unavailable)\n"
+        }
+        for key in ["WINEDLLPATH_PREPEND", "WINEDLLOVERRIDES", "ROSETTA_ADVERTISE_AVX", "MTL_HUD_ENABLED", "CX_FWD_COMPAT_GL_CTX", "DXVK_CONFIG_FILE", "DXVK_LOG_PATH", "LSFGM_MULTIPLIER", "LSFGM_PACING_MODE", "LSFGM_FLOW_SCALE", "LSFGM_DLL_PATH"] {
             if let value = env[key] { out += "# \(key)=\(value)\n" }
         }
         // The generated dxvk.conf decides per-game behaviour, so quote it rather than making the
@@ -136,12 +141,20 @@ public struct WineRunner: Sendable {
         // The caller's own caveat, e.g. a Steam client kept with another renderer: the header is
         // what a report quotes, so the truth about the stack the game got must be in it.
         if let headerNote { header += "# note: \(headerNote)\n" }
+        // report why frame generation is unavailable
+        if case .unavailable(let why) = bottle.frameGenStatus(engine: engine, environment: env) {
+            header += "# note: frame generation is off: \(why)\n"
+            onOutput?("note: frame generation is off: \(why)")
+        }
         logHandle.write(Data(header.utf8))
 
         let process = Process()
         process.executableURL = engine.wineBinary
         process.arguments = args
-        process.environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
+        let inherited = ProcessInfo.processInfo.environment.filter {
+            !$0.key.hasPrefix("LSFGM_") && $0.key != "DISABLE_LSFGM"
+        }
+        process.environment = inherited.merging(env) { $1 }
         // drive_c only exists after the first wineboot — fall back to the bottle root on fresh prefixes.
         process.currentDirectoryURL = workingDirectory
             ?? (FileManager.default.fileExists(atPath: bottle.driveC.path) ? bottle.driveC : bottle.url)

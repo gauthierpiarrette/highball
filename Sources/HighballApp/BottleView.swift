@@ -264,13 +264,21 @@ struct BottleSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let bottle: Bottle
     @State private var confirmDelete = false
+    @State private var showFrameGenInfo = false
+
+    /// small ⓘ next to a frame-generation control; the detail lives in the popover,
+    /// so "How frame generation works" stays about frame generation in general
+    private func infoIcon(_ text: String) -> some View {
+        InfoButton(text: L(text))
+    }
     /// Live slider value while dragging; nil means "read the saved dpiScale". Applied on release
     /// only, so dragging doesn't fire a wine registry write on every step.
     @State private var dpiDraft: Double? = nil
 
     private var currentDpi: Int { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.dpiScale }
-    private var currentRenderer: Renderer { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.renderer }
-    private var engine: InstalledEngine? { state.engine(for: bottle) }
+    private var liveBottle: Bottle { state.bottles.first { $0.name == bottle.name } ?? bottle }
+    private var currentRenderer: Renderer { liveBottle.settings.renderer }
+    private var engine: InstalledEngine? { state.engine(for: liveBottle) }
     private var d3dmetalAvailable: Bool { engine?.rendererDir("d3dmetal") != nil }
     private var vkd3dAvailable: Bool { engine?.rendererDir("vkd3d") != nil }
     private var d3dmetalPossible: Bool {
@@ -324,6 +332,64 @@ struct BottleSettingsSheet: View {
                                     state.showGPTKLicense = true
                                 }
                             }.controlSize(.small)
+                        }
+                    }
+                    // only engines that ship the shim get the control
+                    if let engine, let shim = state.lsfgShimDirs[engine.id] {
+                        Picker(L("Frame generation (Lossless Scaling, beta)"), selection: Binding(
+                            get: { liveBottle.settings.frameGen },
+                            set: { newValue in
+                                let turnedOn = liveBottle.settings.frameGen <= 1 && newValue > 1
+                                var copy = state.bottles.first { $0.name == bottle.name } ?? bottle
+                                copy.settings.frameGen = newValue
+                                Task { @MainActor in state.update(copy) }
+                                if turnedOn { showFrameGenInfo = true }
+                            })) {
+                            Text(L("Off")).tag(1)
+                            Text("2×").tag(2)
+                            Text("3×").tag(3)
+                            Text("4×").tag(4)
+                        }
+                        HStack(spacing: 6) {
+                            Button(L("How frame generation works")) { showFrameGenInfo = true }
+                                .buttonStyle(.link).controlSize(.small)
+                            infoIcon("How many frames are shown for each frame the game renders. 2× puts one generated frame between every pair of real frames, 4× puts three. Higher multipliers need more GPU headroom and only pay off on a display fast enough to show them.")
+                        }
+                        if liveBottle.settings.frameGen > 1 {
+                            HStack(spacing: 6) {
+                                Toggle(L("Adaptive pacing"), isOn: binding(\.frameGenAdaptive))
+                                infoIcon("Measures the game's own frame rate and inserts only as many frames as it takes to fill the display, up to the multiplier: a 45 fps game gets one extra frame every other frame, and a game already at the refresh rate is left alone.")
+                            }
+                            HStack(spacing: 6) {
+                                Toggle(L("Performance mode"), isOn: binding(\.frameGenPerformance))
+                                infoIcon("Uses Lossless Scaling's cheaper shader set: noticeably less GPU time per generated frame, with slightly softer interpolation around fast motion.")
+                            }
+                            HStack(spacing: 6) {
+                                Toggle(L("Force vsync"), isOn: binding(\.frameGenForceVsync))
+                                if liveBottle.settings.frameGenForceVsync {
+                                    infoIcon("Paces generated frames to the display. Turn it off to let the game present at its own rate instead.")
+                                } else {
+                                    InfoButton(text: L("The game presents at its own rate. Frames beyond the display's refresh rate are discarded and the image can tear, so this only helps above 60 Hz."), warning: true)
+                                }
+                            }
+                            HStack(spacing: 6) {
+                                Picker(L("Motion estimation resolution"), selection: binding(\.frameGenFlowScale)) {
+                                    Text("100%").tag(100)
+                                    Text("75%").tag(75)
+                                    Text("50%").tag(50)
+                                }
+                                infoIcon("Resolution used to estimate motion, as a percentage of the frame. Lower is cheaper and can help a GPU-bound game, at the cost of accuracy around small or fast-moving detail.")
+                            }
+                        }
+                        switch liveBottle.frameGenStatus(shim: shim) {
+                        case .unavailable(let why):
+                            Text(String(format: L("Frame generation stays off: %@"), L(why)))
+                                .font(.caption).foregroundStyle(.secondary)
+                        case .active:
+                            Text(L("After changing this, stop the environment and relaunch so a Steam game picks it up."))
+                                .font(.caption).foregroundStyle(.secondary)
+                        case .off:
+                            EmptyView()
                         }
                     }
                     Toggle(L("Metal performance HUD"), isOn: binding(\.metalHUD))
@@ -433,6 +499,11 @@ struct BottleSettingsSheet: View {
                             isPresented: $confirmDelete, titleVisibility: .visible) {
             Button(L("Delete"), role: .destructive) { dismiss(); state.deleteBottle(bottle.name) }
             Button(L("Cancel"), role: .cancel) {}
+        }
+        .alert(L("About frame generation"), isPresented: $showFrameGenInfo) {
+            Button(L("Got it"), role: .cancel) {}
+        } message: {
+            Text(L("Lossless Scaling inserts interpolated frames between the game's real frames to make motion look smoother.\n\nBy default the generated frames are paced to your display, so it never presents more than your screen's refresh rate. It therefore helps most when a game runs BELOW your refresh rate, for example a demanding game locked at 30 fps smoothed up to 60. On the built-in 60 Hz display a game already running above 60 is capped to 60 and feels worse, not better. It pays off on an external high-refresh monitor (120 Hz or more), where a 60 fps game becomes 120.\n\nIt also adds a little input lag, because a real frame is held back to interpolate.\n\nIt works with every graphics mode: DXVK and vkd3d-proton through Vulkan, DXMT and D3DMetal through Metal, and WineD3D on its own renderer, OpenGL or Vulkan.\n\nAfter changing any of these settings, stop the environment and relaunch so a Steam game picks up the new one.\n\nThis is a beta feature: some games may show artifacts, stutter or not start with it on. Turn it off if a game misbehaves.\n\nClick the ⓘ beside each setting to see what that one does."))
         }
     }
 
@@ -652,6 +723,32 @@ struct EnvEditor: View {
             guard copy.settings.environment != parsed.environment else { return }
             copy.settings.environment = parsed.environment
             state.update(copy)
+        }
+    }
+}
+
+/// A small ⓘ (or ⚠) that explains one setting. Click opens a popover; hovering still shows
+/// the same text as a tooltip, so it works either way.
+private struct InfoButton: View {
+    let text: String
+    var warning = false
+    @State private var showing = false
+
+    var body: some View {
+        Button { showing.toggle() } label: {
+            Image(systemName: warning ? "exclamationmark.triangle.fill" : "info.circle")
+                .foregroundStyle(warning ? Color.orange : Color.secondary)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(text)
+        .accessibilityLabel(warning ? L("Warning") : L("What this setting does"))
+        .popover(isPresented: $showing, arrowEdge: .bottom) {
+            Text(text)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 320, alignment: .leading)
+                .padding(14)
         }
     }
 }

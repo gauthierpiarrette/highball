@@ -333,6 +333,17 @@ public struct BottleSettings: Codable, Sendable {
     public var dxvkAsync: Bool = false
     /// Cap the frame rate (0 = uncapped). Applied per renderer (DXVK_FRAME_RATE / DXMT_CONFIG).
     public var fpsCap: Int = 0
+    /// frame generation multiplier; 1 disables it
+    public var frameGen: Int = 1
+    /// adaptive pacing: fill display slots per source frame, the multiplier is the cap
+    public var frameGenAdaptive: Bool = false
+    /// flow estimation resolution as a percentage of the frame, 25 to 100
+    public var frameGenFlowScale: Int = 100
+    /// lossless scaling's performance shader set: cheaper, lower quality
+    public var frameGenPerformance: Bool = false
+    /// force FIFO on wrapped swapchains. Off lets the game's own present mode through, so
+    /// presentation can exceed the refresh rate; only useful above 60 Hz, and it can tear.
+    public var frameGenForceVsync: Bool = true
     /// Map the Mac Command keys to Windows Ctrl, so Cmd+C/Cmd+V/Cmd+A do what a Mac user expects
     /// inside Windows apps. Wine's default leaves Command as Alt, which is why pasting into Steam
     /// beeps instead of pasting. Option is mapped to Alt alongside it — without that, mapping both
@@ -363,7 +374,7 @@ public struct BottleSettings: Codable, Sendable {
     public var recipes: [String] = []
     public var created: Date = Date()
 
-    enum CodingKeys: String, CodingKey { case formatVersion, name, engineID, renderer, rendererExplicit, windowsVersion, sync, metalHUD, advertiseAVX, dxvkAsync, fpsCap, commandIsControl, commandIsControlSynced, dpiScale, dllOverrides, dxvkAppConfig, dllOverridesSynced, environment, pins, recipes, created }
+    enum CodingKeys: String, CodingKey { case formatVersion, name, engineID, renderer, rendererExplicit, windowsVersion, sync, metalHUD, advertiseAVX, dxvkAsync, fpsCap, frameGen, frameGenAdaptive, frameGenFlowScale, frameGenPerformance, frameGenForceVsync, commandIsControl, commandIsControlSynced, dpiScale, dllOverrides, dxvkAppConfig, dllOverridesSynced, environment, pins, recipes, created }
 
     public init(name: String, engineID: String) {
         self.name = name
@@ -384,6 +395,13 @@ public struct BottleSettings: Codable, Sendable {
         advertiseAVX = try c.decodeIfPresent(Bool.self, forKey: .advertiseAVX) ?? false
         dxvkAsync = try c.decodeIfPresent(Bool.self, forKey: .dxvkAsync) ?? false
         fpsCap = try c.decodeIfPresent(Int.self, forKey: .fpsCap) ?? 0
+        let decodedFrameGen = try c.decodeIfPresent(Int.self, forKey: .frameGen) ?? 1
+        frameGen = (1...4).contains(decodedFrameGen) ? decodedFrameGen : 1
+        frameGenAdaptive = try c.decodeIfPresent(Bool.self, forKey: .frameGenAdaptive) ?? false
+        let decodedFlow = try c.decodeIfPresent(Int.self, forKey: .frameGenFlowScale) ?? 100
+        frameGenFlowScale = (25...100).contains(decodedFlow) ? decodedFlow : 100
+        frameGenPerformance = try c.decodeIfPresent(Bool.self, forKey: .frameGenPerformance) ?? false
+        frameGenForceVsync = try c.decodeIfPresent(Bool.self, forKey: .frameGenForceVsync) ?? true
         // dpiScale supersedes the old retinaMode toggle (on == 200% == LogPixels 192).
         if let dpi = try c.decodeIfPresent(Int.self, forKey: .dpiScale) {
             dpiScale = dpi
@@ -474,6 +492,99 @@ public struct Bottle: Sendable {
         return (instead, "running with \(Renderer.displayName(instead)) instead of \(Renderer.displayName(wanted)): \(why)")
     }
 
+    /// lossless scaling app id
+    public static let losslessScalingAppID = 993090
+
+    /// resolve native paths and wine drive mappings
+    private func frameGenPath(_ path: String) -> URL {
+        if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
+        let pieces = path.replacingOccurrences(of: "\\", with: "/").split(separator: ":", maxSplits: 1)
+        if pieces.count == 2, pieces[0].count == 1 {
+            let drive = String(pieces[0]).lowercased()
+            if drive == "c" || drive == "z" { return resolve(windowsPath: path) }
+            return url.appending(path: "dosdevices/\(drive):")
+                .appending(path: String(pieces[1]).trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+                .resolvingSymlinksInPath()
+        }
+        return URL(fileURLWithPath: path, relativeTo: url).standardizedFileURL
+    }
+
+    private func frameGenFile(_ url: URL) -> Bool {
+        (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+            && FileManager.default.isReadableFile(atPath: url.path)
+    }
+
+    public var losslessScalingDLL: URL? { losslessScalingDLL(environment: settings.environment) }
+
+    private func losslessScalingDLL(environment: [String: String]) -> URL? {
+        if let override = environment["LSFGM_DLL_PATH"], !override.isEmpty {
+            let dll = frameGenPath(override)
+            return frameGenFile(dll) ? dll : nil
+        }
+        guard let root = SteamLibrary.steamRoot(of: self) else { return nil }
+        var libraries = [root]
+        // check secondary steam libraries
+        if let text = try? String(contentsOf: root.appending(path: "steamapps/libraryfolders.vdf"), encoding: .utf8) {
+            let pattern = #/"path"\s+"((?:\\.|[^"\\])*)"/#
+            for match in text.matches(of: pattern) {
+                let path = String(match.1).replacingOccurrences(of: #"\\"#, with: #"\"#)
+                    .replacingOccurrences(of: #"\""#, with: "\"")
+                libraries.append(frameGenPath(path))
+            }
+        }
+        for library in libraries {
+            let manifest = library.appending(path: "steamapps/appmanifest_\(Self.losslessScalingAppID).acf")
+            let dir = SteamLibrary.parseManifest(manifest)?.installdir ?? "Lossless Scaling"
+            let dll = library.appending(path: "steamapps/common/\(dir)/lsfg-vk.dll")
+            if frameGenFile(dll) { return dll }
+        }
+        return nil
+    }
+
+    public enum FrameGenStatus: Equatable, Sendable {
+        case off
+        /// requested for this launch; runtime fallback is still possible
+        case active(multiplier: Int)
+        case unavailable(String)
+    }
+
+    /// derive status from the final launch environment
+    public func frameGenStatus(engine: InstalledEngine,
+                               environment: [String: String]? = nil) -> FrameGenStatus {
+        frameGenStatus(shim: engine.resolveLsfgShimDir(), environment: environment)
+    }
+
+    /// same, with the shim directory already resolved, so a view can pass a cached one
+    public func frameGenStatus(shim shimDir: URL?,
+                               environment: [String: String]? = nil) -> FrameGenStatus {
+        guard settings.frameGen > 1 else { return .off }
+        let env = environment ?? settings.environment
+        if let reason = env["HB_LSFG_UNAVAILABLE"] { return .unavailable(reason) }
+        guard (1...4).contains(settings.frameGen),
+              let multiplier = Int(env["LSFGM_MULTIPLIER"] ?? String(settings.frameGen)),
+              (1...4).contains(multiplier) else {
+            return .unavailable("Frame generation requires a multiplier from 1 to 4.")
+        }
+        if multiplier == 1 || env["DISABLE_LSFGM"] != nil { return .off }
+        guard let shim = shimDir else {
+            return .unavailable("This engine has no usable frame generation component. Build or install the component for this engine.")
+        }
+        if let path = env["LSFGM_MOLTENVK"], !path.isEmpty {
+            let driver = frameGenPath(path)
+            guard driver.lastPathComponent != "libMoltenVK.dylib", frameGenFile(driver),
+                  driver.resolvingSymlinksInPath() != shim.appending(path: "libMoltenVK.dylib").resolvingSymlinksInPath() else {
+                return .unavailable("The real MoltenVK override is unusable. Use a readable driver with a different filename from libMoltenVK.dylib.")
+            }
+        }
+        guard losslessScalingDLL(environment: env) != nil else {
+            if let override = env["LSFGM_DLL_PATH"], !override.isEmpty {
+                return .unavailable("The shader DLL override is not a readable file. Correct LSFGM_DLL_PATH or remove the override.")
+            }
+            return .unavailable("Install Lossless Scaling from Steam in this environment and select its lsfg-vk beta branch (Properties → Betas).")
+        }
+        return .active(multiplier: multiplier)
+    }
+
     public func environment(engine: InstalledEngine, renderer: Renderer? = nil, extra: [String: String] = [:]) throws -> [String: String] {
         let effective = try effectiveRenderer(requested: renderer, engine: engine).renderer
         var env = engine.baseEnvironment()
@@ -534,6 +645,48 @@ public struct Bottle: Sendable {
         merge(&env, settings.environment)
         merge(&env, try effective.environment(engine: engine))
         merge(&env, extra)
+        // apply frame generation after all overrides
+        env.removeValue(forKey: "HB_LSFG_UNAVAILABLE")
+        let shimDir = engine.resolveLsfgShimDir()
+        let frameGeneration = frameGenStatus(shim: shimDir, environment: env)
+        if case .active(let multiplier) = frameGeneration,
+           let shim = shimDir, let dll = losslessScalingDLL(environment: env) {
+            let existing = (env["DYLD_LIBRARY_PATH"] ?? "").split(separator: ":").map(String.init)
+            env["DYLD_LIBRARY_PATH"] = ([shim.path] + existing.filter { $0 != shim.path }).joined(separator: ":")
+            // every renderer gets the same dylib inserted: metal renderers to hook CAMetalLayer, the rest for OpenGL games
+            let dylib = shim.appending(path: "libMoltenVK.dylib").path
+            let inserted = (env["DYLD_INSERT_LIBRARIES"] ?? "").split(separator: ":").map(String.init)
+            env["DYLD_INSERT_LIBRARIES"] = ([dylib] + inserted.filter { $0 != dylib }).joined(separator: ":")
+            switch r {
+            case .dxmt, .d3dmetal:
+                env["LSFGM_METAL"] = "1"
+                env.removeValue(forKey: "LSFGM_OPENGL")
+            case .wined3d:
+                env.removeValue(forKey: "LSFGM_METAL")
+                env["LSFGM_OPENGL"] = "1"
+            case .dxvk, .vkd3d:
+                env.removeValue(forKey: "LSFGM_METAL")
+                env["LSFGM_OPENGL"] = "1"
+            }
+            env["LSFGM_MOLTENVK"] = env["LSFGM_MOLTENVK"].flatMap { $0.isEmpty ? nil : frameGenPath($0).path }
+                ?? shim.appending(path: InstalledEngine.lsfgRealDriverName).path
+            env["LSFGM_ENV"] = "1"
+            env["LSFGM_MULTIPLIER"] = String(multiplier)
+            env["LSFGM_DLL_PATH"] = dll.path
+            if env["LSFGM_PACING_MODE"] == nil { env["LSFGM_PACING_MODE"] = settings.frameGenAdaptive ? "adaptive" : "vsync" }
+            if env["LSFGM_FLOW_SCALE"] == nil, settings.frameGenFlowScale < 100 { env["LSFGM_FLOW_SCALE"] = String(format: "%.2f", Double(settings.frameGenFlowScale) / 100) }
+            if env["LSFGM_PERFORMANCE_MODE"] == nil, settings.frameGenPerformance { env["LSFGM_PERFORMANCE_MODE"] = "1" }
+            if env["LSFGM_OVERRIDE_PRESENT_MODE"] == nil, !settings.frameGenForceVsync { env["LSFGM_OVERRIDE_PRESENT_MODE"] = "0" }
+            if env["LSFGM_LOG_FILE"] == nil { env["LSFGM_LOG_FILE"] = dxvkLogURL.appending(path: "lsfg-metal.log").path }
+        } else {
+            env.removeValue(forKey: "LSFGM_ENV")
+            env.removeValue(forKey: "LSFGM_PROFILE")
+            env.removeValue(forKey: "LSFGM_METAL")
+            env.removeValue(forKey: "LSFGM_OPENGL")
+            // keep unavailable settings disabled
+            env["DISABLE_LSFGM"] = "1"
+            if case .unavailable(let reason) = frameGeneration { env["HB_LSFG_UNAVAILABLE"] = reason }
+        }
         return env
     }
 
