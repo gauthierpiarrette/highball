@@ -119,6 +119,39 @@ public enum ProcessTable {
         return SyncMode(environment: env)
     }
 
+    /// The environment a running wineserver was started with, nil when none runs. Wine's
+    /// `services.exe` and every Windows service it starts inherit exactly this environment,
+    /// however the service was later asked for, because the prefix boots them once from the
+    /// first process that started the server.
+    public static func liveServerEnvironment(forPrefix prefix: URL) -> [String: String]? {
+        guard let pid = liveServer(forPrefix: prefix) else { return nil }
+        return commandLineAndEnvironment(of: pid)?.environment
+    }
+
+    /// Whether nothing but Wine's own plumbing and Windows services runs in the prefix, so the
+    /// server can be restarted without ending anything a person started.
+    ///
+    /// The tell is the working directory: `services.exe`, `winedevice.exe`, `plugplay.exe`,
+    /// `rpcss.exe`, `svchost.exe` and `explorer.exe` work in `drive_c/windows`, and services.exe
+    /// starts every Windows service there too (Rockstar's, EA's, anti-cheat services; measured
+    /// 2026-09-18). Programs Highball or a launcher started work in their own folder. Pure, so
+    /// it is tested without processes.
+    public static func isIdle(workingDirectories: [String], prefix: String, serverDirectory: String?) -> Bool {
+        let root = prefix.hasSuffix("/") ? prefix : prefix + "/"
+        let windows = root + "drive_c/windows"
+        return workingDirectories.allSatisfy { cwd in
+            if let server = serverDirectory, cwd == server || cwd.hasPrefix(server + "/") { return true }
+            return cwd == windows || cwd.hasPrefix(windows + "/")
+        }
+    }
+
+    public static func isIdle(prefix: URL) -> Bool {
+        let root = canonical(prefix.path)
+        let server = serverDirectory(forPrefix: prefix).map { canonical($0.path) }
+        let cwds = processes(ofPrefix: prefix).compactMap { workingDirectory(of: $0) }.map(canonical)
+        return isIdle(workingDirectories: cwds, prefix: root, serverDirectory: server)
+    }
+
     /// Ends the given processes: SIGTERM, a grace period, then SIGKILL for whatever is left.
     /// Returns the ids that had to be killed the hard way.
     @discardableResult

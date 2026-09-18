@@ -229,7 +229,42 @@ public struct WineRunner: Sendable {
     public func start(_ executable: URL, arguments: [String] = [], renderer: Renderer? = nil, extraEnvironment: [String: String] = [:], workingDirectory: URL? = nil, headerNote: String? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
         await syncDllOverridesRegistry()
         await syncKeyboardRegistry()
-        return try await run([executable.path] + arguments, renderer: renderer, extraEnvironment: extraEnvironment, label: executable.lastPathComponent, workingDirectory: workingDirectory, headerNote: headerNote, onOutput: onOutput)
+        var note = headerNote
+        if let rebooted = try await rebootIdleEnvironmentIfMismatched(renderer: renderer, extraEnvironment: extraEnvironment) {
+            onOutput?("note: \(rebooted)")
+            note = [headerNote, rebooted].compactMap { $0 }.joined(separator: "; ")
+        }
+        return try await run([executable.path] + arguments, renderer: renderer, extraEnvironment: extraEnvironment, label: executable.lastPathComponent, workingDirectory: workingDirectory, headerNote: note, onOutput: onOutput)
+    }
+
+    /// Restarts the environment's Wine server before a program launch when the server, and so
+    /// every Windows service in it, was booted under a different stack than this launch gets,
+    /// and nothing a person started is running. Returns the note for the log, nil when the
+    /// server serves as is or does not run.
+    ///
+    /// A prefix boots `services.exe` once, from whichever process starts the server, and every
+    /// service it later starts inherits that first environment, not the launching program's.
+    /// On a fresh environment that process is a setup step (the first boot, a registry write,
+    /// an installer), all of which run without a renderer overlay. The Rockstar launcher's
+    /// self-update then restarts it through its own service, so the restarted launcher and its
+    /// browser ran under wined3d and the Sign In window stayed empty on every first launch
+    /// after install (highball#124, measured 2026-09-18: `services.exe` and the restarted
+    /// launcher had no WINEDLLPATH_PREPEND while the launch that started it did). A stop and a
+    /// second Play fixed it, which is what this does on its own. Never while something a
+    /// person started is running: a wrong stack for the services beats ending their program,
+    /// and that case is noted instead.
+    func rebootIdleEnvironmentIfMismatched(renderer: Renderer?, extraEnvironment: [String: String]) async throws -> String? {
+        guard let live = ProcessTable.liveServerEnvironment(forPrefix: bottle.url) else { return nil }
+        let wanted = try bottle.environment(engine: engine, renderer: renderer, extra: extraEnvironment)
+        guard let why = SteamRestart.reason(live: live, wanted: wanted,
+                                            wantedRenderer: (renderer ?? bottle.settings.renderer).rawValue,
+                                            custom: Array(bottle.settings.environment.keys)) else { return nil }
+        guard ProcessTable.isIdle(prefix: bottle.url) else {
+            return "the environment's Windows services keep the stack they started with (\(why)); a program is still running, so the environment was not restarted"
+        }
+        _ = try kill()
+        try? await Task.sleep(for: .seconds(2))
+        return "restarted the environment before the launch so its Windows services get this stack: \(why)"
     }
 
     /// Runs the pinned program, honouring its own renderer/env/args.
