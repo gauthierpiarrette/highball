@@ -9,7 +9,10 @@ struct GraphicsModePicker: View {
     let bottle: Bottle
 
     private var live: Bottle { state.bottles.first { $0.name == bottle.name } ?? bottle }
-    private var d3dmetalAvailable: Bool { state.engine(for: live)?.rendererDir("d3dmetal") != nil }
+    // Listed when the engine ships it, licence accepted or not: picking it with the licence
+    // still to accept makes the next Play ask for it, in context (highball#138: the option
+    // was hidden until then and the reporter could not find it).
+    private var d3dmetalAvailable: Bool { state.engine(for: live).map { Renderer.d3dmetal.availability(in: $0) != .notShipped } ?? false }
     private var vkd3dAvailable: Bool { state.engine(for: live)?.rendererDir("vkd3d") != nil }
 
     /// nil = Automatic.

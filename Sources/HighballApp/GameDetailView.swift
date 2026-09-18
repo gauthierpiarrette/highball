@@ -219,7 +219,9 @@ struct GameDetailView: View {
                                         get: { state.rendererOverride(for: item)?.rawValue ?? "" },
                                         set: { state.setRendererOverride(Renderer(rawValue: $0), for: item.id) })) {
                                         Text(L("Environment's mode")).tag("")
-                                        ForEach(Renderer.allCases.filter { $0.availability(in: engine) == .available }, id: \.self) { r in
+                                        // Shipped modes, licence accepted or not: a pick that still
+                                        // needs Apple's licence is asked for at Play (highball#138).
+                                        ForEach(Renderer.allCases.filter { $0.availability(in: engine) != .notShipped }, id: \.self) { r in
                                             Text(GamePageCopy.plainName(r)).tag(r.rawValue)
                                         }
                                     }.labelsHidden().frame(maxWidth: 360)
