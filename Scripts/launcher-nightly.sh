@@ -19,6 +19,10 @@ OUT=private/launcher-nightly; mkdir -p "$OUT"
 only=(); [ "${1:-}" = "--only" ] && { shift; only=("$@"); }
 locked=$(ioreg -n Root -d1 2>/dev/null | grep -q 'CGSSessionScreenIsLocked"=Yes' && echo true || echo false)
 winlist=Scripts/winlist; [ -x "$winlist" ] || winlist=""
+# A recipe without an engine pin runs on the app's default engine (spike/engine-manifest.json),
+# not on the CLI's "newest installed": on the maintainer's Mac that was r6 (2026-09-19), which
+# is opt-in and not what a new user gets.
+DEFAULT_ENGINE=$(python3 -c "import json;print(json.load(open('spike/engine-manifest.json'))['id'])" 2>/dev/null)
 results=()
 for f in "$DB"/*.json; do
   id=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['id'])" "$f")
@@ -37,6 +41,7 @@ PY
   if [ "$blocked" = yes ]; then
     echo "[$id] blocked by its recipe (expected)"; results+=("{\"id\":\"$id\",\"result\":\"blocked\"}"); continue
   fi
+  [ "$engine" = default ] && [ -n "$DEFAULT_ENGINE" ] && engine=$DEFAULT_ENGINE
   engarg=(); [ "$engine" != default ] && engarg=(--engine "$engine")
   # A recipe may pin an engine this Mac has not installed (EA app pins r4, 2026-09-19). The app
   # downloads it before Play; the nightly does the same from the bundled manifest, so the
