@@ -28,6 +28,31 @@ final class PlayReportTests: XCTestCase {
         XCTAssertFalse(names.contains("renderer"))
     }
 
+    func testSettingsSummaryListsWhatWasChosen() {
+        var s = BottleSettings(name: "Gaming", engineID: "e")
+        XCTAssertEqual(PlayReport.settingsSummary(s), "mode dxmt, sync msync, Windows win10, scale 96 dpi",
+                       "defaults say nothing about the run, so only the always-on line remains")
+        s.fpsCap = 60; s.frameGen = 2; s.frameGenAdaptive = true; s.metalHUD = true
+        s.environment = ["DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN": "1"]
+        s.dxvkAppConfig = ["csgo.exe": ["d3d9.customDeviceId": "73BF"]]
+        s.recipes = ["steam"]
+        let pin = Pin(name: "Skyrim", path: "x.exe", arguments: ["-dx11"], environment: ["A": "b"], renderer: .d3dmetal)
+        let lines = PlayReport.settingsSummary(s, pin: pin).split(separator: "\n").map(String.init)
+        XCTAssertEqual(lines, ["mode dxmt, sync msync, Windows win10, scale 96 dpi", "Metal HUD on", "frame cap 60",
+                               "frame generation 2x, adaptive", "DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1",
+                               "dxvk.conf [csgo.exe] d3d9.customDeviceId=73BF", "recipes steam",
+                               "program mode d3dmetal", "program arguments -dx11", "program A=b"])
+    }
+
+    func testSettingsReachTheForm() throws {
+        let url = PlayReport.url(title: "X", appid: nil, renderer: nil, chip: "c", macos: "m", engine: "e", minutes: 1,
+                                 settings: "frame cap 60\nMetal HUD on")
+        let q = Dictionary(uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(q["settings"], "frame cap 60\nMetal HUD on")
+        let bare = PlayReport.url(title: "X", appid: nil, renderer: nil, chip: "c", macos: "m", engine: "e", minutes: 1, settings: "")
+        XCTAssertFalse(URLComponents(url: bare, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "settings" } ?? true)
+    }
+
     func testSessionRecordWithoutRendererStillDecodes() throws {
         let old = Data(#"{"title":"T","bottle":"B","appid":1,"started":0,"ended":120,"reason":"ended"}"#.utf8)
         let r = try JSONDecoder().decode(SessionRecord.self, from: old)

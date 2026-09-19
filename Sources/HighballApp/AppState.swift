@@ -1339,9 +1339,12 @@ final class AppState {
         // one: two of three app-sent reports on 2026-09-13 arrived with the mode empty.
         let renderer = record.renderer ?? bottle?.settings.renderer.rawValue
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        // The environment's settings go along (highball#159): a pinned program adds its own.
+        let pin = bottle?.settings.pins.first { $0.name == record.title }
+        let settings = bottle.map { PlayReport.settingsSummary($0.settings, pin: pin) }
         NSWorkspace.shared.open(PlayReport.url(title: record.title, appid: record.appid, renderer: renderer,
                                                chip: Machine.chip(), macos: Machine.macOSVersion(), engine: engine,
-                                               minutes: record.seconds / 60, version: version))
+                                               minutes: record.seconds / 60, version: version, settings: settings))
         postPlay = nil
     }
 
