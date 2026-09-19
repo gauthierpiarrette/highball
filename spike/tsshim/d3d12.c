@@ -23,7 +23,23 @@ static HMODULE real_dll;
 static HINSTANCE self;
 static int dbg, idle;
 static UINT64 qpc_freq;
-#define LOG(...) do { if (dbg) { fprintf(stderr, "tsshim: " __VA_ARGS__); fputc('\n', stderr); fflush(stderr); } } while (0)
+// Debug lines go to a file: a GUI-subsystem game started by Steam has no stderr handle on the
+// Windows side, so fprintf(stderr) vanished (The Last Caretaker, 2026-09-19). C:\highball\logs is
+// where Highball keeps the renderers' own logs inside the bottle.
+static FILE *dbg_file;
+static FILE *dbg_out(void)
+{
+    if (!dbg_file) {
+        char path[MAX_PATH]; snprintf(path, sizeof path, "C:\\highball\\logs\\tsshim-%lu.log", (unsigned long)GetCurrentProcessId());
+        dbg_file = fopen(path, "a");
+        if (!dbg_file) dbg_file = stderr;
+    }
+    return dbg_file;
+}
+static CRITICAL_SECTION log_lock; static int log_lock_ready;
+#define LOG(...) do { if (dbg) { if (!log_lock_ready) { InitializeCriticalSection(&log_lock); log_lock_ready = 1; } \
+    EnterCriticalSection(&log_lock); FILE *f_ = dbg_out(); SYSTEMTIME st_; GetLocalTime(&st_); \
+    fprintf(f_, "%02u:%02u:%02u.%03u tsshim[%lu]: ", st_.wHour, st_.wMinute, st_.wSecond, st_.wMilliseconds, (unsigned long)GetCurrentThreadId()); fprintf(f_, __VA_ARGS__); fputc('\n', f_); fflush(f_); LeaveCriticalSection(&log_lock); } } while (0)
 
 // Wine tells builtin modules apart by name (the file name on Wine 10, the PE's internal export name
 // on CrossOver's Wine 11), so a second "d3d12.dll" at another path comes back as this shim. Highball
@@ -215,10 +231,82 @@ static void patch_slot(void **slot, void *hook, void **saved)
     if (old) VirtualProtect(slot, sizeof(void *), old, &old);
 }
 
+// Diagnostic only (HB_TSSHIM_DEBUG): log each resource the game creates, so a Metal assertion
+// such as "MTLTextureDescriptor has invalid pixelFormat (0)" (The Last Caretaker, 2026-09-19)
+// can be tied to the DXGI format D3DMetal failed to map. Forwarded untouched otherwise.
+static HRESULT (STDMETHODCALLTYPE *real_CreateCommittedResource)(ID3D12Device *, const D3D12_HEAP_PROPERTIES *, D3D12_HEAP_FLAGS, const D3D12_RESOURCE_DESC *, D3D12_RESOURCE_STATES, const D3D12_CLEAR_VALUE *, REFIID, void **);
+static HRESULT (STDMETHODCALLTYPE *real_CreatePlacedResource)(ID3D12Device *, ID3D12Heap *, UINT64, const D3D12_RESOURCE_DESC *, D3D12_RESOURCE_STATES, const D3D12_CLEAR_VALUE *, REFIID, void **);
+static void log_resource(const char *what, const D3D12_RESOURCE_DESC *d, HRESULT hr)
+{
+    if (!d || d->Dimension == D3D12_RESOURCE_DIMENSION_BUFFER) return;
+    LOG("%s dim=%d format=%u %llux%u depth/array=%u mips=%u samples=%u flags=0x%x hr=0x%lx", what, (int)d->Dimension, (unsigned)d->Format,
+        (unsigned long long)d->Width, (unsigned)d->Height, (unsigned)d->DepthOrArraySize, (unsigned)d->MipLevels, (unsigned)d->SampleDesc.Count, (unsigned)d->Flags, (unsigned long)hr);
+}
+static HRESULT STDMETHODCALLTYPE hook_CreateCommittedResource(ID3D12Device *dev, const D3D12_HEAP_PROPERTIES *hp, D3D12_HEAP_FLAGS hf, const D3D12_RESOURCE_DESC *d, D3D12_RESOURCE_STATES st, const D3D12_CLEAR_VALUE *cv, REFIID riid, void **out)
+{
+    if (dbg) { log_resource("CreateCommittedResource begin", d, 0); }
+    HRESULT hr = real_CreateCommittedResource(dev, hp, hf, d, st, cv, riid, out);
+    if (dbg) { log_resource("CreateCommittedResource done", d, hr); if (d && d->Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) LOG("  -> res=%p", out ? *out : NULL); }
+    return hr;
+}
+static HRESULT STDMETHODCALLTYPE hook_CreatePlacedResource(ID3D12Device *dev, ID3D12Heap *heap, UINT64 off, const D3D12_RESOURCE_DESC *d, D3D12_RESOURCE_STATES st, const D3D12_CLEAR_VALUE *cv, REFIID riid, void **out)
+{
+    if (dbg) { log_resource("CreatePlacedResource begin", d, 0); }
+    HRESULT hr = real_CreatePlacedResource(dev, heap, off, d, st, cv, riid, out);
+    if (dbg) { log_resource("CreatePlacedResource done", d, hr); if (d && d->Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) LOG("  -> res=%p", out ? *out : NULL); }
+    return hr;
+}
+static HRESULT (STDMETHODCALLTYPE *real_CreateReservedResource)(ID3D12Device *, const D3D12_RESOURCE_DESC *, D3D12_RESOURCE_STATES, const D3D12_CLEAR_VALUE *, REFIID, void **);
+static HRESULT STDMETHODCALLTYPE hook_CreateReservedResource(ID3D12Device *dev, const D3D12_RESOURCE_DESC *d, D3D12_RESOURCE_STATES st, const D3D12_CLEAR_VALUE *cv, REFIID riid, void **out)
+{
+    if (dbg) { log_resource("CreateReservedResource begin", d, 0); }
+    HRESULT hr = real_CreateReservedResource(dev, d, st, cv, riid, out);
+    if (dbg) { log_resource("CreateReservedResource done", d, hr); if (d && d->Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) LOG("  -> res=%p", out ? *out : NULL); }
+    return hr;
+}
+// Views: a cast over a typeless texture is where a format D3DMetal cannot map would surface.
+static void (STDMETHODCALLTYPE *real_CreateShaderResourceView)(ID3D12Device *, ID3D12Resource *, const D3D12_SHADER_RESOURCE_VIEW_DESC *, D3D12_CPU_DESCRIPTOR_HANDLE);
+static void (STDMETHODCALLTYPE *real_CreateUnorderedAccessView)(ID3D12Device *, ID3D12Resource *, ID3D12Resource *, const D3D12_UNORDERED_ACCESS_VIEW_DESC *, D3D12_CPU_DESCRIPTOR_HANDLE);
+static void (STDMETHODCALLTYPE *real_CreateRenderTargetView)(ID3D12Device *, ID3D12Resource *, const D3D12_RENDER_TARGET_VIEW_DESC *, D3D12_CPU_DESCRIPTOR_HANDLE);
+static void (STDMETHODCALLTYPE *real_CreateDepthStencilView)(ID3D12Device *, ID3D12Resource *, const D3D12_DEPTH_STENCIL_VIEW_DESC *, D3D12_CPU_DESCRIPTOR_HANDLE);
+static void STDMETHODCALLTYPE hook_CreateShaderResourceView(ID3D12Device *dev, ID3D12Resource *res, const D3D12_SHADER_RESOURCE_VIEW_DESC *d, D3D12_CPU_DESCRIPTOR_HANDLE h)
+{
+    if (dbg && d) LOG("SRV begin res=%p format=%u viewdim=%d", res, (unsigned)d->Format, (int)d->ViewDimension);
+    real_CreateShaderResourceView(dev, res, d, h);
+    if (dbg && d) LOG("SRV done res=%p", res);
+}
+static void STDMETHODCALLTYPE hook_CreateUnorderedAccessView(ID3D12Device *dev, ID3D12Resource *res, ID3D12Resource *counter, const D3D12_UNORDERED_ACCESS_VIEW_DESC *d, D3D12_CPU_DESCRIPTOR_HANDLE h)
+{
+    if (dbg && d) LOG("UAV begin res=%p format=%u viewdim=%d", res, (unsigned)d->Format, (int)d->ViewDimension);
+    real_CreateUnorderedAccessView(dev, res, counter, d, h);
+    if (dbg && d) LOG("UAV done res=%p", res);
+}
+static void STDMETHODCALLTYPE hook_CreateRenderTargetView(ID3D12Device *dev, ID3D12Resource *res, const D3D12_RENDER_TARGET_VIEW_DESC *d, D3D12_CPU_DESCRIPTOR_HANDLE h)
+{
+    if (dbg && d) LOG("RTV begin res=%p format=%u viewdim=%d", res, (unsigned)d->Format, (int)d->ViewDimension);
+    real_CreateRenderTargetView(dev, res, d, h);
+    if (dbg && d) LOG("RTV done res=%p", res);
+}
+static void STDMETHODCALLTYPE hook_CreateDepthStencilView(ID3D12Device *dev, ID3D12Resource *res, const D3D12_DEPTH_STENCIL_VIEW_DESC *d, D3D12_CPU_DESCRIPTOR_HANDLE h)
+{
+    if (dbg && d) LOG("DSV begin res=%p format=%u viewdim=%d", res, (unsigned)d->Format, (int)d->ViewDimension);
+    real_CreateDepthStencilView(dev, res, d, h);
+    if (dbg && d) LOG("DSV done res=%p", res);
+}
+
 static void patch_device_vtbl(void *iface)
 {
     ID3D12DeviceVtbl *vt = *(ID3D12DeviceVtbl **)iface;
     patch_slot((void **)&vt->CreateQueryHeap, (void *)hook_CreateQueryHeap, (void **)&real_CreateQueryHeap);
+    if (dbg) {
+        patch_slot((void **)&vt->CreateCommittedResource, (void *)hook_CreateCommittedResource, (void **)&real_CreateCommittedResource);
+        patch_slot((void **)&vt->CreatePlacedResource, (void *)hook_CreatePlacedResource, (void **)&real_CreatePlacedResource);
+        patch_slot((void **)&vt->CreateReservedResource, (void *)hook_CreateReservedResource, (void **)&real_CreateReservedResource);
+        patch_slot((void **)&vt->CreateShaderResourceView, (void *)hook_CreateShaderResourceView, (void **)&real_CreateShaderResourceView);
+        patch_slot((void **)&vt->CreateUnorderedAccessView, (void *)hook_CreateUnorderedAccessView, (void **)&real_CreateUnorderedAccessView);
+        patch_slot((void **)&vt->CreateRenderTargetView, (void *)hook_CreateRenderTargetView, (void **)&real_CreateRenderTargetView);
+        patch_slot((void **)&vt->CreateDepthStencilView, (void *)hook_CreateDepthStencilView, (void **)&real_CreateDepthStencilView);
+    }
 }
 static void patch_list_vtbl(void *iface)
 {
