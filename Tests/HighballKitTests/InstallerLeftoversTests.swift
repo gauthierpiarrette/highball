@@ -16,6 +16,14 @@ final class InstallerLeftoversTests: XCTestCase {
         XCTAssertEqual(RecipeRunner.installerLeftovers(before: [10, 11], after: [10, 11, 42], wasIdle: false), [])
     }
 
+    func testPlumbingThatAppearedIsNeverALeftover() {
+        // A cold prefix boots its server and Windows services from the installer's own launch;
+        // they are new pids but not the installer's, and ending them by signal broke the VC++
+        // install on nightly-e2e (#160). The environment reset after the step handles them.
+        XCTAssertEqual(RecipeRunner.installerLeftovers(before: [10], after: [10, 20, 21, 30], wasIdle: true,
+                                                       isPlumbing: { $0 == 20 || $0 == 21 }), [30])
+    }
+
     func testProcessesThatEndedDuringTheInstallAreNotReported() {
         XCTAssertEqual(RecipeRunner.installerLeftovers(before: [10, 11, 12], after: [10, 99], wasIdle: true), [99])
     }

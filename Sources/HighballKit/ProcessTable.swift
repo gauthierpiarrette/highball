@@ -156,6 +156,14 @@ public enum ProcessTable {
         return name == "wineserver" || name.hasSuffix("/wineserver")
     }
 
+    /// `isPlumbing` for a running process, by its working directory and, for the server, its
+    /// command line. False when the process is already gone.
+    public static func isPlumbing(_ pid: pid_t, prefix: URL) -> Bool {
+        guard let cwd = workingDirectory(of: pid) else { return false }
+        let exe = commandLineAndEnvironment(of: pid)?.arguments.first ?? ""
+        return isPlumbing(executable: exe, workingDirectory: canonical(cwd), prefix: canonical(prefix.path))
+    }
+
     public static func isIdle(prefix: URL) -> Bool {
         let root = canonical(prefix.path)
         let server = serverDirectory(forPrefix: prefix).map { canonical($0.path) }

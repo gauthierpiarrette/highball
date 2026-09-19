@@ -343,11 +343,24 @@ public struct RecipeRunner: Sendable {
 
     /// The processes an installer left behind: those that appeared during the step, and only
     /// when the environment was idle before it. A busy environment gets none, because a new
-    /// pid there may belong to the running program, not the installer. Pure, for the tests.
-    public static func installerLeftovers(before: Set<pid_t>, after: [pid_t], wasIdle: Bool) -> [pid_t] {
+    /// pid there may belong to the running program, not the installer. Plumbing that appeared
+    /// (the server and the Windows services the installer's own launch booted on a cold
+    /// prefix) is never a leftover: ending those by signal is what printed "wineserver crashed"
+    /// in the middle of the VC++ install on nightly-e2e (#160); the environment reset after
+    /// the step stops them properly. Pure, for the tests.
+    public static func installerLeftovers(before: Set<pid_t>, after: [pid_t], wasIdle: Bool,
+                                          isPlumbing: (pid_t) -> Bool = { _ in false }) -> [pid_t] {
         guard wasIdle else { return [] }
-        return after.filter { !before.contains($0) }
+        return after.filter { !before.contains($0) && !isPlumbing($0) }
     }
+
+    /// How long an installer's helpers get to finish on their own before they count as
+    /// leftovers. A bootstrapper's parent exits while its engine keeps installing: the VC++
+    /// redistributable returned 0 after 8 s with its Burn engine still writing the x64 runtime,
+    /// and ending it then left the runtime half installed (nightly-e2e 2026-09-19, #160). The
+    /// leftovers this exists for, Battle.net's Agent and Rockstar's service, never exit, so
+    /// they are ended once the minute is up.
+    public static let installerGrace: TimeInterval = 60
 
     /// Runs every step. Returns the notes the UI should show afterwards.
     public mutating func apply(_ recipe: Recipe,
@@ -418,7 +431,23 @@ public struct RecipeRunner: Sendable {
                 // is new since then can otherwise be a running game's own child (a launcher it
                 // spawned, a crash handler), and a pid difference cannot tell the two apart. In
                 // that case the leftovers stay, and the note says so.
-                let leftovers = Self.installerLeftovers(before: before, after: ProcessTable.processes(ofPrefix: bottle.url), wasIdle: wasIdle)
+                let prefix = bottle.url
+                let currentLeftovers = {
+                    Self.installerLeftovers(before: before, after: ProcessTable.processes(ofPrefix: prefix), wasIdle: wasIdle,
+                                            isPlumbing: { ProcessTable.isPlumbing($0, prefix: prefix) })
+                }
+                var leftovers = currentLeftovers()
+                if !leftovers.isEmpty {
+                    // Helpers still finishing the install get a grace period first (see installerGrace).
+                    let started = Date()
+                    let deadline = started.addingTimeInterval(Self.installerGrace)
+                    while !leftovers.isEmpty, Date() < deadline {
+                        try await Task.sleep(nanoseconds: 1_000_000_000)
+                        leftovers = currentLeftovers()
+                    }
+                    let waited = Int(Date().timeIntervalSince(started))
+                    if waited > 0 { log?("[\(recipe.id)] waited \(waited) s for the installer's helpers to finish") }
+                }
                 if !leftovers.isEmpty {
                     ProcessTable.terminate(leftovers)
                     log?("[\(recipe.id)] ended \(leftovers.count) process\(leftovers.count == 1 ? "" : "es") the installer left running")
