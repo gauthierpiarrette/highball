@@ -37,23 +37,35 @@ GAMES=(
   "319510|dxvk|Five Nights|fnaf|"
   # Canary set (2026-09-18): one title per graphics path, all installed here as demos or
   # verified rows, so a renderer or engine change cannot slip through on a path nobody ran.
-  # Not The Last Caretaker demo: after its first run it comes back fullscreen and black on
-  # D3DMetal, windowed arguments or not (three runs 2026-09-18, screen unlocked, 1% lit at
-  # display size), so it cannot be a canary; the finding lives in its db row.
+  # The Last Caretaker demo went black after its first run because its 4K menu video kills a
+  # D3DMetal thread through Media Foundation; the the-last-caretaker recipe (mfplat off for the
+  # game's exe) fixes it and must be applied to the bottle, so this row guards the recipe too.
+  "3916150|d3dmetal|Caretaker|caretaker|"
   "1773210|d3dmetal|HumanitZ|humanitz|"
   "3527290|dxvk|PEAK|peak|"
+  # DXMT, the default mode, had no canary until 2026-09-19. Umamusume's title screen animates
+  # and needs no sign-in (Cygames' EULA accepted once in Steam).
+  "3224770|dxmt|Umamusume|umamusume|"
+  # A sixth column names a bottle other than Gaming: canary-r6 is a clone of Gaming on the r6
+  # engine (D3DMetal from GPTK 4), so an engine revision gets the same guard as the default.
+  "1773210|d3dmetal|HumanitZ|humanitz-r6||canary-r6"
 )
 only=("$@")
 results=(); passed=true
 for row in "${GAMES[@]}"; do
-  IFS='|' read -r appid renderer winre name extra <<< "$row"
-  if [ ${#only[@]} -gt 0 ] && ! printf '%s\n' "${only[@]}" | grep -qx "$appid"; then continue; fi
+  IFS='|' read -r appid renderer winre name extra bottle <<< "$row"
+  bottle=${bottle:-Gaming}
+  if [ ${#only[@]} -gt 0 ] && ! printf '%s\n' "${only[@]}" | grep -qxE "$appid|$name"; then continue; fi
+  if [ ! -d "$H/bottles/$bottle" ]; then echo "[$name] bottle $bottle absent"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"bottle absent\"}"); continue; fi
+  ST="$H/bottles/$bottle/drive_c/Program Files (x86)/Steam/steamapps"
   st=$(grep -E '"StateFlags"' "$ST/appmanifest_$appid.acf" 2>/dev/null | grep -oE '[0-9]+' | tail -1)
   if [ "$st" != "4" ]; then echo "[$name] not installed"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"not installed\"}"); continue; fi
   echo "[$(date +%H:%M:%S)] $name ($appid) under $renderer"
-  pkill -9 -f 'Steam.steam\.exe' 2>/dev/null; pkill -9 -f steamwebhelper 2>/dev/null; sleep 3
-  ($HB run Gaming 'C:\Program Files (x86)\Steam\steam.exe' --renderer $renderer -- -silent > /dev/null 2>&1 &); sleep 35
-  ($HB run Gaming 'C:\Program Files (x86)\Steam\steam.exe' -- -applaunch $appid $extra > "$OUT/$name.log" 2>&1 &)
+  # Scoped to the row's bottle: a machine-wide Steam kill took down the launcher nightly's own
+  # Steam when both ran (2026-09-19).
+  $HB bottle kill "$bottle" >/dev/null 2>&1; sleep 3
+  ($HB run "$bottle" 'C:\Program Files (x86)\Steam\steam.exe' --renderer $renderer -- -silent > /dev/null 2>&1 &); sleep 35
+  ($HB run "$bottle" 'C:\Program Files (x86)\Steam\steam.exe' -- -applaunch $appid $extra > "$OUT/$name.log" 2>&1 &)
   n=0; until "$WINLIST" 2>/dev/null | grep -iE "wine.*($winre)" | grep -q 'on=true' || [ $n -ge 60 ]; do sleep 3; n=$((n+1)); done
   id=$("$WINLIST" 2>/dev/null | grep -iE "wine.*($winre)" | grep on=true | head -1 | awk '{print $1}')
   if [ -z "$id" ]; then echo "  FAIL: no window within $((n*3))s"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"no window\"}"); passed=false
@@ -84,7 +96,7 @@ for row in "${GAMES[@]}"; do
   # kill the game by its window-owning wine process if still up (generic)
   for p in $(ps -axo pid,command | grep -E 'steamapps[/\\\\]common' | grep -vE 'grep|steam\.exe|steamwebhelper|gameoverlayui' | awk '{print $1}'); do kill -9 $p 2>/dev/null; done
 done
-pkill -9 -f 'Steam.steam\.exe' 2>/dev/null; pkill -9 -f steamwebhelper 2>/dev/null
+for b in Gaming canary-r6; do $HB bottle kill "$b" >/dev/null 2>&1; done
 # Nothing installed is not a pass: say so and exit 3 so Scripts/gate.sh records "skipped".
 if ! printf '%s\n' "${results[@]}" | grep -qv '"not installed"'; then
   echo "GAME SMOKE SKIPPED: none of the table's games is installed in the Gaming bottle"

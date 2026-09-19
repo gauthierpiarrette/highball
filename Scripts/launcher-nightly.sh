@@ -38,7 +38,32 @@ PY
     echo "[$id] blocked by its recipe (expected)"; results+=("{\"id\":\"$id\",\"result\":\"blocked\"}"); continue
   fi
   engarg=(); [ "$engine" != default ] && engarg=(--engine "$engine")
-  if ! $HB bottle create "$b" "${engarg[@]}" --recipe "$f" > "$OUT/$id-install.log" 2>&1; then
+  # A recipe may pin an engine this Mac has not installed (EA app pins r4, 2026-09-19). The app
+  # downloads it before Play; the nightly does the same from the bundled manifest, so the
+  # engine download path is exercised too and a missing engine is not counted as a failure.
+  if [ "$engine" != default ] && ! $HB engine list 2>/dev/null | grep -q "^$engine	"; then
+    if [ -f "spike/engines/$engine.json" ]; then
+      echo "[$id] installing engine $engine first"
+      $HB engine install "spike/engines/$engine.json" --accept-d3dmetal-license > "$OUT/$id-engine-install.log" 2>&1 || { echo "[$id] engine install FAILED (see $OUT/$id-engine-install.log)"; results+=("{\"id\":\"$id\",\"result\":\"engine-install-failed\"}"); continue; }
+    else
+      echo "[$id] recipe engine $engine is not bundled"; results+=("{\"id\":\"$id\",\"result\":\"engine-unknown\"}"); continue
+    fi
+  fi
+  # A launcher's installer may be interactive (Rockstar opens a language dialog and waits for a
+  # person, 2026-09-19), which is right for the app's flow and endless here. The install gets
+  # ten minutes; past that the installer's window title is recorded as the result and the run
+  # moves on, so the nightly stays bounded and says exactly where the recipe needs a hand.
+  ( $HB bottle create "$b" "${engarg[@]}" --recipe "$f" > "$OUT/$id-install.log" 2>&1; echo $? > "$OUT/$id-install.rc" ) &
+  ipid=$!; rm -f "$OUT/$id-install.rc"; it=0
+  while [ ! -f "$OUT/$id-install.rc" ] && [ $it -lt 600 ]; do sleep 10; it=$((it+10)); done
+  if [ ! -f "$OUT/$id-install.rc" ]; then
+    ipids=$($HB bottle ps "$b" 2>/dev/null | awk -F'\t' '$1 ~ /^[0-9]+$/ {print $1}' | paste -sd'|' -)
+    title=$( [ -n "$winlist" ] && [ -n "$ipids" ] && $winlist 2>/dev/null | grep -E "pid=($ipids)[[:space:]]" | grep "on=true" | grep -v "||" | head -1 | cut -f4 | tr -d '|' )
+    echo "[$id] installer still running after ${it}s, waiting for a person (window: ${title:-none})"
+    results+=("{\"id\":\"$id\",\"result\":\"install-waits\",\"window\":\"${title:-none}\"}")
+    $HB bottle kill "$b" >/dev/null 2>&1; kill $ipid 2>/dev/null; sleep 3; $HB bottle delete "$b" >/dev/null 2>&1; continue
+  fi
+  if [ "$(cat "$OUT/$id-install.rc")" != "0" ]; then
     echo "[$id] install FAILED (see $OUT/$id-install.log)"; results+=("{\"id\":\"$id\",\"result\":\"install-failed\"}"); $HB bottle delete "$b" >/dev/null 2>&1; continue
   fi
   # Steam's first start is a chain of relaunches (exit 9 mid-download, exit 42 after the
