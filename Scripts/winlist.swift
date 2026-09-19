@@ -1,5 +1,9 @@
 import CoreGraphics
 import Foundation
+// Window titles and captures need Screen Recording access. Say on stderr whether this process
+// has it, so a script run without it (a launchd agent, for instance) can tell blank titles and
+// blank captures from missing windows.
+FileHandle.standardError.write("screen-access=\(CGPreflightScreenCaptureAccess())\n".data(using: .utf8)!)
 let opts: CGWindowListOption = [.optionAll, .excludeDesktopElements]
 let list = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]] ?? []
 let filter = CommandLine.arguments.count > 1 ? CommandLine.arguments[1].lowercased() : ""

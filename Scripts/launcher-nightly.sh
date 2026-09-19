@@ -6,10 +6,12 @@
 #
 # Per launcher it records: whether the recipe applied (blocked recipes are expected-fail and
 # recorded as such), the installer's exit, crash lines in the launch log, whether a window with
-# the launcher's title appeared, how much of it drew (only when the screen is unlocked; a locked
-# session records "locked", never a verdict), and the process-environment invariant
-# (`highball bottle ps --expect`). Writes private/launcher-nightly/latest.json and one line per
-# launcher on stdout. Usage: Scripts/launcher-nightly.sh [--only <id>...]
+# owned by one of the environment's processes appeared, how much of it drew (only when the screen
+# is unlocked and this process may capture it; a locked session records "locked", a process
+# without Screen Recording access "no-screen-access", never a verdict), and the process-environment
+# invariant (`highball bottle ps --expect`). Writes private/launcher-nightly/latest.json and one
+# line per launcher on stdout. Scheduled by Scripts/install-nightly.sh, which runs it from a clone
+# under ~/.highball-nightly. Usage: Scripts/launcher-nightly.sh [--only <id>...]
 set -u
 HB=${HB:-.build/debug/highball}
 DB=${DB:-../highball-db/recipes/launchers}
@@ -46,21 +48,30 @@ PY
   ($HB run "$b" "$pinname" > "$OUT/$id-launch.log" 2>&1 &)
   sleep "$wait_s"
   crash=$(grep -cE 'int3|Unhandled exception|page fault' "$OUT/$id-launch.log")
+  # An empty process list is a failure, not a pass: the launcher exited or never started, and
+  # an invariant over nothing proves nothing.
+  $HB bottle ps "$b" --expect > "$OUT/$id-ps.txt" 2>&1 && env_ok=true || env_ok=false
+  pids=$(awk -F'\t' '$1 ~ /^[0-9]+$/ {print $1}' "$OUT/$id-ps.txt" | paste -sd'|' -)
   win="none"; lit="n/a"
-  if [ -n "$winlist" ]; then
-    # Scripts/winlist prints "<id> pid=<n> wine |<title>| x,y wxh layer=<l> on=<bool>".
-    row=$($winlist 2>/dev/null | grep -E "pid=[0-9]+[[:space:]]+wine[[:space:]]" | grep -i "$winre" | head -1); [ -n "$row" ] && win="yes"
-    if [ "$win" = yes ] && [ "$locked" = false ]; then
+  if [ -n "$winlist" ] && [ -n "$pids" ]; then
+    # Scripts/winlist prints "<id> pid=<n> wine |<title>| x,y wxh layer=<l> on=<bool>". The window
+    # is matched by its owner's pid, one of this environment's processes, never by title: titles
+    # need Screen Recording access, which a launchd agent does not have (winlist then reports
+    # screen-access=false on stderr, and a capture would be blank).
+    rows=$($winlist 2>"$OUT/$id-winlist.err" | grep -E "pid=($pids)[[:space:]]+wine[[:space:]]")
+    row=$(echo "$rows" | grep "on=true" | head -1); [ -z "$row" ] && row=$(echo "$rows" | head -1)
+    [ -n "$row" ] && win="yes"
+    access=$(grep -o 'screen-access=[a-z]*' "$OUT/$id-winlist.err" | cut -d= -f2)
+    if [ "$locked" = true ]; then lit="locked"
+    elif [ "$access" = false ]; then lit="no-screen-access"
+    elif [ "$win" = yes ]; then
       wid=$(echo "$row" | awk '{print $1}')
       screencapture -l "$wid" -o -x "$OUT/$id.png" 2>/dev/null && lit=$(python3 -c "
 from PIL import Image; im=Image.open('$OUT/$id.png').convert('RGBA'); px=list(im.getdata()); n=len(px)
 print('%.2f'%(sum(1 for q in px if q[3]>200 and (q[0]+q[1]+q[2])>90)/n))" 2>/dev/null || echo "n/a")
-    elif [ "$locked" = true ]; then lit="locked"; fi
+    fi
   fi
-  # An empty process list is a failure, not a pass: the launcher exited or never started, and
-  # an invariant over nothing proves nothing.
-  $HB bottle ps "$b" --expect > "$OUT/$id-ps.txt" 2>&1 && env_ok=true || env_ok=false
-  if ! grep -q "	program	" "$OUT/$id-ps.txt"; then env_ok=false; win="none"; echo "[$id] no program running 90 s after launch (see $OUT/$id-launch.log)"; fi
+  if ! grep -q "	program	" "$OUT/$id-ps.txt"; then env_ok=false; win="none"; echo "[$id] no program running $wait_s s after launch (see $OUT/$id-launch.log)"; fi
   $HB bottle kill "$b" >/dev/null 2>&1; $HB bottle delete "$b" >/dev/null 2>&1
   echo "[$id] installed, crash lines $crash, window $win, lit $lit, env invariant $env_ok ($(( $(date +%s) - t0 ))s)"
   results+=("{\"id\":\"$id\",\"result\":\"ran\",\"crashLines\":$crash,\"window\":\"$win\",\"lit\":\"$lit\",\"envInvariant\":$env_ok}")
