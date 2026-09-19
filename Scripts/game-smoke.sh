@@ -39,8 +39,12 @@ GAMES=(
   # verified rows, so a renderer or engine change cannot slip through on a path nobody ran.
   # The Last Caretaker demo went black after its first run because its 4K menu video kills a
   # D3DMetal thread through Media Foundation; the the-last-caretaker recipe (mfplat off for the
-  # game's exe) fixes it and must be applied to the bottle, so this row guards the recipe too.
-  "3916150|d3dmetal|Caretaker|caretaker|"
+  # game's exe) fixes it and is applied to canary-r6, so this row guards the recipe. It runs
+  # there and not in Gaming: in the long-lived Gaming bottle the demo waits black at idle GPU
+  # with no assertion and no deadlock for a reason not found on 2026-09-20, while four runs in
+  # fresh clones of Gaming (r5 and r6) show the title. Title is a still, dark picture, so the
+  # verdict comes from the GPU fallback below.
+  "3916150|d3dmetal|Caretaker|caretaker||canary-r6"
   "1773210|d3dmetal|HumanitZ|humanitz|"
   "3527290|dxvk|PEAK|peak|"
   # DXMT, the default mode, had no canary until 2026-09-19. Umamusume's title screen animates
@@ -86,7 +90,13 @@ for row in "${GAMES[@]}"; do
     sleep 40; h=(); for k in 1 2 3; do grab "$OUT/$name-$k.png"; h+=("$(md5 -q "$OUT/$name-$k.png" 2>/dev/null)"); sleep 10; done
     crash=$("$WINLIST" 2>/dev/null | grep -iE 'Program Error|Wine Debugger' | grep -c on=true)
     if [ "$crash" -gt 0 ]; then echo "  FAIL: crash dialog"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"crash dialog\"}"); passed=false
-    elif [ "${h[1]}" = "${h[2]}" ] && [ "${h[2]}" = "${h[3]}" ]; then echo "  FAIL: window frozen or blank (3 identical captures)"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"frozen\"}"); passed=false
+    elif [ "${h[1]}" = "${h[2]}" ] && [ "${h[2]}" = "${h[3]}" ]; then
+      # Identical captures also come from a still picture that is drawn every frame (The Last
+      # Caretaker's title, black with one blinking line). The GPU tells those apart: a game whose
+      # render thread died sits at 2-5% (its black screen, 2026-09-19), a live one keeps it busy.
+      gsum=0; for k in 1 2 3; do g=$(ioreg -r -c AGXAccelerator -d1 2>/dev/null | grep -oE '"Device Utilization %"=[0-9]+' | head -1 | cut -d= -f2); gsum=$((gsum + ${g:-0})); sleep 2; done; gavg=$((gsum/3))
+      if [ $gavg -ge 30 ]; then echo "  ok: window after ~$((n*3))s, still picture but drawing (GPU ${gavg}%)"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"ok\",\"windowAfter\":$((n*3)),\"gpu\":$gavg}")
+      else echo "  FAIL: window frozen or blank (3 identical captures, GPU ${gavg}%)"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"frozen\",\"gpu\":$gavg}"); passed=false; fi
     else echo "  ok: window after ~$((n*3))s, drawing"; results+=("{\"appid\":$appid,\"name\":\"$name\",\"result\":\"ok\",\"windowAfter\":$((n*3))}"); fi
   fi
   # Games started through Steam show Windows paths in the process list (steamapps\common\...),
