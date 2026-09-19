@@ -42,6 +42,25 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
     public var displayName: String
     public var arch: String
     public var minMacOS: String
+
+    /// Whether this engine is meant for the given macOS version (numeric compare of `minMacOS`,
+    /// "27.0" against "26.6.2" and so on). An engine measured only on a newer macOS says so in
+    /// its floor and is then neither offered nor installed on an older one (highball#85).
+    public func runs(onMacOS version: String) -> Bool {
+        let parse: (String) -> [Int] = { $0.split(separator: ".").map { Int($0) ?? 0 } }
+        let floor = parse(minMacOS), have = parse(version)
+        for i in 0..<max(floor.count, have.count) {
+            let f = i < floor.count ? floor[i] : 0, h = i < have.count ? have[i] : 0
+            if h != f { return h > f }
+        }
+        return true
+    }
+
+    /// This Mac's macOS version as "major.minor.patch".
+    public static var currentMacOS: String {
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+    }
     public var requires: [String]?
     public var notes: [String]?
     public var components: [String: Component]

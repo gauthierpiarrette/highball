@@ -58,6 +58,9 @@ struct Engine: AsyncParsableCommand {
 
         func run() async throws {
             let m = try EngineManifest.load(from: URL(fileURLWithPath: manifest))
+            guard m.runs(onMacOS: EngineManifest.currentMacOS) else {
+                throw HighballError.invalid("\(m.id) needs macOS \(m.minMacOS) or newer; this Mac runs \(EngineManifest.currentMacOS)")
+            }
             print("installing \(m.id): \(m.displayName)")
             var accepted: Set<String> = []
             if acceptD3DMetal { accepted.insert("apple-gptk-license-2023-08-17") }

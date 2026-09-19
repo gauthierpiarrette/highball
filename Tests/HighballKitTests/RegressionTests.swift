@@ -989,6 +989,20 @@ extension RegressionTests {
         XCTAssertEqual(EngineStore.offeredEngines(installed: [r1], known: [], current: r1.id).count, 1, "current engine present: no extra row")
     }
 
+    func testEnginesAboveTheMacOSFloorAreNotOffered() throws {
+        func manifest(_ id: String, floor: String) throws -> EngineManifest {
+            let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"\#(floor)","components":{}}"#
+            return try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8))
+        }
+        let r5 = try manifest("x64-a-r5", floor: "14.0"), r6 = try manifest("x64-a-r6", floor: "27.0")
+        XCTAssertTrue(r6.runs(onMacOS: "27.0")); XCTAssertTrue(r6.runs(onMacOS: "27.1.2")); XCTAssertTrue(r5.runs(onMacOS: "26.6.2"))
+        XCTAssertFalse(r6.runs(onMacOS: "26.6.2"), "26.6.2 is below a 27.0 floor even though 6 > 0 in the second field")
+        XCTAssertEqual(EngineStore.offeredEngines(installed: [], known: [r5, r6], macOS: "26.6.2").map(\.id), ["x64-a-r5"])
+        XCTAssertEqual(EngineStore.offeredEngines(installed: [], known: [r5, r6], macOS: "27.0").map(\.id), ["x64-a-r6", "x64-a-r5"])
+        let installedR6 = InstalledEngine(manifest: r6, root: URL(fileURLWithPath: "/tmp/r6"))
+        XCTAssertEqual(EngineStore.offeredEngines(installed: [installedR6], known: [r6], macOS: "26.6.2").map(\.id), ["x64-a-r6"], "an engine already installed stays listed")
+    }
+
     // A bottle set up by an old Steam recipe carries WINEMSYNC=0/WINEESYNC=0 in its bottle-wide
     // environment, which silently turned msync off for every game. Format 3 drops exactly that
     // pair once; a deliberate WINEMSYNC=1 or a single variable is left alone.

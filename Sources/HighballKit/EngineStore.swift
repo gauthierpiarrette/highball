@@ -126,11 +126,14 @@ public struct EngineStore: Sendable {
         public let missing: Bool
         public init(id: String, installed: Bool, missing: Bool = false) { self.id = id; self.installed = installed; self.missing = missing }
     }
-    public static func offeredEngines(installed: [InstalledEngine], known: [EngineManifest], current: String? = nil) -> [OfferedEngine] {
+    public static func offeredEngines(installed: [InstalledEngine], known: [EngineManifest], current: String? = nil,
+                                      macOS: String = EngineManifest.currentMacOS) -> [OfferedEngine] {
         let newestFirst: (String, String) -> Bool = { $0.compare($1, options: .numeric) == .orderedDescending }
         let have = installed.sorted { newestFirst($0.id, $1.id) }.map { OfferedEngine(id: $0.id, installed: true) }
         let ids = Set(have.map(\.id))
-        let more = known.filter { !ids.contains($0.id) }.sorted { newestFirst($0.id, $1.id) }
+        // A manifest with a macOS floor above this Mac is not offered: it would download and
+        // then run untested (r6's D3DMetal was measured on 27 only). Installed engines stay listed.
+        let more = known.filter { !ids.contains($0.id) && $0.runs(onMacOS: macOS) }.sorted { newestFirst($0.id, $1.id) }
             .map { OfferedEngine(id: $0.id, installed: false) }
         var rows = have + more
         if let current, !rows.contains(where: { $0.id == current }) { rows.append(OfferedEngine(id: current, installed: false, missing: true)) }
