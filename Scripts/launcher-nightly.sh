@@ -42,39 +42,47 @@ PY
     echo "[$id] install FAILED (see $OUT/$id-install.log)"; results+=("{\"id\":\"$id\",\"result\":\"install-failed\"}"); $HB bottle delete "$b" >/dev/null 2>&1; continue
   fi
   # Steam's first start is a chain of relaunches (exit 9 mid-download, exit 42 after the
-  # update, then the client), fifteen minutes or more under WoW64 and Rosetta; the others
-  # show their sign-in window within a minute or two.
+  # update, then the client), so the launcher is sampled every 20 s up to a deadline rather than
+  # checked once: a launcher that comes up and then quits (Steam's client stalled and died after
+  # three minutes on 2026-09-19) is recorded as "exited after N s", never as "nothing ran".
   wait_s=90; [ "$id" = steam ] && wait_s=900
   ($HB run "$b" "$pinname" > "$OUT/$id-launch.log" 2>&1 &)
-  sleep "$wait_s"
-  crash=$(grep -cE 'int3|Unhandled exception|page fault' "$OUT/$id-launch.log")
-  # An empty process list is a failure, not a pass: the launcher exited or never started, and
-  # an invariant over nothing proves nothing.
-  $HB bottle ps "$b" --expect > "$OUT/$id-ps.txt" 2>&1 && env_ok=true || env_ok=false
-  pids=$(awk -F'\t' '$1 ~ /^[0-9]+$/ {print $1}' "$OUT/$id-ps.txt" | paste -sd'|' -)
-  win="none"; lit="n/a"
-  if [ -n "$winlist" ] && [ -n "$pids" ]; then
+  win="none"; lit="n/a"; env_ok=false; seen=false; exited="null"; t=0
+  while [ $t -lt $wait_s ]; do
+    sleep 20; t=$((t+20))
+    $HB bottle ps "$b" --expect > "$OUT/$id-ps.tick" 2>&1 && tick_ok=true || tick_ok=false
+    if grep -q "	program	" "$OUT/$id-ps.tick"; then
+      seen=true; env_ok=$tick_ok; cp "$OUT/$id-ps.tick" "$OUT/$id-ps.txt"
+    elif [ "$seen" = true ]; then exited=$t; break
+    else continue
+    fi
+    [ "$win" = yes ] && continue
+    pids=$(awk -F'\t' '$1 ~ /^[0-9]+$/ {print $1}' "$OUT/$id-ps.txt" | paste -sd'|' -)
+    [ -n "$winlist" ] && [ -n "$pids" ] || continue
     # Scripts/winlist prints "<id> pid=<n> wine |<title>| x,y wxh layer=<l> on=<bool>". The window
     # is matched by its owner's pid, one of this environment's processes, never by title: titles
     # need Screen Recording access, which a launchd agent does not have (winlist then reports
     # screen-access=false on stderr, and a capture would be blank).
-    rows=$($winlist 2>"$OUT/$id-winlist.err" | grep -E "pid=($pids)[[:space:]]+wine[[:space:]]")
-    row=$(echo "$rows" | grep "on=true" | head -1); [ -z "$row" ] && row=$(echo "$rows" | head -1)
-    [ -n "$row" ] && win="yes"
-    access=$(grep -o 'screen-access=[a-z]*' "$OUT/$id-winlist.err" | cut -d= -f2)
+    row=$($winlist 2>"$OUT/$id-winlist.err" | grep -E "pid=($pids)[[:space:]]+wine[[:space:]]" | grep "on=true" | head -1)
+    [ -n "$row" ] || continue
+    win="yes"; access=$(grep -o 'screen-access=[a-z]*' "$OUT/$id-winlist.err" | cut -d= -f2)
     if [ "$locked" = true ]; then lit="locked"
     elif [ "$access" = false ]; then lit="no-screen-access"
-    elif [ "$win" = yes ]; then
+    else
       wid=$(echo "$row" | awk '{print $1}')
       screencapture -l "$wid" -o -x "$OUT/$id.png" 2>/dev/null && lit=$(python3 -c "
 from PIL import Image; im=Image.open('$OUT/$id.png').convert('RGBA'); px=list(im.getdata()); n=len(px)
 print('%.2f'%(sum(1 for q in px if q[3]>200 and (q[0]+q[1]+q[2])>90)/n))" 2>/dev/null || echo "n/a")
     fi
-  fi
-  if ! grep -q "	program	" "$OUT/$id-ps.txt"; then env_ok=false; win="none"; echo "[$id] no program running $wait_s s after launch (see $OUT/$id-launch.log)"; fi
+  done
+  rm -f "$OUT/$id-ps.tick"
+  crash=$(grep -cE 'int3|Unhandled exception|page fault' "$OUT/$id-launch.log")
+  # Nothing ever running is a failure, not a pass: an invariant over nothing proves nothing.
+  if [ "$seen" = false ]; then env_ok=false; echo "[$id] no program running within $wait_s s of the launch (see $OUT/$id-launch.log)"
+  elif [ "$exited" != null ]; then echo "[$id] launcher exited after $exited s"; fi
   $HB bottle kill "$b" >/dev/null 2>&1; $HB bottle delete "$b" >/dev/null 2>&1
-  echo "[$id] installed, crash lines $crash, window $win, lit $lit, env invariant $env_ok ($(( $(date +%s) - t0 ))s)"
-  results+=("{\"id\":\"$id\",\"result\":\"ran\",\"crashLines\":$crash,\"window\":\"$win\",\"lit\":\"$lit\",\"envInvariant\":$env_ok}")
+  echo "[$id] installed, crash lines $crash, window $win, lit $lit, env invariant $env_ok, exited after $exited ($(( $(date +%s) - t0 ))s)"
+  results+=("{\"id\":\"$id\",\"result\":\"ran\",\"crashLines\":$crash,\"window\":\"$win\",\"lit\":\"$lit\",\"envInvariant\":$env_ok,\"programSeen\":$seen,\"exitedAfter\":$exited}")
 done
 printf '{"date":"%s","epoch":%s,"locked":%s,"results":[%s]}\n' "$(date +%Y-%m-%d)" "$(date +%s)" "$locked" "$(IFS=,; echo "${results[*]}")" > "$OUT/latest.json"
 echo "launcher nightly: $OUT/latest.json"
