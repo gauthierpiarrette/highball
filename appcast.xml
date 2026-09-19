@@ -7,9 +7,9 @@
     <item>
       <title>Highball 0.9.32</title>
       <description><![CDATA[New engine to pick under Advanced on macOS 27 or newer, x64-sikarugir10.0_6-r6, with Apple's D3DMetal from Game Porting Toolkit 4 for DirectX 12 games: HumanitZ ran at a fraction of the memory, picture confirmed. Engines now stay hidden on a macOS older than they need.]]></description>
-      <pubDate>Sat, 19 Sep 2026 18:16:46 +0200</pubDate>
+      <pubDate>Sun, 20 Sep 2026 00:52:10 +0200</pubDate>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
       <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.32/Highball-0.9.32.zip" sparkle:version="0.9.32" sparkle:shortVersionString="0.9.32" sparkle:edSignature="ruu3Zb6MksLoqWgh3h7jS8duCOfakfzq7PiiG+LQx7w4DRSwVhFL8XT3ynjMuHEt0tV1xFNnyRpm8WXKmuCECA==" length="3801948" type="application/octet-stream"/>
     </item>
     <item>
