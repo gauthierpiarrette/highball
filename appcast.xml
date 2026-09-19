@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.31</title>
+      <description><![CDATA[Fixes a regression from the 0.9.29 and 0.9.30 betas where the installer cleanup could end the environment's own services and a still-running installer helper and leave the Visual C++ runtimes half installed. Compatibility reports now carry the environment's settings.]]></description>
+      <pubDate>Sat, 19 Sep 2026 14:50:40 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.31/Highball-0.9.31.zip" sparkle:version="0.9.31" sparkle:shortVersionString="0.9.31" sparkle:edSignature="ROpgMqDOAZvsZqhCKwaQ6kJDilgm6w4nqeu/pNXNOVb3bViB4cwW90VfGku3qZTnPSGGh7PFb7Rl5KrT2JOMAA==" length="3791501" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.30</title>
       <description><![CDATA[Installer cleanup only when the environment was idle before the step, so a running game's own processes are never ended; CI now runs the database tests]]></description>
       <pubDate>Fri, 18 Sep 2026 21:00:31 +0200</pubDate>
