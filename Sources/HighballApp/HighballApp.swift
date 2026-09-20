@@ -202,6 +202,7 @@ struct ContentView: View {
         .sheet(isPresented: $state.showGPTKLicense) { GPTKLicenseSheet() }
         .d3dMetalAsk(state)
         .engineAsk(state)
+        .updateAsk(state)
         .rendererTrialAsk(state)
         .homeMoveAsk(state)
         .sheet(isPresented: $state.showEpicSignIn) { EpicSignInSheet() }
@@ -318,6 +319,22 @@ private extension View {
             Button(L("Not now"), role: .cancel) { state.pendingEngine = nil }
         } message: { pending in
             Text(GamePageCopy.engineAsk(recipe: pending.recipe, manifest: pending.manifest, installed: state.engines.contains { $0.id == pending.manifest.id }))
+        }
+    }
+    @MainActor func updateAsk(_ state: AppState) -> some View {
+        self.alert(state.pendingUpdate.map { String(format: L("%@ needs a newer Highball"), $0.recipe.title) } ?? "",
+               isPresented: .init(get: { state.pendingUpdate != nil }, set: { if !$0 { state.pendingUpdate = nil } }),
+               presenting: state.pendingUpdate) { pending in
+            Button(L("Check for Updates…")) {
+                state.pendingUpdate = nil
+                (NSApp.delegate as? AppDelegate)?.updaterController.updater.checkForUpdates()
+            }
+            if pending.play != nil {
+                Button(L("Play without the fix")) { state.playWithoutTheFix() }
+            }
+            Button(L("Not now"), role: .cancel) { state.pendingUpdate = nil }
+        } message: { pending in
+            Text(GamePageCopy.updateAsk(recipe: pending.recipe, engineID: pending.engineID, canPlay: pending.play != nil))
         }
     }
     @MainActor func rendererTrialAsk(_ state: AppState) -> some View {

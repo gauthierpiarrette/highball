@@ -36,6 +36,22 @@ final class RecipeEngineTests: XCTestCase {
         XCTAssertNil(try recipe(engine: nil).engineToOffer(current: wine10, known: [wine10, wine11]))
     }
 
+    /// A recipe can reach the database before the Highball that ships its engine (The Last
+    /// Flame's r11 pin landed while 0.9.32 was the stable, highball#99). Play then must say
+    /// "update" rather than launch on the old engine as if the recipe had never asked, and must
+    /// stay quiet when the environment is already on that engine, whoever installed it.
+    func testAnEngineThisBuildDoesNotShipAsksForAnUpdate() throws {
+        let wine10 = try manifest(id: "x64-sikarugir10.0_6-r5", wine: "aaa")
+        let r10 = try manifest(id: "x64-crossover26.3-r10", wine: "bbb")
+        let r11 = try manifest(id: "x64-crossover26.3-r11", wine: "ccc")
+        let r = try recipe(engine: "x64-crossover26.3-r11")
+        XCTAssertNil(r.engineToOffer(current: wine10, known: [wine10, r10]), "nothing to offer: the build has no r11")
+        XCTAssertEqual(r.engineUnknown(current: wine10, known: [wine10, r10]), "x64-crossover26.3-r11")
+        XCTAssertNil(r.engineUnknown(current: wine10, known: [wine10, r10, r11]), "the build ships it: the engine ask handles it")
+        XCTAssertNil(r.engineUnknown(current: r11, known: [wine10, r10]), "already on it (a newer Highball installed it)")
+        XCTAssertNil(try recipe(engine: nil).engineUnknown(current: wine10, known: [wine10]))
+    }
+
     /// r6 and r7 are the same Wine as r5, and a bottle on r5 still needs them: r6 changes
     /// MoltenVK (Red Dead), r7 adds a builtin DLL (CS:GO). Same Wine never meant "has it".
     func testALaterRevisionOfTheSameWineIsOffered() throws {

@@ -288,6 +288,10 @@ final class AppState {
                 pendingEngine = (recipe, bottle, wanted)
                 return
             }
+            if let missing = recipe.engineUnknown(current: engine.manifest, known: Self.knownManifests) {
+                pendingUpdate = (recipe, missing, (item, bottle, renderer))
+                return
+            }
             if recipe.isAutoApplicable {
                 Task { @MainActor in
                     var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
@@ -943,6 +947,12 @@ final class AppState {
     /// engine (other programs untouched) or moving this one.
     var pendingEngine: (recipe: HighballKit.Recipe, bottle: Bottle, manifest: EngineManifest)?
 
+    /// A recipe naming an engine this build does not ship: the database moved ahead of the
+    /// app (The Last Flame's fix needs r11, which 0.9.33 was the first to carry). The ask
+    /// points at Check for Updates; `play` is the game Play was launching, so the owner can
+    /// still run it without the fix, or nil when the page's own button asked for the fix.
+    var pendingUpdate: (recipe: HighballKit.Recipe, engineID: String, play: (item: LibraryItem, bottle: Bottle, renderer: Renderer?)?)?
+
     /// The ask's first way out: a new environment on the engine the recipe names, the recipe
     /// applied; the engine downloads first when it is not installed.
     func createEnvironment(for recipe: HighballKit.Recipe, on manifest: EngineManifest) {
@@ -970,6 +980,16 @@ final class AppState {
             for n in notes { await MainActor.run { self.appendLog("note: \(n)") } }
             await MainActor.run { self.selectedBottle = name }
         }
+    }
+
+    /// The update ask's way out that keeps playing: the game launches as it would have before
+    /// the recipe existed, on the current engine, and the log says which fix it went without.
+    func playWithoutTheFix() {
+        guard let pending = pendingUpdate else { return }
+        pendingUpdate = nil
+        guard let play = pending.play else { return }
+        appendLog("\(play.item.title): its fix needs the \(pending.engineID) engine, which this Highball does not ship; playing without it.")
+        launch(play.item, in: play.bottle, renderer: play.renderer)
     }
 
     /// The ask's second way out: move the environment itself (the Windows setup re-runs, nothing
@@ -1030,6 +1050,9 @@ final class AppState {
         guard let engine = engine(for: bottle), let recipe = Self.recipe(id) else { return }
         if let wanted = recipe.engineToOffer(current: engine.manifest, known: Self.knownManifests) {
             pendingEngine = (recipe, bottle, wanted); return
+        }
+        if let missing = recipe.engineUnknown(current: engine.manifest, known: Self.knownManifests) {
+            pendingUpdate = (recipe, missing, nil); return
         }
         runBusy("Installing \(recipe.title)",
                 done: done ?? DoneState(title: String(format: L("%@ installed"), recipe.title), ctaTitle: nil, cta: nil),

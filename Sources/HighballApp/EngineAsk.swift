@@ -13,6 +13,13 @@ extension GamePageCopy {
         ByteCountFormatter.string(fromByteCount: Int64(m.components.values.compactMap(\.size).reduce(0, +)), countStyle: .file)
     }
 
+    /// The fix names an engine this build does not ship: the database moved ahead of the app.
+    static func updateAsk(recipe: HighballKit.Recipe, engineID: String, canPlay: Bool) -> String {
+        let play = canPlay ? " " + L("You can also play without the fix, as before.") : ""
+        return String(format: L("%@'s fix runs on the %@ engine, and this version of Highball does not ship it yet. Check for Updates gets the version that does.%@"),
+                      recipe.title, engineID, play)
+    }
+
     static func engineAsk(recipe: HighballKit.Recipe, manifest: EngineManifest, installed: Bool) -> String {
         let download = installed ? "" : String(format: L(", after a download of about %@"), downloadSize(manifest))
         return String(format: L("%@ is verified on the %@ engine, and this environment is not on it. Moving this environment switches it there%@ and keeps everything installed; the Windows setup re-runs when needed, a minute or two. A new environment keeps your other programs where they are and starts empty, so the game has to be installed again."),
