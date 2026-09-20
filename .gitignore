@@ -17,3 +17,4 @@ Scripts/winlist
 spike/epic-stub/EpicGamesLauncher.exe
 spike/tools/cabextract
 spike/tools/cabextract.LICENSE
+spike/*/*.exe
