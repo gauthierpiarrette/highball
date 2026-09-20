@@ -82,6 +82,8 @@ public struct WineRunner: Sendable {
         case .active(let m): out += " frameGen=\(m)x(requested\(env["LSFGM_PACING_MODE"] == "adaptive" ? ", adaptive" : "")\(env["LSFGM_FLOW_SCALE"].map { ", flow \($0)" } ?? "")\(env["LSFGM_PERFORMANCE_MODE"] == "1" ? ", performance" : ""))\n"
         case .unavailable: out += " frameGen=off(unavailable)\n"
         }
+        // The Mac's output rate: a sound report is unanswerable without it (highball#127).
+        if let audio = AudioOutput.headerLine(sampleRate: AudioOutput.defaultOutputSampleRate()) { out += audio }
         for key in ["WINEDLLPATH_PREPEND", "WINEDLLOVERRIDES", "ROSETTA_ADVERTISE_AVX", "MTL_HUD_ENABLED", "CX_FWD_COMPAT_GL_CTX", "DXVK_CONFIG_FILE", "DXVK_LOG_PATH", "LSFGM_MULTIPLIER", "LSFGM_PACING_MODE", "LSFGM_FLOW_SCALE", "LSFGM_DLL_PATH"] {
             if let value = env[key] { out += "# \(key)=\(value)\n" }
         }
@@ -174,6 +176,10 @@ public struct WineRunner: Sendable {
         }
 
         let reader = pipe.fileHandleForReading
+        // Wine's "Library x.dll ... not found" lines, kept so a failed run can be told apart
+        // from an engine whose files are gone (EngineIntegrity, highball#151/#153). Only those
+        // lines are kept: the rest of a launch's output can run to megabytes.
+        let importFailures = Collector()
         // The exit code used to be computed and thrown away: a failed install produced a log
         // shape-identical to a successful one, so user-submitted reports were undiagnosable
         // (issue #36 cost two research passes to answer). It is now a footer, written below.
@@ -195,6 +201,7 @@ public struct WineRunner: Sendable {
                     while let nl = buffer.firstIndex(of: 0x0A) {
                         let line = String(decoding: buffer[..<nl], as: UTF8.self)
                         buffer.removeSubrange(...nl)
+                        if line.contains("import_dll") { importFailures.append(line) }
                         onOutput?(line)
                     }
                 }
@@ -220,6 +227,16 @@ public struct WineRunner: Sendable {
             try? tail.close()
         }
         onOutput?(footer.trimmingCharacters(in: .newlines))
+        // A run that failed while Wine could not find its own DLLs is not a failure of what was
+        // run: the engine has been emptied out under Highball (an antivirus quarantine is the
+        // usual cause), and every launch in it will fail the same way until it is installed
+        // again. Say so here, once, rather than leaving each caller to offer "try again with a
+        // fresh copy" for a download that was never the problem (highball#151, #153).
+        let gone = EngineIntegrity.gone(fromEngineAt: engine.root,
+                                        notFound: EngineIntegrity.librariesNotFound(in: importFailures.lines.joined(separator: "\n")))
+        if status != 0, !gone.isEmpty {
+            throw HighballError.engineDamaged(engine: engine.id, files: gone)
+        }
         return LaunchResult(exitStatus: status, duration: duration, log: logURL, note: resolved.note)
     }
 

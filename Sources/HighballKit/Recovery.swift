@@ -10,6 +10,8 @@ public struct Recovery: Equatable, Sendable {
         case retry
         /// Re-run the bottle's Windows setup.
         case repairBottle
+        /// Download and unpack this engine again over the damaged copy.
+        case reinstallEngine(String)
         /// Nothing automatic; the details and a report are the next step.
         case none
     }
@@ -45,6 +47,14 @@ public struct Recovery: Equatable, Sendable {
             return Recovery(headline: (error as NSError).localizedDescription, meaning: "")
         }
         switch known {
+        case let .engineDamaged(engine, files):
+            // The files came back as "not found" from inside Wine, so the loader's own words
+            // ("could not load ...") are useless here: say where the files went and offer the
+            // one thing that brings them back. The exclusion matters more than the download —
+            // without it the fresh engine is quarantined again within the hour (#153).
+            return Recovery(headline: "Files are missing from Highball's engine.",
+                            meaning: "\(EngineIntegrity.list(files)) left engine \(engine) after it was installed, so no Windows program can start in it. Antivirus software quarantining Highball's folder is what this looks like from the inside: add ~/Library/Application Support/Highball to its exclusions first, then install the engine again.",
+                            actionTitle: "Install the engine again", action: .reinstallEngine(engine))
         case .checksumMismatch:
             return Recovery(headline: "The download didn't arrive intact.",
                             meaning: "This is usually a network problem. Highball discards the damaged file and downloads it again.",

@@ -44,3 +44,34 @@ extension DisplayModeEmulationTests {
         XCTAssertFalse(DisplayModeEmulation.isOn(in: bottle, executable: URL(fileURLWithPath: "/x/PEAK.exe")))
     }
 }
+
+/// highball#67 (Five Nights at Freddy's) and #103 (Dead Rising 3): the game comes up small in a
+/// corner and the mouse lands away from what it draws, and every graphics mode does the same,
+/// because the fullscreen size it asked for is one the Mac never switched to.
+final class UnswitchedDisplayModeTests: XCTestCase {
+    private func log(_ attempts: Int) -> String {
+        (["# gin x64-sikarugir10.0_6-r3 bottle=Games renderer=dxvk"]
+         + (0..<attempts).map { "00d\($0):err:system:display_mode_changed Failed to get primary source current display settings." }
+         + ["# exit=0 after 934s"]).joined(separator: "\n")
+    }
+
+    func testRepeatedFailedModeChangesAreTheTell() {
+        XCTAssertTrue(DisplayModeEmulation.looksUnswitched(inLog: log(3)))
+        XCTAssertTrue(DisplayModeEmulation.looksUnswitched(inLog: log(2)))
+    }
+
+    func testOneFailureIsNotEnough() {
+        // A screen waking up or a monitor being plugged in fails the same read once.
+        XCTAssertFalse(DisplayModeEmulation.looksUnswitched(inLog: log(1)))
+    }
+
+    func testAnOrdinaryLogSaysNothing() {
+        let ordinary = """
+        # gin x64-sikarugir10.0_6-r3 bottle=Games renderer=dxmt
+        0164:err:environ:init_peb starting L"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe" in experimental wow64 mode
+        0138:err:ole:com_get_class_object apartment not initialised
+        # exit=0 after 120s
+        """
+        XCTAssertFalse(DisplayModeEmulation.looksUnswitched(inLog: ordinary))
+    }
+}

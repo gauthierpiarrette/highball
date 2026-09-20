@@ -12,6 +12,27 @@ import Foundation
 public enum DisplayModeEmulation {
     public static let valueName = "EmulateModeset"
 
+    /// What a fullscreen size the Mac never switched to leaves in a launch log: win32u gives up
+    /// on the display it was told to change, once per attempt. The game then draws at the size it
+    /// asked for inside a window that stayed the size it was, which is the corner window with the
+    /// pointer landing somewhere other than what is drawn — highball#67 (Five Nights at Freddy's)
+    /// and #103 (Dead Rising 3) are the same report, and switching graphics modes never moved it.
+    public static let unswitchedMarker = "err:system:display_mode_changed"
+
+    /// Whether a launch log shows a game asking for a mode change that never happened. Two
+    /// sightings, not one: a lone failure can be a screen waking up or a monitor being plugged
+    /// in, while a game that wants a mode the Mac will not give asks again on every attempt.
+    public static func looksUnswitched(inLog text: String, atLeast: Int = 2) -> Bool {
+        text.split(separator: "\n").filter { $0.contains(unswitchedMarker) }.count >= atLeast
+    }
+
+    /// The same question for a log on disk, read head-and-tail so a log of many megabytes — what
+    /// a long session leaves — costs a bounded read.
+    public static func looksUnswitched(log url: URL, atLeast: Int = 2) -> Bool {
+        guard let text = BugReport.boundedText(of: url) else { return false }
+        return looksUnswitched(inLog: text, atLeast: atLeast)
+    }
+
     /// The per-program key, as `reg add` wants it.
     public static func key(forExecutable exe: URL) -> String {
         "HKCU\\Software\\Wine\\AppDefaults\\\(exe.lastPathComponent)\\X11 Driver"
