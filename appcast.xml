@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.34</title>
+      <description><![CDATA[Keep game files inside this environment: a new environment setting, off by default, that makes the Windows Documents folder live inside the environment so games stop writing saves into your Mac's Documents (asked in Discussions). Game pages gain Show the game's folder, where mods go.]]></description>
+      <pubDate>Mon, 21 Sep 2026 00:25:52 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.34/Highball-0.9.34.zip" sparkle:version="0.9.34" sparkle:shortVersionString="0.9.34" sparkle:edSignature="BxkTOklot3QCIXwVr98X9xiHF+ogZRDgmeOCQn7oj0ddWVdlzdnILLYPs56pFdKxDiNTUAQaQDb9nkCCdITwCA==" length="3841579" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.33</title>
       <description><![CDATA[New Wine 11 engine x64-crossover26.3-r11, offered from The Last Flame's page and a pick under Advanced: the last error a game reads after a file call is now the real one on a Mac (Unity's Start did nothing, #99), and videos a game plays through Media Foundation reach DXMT as shared textures. A fix that needs an engine your Highball does not ship yet now says so and points at Check for Updates.]]></description>
       <pubDate>Mon, 21 Sep 2026 00:08:41 +0200</pubDate>
