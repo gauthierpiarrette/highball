@@ -42,6 +42,16 @@ private func frameGenerationChecks() throws {
     let userFile = try String(contentsOf: real, encoding: .utf8)
     try check(userFile == "keep this user file", "Driver repair deleted a regular user file")
 
+    // A bottle with no Steam of its own uses a copy installed in another bottle beside it.
+    let neighbourSteam = root.appending(path: "neighbour/drive_c/Program Files (x86)/Steam")
+    try file(neighbourSteam.appending(path: "steam.exe"))
+    let neighbourDLL = neighbourSteam.appending(path: "steamapps/common/Lossless Scaling/lsfg-vk.dll")
+    try check(bottle.losslessScalingDLL == nil, "A neighbour without the DLL was reported as having it")
+    try file(neighbourDLL)
+    // Enumerating the bottles directory resolves symlinks, which the temporary directory has.
+    try check(bottle.losslessScalingDLL?.resolvingSymlinksInPath() == neighbourDLL.resolvingSymlinksInPath(),
+              "A neighbouring environment's copy was not found")
+
     let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam")
     try file(steam.appending(path: "steam.exe"))
     let external = root.appending(path: "External Steam Library")
