@@ -7,9 +7,9 @@
     <item>
       <title>Highball 0.9.33</title>
       <description><![CDATA[New Wine 11 engine x64-crossover26.3-r11, offered from The Last Flame's page and a pick under Advanced: the last error a game reads after a file call is now the real one on a Mac (Unity's Start did nothing, #99), and videos a game plays through Media Foundation reach DXMT as shared textures. A fix that needs an engine your Highball does not ship yet now says so and points at Check for Updates.]]></description>
-      <pubDate>Sun, 20 Sep 2026 05:39:18 +0200</pubDate>
+      <pubDate>Mon, 21 Sep 2026 00:08:41 +0200</pubDate>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
       <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.33/Highball-0.9.33.zip" sparkle:version="0.9.33" sparkle:shortVersionString="0.9.33" sparkle:edSignature="TeLFiJ5Xo44eB2915tMHrZ1r8Kbi7L7CaJIYmiOkBs88LY8xqOfaNTcXrxVNkK7HoGpwdlAtra2N2eRCw1VVDw==" length="3823227" type="application/octet-stream"/>
     </item>
     <item>
