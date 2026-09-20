@@ -1552,6 +1552,19 @@ final class AppState {
         do { try bottleStore.update(bottle); refresh() } catch { fail(error, bottle: bottle) }
     }
 
+    /// Discussion #157: the environment's Documents becomes a real folder inside it (or the link
+    /// to the Mac's Documents again). The prefix changes first, the setting records it; a failure
+    /// leaves the setting as it was, so the switch never claims a shape the prefix does not have.
+    func setKeepFilesInside(_ on: Bool, for bottle: Bottle) {
+        var copy = bottles.first { $0.name == bottle.name } ?? bottle
+        guard copy.settings.keepFilesInside != on else { return }
+        do {
+            for line in try UserFolders.set(inside: on, driveC: copy.driveC) { appendLog(line) }
+            copy.settings.keepFilesInside = on
+            update(copy)
+        } catch { fail(error, bottle: copy) }
+    }
+
     func deleteBottle(_ name: String) {
         // The row and its Delete item stay on screen for the whole operation, so without this a
         // second click started a second delete and the loser reported "missing" for a delete that

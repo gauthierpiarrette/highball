@@ -138,7 +138,7 @@ struct Bottle: AsyncParsableCommand {
     }
 
     struct Set: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Change a bottle setting: engine, renderer, winver, sync, hud, avx, dpi, dxvkasync, framegen, framegenadaptive, framegenflow, framegenperformance, framegenforcevsync, dlloverrides, env KEY=VALUE (empty VALUE removes)")
+        static let configuration = CommandConfiguration(abstract: "Change a bottle setting: engine, renderer, winver, sync, hud, avx, dpi, dxvkasync, framegen, framegenadaptive, framegenflow, framegenperformance, framegenforcevsync, dlloverrides, keepfiles on|off, env KEY=VALUE (empty VALUE removes)")
         @Argument var name: String
         @Argument var setting: String
         @Argument var value: String
@@ -176,6 +176,11 @@ struct Bottle: AsyncParsableCommand {
                 b.settings.frameGenFlowScale = f
             case "dlloverrides":
                 b.settings.dllOverrides = value
+            case "keepfiles":
+                // Discussion #157: Documents inside the environment (on) or linked to ~/Documents (off).
+                let on = (value == "1" || value == "true" || value == "on")
+                for line in try UserFolders.set(inside: on, driveC: b.driveC) { print(line) }
+                b.settings.keepFilesInside = on
             case "dpi":
                 guard let scale = Int(value) else { fail("dpi expects a number (96..240; 96 = 100%, 192 = 200%)") }
                 b.settings.dpiScale = scale

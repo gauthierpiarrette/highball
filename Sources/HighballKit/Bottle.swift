@@ -369,12 +369,18 @@ public struct BottleSettings: Codable, Sendable {
     /// inherits Steam's environment from before the setting changed and never sees it
     /// (issues #22/#25). Launches re-mirror when this differs from dllOverrides.
     public var dllOverridesSynced: String?
+    /// Game files stay inside the environment: the user's Documents is a real folder under
+    /// drive_c instead of a link to the macOS Documents (which is what wineboot makes, and why
+    /// Dark Souls' or the Sims' save folders land in ~/Documents, discussion #157). Off keeps the
+    /// link. Applied to the prefix by `UserFolders`; the saves go with the environment when it
+    /// is deleted, and the delete confirmation says so.
+    public var keepFilesInside: Bool = false
     public var environment: [String: String] = [:]
     public var pins: [Pin] = []
     public var recipes: [String] = []
     public var created: Date = Date()
 
-    enum CodingKeys: String, CodingKey { case formatVersion, name, engineID, renderer, rendererExplicit, windowsVersion, sync, metalHUD, advertiseAVX, dxvkAsync, fpsCap, frameGen, frameGenAdaptive, frameGenFlowScale, frameGenPerformance, frameGenForceVsync, commandIsControl, commandIsControlSynced, dpiScale, dllOverrides, dxvkAppConfig, dllOverridesSynced, environment, pins, recipes, created }
+    enum CodingKeys: String, CodingKey { case formatVersion, name, engineID, renderer, rendererExplicit, windowsVersion, sync, metalHUD, advertiseAVX, dxvkAsync, fpsCap, frameGen, frameGenAdaptive, frameGenFlowScale, frameGenPerformance, frameGenForceVsync, commandIsControl, commandIsControlSynced, dpiScale, dllOverrides, dxvkAppConfig, dllOverridesSynced, keepFilesInside, environment, pins, recipes, created }
 
     public init(name: String, engineID: String) {
         self.name = name
@@ -412,6 +418,7 @@ public struct BottleSettings: Codable, Sendable {
         }
         dllOverrides = try c.decodeIfPresent(String.self, forKey: .dllOverrides) ?? ""
         dllOverridesSynced = try c.decodeIfPresent(String.self, forKey: .dllOverridesSynced)
+        keepFilesInside = try c.decodeIfPresent(Bool.self, forKey: .keepFilesInside) ?? false
         commandIsControl = try c.decodeIfPresent(Bool.self, forKey: .commandIsControl) ?? true
         commandIsControlSynced = try c.decodeIfPresent(Bool.self, forKey: .commandIsControlSynced)
         environment = try c.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]

@@ -435,6 +435,11 @@ struct BottleSettingsSheet: View {
                         .font(.caption).foregroundStyle(.secondary)
                     Text(L("Games run with the environment’s sync (msync is fastest). Opening the Steam window restarts Windows processes with sync off — its interface needs it."))
                         .font(.caption).foregroundStyle(.secondary)
+                    Toggle(L("Keep game files inside this environment"), isOn: Binding(
+                        get: { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.keepFilesInside },
+                        set: { on in state.setKeepFilesInside(on, for: bottle) }))
+                    Text(L("On, the Windows Documents folder lives inside this environment, so games that save there (FromSoftware, Bandai Namco, the Sims and others) no longer write into your Mac's Documents. Files already in your Mac's Documents stay there and the game starts fresh here. Off again keeps the environment's folder as “Documents (environment)”. Saves kept inside go with the environment when you delete it."))
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Section(L("Advanced")) {
                     let offered = state.offeredEngines(for: state.bottles.first { $0.name == bottle.name } ?? bottle)
@@ -495,7 +500,9 @@ struct BottleSettingsSheet: View {
             .formStyle(.grouped)
         }
         .frame(width: 560, height: 560)
-        .confirmationDialog(L("Delete this environment? Its Windows drive and everything installed in it are removed."),
+        .confirmationDialog(UserFolders.hasFilesInside(driveC: bottle.driveC)
+                            ? L("Delete this environment? Its Windows drive and everything installed in it are removed, including the game saves kept in its Documents folder.")
+                            : L("Delete this environment? Its Windows drive and everything installed in it are removed."),
                             isPresented: $confirmDelete, titleVisibility: .visible) {
             Button(L("Delete"), role: .destructive) { dismiss(); state.deleteBottle(bottle.name) }
             Button(L("Cancel"), role: .cancel) {}
