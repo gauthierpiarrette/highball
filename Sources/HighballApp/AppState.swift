@@ -1140,14 +1140,32 @@ final class AppState {
     private func findProgramExecutable(for item: LibraryItem) -> URL? {
         guard let bottleName = item.bottleName, let bottle = bottles.first(where: { $0.name == bottleName }) else { return nil }
         switch item.source {
-        case .steam:
-            guard let game = gamesByBottle[bottleName]?.first(where: { $0.appid == item.steamAppID }), !game.installdir.isEmpty else { return nil }
-            return PEIcon.bestExecutable(in: bottle.driveC.appending(path: "Program Files (x86)/Steam/steamapps/common/\(game.installdir)"))
-        case .epic:
-            return item.epicAppName.flatMap { epicInstalls[$0] }.flatMap { PEIcon.bestExecutable(in: URL(fileURLWithPath: $0)) }
+        case .steam, .epic:
+            return programFolder(for: item).flatMap { PEIcon.bestExecutable(in: $0) }
         case .pin:
             return item.pinID.flatMap { id in bottle.settings.pins.first { $0.id == id } }.map { $0.executableURL(driveC: bottle.driveC) }
         }
+    }
+
+    /// The game's own folder on disk: Steam's install directory, Epic's install path, or the
+    /// directory a pinned program lives in. What "Show the game's folder" opens (discussion
+    /// #126: mods are folder copies, and the question was where the game is). Nil when the
+    /// game is not installed here.
+    func programFolder(for item: LibraryItem) -> URL? {
+        guard let bottleName = item.bottleName, let bottle = bottles.first(where: { $0.name == bottleName }) else { return nil }
+        let folder: URL?
+        switch item.source {
+        case .steam:
+            guard let game = gamesByBottle[bottleName]?.first(where: { $0.appid == item.steamAppID }), !game.installdir.isEmpty else { return nil }
+            folder = bottle.driveC.appending(path: "Program Files (x86)/Steam/steamapps/common/\(game.installdir)", directoryHint: .isDirectory)
+        case .epic:
+            folder = item.epicAppName.flatMap { epicInstalls[$0] }.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        case .pin:
+            folder = item.pinID.flatMap { id in bottle.settings.pins.first { $0.id == id } }.map { $0.executableURL(driveC: bottle.driveC).deletingLastPathComponent() }
+        }
+        guard let folder else { return nil }
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDir) && isDir.boolValue ? folder : nil
     }
 
     /// Emulated display mode changes for a program (`DisplayModeEmulation`): the bottle's

@@ -255,6 +255,10 @@ struct GameDetailView: View {
                         }
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(L("Files")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+                            if let folder = state.programFolder(for: item) {
+                                Button(L("Show the game's folder")) { NSWorkspace.shared.open(folder) }.controlSize(.small)
+                                    .help(L("Opens the game's own folder in the Finder, where mods and config files go."))
+                            }
                             Button(L("Show the Windows drive")) { NSWorkspace.shared.open(bottle.driveC) }.controlSize(.small)
                             if MacAppStub.existing(for: item.title) != nil {
                                 Button(L("Remove the shortcut")) { state.removeMacApp(title: item.title) }.controlSize(.small)
