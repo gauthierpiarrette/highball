@@ -52,6 +52,9 @@ run game Scripts/game-smoke.sh
 # Advisory until its false-fail rate is zero, like every new check: the process-environment
 # invariant behind the 2026-09-18 launcher fixes (see Scripts/env-invariant-smoke.sh).
 run env-invariant Scripts/env-invariant-smoke.sh
+# Engine probes (Scripts/engine-probe-smoke.sh): one Windows program per Wine-on-macOS patch,
+# run in an environment on the engine that carries it. lasterr covers patch 0011 (r11+).
+run engine-probe Scripts/engine-probe-smoke.sh
 [ $WITH_RENDER = 1 ] && run render Scripts/render-smoke.sh
 
 passed=true
