@@ -528,21 +528,48 @@ public struct Bottle: Sendable {
             let dll = frameGenPath(override)
             return frameGenFile(dll) ? dll : nil
         }
-        guard let root = SteamLibrary.steamRoot(of: self) else { return nil }
-        var libraries = [root]
-        // check secondary steam libraries
-        if let text = try? String(contentsOf: root.appending(path: "steamapps/libraryfolders.vdf"), encoding: .utf8) {
-            let pattern = #/"path"\s+"((?:\\.|[^"\\])*)"/#
-            for match in text.matches(of: pattern) {
-                let path = String(match.1).replacingOccurrences(of: #"\\"#, with: #"\"#)
-                    .replacingOccurrences(of: #"\""#, with: "\"")
-                libraries.append(frameGenPath(path))
+        if let root = SteamLibrary.steamRoot(of: self) {
+            var libraries = [root]
+            // check secondary steam libraries
+            if let text = try? String(contentsOf: root.appending(path: "steamapps/libraryfolders.vdf"), encoding: .utf8) {
+                let pattern = #/"path"\s+"((?:\\.|[^"\\])*)"/#
+                for match in text.matches(of: pattern) {
+                    let path = String(match.1).replacingOccurrences(of: #"\\"#, with: #"\"#)
+                        .replacingOccurrences(of: #"\""#, with: "\"")
+                    libraries.append(frameGenPath(path))
+                }
+            }
+            for library in libraries {
+                let dll = Self.losslessScalingDLL(inLibrary: library)
+                if frameGenFile(dll) { return dll }
             }
         }
-        for library in libraries {
-            let manifest = library.appending(path: "steamapps/appmanifest_\(Self.losslessScalingAppID).acf")
-            let dir = SteamLibrary.parseManifest(manifest)?.installdir ?? "Lossless Scaling"
-            let dll = library.appending(path: "steamapps/common/\(dir)/lsfg-vk.dll")
+        // The DLL is bought on Steam, but it is read as a plain file: a copy installed in another
+        // bottle works just as well. Without this an Epic-only or GOG-only bottle cannot use frame
+        // generation even though the user owns Lossless Scaling one bottle over.
+        return siblingLosslessScalingDLL()
+    }
+
+    /// Path where the shader DLL would sit inside one Steam library directory, whatever the
+    /// install folder is named. Says nothing about whether the file is there.
+    private static func losslessScalingDLL(inLibrary library: URL) -> URL {
+        let manifest = library.appending(path: "steamapps/appmanifest_\(Self.losslessScalingAppID).acf")
+        let dir = SteamLibrary.parseManifest(manifest)?.installdir ?? "Lossless Scaling"
+        return library.appending(path: "steamapps/common/\(dir)/lsfg-vk.dll")
+    }
+
+    /// Default Steam library of every other bottle beside this one. Secondary libraries are not
+    /// followed there: their paths are Windows paths that only that bottle's drives can resolve.
+    /// Sorted by name so two bottles holding the DLL always resolve to the same one, whatever
+    /// order the filesystem reports.
+    private func siblingLosslessScalingDLL() -> URL? {
+        let parent = url.deletingLastPathComponent()
+        let others = (try? FileManager.default.contentsOfDirectory(
+            at: parent, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        for other in others.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+        where other.standardizedFileURL != url.standardizedFileURL {
+            guard let root = SteamLibrary.steamRoot(driveC: other.appending(path: "drive_c")) else { continue }
+            let dll = Self.losslessScalingDLL(inLibrary: root)
             if frameGenFile(dll) { return dll }
         }
         return nil
@@ -587,7 +614,7 @@ public struct Bottle: Sendable {
             if let override = env["LSFGM_DLL_PATH"], !override.isEmpty {
                 return .unavailable("The shader DLL override is not a readable file. Correct LSFGM_DLL_PATH or remove the override.")
             }
-            return .unavailable("Install Lossless Scaling from Steam in this environment and select its lsfg-vk beta branch (Properties → Betas).")
+            return .unavailable("Install Lossless Scaling from Steam in any environment and select its lsfg-vk beta branch (Properties → Betas), or point LSFGM_DLL_PATH at its lsfg-vk.dll.")
         }
         return .active(multiplier: multiplier)
     }

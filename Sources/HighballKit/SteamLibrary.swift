@@ -24,7 +24,12 @@ public struct SteamGame: Identifiable, Sendable, Hashable {
 public enum SteamLibrary {
     /// Path of the Windows Steam install inside a bottle, if present.
     public static func steamRoot(of bottle: Bottle) -> URL? {
-        let root = bottle.driveC.appending(path: "Program Files (x86)/Steam")
+        steamRoot(driveC: bottle.driveC)
+    }
+
+    /// Path of the Windows Steam install under a `drive_c` we only have the path of.
+    static func steamRoot(driveC: URL) -> URL? {
+        let root = driveC.appending(path: "Program Files (x86)/Steam")
         return FileManager.default.fileExists(atPath: root.appending(path: "steam.exe").path) ? root : nil
     }
 
