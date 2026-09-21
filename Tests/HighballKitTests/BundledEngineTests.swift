@@ -38,19 +38,29 @@ final class BundledEngineTests: XCTestCase {
         XCTAssertEqual(d3dmetal.license, "apple-gptk-license-2023-08-17", "same licence text as GPTK 3, same gate")
     }
 
-    /// The lsfg variant is r6 with one component added, so it has to keep everything r6 exists for
-    /// and pin the shim to a published archive: a local file URL there would fail on every machine.
-    func testLsfgVariantIsR6PlusAPinnedShim() throws {
-        let lsfg = try XCTUnwrap(try manifests().first { $0.id == "x64-sikarugir10.0_6-r6-lsfg" }, "lsfg manifest missing")
-        let r6 = try XCTUnwrap(try manifests().first { $0.id == "x64-sikarugir10.0_6-r6" }, "r6 manifest missing")
-        XCTAssertEqual(lsfg.minMacOS, r6.minMacOS)
-        XCTAssertEqual(lsfg.baseEnv?["D3DM_MTL4"], "0", "the lsfg variant must keep r6's Metal 4 backend setting")
-        for (name, component) in r6.components {
-            XCTAssertEqual(lsfg.components[name]?.sha256, component.sha256, "\(name) drifted from r6, so its download is not reused")
+    /// Frame generation rides in the engines as one component, off unless an environment asks
+    /// (itsOwen's lsfg-metal, highball#171): r7 is r5 plus that component on the main line, r8 is
+    /// r6 plus the same one on the GPTK 4 line. Both keep everything their base exists for, and
+    /// the shim comes from Highball's own release (a component URL has to be ours to stay
+    /// immutable; winetricks' branch URL drifting broke every fresh install once, #27/#28).
+    func testFrameGenerationEnginesAreTheirBasePlusOnePinnedShim() throws {
+        // The default engine lives in spike/engine-manifest.json, beside the spike/engines set.
+        let all = try manifests() + [try EngineManifest.load(from: engines.deletingLastPathComponent().appending(path: "engine-manifest.json"))]
+        func one(_ id: String) throws -> EngineManifest { try XCTUnwrap(all.first { $0.id == id }, "\(id) missing") }
+        for (variantID, baseID) in [("x64-sikarugir10.0_6-r7", "x64-sikarugir10.0_6-r5"), ("x64-sikarugir10.0_6-r8", "x64-sikarugir10.0_6-r6")] {
+            let variant = try one(variantID), base = try one(baseID)
+            XCTAssertEqual(variant.minMacOS, base.minMacOS, "\(variantID) must keep \(baseID)'s floor")
+            XCTAssertEqual(variant.baseEnv?["D3DM_MTL4"], base.baseEnv?["D3DM_MTL4"], "\(variantID) must keep \(baseID)'s Metal 4 setting")
+            for (name, component) in base.components {
+                XCTAssertEqual(variant.components[name]?.sha256, component.sha256, "\(name) drifted from \(baseID), so its download is not reused")
+            }
+            XCTAssertEqual(Set(variant.components.keys).subtracting(base.components.keys), ["lsfg"], "\(variantID) adds exactly the lsfg component")
+            let shim = try XCTUnwrap(variant.components["lsfg"], "no lsfg component in \(variantID)")
+            XCTAssertEqual(shim.extract?.into, "renderers/lsfg", "resolveLsfgShimDir looks for renderers/lsfg")
+            XCTAssertEqual(shim.license, "MIT")
+            XCTAssertEqual(shim.sha256, "fa496bb3947f52652fc3856c4a0413c7e5603e19c7dd6936dfc5d76be756b0f9", "the v0.7.0 asset, verified against the published release")
+            XCTAssertEqual(shim.url.absoluteString, "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/lsfg-metal-0.7.0.tar.xz")
         }
-        let shim = try XCTUnwrap(lsfg.components["lsfg"], "no lsfg component")
-        XCTAssertEqual(shim.extract?.into, "renderers/lsfg", "resolveLsfgShimDir looks for renderers/lsfg")
-        XCTAssertEqual(shim.license, "MIT")
-        XCTAssertEqual(shim.url.scheme, "https", "the shim must come from a published archive, not a build machine")
+        XCTAssertEqual(all.last?.id, "x64-sikarugir10.0_6-r7", "r7 is the default engine")
     }
 }

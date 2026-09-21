@@ -52,8 +52,8 @@ with tarfile.open(archive,'w:xz',format=tarfile.PAX_FORMAT) as tar:
             with path.open('rb') as content:tar.addfile(info,content)
         else:tar.addfile(info)
 sha=hashlib.sha256(archive.read_bytes()).hexdigest()
-manifest=json.load(open('spike/engines/x64-sikarugir10.0_6-r6.json'))
-manifest['id']='x64-sikarugir10.0_6-r6-lsfg' + ('' if release else '-local')
+manifest=json.load(open('spike/engine-manifest.json'))
+manifest['id']=manifest['id'] + ('-lsfg' if release else '-lsfg-local')
 manifest['displayName']+=' + lsfg-metal' if release else ' + local lsfg-metal'
 manifest['components']['lsfg']={'kind':'renderer','order':1,'version':archive.stem.removesuffix('.tar'),
     'url':release or archive.resolve().as_uri(),'sha256':sha,'size':archive.stat().st_size,

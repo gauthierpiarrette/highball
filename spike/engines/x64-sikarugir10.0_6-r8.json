@@ -1,7 +1,7 @@
 {
   "$schema": "https://highball.app/schemas/engine-manifest/v0",
-  "id": "x64-sikarugir10.0_6-r6-lsfg",
-  "displayName": "Wine 10.0 (Sikarugir) r6, D3DMetal 4.0 beta 2 + lsfg-metal",
+  "id": "x64-sikarugir10.0_6-r8",
+  "displayName": "Wine 10.0 (Sikarugir) r8, D3DMetal 4.0 beta 2 + frame generation (lsfg-metal, opt-in)",
   "arch": "x86_64",
   "minMacOS": "27.0",
   "requires": [
@@ -19,7 +19,7 @@
     "r2 (2026-09-07): adds the d3dmetal-tsshim component, a d3d12.dll in front of D3DMetal's that serves DirectX 12 timestamp queries (D3DMetal 3.0 resolves them to zero at a reported 60 Hz, which crashes Guardians of the Galaxy, highball#63). Everything else is byte-identical to r1, so existing downloads are reused; only the 46 KB shim tarball is new. Source: spike/tsshim, Scripts/build-tsshim.sh.",
     "r3 (2026-09-15): the d3dmetal-tsshim component rebuilt so its exports carry Microsoft's d3d12 ordinals (GetBehaviorValue 100, D3D12CreateDevice 101, ... 110), which D3DMetal mirrors. The r2 shim numbered them from 1, so a game that binds d3d12 imports by ordinal (Path of Exile 2 delay-loads D3D12CreateDevice as ordinal 101) died at startup with 'ordinal 101 out of range' and Wine's exception 0xc06d007f (highball-db#53). Everything else is byte-identical to r2, so existing downloads are reused; only the 46 KB shim tarball is new. Source: spike/tsshim, Scripts/build-tsshim.sh 20260915.",
     "r5 (2026-09-18): adds the d9vk-modern component, the DXVK-MacOS 3.1 Direct3D 9 that the withdrawn r4 candidate had put on every launch's search path, now as a directory nothing loads by itself. A game's recipe copies it beside the game with a per-program override (the legacy CS:GO copy mechanism). Every other component is byte-identical to r3, so existing downloads are reused; only the 10 MB d9vk archive is new, and it was already published for r4.",
-    "r6-lsfg (2026-09-20): r6 plus the lsfg component, lsfg-metal v0.7.0. Every other component is byte-identical to r6, so existing downloads are reused; only the 383 KB lsfg archive is new. The archive is the published release asset and its SHA-256 is the one this manifest pins. Frame generation stays off until an environment asks for it. Measured on an M2, macOS 27.0, at 2x with the component installed by hand on r5 rather than through this manifest: Absolute Drift and Codename CURE II through DXMT and Among Us (Epic) through DXMT, all about 30 source fps shown at about 60, and Slay the Spire on the OpenGL path. This manifest itself has not been installed end to end."
+    "r8 (2026-09-21, was itsOwen's r6-lsfg in highball#171): r6 plus the lsfg component, lsfg-metal v0.7.0, the same component r7 carries on the main line. Every other component is byte-identical to r6, so existing downloads are reused; only the 383 KB lsfg archive is new. The archive is the published release asset and its SHA-256 is the one this manifest pins. Frame generation stays off until an environment asks for it. Measured on an M2, macOS 27.0, at 2x with the component installed by hand on r5 rather than through this manifest: Absolute Drift and Codename CURE II through DXMT and Among Us (Epic) through DXMT, all about 30 source fps shown at about 60, and Slay the Spire on the OpenGL path. This manifest itself has not been installed end to end."
   ],
   "components": {
     "d3dmetal": {
@@ -88,11 +88,11 @@
       },
       "kind": "renderer",
       "license": "MIT",
-      "note": "Lossless Scaling frame generation: a MoltenVK shim that sits in front of the real driver as libMoltenVK.dylib, with libMoltenVK.real.dylib beside it pointing at the engine's own MoltenVK. Interpolates on the Vulkan path (DXVK, vkd3d-proton), on Metal for DXMT and D3DMetal, and on OpenGL. Needs the user's own lsfg-vk.dll from the Lossless Scaling Steam application (lsfg-vk beta branch); nothing of Lossless Scaling is shipped here. Off unless an environment turns it on, and DISABLE_LSFGM=1 turns it off for one process. Source: github.com/itsOwen/lsfg-metal, Scripts/build-lsfg.sh.",
+      "note": "Lossless Scaling frame generation: a MoltenVK shim that sits in front of the real driver as libMoltenVK.dylib, with libMoltenVK.real.dylib beside it pointing at the engine's own MoltenVK. Interpolates on the Vulkan path (DXVK, vkd3d-proton), on Metal for DXMT and D3DMetal, and on OpenGL. Needs the user's own lsfg-vk.dll from the Lossless Scaling Steam application (lsfg-vk beta branch); nothing of Lossless Scaling is shipped here. Off unless an environment turns it on, and DISABLE_LSFGM=1 turns it off for one process. Source: github.com/itsOwen/lsfg-metal (itsOwen, highball#109, #171), built by Scripts/build-lsfg.sh; the archive is the v0.7.0 release asset mirrored under Highball's engine-components release, same bytes (SHA-256 fa496bb3…).",
       "order": 1,
       "sha256": "fa496bb3947f52652fc3856c4a0413c7e5603e19c7dd6936dfc5d76be756b0f9",
       "size": 392176,
-      "url": "https://github.com/itsOwen/lsfg-metal/releases/download/v0.7.0/lsfg-v0.7.0.tar.xz",
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/lsfg-metal-0.7.0.tar.xz",
       "version": "lsfg-v0.7.0"
     },
     "moltenvk": {
@@ -135,7 +135,7 @@
     "winetricks": {
       "kind": "tool",
       "license": "LGPL-2.1",
-      "note": "Pinned to upstream commit 5a59ea07 (20260125+dev, 2026-08-07) \u2014 the exact bytes 0.7.x verified with dotnet48. The old branch URL drifted and broke every fresh engine install (issues #27/#28); URLs here must be immutable.",
+      "note": "Pinned to upstream commit 5a59ea07 (20260125+dev, 2026-08-07) — the exact bytes 0.7.x verified with dotnet48. The old branch URL drifted and broke every fresh engine install (issues #27/#28); URLs here must be immutable.",
       "sha256": "f35c29737ca08a583569e6a3752d52fbe23333c5acfad5f16c4177d25eaf3f4b",
       "url": "https://raw.githubusercontent.com/Winetricks/winetricks/5a59ea07513b24093bd90fad943ecf9543cf05bc/src/winetricks"
     }
@@ -150,7 +150,7 @@
   "licenses": {
     "apple-gptk-license-2023-08-17": {
       "applies": [
-        "renderers/d3dmetal (bundled in the Sikarugir Template: D3DMetal.framework sha1 1405e5c6\u2026 identical to GPTK 3.0-3)",
+        "renderers/d3dmetal (bundled in the Sikarugir Template: D3DMetal.framework sha1 1405e5c6… identical to GPTK 3.0-3)",
         "renderers/d3dmetal (GPTK 4.0 beta 2 redist: D3DMetal-4.0b2)"
       ],
       "summary": "Apple Game Porting Toolkit license: non-commercial use/distribution only; no modification; use scoped to developing, testing or evaluating games on Apple hardware.",
@@ -158,9 +158,9 @@
     }
   },
   "verified": {
-    "date": "2026-09-19",
+    "date": "2026-09-21",
     "macos": "27.0",
     "chip": "Apple M1 Pro",
-    "result": "HumanitZ demo (D3D12) stable 3 min at ~260 MB resident (r5: 1.26 GB); The Last Caretaker demo draws (99% GPU) where r5 shows a black screen (2% GPU). Blind run (session locked): process, GPU load and logs only, no captures."
+    "result": "Installed from this manifest through the CLI: only the 383 KB lsfg archive downloaded, every other component reused from r6; renderers/lsfg holds the x86_64 shim with its 8 exports, LICENSE, source.txt and the libMoltenVK.real.dylib link resolving to the engine's own MoltenVK. Frame generation itself not run here (needs the user's Lossless Scaling); itsOwen measured it on four games at 2x."
   }
 }
