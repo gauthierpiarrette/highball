@@ -19,11 +19,13 @@ PORT_VERSION="${LSFGM_VERSION:-lsfg-metal-$(git -C "$SRC" rev-parse --short=7 HE
 export LSFGM_VERSION="$PORT_VERSION"
 (cd "$SRC" && cargo build --release && cargo test --release)
 DYLIB="$SRC/target/x86_64-apple-darwin/release/liblsfg_metal.dylib"
-# exactly four exported text symbols, the names Wine dlsyms (objc2 class statics are data, not T)
+# exactly eight exported text symbols: the names Wine dlsyms plus the globals a native app resolves by symbol
 SYMBOLS="$(nm -gU "$DYLIB" | awk '$2=="T"')"
 COUNT="$(printf '%s\n' "$SYMBOLS" | grep -c . || true)"
-[[ "$COUNT" -eq 4 ]] || { echo "expected 4 exported functions, found $COUNT:" >&2; printf '%s\n' "$SYMBOLS" >&2; exit 1; }
-for symbol in vkGetInstanceProcAddr vkGetDeviceProcAddr vkCreateMetalSurfaceEXT vkCreateMacOSSurfaceMVK; do
+[[ "$COUNT" -eq 8 ]] || { echo "expected 8 exported functions, found $COUNT:" >&2; printf '%s\n' "$SYMBOLS" >&2; exit 1; }
+for symbol in vkGetInstanceProcAddr vkGetDeviceProcAddr vkCreateMetalSurfaceEXT vkCreateMacOSSurfaceMVK \
+  vkCreateInstance vkEnumerateInstanceExtensionProperties vkEnumerateInstanceVersion \
+  vkEnumerateDeviceExtensionProperties; do
   printf '%s\n' "$SYMBOLS" | grep -q " _$symbol\$" || { echo "missing export: $symbol" >&2; exit 1; }
 done
 WORK="$(mktemp -d)"
@@ -50,8 +52,8 @@ with tarfile.open(archive,'w:xz',format=tarfile.PAX_FORMAT) as tar:
             with path.open('rb') as content:tar.addfile(info,content)
         else:tar.addfile(info)
 sha=hashlib.sha256(archive.read_bytes()).hexdigest()
-manifest=json.load(open('spike/engine-manifest.json'))
-manifest['id']='x64-sikarugir10.0_6-r3-lsfg' + ('' if release else '-local')
+manifest=json.load(open('spike/engines/x64-sikarugir10.0_6-r6.json'))
+manifest['id']='x64-sikarugir10.0_6-r6-lsfg' + ('' if release else '-local')
 manifest['displayName']+=' + lsfg-metal' if release else ' + local lsfg-metal'
 manifest['components']['lsfg']={'kind':'renderer','order':1,'version':archive.stem.removesuffix('.tar'),
     'url':release or archive.resolve().as_uri(),'sha256':sha,'size':archive.stat().st_size,

@@ -37,4 +37,20 @@ final class BundledEngineTests: XCTestCase {
         XCTAssertEqual(d3dmetal.extract?.into, "renderers/d3dmetal", "rendererDir prefers the engine's own renderers/d3dmetal")
         XCTAssertEqual(d3dmetal.license, "apple-gptk-license-2023-08-17", "same licence text as GPTK 3, same gate")
     }
+
+    /// The lsfg variant is r6 with one component added, so it has to keep everything r6 exists for
+    /// and pin the shim to a published archive: a local file URL there would fail on every machine.
+    func testLsfgVariantIsR6PlusAPinnedShim() throws {
+        let lsfg = try XCTUnwrap(try manifests().first { $0.id == "x64-sikarugir10.0_6-r6-lsfg" }, "lsfg manifest missing")
+        let r6 = try XCTUnwrap(try manifests().first { $0.id == "x64-sikarugir10.0_6-r6" }, "r6 manifest missing")
+        XCTAssertEqual(lsfg.minMacOS, r6.minMacOS)
+        XCTAssertEqual(lsfg.baseEnv?["D3DM_MTL4"], "0", "the lsfg variant must keep r6's Metal 4 backend setting")
+        for (name, component) in r6.components {
+            XCTAssertEqual(lsfg.components[name]?.sha256, component.sha256, "\(name) drifted from r6, so its download is not reused")
+        }
+        let shim = try XCTUnwrap(lsfg.components["lsfg"], "no lsfg component")
+        XCTAssertEqual(shim.extract?.into, "renderers/lsfg", "resolveLsfgShimDir looks for renderers/lsfg")
+        XCTAssertEqual(shim.license, "MIT")
+        XCTAssertEqual(shim.url.scheme, "https", "the shim must come from a published archive, not a build machine")
+    }
 }
