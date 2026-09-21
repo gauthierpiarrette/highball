@@ -10,7 +10,7 @@ final class AudioOutputTests: XCTestCase {
 
     func testAMismatchSaysWhatItMeans() {
         let line = AudioOutput.headerLine(sampleRate: 44100)
-        XCTAssertEqual(line, "# audio out=44100 Hz (games mix at 48000 Hz, so macOS resamples)\n")
+        XCTAssertEqual(line, "# audio out=44100 Hz (most games mix at 48000 Hz)\n")
     }
 
     func testNoDeviceAddsNoLine() {

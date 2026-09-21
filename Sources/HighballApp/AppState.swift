@@ -1844,6 +1844,14 @@ final class AppState {
         runBusy(String(format: L("Installing engine %@ again"), id), expected: L("usually a few minutes"),
                 done: DoneState(title: L("Engine installed again"), ctaTitle: nil, cta: nil),
                 stop: .cancelTask(label: L("Stop"))) { [self] in
+            // The install swaps the engine directory under whatever runs on it. Nothing should
+            // be running on a damaged engine, but the detection is a heuristic, so stop the
+            // bottles on it first the way an engine move does, and the swap is safe either way.
+            if let damaged = engines.first(where: { $0.id == id }) {
+                for bottle in bottles where bottle.settings.engineID == id {
+                    try? WineRunner(paths: paths, engine: damaged, bottle: bottle).kill()
+                }
+            }
             _ = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
                 Task { @MainActor in self.reportDownload(name, received: received, total: total) }
             }

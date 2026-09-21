@@ -37,7 +37,10 @@ public enum AudioOutput {
     public static func headerLine(sampleRate: Double?) -> String? {
         guard let rate = sampleRate else { return nil }
         let hz = Int(rate.rounded())
+        // The rate is the fact; what it means for a given crackle is the reader's to work out.
+        // Crackling under Wine on a Mac is at least as often a winecoreaudio underrun as a
+        // resample, so the header does not name a cause (highball#181 review).
         guard hz != Int(gameSampleRate) else { return "# audio out=\(hz) Hz\n" }
-        return "# audio out=\(hz) Hz (games mix at \(Int(gameSampleRate)) Hz, so macOS resamples)\n"
+        return "# audio out=\(hz) Hz (most games mix at \(Int(gameSampleRate)) Hz)\n"
     }
 }
