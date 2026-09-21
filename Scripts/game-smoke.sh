@@ -53,6 +53,12 @@ GAMES=(
   # A sixth column names a bottle other than Gaming: canary-r6 is a clone of Gaming on the r6
   # engine (D3DMetal from GPTK 4), so an engine revision gets the same guard as the default.
   "1773210|d3dmetal|HumanitZ|humanitz-r6||canary-r6"
+  # The Wine 11 engine r11 (2026-09-20) carries two patches nothing else exercises: 0010 (a
+  # game's Media Foundation video reaches DXMT as a shared texture) and 0011 (the LastError
+  # slot MSVC-built code reads). The Last Flame Prologue is a Unity title whose menu plays such a
+  # video under DXMT, so its menu drawing on re-w11 covers both paths; the lasterr probe in the
+  # gate covers 0011 more directly. re-w11 is the bottle kept on the newest Wine 11 revision.
+  "2517810|dxmt|The Last Flame|lastflame||re-w11"
 )
 only=("$@")
 results=(); passed=true
@@ -106,7 +112,7 @@ for row in "${GAMES[@]}"; do
   # kill the game by its window-owning wine process if still up (generic)
   for p in $(ps -axo pid,command | grep -E 'steamapps[/\\\\]common' | grep -vE 'grep|steam\.exe|steamwebhelper|gameoverlayui' | awk '{print $1}'); do kill -9 $p 2>/dev/null; done
 done
-for b in Gaming canary-r6; do $HB bottle kill "$b" >/dev/null 2>&1; done
+for b in Gaming canary-r6 re-w11; do $HB bottle kill "$b" >/dev/null 2>&1; done
 # Nothing installed is not a pass: say so and exit 3 so Scripts/gate.sh records "skipped".
 if ! printf '%s\n' "${results[@]}" | grep -qv '"not installed"'; then
   echo "GAME SMOKE SKIPPED: none of the table's games is installed in the Gaming bottle"
