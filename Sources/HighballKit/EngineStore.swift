@@ -6,6 +6,9 @@ public enum HighballError: Error, CustomStringConvertible {
     case processFailed(command: String, status: Int32, output: String)
     case missing(String)
     case invalid(String)
+    /// Wine's own DLLs are gone from an installed engine, so nothing Windows can start in it
+    /// (highball#151, #153: an antivirus quarantine emptying parts of Highball's folder).
+    case engineDamaged(engine: String, files: [String])
     /// A message already written for the user. Carries no prefix, so it reads as a sentence
     /// rather than as a category the reader has to decode.
     case failed(String)
@@ -16,6 +19,8 @@ public enum HighballError: Error, CustomStringConvertible {
             return "checksum mismatch for \(file): expected \(expected), got \(actual)"
         case let .processFailed(command, status, output):
             return "\(command) exited with \(status)\n\(output)"
+        case let .engineDamaged(engine, files):
+            return "engine \(engine) is missing Wine's own \(files.joined(separator: ", "))"
         case let .missing(what): return "missing: \(what)"
         case let .invalid(what): return "invalid: \(what)"
         case let .failed(message): return message

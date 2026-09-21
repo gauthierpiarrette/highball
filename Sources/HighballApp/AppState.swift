@@ -136,12 +136,34 @@ final class AppState {
         appendLog(renderer.map { "\(id): graphics mode set to \($0.rawValue) for this game" } ?? "\(id): graphics mode back to the environment's")
     }
 
+    /// A game whose last run asked Windows for a fullscreen size this Mac never switched to.
+    /// One click tells Wine to pretend the switch happened and scale the game to the screen.
+    struct ModesetTrial {
+        let itemID: String
+        let title: String
+    }
+    var modesetTrial: ModesetTrial?
+    func acceptModesetTrial() {
+        defer { modesetTrial = nil }
+        guard let trial = modesetTrial, let item = libraryItems.first(where: { $0.id == trial.itemID }) else { return }
+        setDisplayModeEmulation(true, for: item)
+    }
+
     /// "Had problems" on the post-play row: offer the next mode for this game, then the report.
     func offerRendererTrial(for record: SessionRecord) {
         postPlay = nil
         guard let bottle = bottles.first(where: { $0.name == record.bottle }), let engine = engine(for: bottle),
               let item = libraryItems.first(where: { $0.steamAppID != nil && $0.steamAppID == record.appid })
                 ?? libraryItems.first(where: { $0.title == record.title && $0.bottleName == record.bottle }) else { return }
+        // A game that came up in a corner of the screen, with the mouse landing away from what it
+        // draws, is not asking for another graphics mode: it asked for a fullscreen size the Mac
+        // did not switch to, and every mode behaves the same (highball#67, #103). The log says
+        // which of the two happened, so offer the fix that matches rather than a mode to try.
+        if displayModeEmulation(for: item) == false, let log = lastLaunchLog(for: item),
+           DisplayModeEmulation.looksUnswitched(log: log) {
+            modesetTrial = ModesetTrial(itemID: item.id, title: item.title)
+            return
+        }
         let current = record.renderer.flatMap(Renderer.init(rawValue:)) ?? rendererOverride(for: item) ?? bottle.settings.renderer
         let next = Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil,
                                        vkd3dAvailable: engine.rendererDir("vkd3d") != nil)
@@ -1807,6 +1829,34 @@ final class AppState {
             let copy = try await Task.detached { try store.duplicate(name) }.value
             await MainActor.run { self.selectedBottle = copy.name }
         }
+    }
+
+    /// Installs an engine again over the copy on disk, for one whose files went missing after it
+    /// was installed — an antivirus quarantine emptying parts of Highball's folder, which reaches
+    /// the user as Wine failing to find its own DLLs (highball#151, #153). `install` stages a
+    /// whole tree and only then replaces the old one, so the id, the bottles on it and their
+    /// settings are untouched; accepted licences carry over as they do for an update.
+    func reinstallEngine(_ id: String) {
+        guard let manifest = manifestForReinstall(id) else {
+            fail(HighballError.failed("Highball cannot tell what engine \(id) was made of: its manifest is gone too. Quit Highball, move the engines folder inside ~/Library/Application Support/Highball to the Trash, then open Highball again and it installs its engine fresh.")); return
+        }
+        let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
+        runBusy(String(format: L("Installing engine %@ again"), id), expected: L("usually a few minutes"),
+                done: DoneState(title: L("Engine installed again"), ctaTitle: nil, cta: nil),
+                stop: .cancelTask(label: L("Stop"))) { [self] in
+            _ = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
+                Task { @MainActor in self.reportDownload(name, received: received, total: total) }
+            }
+            await MainActor.run { self.appendLog("engine \(id) installed again"); self.refresh() }
+        }
+    }
+
+    /// What to reinstall engine `id` from: its own manifest, or the bundled one when that file
+    /// was taken too and it describes the same engine.
+    private func manifestForReinstall(_ id: String) -> EngineManifest? {
+        if let m = try? EngineManifest.load(from: paths.engine(id).appending(path: "manifest.json")) { return m }
+        guard let url = Self.bundledManifest, let bundled = try? EngineManifest.load(from: url), bundled.id == id else { return nil }
+        return bundled
     }
 
     func repairBottle(_ bottle: Bottle) {

@@ -46,7 +46,7 @@ public enum FunnelLog {
     /// Counts per event plus the failure details, in words a person can check before sending.
     /// Pure: the same records always give the same text.
     public static func aggregate(_ records: [Record], appVersion: String, macos: String, chip: String) -> String {
-        var lines = ["Highball \(appVersion), macOS \(macos), \(chip)", ""]
+        var lines = ["Highball \(appVersion), macOS \(macos), \(chip)", "", preamble, ""]
         for event in Event.allCases {
             let matching = records.filter { $0.event == event }
             guard !matching.isEmpty else { continue }
@@ -57,9 +57,21 @@ public enum FunnelLog {
             }
             lines.append(line)
         }
-        if lines.count == 2 { lines.append("no events yet") }
+        if lines.last == "" { lines.append("no events yet") }
+        if !records.contains(where: { $0.event == .downloadFailed || $0.event == .extractFailed }) {
+            lines += ["", "Nothing failed on this Mac."]
+        }
         return lines.joined(separator: "\n")
     }
+
+    /// What the counts are, in the issue itself. Without it the numbers arrive as a wall titled
+    /// "Install statistics" that reads like a bug report with the words missing: highball#161 is
+    /// one, sent by an install where nothing went wrong, and a passer-by answered it with "n".
+    public static let preamble = """
+        Install counters from Highball, sent on purpose from its activity strip. This is not a \
+        bug report and needs no reply: it counts how often installing Highball and starting a \
+        first game get through, so the failures have something to be measured against.
+        """
 
     /// The issue that carries the aggregate: the person sees the text before the browser opens.
     public static func url(aggregate: String) -> URL {
