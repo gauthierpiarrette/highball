@@ -37,18 +37,20 @@ final class UninstallTests: XCTestCase {
         XCTAssertTrue(Uninstall.isActionable(.windowsUninstaller))
     }
 
-    func testTheQuestionNamesWhoRemovesItAndWhatComesBack() {
-        let steam = Uninstall.confirmation(title: "Portal 2", route: .steam(appID: 620), sizeOnDisk: 12_884_901_888)
-        XCTAssertTrue(steam.contains("Portal 2"), steam)
+    /// Seen on screen 2026-09-22: the alert's title already asks "Remove <game>?", so a message
+    /// that asks it again reads as a stutter. The message says who removes it and what comes back.
+    func testTheMessageSaysWhoRemovesItAndWhatComesBackWithoutRepeatingTheQuestion() {
+        let steam = Uninstall.confirmation(route: .steam(appID: 620), sizeOnDisk: 12_884_901_888)
+        XCTAssertFalse(steam.hasPrefix("Remove"), "the title asks the question, not the message: \(steam)")
         XCTAssertTrue(steam.contains("Steam does the uninstalling"), steam)
         XCTAssertTrue(steam.contains("GB"), "a confirmation without a figure is unanswerable: \(steam)")
-        let unknownSize = Uninstall.confirmation(title: "Portal 2", route: .steam(appID: 620), sizeOnDisk: 0)
+        let unknownSize = Uninstall.confirmation(route: .steam(appID: 620), sizeOnDisk: 0)
         XCTAssertFalse(unknownSize.contains("frees"), "no invented figure when the size is unknown")
     }
 
     /// The Windows route can come up empty, and the question says so rather than promising.
     func testTheWindowsRouteAdmitsItMayNotListTheGame() {
-        let text = Uninstall.confirmation(title: "Dark Omen", route: .windowsUninstaller, sizeOnDisk: 0)
+        let text = Uninstall.confirmation(route: .windowsUninstaller, sizeOnDisk: 0)
         XCTAssertTrue(text.contains("will not be in that list"), text)
         XCTAssertTrue(text.contains("delete the environment"), text)
     }
@@ -56,7 +58,7 @@ final class UninstallTests: XCTestCase {
     func testTheReasonIsWhatAnUnroutableGameShows() {
         let route = Uninstall.route(for: item(.steam))
         guard case let .none(reason) = route else { return XCTFail("expected none") }
-        XCTAssertEqual(Uninstall.confirmation(title: "Portal 2", route: route, sizeOnDisk: 99), reason,
+        XCTAssertEqual(Uninstall.confirmation(route: route, sizeOnDisk: 99), reason,
                        "no size talk when nothing can be removed")
     }
 }

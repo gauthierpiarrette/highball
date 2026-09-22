@@ -348,7 +348,7 @@ private extension View {
             }
             Button(L("Cancel"), role: .cancel) { state.pendingUninstall = nil }
         } message: { pending in
-            Text(Uninstall.confirmation(title: pending.item.title, route: pending.route, sizeOnDisk: pending.item.sizeOnDisk))
+            Text(Uninstall.confirmation(route: pending.route, sizeOnDisk: pending.item.sizeOnDisk))
         }
     }
 

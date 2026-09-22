@@ -43,18 +43,18 @@ public enum Uninstall {
         }
     }
 
-    /// The question asked before anything happens. It names the game, says who does the removing,
-    /// and says how much space comes back when that is known, because "are you sure" without a
-    /// figure is a question nobody can answer.
-    public static func confirmation(title: String, route: Route, sizeOnDisk: Int64) -> String {
+    /// What is said under the question, which is "Remove <game>?" and is not repeated here: it
+    /// says who does the removing and how much space comes back when that is known, because
+    /// "are you sure" without a figure is a question nobody can answer.
+    public static func confirmation(route: Route, sizeOnDisk: Int64) -> String {
         let size = sizeOnDisk > 0 ? " That frees \(ByteCountFormatter.string(fromByteCount: sizeOnDisk, countStyle: .file))." : ""
         switch route {
         case .steam:
-            return "Remove \(title)? Steam does the uninstalling and asks you to confirm in its own window, so its library stays right.\(size)"
+            return "Steam does the uninstalling and asks you to confirm in its own window, so its library stays right.\(size)"
         case .epic:
-            return "Remove \(title)? The Epic tools do the uninstalling, so their library stays right.\(size)"
+            return "The Epic tools do the uninstalling, so their library stays right.\(size)"
         case .windowsUninstaller:
-            return "Remove \(title)? Highball opens Windows' Add or Remove Programs in this environment, where you pick it from the list. A game with no uninstaller of its own will not be in that list, and then the only way to remove it is to delete the environment."
+            return "Highball opens Windows' Add or Remove Programs in this environment, where you pick it from the list. A game with no uninstaller of its own will not be in that list, and then the only way to remove it is to delete the environment."
         case let .none(reason):
             return reason
         }
