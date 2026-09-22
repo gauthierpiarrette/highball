@@ -1138,6 +1138,9 @@ extension RegressionTests {
         XCTAssertEqual(tricks.headline, "Installing corefonts with winetricks didn't finish.", "not '/bin/bash didn't finish' (highball#135)")
         XCTAssertFalse(tricks.meaning.contains("fresh copy"))
         XCTAssertFalse(tricks.meaning.contains("It said"), "no reason line when winetricks printed nothing")
+        // The step writes its own log since 2026-09-22; saying where it is turns three unanswerable
+        // reports into ones that carry the output (highball#135, #180, #183).
+        XCTAssertTrue(tricks.meaning.contains("logs folder"), tricks.meaning)
         // The reason is the script's own last real line, ahead of asking for Details (highball#135).
         let out = "warning: taskset/cpuset not available on your platform!\nExecuting mkdir -p /e/cache\n------------------------------------------------------\nwarning: /usr/bin/curl failed to download arial32.exe: SourceForge returned 503\n------------------------------------------------------\n"
         let said = Recovery.describe(HighballError.processFailed(command: "/bin/bash /e/tools/winetricks --unattended corefonts", status: 1, output: out))

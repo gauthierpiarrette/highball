@@ -72,10 +72,11 @@ public struct Recovery: Equatable, Sendable {
             // The reason is the script's own last line, and asking for it under Details cost
             // #135 two rounds with nothing pasted back. Say it up front.
             var meaning = "It downloads its files from the internet as it runs, and those servers refuse now and then, so trying again in a few minutes often works."
-            if let reason = Self.winetricksReason(output) { meaning += " It said: \(reason)" }
             // Where the whole run is, so a report can carry it: the newest winetricks file in the
-            // logs folder, which Troubleshooting opens.
+            // logs folder, which Troubleshooting opens. Said before the script's own words, because
+            // the reason stays the last thing anyone reads (highball#135).
             meaning += " The full output is in Highball's logs folder, in the newest file with winetricks in its name."
+            if let reason = Self.winetricksReason(output) { meaning += " It said: \(reason)" }
             return Recovery(headline: "\(what) didn't finish.", meaning: meaning,
                             actionTitle: "Try again", action: .retry)
         case let .processFailed(command, _, _):
