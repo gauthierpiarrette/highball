@@ -19,15 +19,17 @@ PORT_VERSION="${LSFGM_VERSION:-lsfg-metal-$(git -C "$SRC" rev-parse --short=7 HE
 export LSFGM_VERSION="$PORT_VERSION"
 (cd "$SRC" && cargo build --release && cargo test --release)
 DYLIB="$SRC/target/x86_64-apple-darwin/release/liblsfg_metal.dylib"
-# exactly eight exported text symbols: the names Wine dlsyms plus the globals a native app resolves by symbol
-SYMBOLS="$(nm -gU "$DYLIB" | awk '$2=="T"')"
-COUNT="$(printf '%s\n' "$SYMBOLS" | grep -c . || true)"
-[[ "$COUNT" -eq 8 ]] || { echo "expected 8 exported functions, found $COUNT:" >&2; printf '%s\n' "$SYMBOLS" >&2; exit 1; }
+# the names Wine dlsyms, the globals a native app resolves by symbol and the hooked destroys; since v0.7.1
+# the shim also forwards the driver's other functions, so this is a floor, not the whole export table, and
+# the LSFGM_SHIM marker (a data symbol, so not in SYMBOLS) is what tells a shim from a real MoltenVK
+EXPORTS="$(nm -gU "$DYLIB")"
+SYMBOLS="$(printf '%s\n' "$EXPORTS" | awk '$2=="T"')"
 for symbol in vkGetInstanceProcAddr vkGetDeviceProcAddr vkCreateMetalSurfaceEXT vkCreateMacOSSurfaceMVK \
-  vkCreateInstance vkEnumerateInstanceExtensionProperties vkEnumerateInstanceVersion \
-  vkEnumerateDeviceExtensionProperties; do
+  vkCreateInstance vkDestroyInstance vkDestroyDevice vkEnumerateInstanceExtensionProperties \
+  vkEnumerateInstanceVersion vkEnumerateDeviceExtensionProperties; do
   printf '%s\n' "$SYMBOLS" | grep -q " _$symbol\$" || { echo "missing export: $symbol" >&2; exit 1; }
 done
+printf '%s\n' "$EXPORTS" | grep -q " _LSFGM_SHIM$" || { echo "missing LSFGM_SHIM marker: not an lsfg-metal shim" >&2; exit 1; }
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 PKG="$WORK/pkg"
