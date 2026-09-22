@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.36</title>
+      <description><![CDATA[Uninstall a game from its page or its tile: Steam and the Epic tools do their own removing, so their libraries stay right. Drop an image on a tile or a game's page to set its cover. Installing runtimes and fonts now writes its own log, so a failure can be reported with what the installer actually said.]]></description>
+      <pubDate>Tue, 22 Sep 2026 19:23:01 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.36/Highball-0.9.36.zip" sparkle:version="0.9.36" sparkle:shortVersionString="0.9.36" sparkle:edSignature="zq4LE3TT2y0Xw300gGPz5eLPa0ehDzY5vIw17siUNaLGUIirYJWarsOQeSO66xYEu+2gaVZJ/u2g097xFE+dDg==" length="3922373" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.35</title>
       <description><![CDATA[Frame generation one switch away: engine r7, the new default, carries itsOwen's lsfg-metal shim as a component, off unless an environment turns it on (needs your own Lossless Scaling from Steam). From kkorenn: an engine emptied by an antivirus is named and reinstalled from the app, a game stuck small in a corner gets the scaled-fullscreen fix from Had problems, statistics issues say what they are, launch logs record the audio output rate.]]></description>
       <pubDate>Tue, 22 Sep 2026 19:02:10 +0200</pubDate>
