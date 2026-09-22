@@ -496,7 +496,16 @@ public struct RecipeRunner: Sendable {
                 if !tools.isEmpty {
                     env["PATH"] = (tools.map(\.path) + [env["PATH"] ?? ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"]).joined(separator: ":")
                 }
-                try Shell.run("/bin/bash", [wt.path, "--unattended"] + verbs, env: env)
+                // Its own log, named like every other one in the folder. Without it the step was
+                // invisible: what winetricks said lived only in the error dialog's Details, so
+                // three reports of the core fonts failing came with a game's launch log attached
+                // and none of them could be answered (highball#135, #180, #183).
+                let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
+                let logURL = WineRunner.uniqueLogURL(in: paths.logs,
+                                                     named: "\(stamp)-\(bottle.name)-winetricks-\(verbs.joined(separator: "-"))")
+                log?("[\(recipe.id)] log: \(logURL.path)")
+                try Shell.capture("/bin/bash", [wt.path, "--unattended"] + verbs, env: env, log: logURL,
+                                  logHeader: "# highball winetricks \(verbs.joined(separator: " ")) bottle=\(bottle.name) engine=\(engine.id)")
             case let .environment(name, value):
                 bottle.settings.environment[name] = value
             case let .renderer(r):
