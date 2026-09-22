@@ -158,9 +158,9 @@
     }
   },
   "verified": {
-    "date": "2026-09-21",
+    "date": "2026-09-22",
     "macos": "27.0",
     "chip": "Apple M1 Pro",
-    "result": "Installed from this manifest through the CLI: only the 383 KB lsfg archive downloaded, every other component reused from r6; renderers/lsfg holds the x86_64 shim with its 8 exports, LICENSE, source.txt and the libMoltenVK.real.dylib link resolving to the engine's own MoltenVK. Frame generation itself not run here (needs the user's Lossless Scaling); itsOwen measured it on four games at 2x."
+    "result": "Installed from this manifest through the CLI: only the 383 KB lsfg archive downloaded, every other component reused from r6; renderers/lsfg holds the x86_64 shim with its 8 exports, LICENSE, source.txt and the libMoltenVK.real.dylib link resolving to the engine's own MoltenVK. Frame generation measured on 2026-09-22 with the HumanitZ demo on D3DMetal, M1 Pro, macOS 27.0, 1728x1117 on a 120 Hz display: the same spot in gameplay presents about 47 fps with it off and 63 to 74 fps at 2x, with GPU time per frame falling from 20.6 ms to about 17 ms as half the presented frames become interpolated ones. The shim's own log (drive_c/highball/logs/lsfg-metal.log) confirms it hooked Metal presentation and names one limit: when the game holds three drawables its pool exhausts and those frames present natively. The maintainer played the demo with it on, moving around, and found it smooth."
   }
 }
