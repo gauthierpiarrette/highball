@@ -200,6 +200,7 @@ struct LibraryTile: View {
     let entry: GameDBEntry?
     var width: CGFloat? = nil
     @State private var hovering = false
+    @State private var coverDropTargeted = false
 
     private var blocked: Bool { entry?.isBlocked == true }
     private var playable: Bool { item.installed && !blocked && !state.busy }
@@ -249,8 +250,15 @@ struct LibraryTile: View {
                 }
                 .aspectRatio(2 / 3, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 9))
+                // An image dropped on the tile becomes the cover, so nobody has to walk a file
+                // browser for it (highball#175). Only images are claimed here, so a dropped
+                // Windows program still reaches the window's own handler and runs.
+                .onDrop(of: [.image], isTargeted: $coverDropTargeted) { providers in
+                    state.acceptCoverDrop(providers, for: item)
+                }
                 .overlay(RoundedRectangle(cornerRadius: 9)
-                    .stroke(hovering ? HB.amber.opacity(0.55) : HB.cardStroke, lineWidth: 1))
+                    .stroke(coverDropTargeted ? HB.amber : (hovering ? HB.amber.opacity(0.55) : HB.cardStroke),
+                            lineWidth: coverDropTargeted ? 2 : 1))
                 .scaleEffect(hovering ? 1.02 : 1)
                 .shadow(color: .black.opacity(hovering ? 0.4 : 0.2), radius: hovering ? 12 : 5, y: 3)
 
@@ -291,6 +299,12 @@ struct LibraryTile: View {
                let pin = bottle.settings.pins.first(where: { $0.id == item.pinID }) {
                 Divider()
                 Button(L("Remove from list"), role: .destructive) { state.removePin(pin, from: bottle) }
+            }
+            // Removing the game itself, not just the entry: asked for on r/macgaming because
+            // there was nowhere to do it (highball#185).
+            if item.installed {
+                Divider()
+                Button(L("Uninstall…"), role: .destructive) { state.askUninstall(item) }
             }
         }
         .accessibilityLabel("\(item.title), \(item.source.rawValue)\(item.installed ? "" : ", " + L("Not installed"))")

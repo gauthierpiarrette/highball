@@ -194,6 +194,16 @@ public struct EpicStore: Sendable {
         return try runStreaming(Self.installArguments(appName: appName, basePath: base.path), onLine: onLine)
     }
 
+    static func uninstallArguments(appName: String) -> [String] { ["uninstall", appName, "-y"] }
+
+    /// Removes a game legendary installed. Legendary owns the Epic install state, so it does the
+    /// deleting and its library stays right; deleting the folder ourselves would leave it
+    /// believing the game is still there (highball#185).
+    @discardableResult
+    public func uninstall(_ appName: String, onLine: (@Sendable (String) -> Void)? = nil) throws -> Int32 {
+        try runStreaming(Self.uninstallArguments(appName: appName), onLine: onLine)
+    }
+
     public struct LaunchInfo: Sendable {
         public let executable: URL
         public let arguments: [String]

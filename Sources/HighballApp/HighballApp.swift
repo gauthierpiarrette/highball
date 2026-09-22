@@ -203,6 +203,7 @@ struct ContentView: View {
         .d3dMetalAsk(state)
         .engineAsk(state)
         .updateAsk(state)
+        .uninstallAsk(state)
         .rendererTrialAsk(state)
         .modesetTrialAsk(state)
         .homeMoveAsk(state)
@@ -338,6 +339,19 @@ private extension View {
             Text(GamePageCopy.updateAsk(recipe: pending.recipe, engineID: pending.engineID, canPlay: pending.play != nil))
         }
     }
+    @MainActor func uninstallAsk(_ state: AppState) -> some View {
+        self.alert(state.pendingUninstall.map { String(format: L("Remove %@?"), $0.item.title) } ?? "",
+               isPresented: .init(get: { state.pendingUninstall != nil }, set: { if !$0 { state.pendingUninstall = nil } }),
+               presenting: state.pendingUninstall) { pending in
+            if Uninstall.isActionable(pending.route) {
+                Button(L("Remove"), role: .destructive) { state.uninstallConfirmed() }
+            }
+            Button(L("Cancel"), role: .cancel) { state.pendingUninstall = nil }
+        } message: { pending in
+            Text(Uninstall.confirmation(title: pending.item.title, route: pending.route, sizeOnDisk: pending.item.sizeOnDisk))
+        }
+    }
+
     @MainActor func rendererTrialAsk(_ state: AppState) -> some View {
         self.alert(state.rendererTrial.map { String(format: L("Try %@ for %@ next time?"), GamePageCopy.plainName($0.next), $0.title) } ?? "",
                isPresented: .init(get: { state.rendererTrial != nil }, set: { if !$0 { state.rendererTrial = nil } }),

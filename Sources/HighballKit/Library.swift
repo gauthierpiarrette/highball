@@ -235,6 +235,26 @@ public struct CoverStore: Sendable {
         try png.write(to: dest, options: .atomic)
     }
 
+    /// Same, from image bytes rather than a file. An image dragged out of a browser arrives as
+    /// data with no file behind it, and refusing that would make the drop look broken (#175).
+    public func setCover(for id: String, imageData: Data) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let png = try Self.normalized(imageData: imageData)
+        clearCover(for: id)
+        try png.write(to: dir.appending(path: Self.filename(for: id)).appendingPathExtension("png"), options: .atomic)
+    }
+
+    public static func normalized(imageData: Data) throws -> Data {
+        guard let src = CGImageSourceCreateWithData(imageData as CFData, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(src, 0, [
+                  kCGImageSourceCreateThumbnailFromImageAlways: true,
+                  kCGImageSourceCreateThumbnailWithTransform: true,
+                  kCGImageSourceThumbnailMaxPixelSize: 4096] as CFDictionary) else {
+            throw HighballError.invalid("That is not an image Highball can read. Drop a PNG, JPEG or HEIC file.")
+        }
+        return try normalized(image)
+    }
+
     /// The stored form of an image file: 2:3, capped, PNG. Refuses what ImageIO cannot read.
     public static func normalized(imageAt url: URL) throws -> Data {
         // A thumbnail request applies the EXIF orientation and pre-shrinks a huge photo before

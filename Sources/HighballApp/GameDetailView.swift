@@ -7,6 +7,7 @@ struct GameDetailView: View {
     @Environment(AppState.self) private var state
     let passedItem: LibraryItem
     @State private var showBottleSettings = false
+    @State private var coverDropTargeted = false
     /// The live row: after an install, a delete or a rename, the passed-in copy goes stale.
     private var item: LibraryItem { state.libraryItems.first { $0.id == passedItem.id } ?? passedItem }
     @State private var showWhy = false
@@ -86,7 +87,12 @@ struct GameDetailView: View {
                 .padding(14)
         }
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(HB.cardStroke))
+        // Same as the tile: an image dropped on the hero becomes this game's cover (#175).
+        .onDrop(of: [.image], isTargeted: $coverDropTargeted) { providers in
+            state.acceptCoverDrop(providers, for: item)
+        }
+        .overlay(RoundedRectangle(cornerRadius: 12)
+            .stroke(coverDropTargeted ? HB.amber : HB.cardStroke, lineWidth: coverDropTargeted ? 2 : 1))
     }
 
     private var verdictColor: Color {
@@ -260,6 +266,10 @@ struct GameDetailView: View {
                                     .help(L("Opens the game's own folder in the Finder, where mods and config files go."))
                             }
                             Button(L("Show the Windows drive")) { NSWorkspace.shared.open(bottle.driveC) }.controlSize(.small)
+                            if item.installed {
+                                Button(L("Uninstall…"), role: .destructive) { state.askUninstall(item) }.controlSize(.small)
+                                    .help(L("Steam and the Epic tools do their own uninstalling, so their libraries stay right."))
+                            }
                             if MacAppStub.existing(for: item.title) != nil {
                                 Button(L("Remove the shortcut")) { state.removeMacApp(title: item.title) }.controlSize(.small)
                                     .help(L("Moves this game's shortcut app in ~/Applications/Highball to the Trash."))

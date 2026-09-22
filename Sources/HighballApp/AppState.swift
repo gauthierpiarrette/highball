@@ -391,8 +391,37 @@ final class AppState {
         panel.allowedContentTypes = [.image]
         panel.message = String(format: L("Choose a cover image for %@"), item.title)
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        setCover(for: item, from: url)
+    }
+
+    func setCover(for item: LibraryItem, from url: URL) {
         do { try coverStore.setCover(for: item.id, from: url); coverVersion += 1 }
         catch { fail(error) }
+    }
+
+    /// Takes a dropped image as a game's cover, so nobody has to walk a file browser for it
+    /// (highball#175). A file is read from disk; an image dragged out of a browser arrives as
+    /// bytes with no file, and is taken too. Returns whether anything was claimed, which is what
+    /// SwiftUI uses to decide if the drop was ours.
+    @discardableResult
+    func acceptCoverDrop(_ providers: [NSItemProvider], for item: LibraryItem) -> Bool {
+        guard let provider = providers.first else { return false }
+        if provider.canLoadObject(ofClass: URL.self) {
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                guard let url else { return }
+                Task { @MainActor in self.setCover(for: item, from: url) }
+            }
+            return true
+        }
+        guard let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) else { return false }
+        provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
+            guard let data else { return }
+            Task { @MainActor in
+                do { try self.coverStore.setCover(for: item.id, imageData: data); self.coverVersion += 1 }
+                catch { self.fail(error) }
+            }
+        }
+        return true
     }
 
     func resetCover(for item: LibraryItem) {
@@ -1274,6 +1303,49 @@ final class AppState {
 
     /// Opens Wine's Add/Remove Programs in the environment, the way to uninstall a Windows
     /// program that was installed into it (issue #97). Nothing here is Highball's own data.
+    /// A game the owner asked to remove, held until they confirm (highball#185).
+    var pendingUninstall: (item: LibraryItem, route: Uninstall.Route)?
+
+    /// Offers to remove a game. Nothing happens until the confirmation is answered, and nothing
+    /// deletes files behind a store's back: Steam and the Epic tools do their own removing.
+    func askUninstall(_ item: LibraryItem) {
+        pendingUninstall = (item, Uninstall.route(for: item))
+    }
+
+    /// Carries out the route the ask offered.
+    func uninstallConfirmed() {
+        guard let (item, route) = pendingUninstall else { return }
+        pendingUninstall = nil
+        guard let bottleName = item.bottleName, let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
+        switch route {
+        case let .steam(appID):
+            guard let engine = engine(for: bottle) else { return }
+            let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
+            let url = Uninstall.steamURL(appID: appID)
+            appendLog("\(item.title): asking Steam to uninstall it (\(url))")
+            Task.detached {
+                // A running client takes the URL and shows its own dialog; with none running the
+                // client starts first, which is what `start` does with a steam:// argument.
+                if (try? await runner.forwardToRunningSteam([url])) == nil {
+                    _ = try? await runner.start(bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe"), arguments: [url])
+                }
+            }
+        case let .epic(appName):
+            appendLog("\(item.title): asking the Epic tools to uninstall it")
+            let store = EpicStore(paths: paths)
+            runBusy(String(format: L("Removing %@"), item.title),
+                    done: DoneState(title: String(format: L("%@ removed"), item.title), ctaTitle: nil, cta: nil),
+                    stop: .cancelTask(label: L("Stop"))) { [self] in
+                _ = try store.uninstall(appName) { line in Task { @MainActor in self.appendLog(line) } }
+                await MainActor.run { self.refresh() }
+            }
+        case .windowsUninstaller:
+            openUninstaller(in: bottle)
+        case .none:
+            break
+        }
+    }
+
     func openUninstaller(in bottle: Bottle) {
         guard let engine = engine(for: bottle) else { return }
         let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
