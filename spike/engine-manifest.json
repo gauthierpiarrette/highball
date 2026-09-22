@@ -137,11 +137,11 @@
       },
       "kind": "renderer",
       "license": "MIT",
-      "note": "Lossless Scaling frame generation: a MoltenVK shim that sits in front of the real driver as libMoltenVK.dylib, with libMoltenVK.real.dylib beside it pointing at the engine's own MoltenVK. Interpolates on the Vulkan path (DXVK, vkd3d-proton), on Metal for DXMT and D3DMetal, and on OpenGL. Needs the user's own lsfg-vk.dll from the Lossless Scaling Steam application (lsfg-vk beta branch); nothing of Lossless Scaling is shipped here. Off unless an environment turns it on, and DISABLE_LSFGM=1 turns it off for one process. Source: github.com/itsOwen/lsfg-metal (itsOwen, highball#109, #171), built by Scripts/build-lsfg.sh; the archive is the v0.7.1 release asset mirrored under Highball's engine-components release, same bytes (SHA-256 39e05545…).",
+      "note": "Lossless Scaling frame generation: a MoltenVK shim that sits in front of the real driver as libMoltenVK.dylib, with libMoltenVK.real.dylib beside it pointing at the engine's own MoltenVK. Interpolates on the Vulkan path (DXVK, vkd3d-proton), on Metal for DXMT and D3DMetal, and on OpenGL. Needs the user's own lsfg-vk.dll from the Lossless Scaling Steam application (lsfg-vk beta branch); nothing of Lossless Scaling is shipped here. Off unless an environment turns it on, and DISABLE_LSFGM=1 turns it off for one process. Source: github.com/itsOwen/lsfg-metal (itsOwen, highball#109, #171), built by Scripts/build-lsfg.sh; the archive is the v0.7.1 release asset, pinned at its own release until it is mirrored under Highball's engine-components release (SHA-256 39e05545…, the same bytes either way).",
       "order": 1,
       "sha256": "39e05545fd26739d6b9bb419f87f426333d8342c1d71476d42b6c7845fb2787e",
       "size": 405464,
-      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/lsfg-metal-0.7.1.tar.xz",
+      "url": "https://github.com/itsOwen/lsfg-metal/releases/download/v0.7.1/lsfg-v0.7.1.tar.xz",
       "version": "lsfg-v0.7.1"
     }
   },
