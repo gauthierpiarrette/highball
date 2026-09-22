@@ -31,6 +31,14 @@ sync_repo() {  # <url> <dir>: clone once, then follow origin/main
   if [ -d "\$2/.git" ]; then git -C "\$2" fetch -q origin && git -C "\$2" reset -q --hard origin/main
   else git clone -q "\$1" "\$2"; fi
 }
+# The Mac wakes for this job and the network is not always up yet: on 2026-09-22 the whole run
+# died on "Could not resolve host: github.com" and recorded nothing. Wait for GitHub to resolve,
+# up to five minutes, before giving up, and say which of the two it was.
+for attempt in \$(seq 1 30); do
+  if /usr/bin/nc -z -G 3 github.com 443 >/dev/null 2>&1; then break; fi
+  [ "\$attempt" = 30 ] && { echo "nightly: no network after 5 minutes, nothing ran"; exit 1; }
+  sleep 10
+done
 sync_repo "$APP_URL" highball && sync_repo "$DB_URL" highball-db || { echo "nightly: clone failed"; exit 1; }
 cd highball || exit 1
 echo "nightly: app \$(git rev-parse --short HEAD), db \$(git -C ../highball-db rev-parse --short HEAD), \$(date '+%F %T')"
