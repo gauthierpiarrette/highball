@@ -7,9 +7,9 @@
     <item>
       <title>Highball 0.9.35</title>
       <description><![CDATA[Frame generation one switch away: engine r7, the new default, carries itsOwen's lsfg-metal shim as a component, off unless an environment turns it on (needs your own Lossless Scaling from Steam). From kkorenn: an engine emptied by an antivirus is named and reinstalled from the app, a game stuck small in a corner gets the scaled-fullscreen fix from Had problems, statistics issues say what they are, launch logs record the audio output rate.]]></description>
-      <pubDate>Mon, 21 Sep 2026 15:28:46 +0200</pubDate>
+      <pubDate>Tue, 22 Sep 2026 19:02:10 +0200</pubDate>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
       <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.35/Highball-0.9.35.zip" sparkle:version="0.9.35" sparkle:shortVersionString="0.9.35" sparkle:edSignature="JpA4voKSnRZgHBxcuNI9FFmrJGR/R67IAEyQtbO4UPqJygj/YjXAZMyPnWTtz1EWCXD5ZCrA0wgTjlVZNF11AA==" length="3887265" type="application/octet-stream"/>
     </item>
     <item>
