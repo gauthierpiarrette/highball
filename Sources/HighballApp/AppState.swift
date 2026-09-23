@@ -1293,11 +1293,11 @@ final class AppState {
         } catch { fail(error) }
     }
 
-    /// Trashes the shortcut app for a game or a launcher (issue #97).
+    /// Trashes the Mac app for a game or a launcher (issue #97).
     func removeMacApp(title: String) {
         do {
             try MacAppStub.remove(for: title)
-            appendLog("removed the shortcut for \(title) from ~/Applications/Highball")
+            appendLog("removed the Mac app for \(title) from ~/Applications/Highball")
         } catch { fail(error) }
     }
 

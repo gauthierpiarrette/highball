@@ -271,11 +271,11 @@ struct GameDetailView: View {
                                     .help(L("Steam and the Epic tools do their own uninstalling, so their libraries stay right."))
                             }
                             if MacAppStub.existing(for: item.title) != nil {
-                                Button(L("Remove the shortcut")) { state.removeMacApp(title: item.title) }.controlSize(.small)
-                                    .help(L("Moves this game's shortcut app in ~/Applications/Highball to the Trash."))
+                                Button(L("Remove the Mac app")) { state.removeMacApp(title: item.title) }.controlSize(.small)
+                                    .help(L("Moves this game's Mac app in ~/Applications/Highball to the Trash."))
                             } else if PlayLink.target(for: item) != nil {
-                                Button(L("Make a shortcut…")) { state.makeMacApp(for: item) }.controlSize(.small)
-                                    .help(L("A small app in ~/Applications/Highball that starts this game without opening Highball first."))
+                                Button(L("Make a Mac app…")) { state.makeMacApp(for: item) }.controlSize(.small)
+                                    .help(L("A real app in ~/Applications/Highball with the game's own icon, for the Dock, Spotlight or Launchpad. It starts the game without opening Highball first."))
                             }
                         }
                         if let log = state.lastLaunchLog(for: item) {

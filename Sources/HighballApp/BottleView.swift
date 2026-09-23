@@ -115,9 +115,9 @@ struct BottleView: View {
                         }
                         .contextMenu {
                             if MacAppStub.existing(for: meta.short) != nil {
-                                Button(L("Remove the shortcut")) { state.removeMacApp(title: meta.short) }
+                                Button(L("Remove the Mac app")) { state.removeMacApp(title: meta.short) }
                             } else {
-                                Button(L("Make a shortcut…")) { state.makeMacApp(forLauncher: meta.id, short: meta.short) }
+                                Button(L("Make a Mac app…")) { state.makeMacApp(forLauncher: meta.id, short: meta.short) }
                             }
                             if installed, let pin {
                                 Button(L("Open")) { state.launch(pin: pin, in: bottle) }
