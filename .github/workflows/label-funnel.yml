@@ -1,0 +1,25 @@
+# Install statistics arrive unlabelled, so they cannot be filtered or counted.
+#
+# FunnelLog.url builds the issue with ?labels=funnel, but GitHub only honours that parameter
+# for someone with triage rights on the repository, and every one of these comes from a person
+# who has none. It is dropped in silence: 31 of 31 issues titled "Install statistics" between
+# 2026-09-06 and 2026-09-23 carry no label at all, although the label exists. The app cannot
+# fix this, because the permission belongs to the sender, so the repository does it instead.
+name: label-funnel
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    # The title is fixed by FunnelLog.url, not typed by the sender, so an exact match is safe.
+    if: github.event.issue.title == 'Install statistics'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          NUM: ${{ github.event.issue.number }}
+        run: gh issue edit "$NUM" --repo "$GITHUB_REPOSITORY" --add-label funnel
