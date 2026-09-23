@@ -1,34 +1,77 @@
 # The funnel gate on pull requests (UX plan, Phase 0.0). The nightly replays a fresh install
 # every day; this runs the same script only when a change touches the install funnel, so a
 # funnel-breaking PR cannot merge with the gate red while an unrelated PR pays nothing.
-# Make "funnel-gate" a required check in branch protection once it has been green once.
+#
+# "install" is the required context in the main gate ruleset, so it has to report on EVERY
+# pull request. It used to be the macOS job itself, behind a paths filter, which meant it
+# simply never reported on a PR that touched anything else: such a PR sat on "Expected -
+# waiting for status to be reported" and could only be merged by bypassing the rule (#146
+# went in that way). So the filter moved off the trigger and into the scope job below, and
+# "install" is now a cheap job that always runs and reports what the macOS job did. A PR
+# outside the funnel gets a green "install" in seconds and never boots a macOS runner.
 name: funnel-gate
 on:
   pull_request:
-    paths:
-      - Sources/HighballKit/EngineStore.swift
-      - Sources/HighballKit/BottleStore.swift
-      - Sources/HighballKit/WineRunner.swift
-      - Sources/HighballKit/Manifest.swift
-      - Sources/HighballKit/Paths.swift
-      - Sources/HighballKit/DownloadResume.swift
-      - spike/engine-manifest.json
-      - spike/engines/**
-      - Scripts/e2e-install.sh
-      - Scripts/make-app.sh
-      - .github/workflows/funnel-gate.yml
-      - .github/workflows/nightly-e2e.yml
   workflow_dispatch:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: funnel-gate-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  install:
+  # The one place the funnel's file list lives. A trailing slash means "anything under here".
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      funnel: ${{ steps.decide.outputs.funnel }}
+    steps:
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != pull_request ]; then
+            echo "run by hand, so the install runs"
+            echo "funnel=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cat > /tmp/funnel-paths <<'EOF'
+          Sources/HighballKit/EngineStore.swift
+          Sources/HighballKit/BottleStore.swift
+          Sources/HighballKit/WineRunner.swift
+          Sources/HighballKit/Manifest.swift
+          Sources/HighballKit/Paths.swift
+          Sources/HighballKit/DownloadResume.swift
+          spike/engine-manifest.json
+          spike/engines/
+          Scripts/e2e-install.sh
+          Scripts/make-app.sh
+          .github/workflows/funnel-gate.yml
+          .github/workflows/nightly-e2e.yml
+          EOF
+          gh api "repos/$GITHUB_REPOSITORY/pulls/${{ github.event.number }}/files" \
+            --paginate --jq '.[].filename' > /tmp/changed
+          echo "changed files:"; sed 's/^/  /' /tmp/changed
+          funnel=false
+          while IFS= read -r p; do
+            [ -n "$p" ] || continue
+            case "$p" in
+              # literal prefix, not a regex: a path with a dot in it must not act as a wildcard
+              */) awk -v p="$p" 'index($0, p) == 1 { hit = 1 } END { exit !hit }' /tmp/changed \
+                    && funnel=true ;;
+              *)  grep -qxF "$p" /tmp/changed && funnel=true ;;
+            esac
+          done < /tmp/funnel-paths
+          echo "funnel=$funnel" | tee -a "$GITHUB_OUTPUT"
+
+  # Named apart from the nightly's "e2e" so the two never read as the same check.
+  funnel-install:
+    needs: scope
+    if: needs.scope.outputs.funnel == 'true'
     runs-on: macos-15        # pinned like the nightly; macos-latest re-points silently
     timeout-minutes: 90      # cold install is 25 to 45 min here; a hang is a failure, not a wait
     steps:
@@ -49,3 +92,25 @@ jobs:
           for ws in "$HOME"/hb-e2e/engines/*/engine/bin/wineserver; do
             [ -x "$ws" ] && "$ws" -k 2>/dev/null || true
           done
+
+  # The required context. Always runs, so a pull request is never held up waiting for a
+  # status that cannot arrive. Green on its own when the change is outside the funnel.
+  install:
+    needs: [scope, funnel-install]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: report
+        run: |
+          set -euo pipefail
+          if [ "${{ needs.scope.result }}" != success ]; then
+            echo "could not work out what this pull request touches"
+            exit 1
+          fi
+          if [ "${{ needs.scope.outputs.funnel }}" != true ]; then
+            echo "nothing here touches the install funnel, so the install did not run"
+            exit 0
+          fi
+          # index syntax, not a dot: a hyphen in a job id reads as minus in an expression
+          echo "install funnel touched, the install said: ${{ needs['funnel-install'].result }}"
+          [ "${{ needs['funnel-install'].result }}" = success ]
