@@ -34,7 +34,7 @@ where your games are (Steam, Epic, or a Windows program you have).
 Or with Homebrew:
 
 ```sh
-brew install --cask gauthierpiarrette/highball/highball
+brew install --cask highball
 ```
 
 Not sure it'll run your game? **[Check the compatibility database →](https://gethighball.com/database/)**
