@@ -59,6 +59,16 @@ public struct Recovery: Equatable, Sendable {
             return Recovery(headline: "The download didn't arrive intact.",
                             meaning: "This is usually a network problem. Highball discards the damaged file and downloads it again.",
                             actionTitle: "Download again", action: .retry)
+        // Before any other failed command, because this one is the environment rather than the
+        // step: while the licence sits unaccepted, macOS refuses every Xcode-provided tool, and
+        // winetricks' own closing line then names something unrelated ("wine cmd.exe ... returned
+        // empty string"). highball#180 spent three rounds looking at downloads and SourceForge
+        // before the reporter found it themselves. Retry is still the right button, because it is
+        // the right one once they have accepted.
+        case let .processFailed(_, _, output) where Self.xcodeLicenceUnaccepted(output):
+            return Recovery(headline: "Xcode's licence has not been accepted on this Mac.",
+                            meaning: "Until it is, the developer tools this step needs refuse to run, so it stops partway and says something unrelated. Open Terminal, run sudo xcodebuild -license, read it through and accept it, then try again here.",
+                            actionTitle: "Try again", action: .retry)
         case let .processFailed(command, _, _) where command.hasPrefix("wineboot"):
             return Recovery(headline: "The Windows environment didn't finish setting up.",
                             meaning: "Highball can run the setup again.",
@@ -98,6 +108,14 @@ public struct Recovery: Equatable, Sendable {
 
 
 extension Recovery {
+    /// macOS refuses every Xcode-provided command line tool until the licence has been accepted,
+    /// and prints this one sentence when it does. It can land anywhere in a step's output rather
+    /// than at the end, so it is matched across the whole of it: in highball#180 it appeared four
+    /// times in the middle of a corefonts run whose last real line was about `%AppData%`.
+    static func xcodeLicenceUnaccepted(_ output: String) -> Bool {
+        output.contains("You have not agreed to the Xcode license agreements")
+    }
+
     /// The last line of a winetricks run that says something, skipping its progress noise and
     /// the shell's own "exited with" footer. Nil when the output is empty.
     static func winetricksReason(_ output: String) -> String? {

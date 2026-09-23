@@ -1146,6 +1146,29 @@ extension RegressionTests {
         let said = Recovery.describe(HighballError.processFailed(command: "/bin/bash /e/tools/winetricks --unattended corefonts", status: 1, output: out))
         XCTAssertTrue(said.meaning.hasSuffix("It said: warning: /usr/bin/curl failed to download arial32.exe: SourceForge returned 503"), said.meaning)
         XCTAssertNil(Recovery.winetricksReason("Executing x\n------\n"), "noise-only output gives no reason")
+        // highball#180, the reporter's own output. The licence sentence sits four lines up from
+        // the end, so the generic path would have quoted the %AppData% warning and sent them back
+        // to the network for a fourth round. Name the cause instead.
+        let xcode = """
+            warning: taskset/cpuset not available on your platform!
+            You have not agreed to the Xcode license agreements. Please run 'sudo xcodebuild -license' from within a Terminal window to review and agree to the Xcode and Apple SDKs license.
+            You have not agreed to the Xcode license agreements. Please run 'sudo xcodebuild -license' from within a Terminal window to review and agree to the Xcode and Apple SDKs license.
+            ------------------------------------------------------
+            warning: /e/engine/bin/wine cmd.exe /c echo '%AppData%' returned empty string, error message ""
+            ------------------------------------------------------
+            """
+        let licence = Recovery.describe(HighballError.processFailed(command: "/bin/bash /e/tools/winetricks --unattended corefonts", status: 1, output: xcode))
+        XCTAssertTrue(licence.headline.contains("Xcode's licence"), licence.headline)
+        XCTAssertTrue(licence.meaning.contains("sudo xcodebuild -license"), licence.meaning)
+        XCTAssertFalse(licence.meaning.contains("%AppData%"), "the unrelated last line must not be quoted as the reason")
+        XCTAssertFalse(licence.meaning.contains("It said"), "the cause is named, not quoted from the tail")
+        XCTAssertEqual(licence.action, .retry, "retry is right once they have accepted")
+        // It reaches any failed command, not just winetricks: the licence blocks every Xcode tool,
+        // and "Repair" would be the wrong button to offer for it.
+        let bootLicence = Recovery.describe(HighballError.processFailed(command: "wineboot -u", status: 1, output: xcode))
+        XCTAssertTrue(bootLicence.headline.contains("Xcode's licence"), bootLicence.headline)
+        XCTAssertNotEqual(bootLicence.action, .repairBottle)
+        XCTAssertFalse(Recovery.xcodeLicenceUnaccepted("warning: curl failed\n"), "unrelated output is not the licence gate")
         let wow = Recovery.describe(HighballError.invalid("Windows 32-bit support couldn't be set up in this bottle"))
         XCTAssertEqual(wow.action, .repairBottle)
         let net = Recovery.describe(URLError(.timedOut))
