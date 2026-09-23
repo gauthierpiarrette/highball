@@ -1,0 +1,43 @@
+#!/bin/sh
+# Refuse a push to main that changes Swift before the suite has passed here.
+#
+# Nothing in CI can gate a direct push: a required status check has no commit to report on
+# until the push has already happened, which is why every push to main shows as a bypass.
+# The gate for main is therefore local, and this is its cheapest part. 5373288 went in with
+# only the new test file run, broke RegressionTests.testRecoveryMapping, and left main red
+# until 2b90f81. Twenty seconds here would have caught it.
+#
+# Only Swift changes pay, and only on main: an appcast push, a README, a note under private/
+# goes straight through. Say --no-verify when you mean to skip it.
+
+set -u
+z=0000000000000000000000000000000000000000
+needs_tests=0
+
+while read -r _local_ref local_sha remote_ref remote_sha; do
+  [ "$remote_ref" = refs/heads/main ] || continue
+  [ "$local_sha" = "$z" ] && continue          # deleting the branch, nothing to test
+  if [ "$remote_sha" = "$z" ]; then
+    needs_tests=1        # main does not exist there yet, so assume the worst and test
+    continue
+  fi
+  changed=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null)
+  # anchored: a note filed under some other Sources/ directory is not a Swift change
+  if printf '%s\n' "$changed" | grep -qE '^(Sources/|Tests/|Package\.swift$|Package\.resolved$)'; then
+    needs_tests=1
+  fi
+done
+
+[ "$needs_tests" = 1 ] || exit 0
+
+echo "pre-push: Swift changed on main, running the suite first (--no-verify skips this)" >&2
+if swift test >/tmp/pre-push-test.log 2>&1; then
+  echo "pre-push: suite green" >&2
+  exit 0
+fi
+
+echo "" >&2
+tail -25 /tmp/pre-push-test.log >&2
+echo "" >&2
+echo "pre-push: the suite is red, so this is not going to main. Full output: /tmp/pre-push-test.log" >&2
+exit 1
