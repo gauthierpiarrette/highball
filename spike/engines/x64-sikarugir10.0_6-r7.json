@@ -1,6 +1,6 @@
 {
   "$schema": "https://highball.app/schemas/engine-manifest/v0",
-  "id": "x64-sikarugir10.0_6-r9",
+  "id": "x64-sikarugir10.0_6-r7",
   "displayName": "Wine 10.0 (Sikarugir) + DXMT 0.80 + D3DMetal 3.0 + MoltenVK 1.4.1 (shadow-import patch) + DXVK 3.1 macOS fork Direct3D 9 (opt-in per game) + frame generation (lsfg-metal, opt-in)",
   "arch": "x86_64",
   "minMacOS": "14.0",
@@ -8,9 +8,8 @@
     "rosetta2"
   ],
   "notes": [
-    "r9 (2026-09-22): r7 with the lsfg component moved to itsOwen's lsfg-metal v0.7.1, which closes the symbol gap recorded below. Every other component is byte-identical to r7 and r5, so existing downloads are reused; only the lsfg archive is new. Measured by itsOwen on an M2, macOS 27.0: GStreamer's applemedia plugin loads against the new shim and fails against the old one, and Absolute Drift at 2x through DXVK and through DXMT still runs about 30 source fps shown at about 60. Not retested on this component: the other titles r7 lists, HumanitZ, and video playback in a game. This manifest has not been installed end to end; r7 stays for rollback.",
     "r7 (2026-09-21): r5 plus the lsfg component, itsOwen's lsfg-metal v0.7.0 (highball#171), the frame-generation shim. Off unless an environment turns frame generation on, so every launch is byte-for-byte what r5 ran; on, it needs the user's own Lossless Scaling from Steam (its lsfg-vk beta branch), found in any environment. Every other component is byte-identical to r5, so existing downloads are reused; only the 383 KB lsfg archive is new. Measured by itsOwen on an M2, macOS 27.0, at 2x with the component placed by hand: Absolute Drift, Codename CURE II and Among Us (Epic) through DXMT at about 30 source fps shown at about 60, Slay the Spire on OpenGL. The manifest itself was installed end to end here on 2026-09-21 (see the engine notes' verification line).",
-    "The lsfg component's symbol gap, measured on 2026-09-22 against v0.7.0 and fixed in the v0.7.1 this manifest pins: the shim was loaded as libMoltenVK.dylib and exported only its eight Vulkan entry points, so anything in the process that wanted another MoltenVK symbol failed while frame generation was on. GStreamer's libgstapplemedia.dylib was the one that showed: nine load failures with 'Symbol not found: _mvkMTLPixelFormatFromVkFormat' in a HumanitZ launch at 2x, and zero in the same launch with frame generation off. That plugin is what decodes video on macOS. v0.7.1 forwards every other MoltenVK function to the real driver, so the plugin loads again; r7 and r8 still carry v0.7.0 and the gap.",
+    "Known limit of the lsfg component (measured 2026-09-22): the shim is loaded as libMoltenVK.dylib and exports only its eight Vulkan entry points, so anything in the process that wants another MoltenVK symbol fails while frame generation is on. GStreamer's libgstapplemedia.dylib is the one that shows: nine load failures with 'Symbol not found: _mvkMTLPixelFormatFromVkFormat' in a HumanitZ launch at 2x, and zero in the same launch with frame generation off. That plugin is what decodes video on macOS, so a game's videos are the thing to watch when frame generation is on. Reported to the component's author (highball#171). Frame generation is off unless an environment turns it on, so an environment that never asks for it is unaffected.",
     "Engine is Gcenx's Sikarugir build of upstream Wine 10.0: exports macdrv_functions from winemac.so (required by both DXMT and D3DMetal bridges) and supports WINEDLLPATH_PREPEND for per-bottle renderer overlays.",
     "Vanilla Gcenx wine-devel 11.15 lacks the macdrv_functions export -> DXMT and D3DMetal do NOT work on it. Verified 2026-08-23 with nm.",
     "Runtime dylibs (GStreamer, MoltenVK, gnutls, freetype, SDL2, icu...) are NOT inside the engine; they come from the Sikarugir Wrapper Template's Frameworks/ and are found via DYLD_FALLBACK_LIBRARY_PATH.",
@@ -137,12 +136,12 @@
       },
       "kind": "renderer",
       "license": "MIT",
-      "note": "Lossless Scaling frame generation: a MoltenVK shim that sits in front of the real driver as libMoltenVK.dylib, with libMoltenVK.real.dylib beside it pointing at the engine's own MoltenVK. Interpolates on the Vulkan path (DXVK, vkd3d-proton), on Metal for DXMT and D3DMetal, and on OpenGL. Needs the user's own lsfg-vk.dll from the Lossless Scaling Steam application (lsfg-vk beta branch); nothing of Lossless Scaling is shipped here. Off unless an environment turns it on, and DISABLE_LSFGM=1 turns it off for one process. Source: github.com/itsOwen/lsfg-metal (itsOwen, highball#109, #171), built by Scripts/build-lsfg.sh; the archive is the v0.7.1 release asset, pinned at its own release until it is mirrored under Highball's engine-components release (SHA-256 39e05545…, the same bytes either way).",
+      "note": "Lossless Scaling frame generation: a MoltenVK shim that sits in front of the real driver as libMoltenVK.dylib, with libMoltenVK.real.dylib beside it pointing at the engine's own MoltenVK. Interpolates on the Vulkan path (DXVK, vkd3d-proton), on Metal for DXMT and D3DMetal, and on OpenGL. Needs the user's own lsfg-vk.dll from the Lossless Scaling Steam application (lsfg-vk beta branch); nothing of Lossless Scaling is shipped here. Off unless an environment turns it on, and DISABLE_LSFGM=1 turns it off for one process. Source: github.com/itsOwen/lsfg-metal (itsOwen, highball#109, #171), built by Scripts/build-lsfg.sh; the archive is the v0.7.0 release asset mirrored under Highball's engine-components release, same bytes (SHA-256 fa496bb3…).",
       "order": 1,
-      "sha256": "39e05545fd26739d6b9bb419f87f426333d8342c1d71476d42b6c7845fb2787e",
-      "size": 405464,
-      "url": "https://github.com/itsOwen/lsfg-metal/releases/download/v0.7.1/lsfg-v0.7.1.tar.xz",
-      "version": "lsfg-v0.7.1"
+      "sha256": "fa496bb3947f52652fc3856c4a0413c7e5603e19c7dd6936dfc5d76be756b0f9",
+      "size": 392176,
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/lsfg-metal-0.7.0.tar.xz",
+      "version": "lsfg-v0.7.0"
     }
   },
   "alternatives": {
@@ -167,8 +166,8 @@
   "verified": {
     "date": "2026-09-22",
     "macos": "27.0",
-    "chip": "Apple M2",
-    "result": "Not installed end to end from this manifest. The pinned archive is the published lsfg-metal v0.7.1 asset, its SHA-256 checked against the release. The component itself was measured by placing it in an r5 engine by hand: GStreamer's libgstapplemedia.dylib loads with the shim on the path and fails the same load against v0.7.0, and Absolute Drift ran 60 s at 2x through DXVK and through DXMT at about 30 source fps shown at about 60, with no warnings in the shim log."
+    "chip": "Apple M1 Pro",
+    "result": "Installed from this manifest through the CLI: only the 383 KB lsfg archive downloaded, every other component reused from r5; renderers/lsfg holds the x86_64 shim with its 8 exports, LICENSE, source.txt and the libMoltenVK.real.dylib link resolving to the engine's own MoltenVK. Frame generation measured on 2026-09-22 with the HumanitZ demo on D3DMetal, M1 Pro, macOS 27.0, 1728x1117 on a 120 Hz display: the same spot in gameplay presents about 47 fps with it off and 63 to 74 fps at 2x, with GPU time per frame falling from 20.6 ms to about 17 ms as half the presented frames become interpolated ones. The shim's own log (drive_c/highball/logs/lsfg-metal.log) confirms it hooked Metal presentation and names one limit: when the game holds three drawables its pool exhausts and those frames present natively. The maintainer played the demo with it on, moving around, and found it smooth."
   },
   "licenses": {
     "apple-gptk-license-2023-08-17": {

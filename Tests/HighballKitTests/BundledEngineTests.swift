@@ -39,15 +39,18 @@ final class BundledEngineTests: XCTestCase {
     }
 
     /// Frame generation rides in the engines as one component, off unless an environment asks
-    /// (itsOwen's lsfg-metal, highball#171): r7 is r5 plus that component on the main line, r8 is
-    /// r6 plus the same one on the GPTK 4 line. Both keep everything their base exists for, and
-    /// the shim comes from Highball's own release (a component URL has to be ours to stay
+    /// (itsOwen's lsfg-metal, highball#171): r9 is r5 plus that component on the main line, r10 is
+    /// r6 plus the same one on the GPTK 4 line, and r7 and r8 are the revisions they replace, kept
+    /// for rollback on the shim they pinned. All keep everything their base exists for, and the
+    /// shim comes from Highball's own release (a component URL has to be ours to stay
     /// immutable; winetricks' branch URL drifting broke every fresh install once, #27/#28).
     func testFrameGenerationEnginesAreTheirBasePlusOnePinnedShim() throws {
         // The default engine lives in spike/engine-manifest.json, beside the spike/engines set.
         let all = try manifests() + [try EngineManifest.load(from: engines.deletingLastPathComponent().appending(path: "engine-manifest.json"))]
         func one(_ id: String) throws -> EngineManifest { try XCTUnwrap(all.first { $0.id == id }, "\(id) missing") }
-        for (variantID, baseID) in [("x64-sikarugir10.0_6-r7", "x64-sikarugir10.0_6-r5"), ("x64-sikarugir10.0_6-r8", "x64-sikarugir10.0_6-r6")] {
+        let v070 = ("fa496bb3947f52652fc3856c4a0413c7e5603e19c7dd6936dfc5d76be756b0f9", "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/lsfg-metal-0.7.0.tar.xz")
+        let v071 = ("39e05545fd26739d6b9bb419f87f426333d8342c1d71476d42b6c7845fb2787e", "https://github.com/itsOwen/lsfg-metal/releases/download/v0.7.1/lsfg-v0.7.1.tar.xz")
+        for (variantID, baseID, shim071) in [("x64-sikarugir10.0_6-r9", "x64-sikarugir10.0_6-r5", true), ("x64-sikarugir10.0_6-r10", "x64-sikarugir10.0_6-r6", true), ("x64-sikarugir10.0_6-r7", "x64-sikarugir10.0_6-r5", false), ("x64-sikarugir10.0_6-r8", "x64-sikarugir10.0_6-r6", false)] {
             let variant = try one(variantID), base = try one(baseID)
             XCTAssertEqual(variant.minMacOS, base.minMacOS, "\(variantID) must keep \(baseID)'s floor")
             XCTAssertEqual(variant.baseEnv?["D3DM_MTL4"], base.baseEnv?["D3DM_MTL4"], "\(variantID) must keep \(baseID)'s Metal 4 setting")
@@ -58,9 +61,10 @@ final class BundledEngineTests: XCTestCase {
             let shim = try XCTUnwrap(variant.components["lsfg"], "no lsfg component in \(variantID)")
             XCTAssertEqual(shim.extract?.into, "renderers/lsfg", "resolveLsfgShimDir looks for renderers/lsfg")
             XCTAssertEqual(shim.license, "MIT")
-            XCTAssertEqual(shim.sha256, "fa496bb3947f52652fc3856c4a0413c7e5603e19c7dd6936dfc5d76be756b0f9", "the v0.7.0 asset, verified against the published release")
-            XCTAssertEqual(shim.url.absoluteString, "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/lsfg-metal-0.7.0.tar.xz")
+            let (sha, url) = shim071 ? v071 : v070
+            XCTAssertEqual(shim.sha256, sha, "\(variantID) pins the asset verified against the published release")
+            XCTAssertEqual(shim.url.absoluteString, url)
         }
-        XCTAssertEqual(all.last?.id, "x64-sikarugir10.0_6-r7", "r7 is the default engine")
+        XCTAssertEqual(all.last?.id, "x64-sikarugir10.0_6-r9", "r9 is the default engine")
     }
 }

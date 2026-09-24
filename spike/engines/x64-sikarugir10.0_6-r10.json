@@ -1,0 +1,168 @@
+{
+  "$schema": "https://highball.app/schemas/engine-manifest/v0",
+  "id": "x64-sikarugir10.0_6-r10",
+  "displayName": "Wine 10.0 (Sikarugir) r10, D3DMetal 4.0 beta 2 + frame generation (lsfg-metal, opt-in)",
+  "arch": "x86_64",
+  "minMacOS": "27.0",
+  "requires": [
+    "rosetta2"
+  ],
+  "notes": [
+    "r10 (2026-09-22): r8 with the lsfg component moved to itsOwen's lsfg-metal v0.7.1, which closes the symbol gap recorded below. Every other component is byte-identical to r8 and r6, so existing downloads are reused; only the lsfg archive is new. Measured by itsOwen on an M2, macOS 27.0: GStreamer's applemedia plugin loads against the new shim and fails against the old one, and Absolute Drift at 2x through DXVK and through DXMT still runs about 30 source fps shown at about 60. Not retested on this component: the other titles r8 lists, HumanitZ, and video playback in a game. This manifest has not been installed end to end; r8 stays for rollback.",
+    "r6 = r5 with D3DMetal from Game Porting Toolkit 4.0 beta 2 (highball#85). Only D3DMetal (DirectX 12) games see a difference; DXMT and DXVK are unchanged. Offered on macOS 27 or newer.",
+    "The lsfg component's symbol gap, measured on 2026-09-22 against v0.7.0 and fixed in the v0.7.1 this manifest pins: the shim was loaded as libMoltenVK.dylib and exported only its eight Vulkan entry points, so anything in the process that wanted another MoltenVK symbol failed while frame generation was on. GStreamer's libgstapplemedia.dylib was the one that showed: nine load failures with 'Symbol not found: _mvkMTLPixelFormatFromVkFormat' in a HumanitZ launch at 2x, and zero in the same launch with frame generation off. That plugin is what decodes video on macOS. v0.7.1 forwards every other MoltenVK function to the real driver, so the plugin loads again; r7 and r8 still carry v0.7.0 and the gap.",
+    "baseEnv D3DM_MTL4=0: D3DMetal 4.0b2's Metal 4 backend ended HumanitZ's menu quietly within a minute, twice, with no message and nothing from Metal validation (which, by slowing the work, let it survive), so it is a timing bug in Apple's beta. On the Metal 3 path inside 4.0b2 the same title held for the whole run at a fifth of the memory (about 260 MB resident against 1.26 GB on r5), and The Last Caretaker demo drew at 99% GPU where r5 sat at 2% (its black screen). Set D3DM_MTL4=1 in a game's environment to try the Metal 4 backend. Measured 2026-09-19 on an M1 Pro, macOS 27.0, session locked (process, GPU load and logs; no captures).",
+    "Engine is Gcenx's Sikarugir build of upstream Wine 10.0: exports macdrv_functions from winemac.so (required by both DXMT and D3DMetal bridges) and supports WINEDLLPATH_PREPEND for per-bottle renderer overlays.",
+    "Vanilla Gcenx wine-devel 11.15 lacks the macdrv_functions export -> DXMT and D3DMetal do NOT work on it. Verified 2026-08-23 with nm.",
+    "Runtime dylibs (GStreamer, MoltenVK, gnutls, freetype, SDL2, icu...) are NOT inside the engine; they come from the Sikarugir Wrapper Template's Frameworks/ and are found via DYLD_FALLBACK_LIBRARY_PATH.",
+    "Wine 10 still ships a wine64 binary but the loader is `wine`; use `wine` so Wine 11 engines work unchanged.",
+    "D3DMetal is NOT downloaded separately: the Template's frameworks/renderer/d3dmetal overlay is used, but only exposed once the user has accepted the Apple GPTK license (recorded in manifest.json as acceptedLicenses).",
+    "r1 (2026-09-02): adds the moltenvk component. Everything else is byte-identical to r0, so existing downloads are reused; only the 5 MB MoltenVK tarball is new.",
+    "r2 (2026-09-07): adds the d3dmetal-tsshim component, a d3d12.dll in front of D3DMetal's that serves DirectX 12 timestamp queries (D3DMetal 3.0 resolves them to zero at a reported 60 Hz, which crashes Guardians of the Galaxy, highball#63). Everything else is byte-identical to r1, so existing downloads are reused; only the 46 KB shim tarball is new. Source: spike/tsshim, Scripts/build-tsshim.sh.",
+    "r3 (2026-09-15): the d3dmetal-tsshim component rebuilt so its exports carry Microsoft's d3d12 ordinals (GetBehaviorValue 100, D3D12CreateDevice 101, ... 110), which D3DMetal mirrors. The r2 shim numbered them from 1, so a game that binds d3d12 imports by ordinal (Path of Exile 2 delay-loads D3D12CreateDevice as ordinal 101) died at startup with 'ordinal 101 out of range' and Wine's exception 0xc06d007f (highball-db#53). Everything else is byte-identical to r2, so existing downloads are reused; only the 46 KB shim tarball is new. Source: spike/tsshim, Scripts/build-tsshim.sh 20260915.",
+    "r5 (2026-09-18): adds the d9vk-modern component, the DXVK-MacOS 3.1 Direct3D 9 that the withdrawn r4 candidate had put on every launch's search path, now as a directory nothing loads by itself. A game's recipe copies it beside the game with a per-program override (the legacy CS:GO copy mechanism). Every other component is byte-identical to r3, so existing downloads are reused; only the 10 MB d9vk archive is new, and it was already published for r4.",
+    "r8 (2026-09-21, was itsOwen's r6-lsfg in highball#171): r6 plus the lsfg component, lsfg-metal v0.7.0, the same component r7 carries on the main line. Every other component is byte-identical to r6, so existing downloads are reused; only the 383 KB lsfg archive is new. The archive is the published release asset and its SHA-256 is the one this manifest pins. Frame generation stays off until an environment asks for it. Measured on an M2, macOS 27.0, at 2x with the component installed by hand on r5 rather than through this manifest: Absolute Drift and Codename CURE II through DXMT and Among Us (Epic) through DXMT, all about 30 source fps shown at about 60, and Slay the Spire on the OpenGL path. This manifest itself has not been installed end to end."
+  ],
+  "components": {
+    "d3dmetal": {
+      "kind": "renderer",
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/d3dmetal-4.0b2-gptk4.tar.xz",
+      "sha256": "96cbbe89b71cb07cc33bd761ae4b79452b9cdf3198593dfb779036caf85f07a9",
+      "size": 16462052,
+      "license": "apple-gptk-license-2023-08-17",
+      "version": "D3DMetal-4.0b2 (Game Porting Toolkit 4.0 beta 2, redist/lib; Apple Software Signing chain verified 2026-09-19)",
+      "order": 1,
+      "extract": {
+        "subpath": "renderers/d3dmetal",
+        "into": "renderers/d3dmetal"
+      },
+      "layout": [
+        "external/D3DMetal.framework",
+        "external/libd3dshared.dylib",
+        "wine/x86_64-windows/{d3d10,d3d11,d3d12,dxgi,nvapi64,nvngx-on-metalfx}.dll",
+        "wine/x86_64-unix/*.so -> ../../external/libd3dshared.dylib"
+      ],
+      "note": "Apple's D3DMetal from GPTK 4 (Metal 4), laid over the Template's GPTK 3 copy: rendererDir prefers renderers/d3dmetal. Same Apple licence text as GPTK 3 (identical modulo whitespace, 2026-09-19), so the same licence id and acceptance apply. The framework's own minimum is macOS 14, but it is offered on 27 or newer only, where it was measured."
+    },
+    "d3dmetal-tsshim": {
+      "extract": {
+        "into": "renderers/d3dmetal-tsshim/wine",
+        "subpath": "renderers/d3dmetal-tsshim/wine"
+      },
+      "kind": "renderer",
+      "license": "MIT",
+      "note": "A d3d12.dll in front of D3DMetal's that serves DirectX 12 timestamp queries (D3DMetal 3.0 resolves them to zero at a reported 60 Hz). Exports carry Microsoft's d3d12 ordinals (D3D12CreateDevice at 101), which D3DMetal mirrors, so games that bind d3d12 imports by ordinal load through it. Kill switch HB_D3D12_TSSHIM=0 idles the patches; the DLL stays in front. Source: spike/tsshim, Scripts/build-tsshim.sh.",
+      "order": 1,
+      "sha256": "453f33ef1442ec8d24e9a44d901d35d4d07431c05ae8318c30567facc78d9ef3",
+      "size": 46116,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/d3dmetal-tsshim-20260915/d3dmetal-tsshim-20260915.tar.xz",
+      "version": "20260915"
+    },
+    "d9vk-modern": {
+      "extract": {
+        "into": "renderers/d9vk-modern/wine",
+        "subpath": "renderers/d9vk/wine"
+      },
+      "kind": "renderer",
+      "license": "zlib",
+      "note": "The metalsharp DXVK-MacOS v3.1-macos1.0 Direct3D 9 (DXVK 3.1 with the Gcenx MoltenVK work), both architectures, stamped as Wine builtins. Not on any launch's search path: the template's DXVK-Kegworks 1.10.4 d9vk stays the Direct3D 9 every game gets. A game's recipe copies this one beside the game's executable with a per-program native override when the row says the newer layer is the one that runs it (RaceRoom, highball-db#60). It rendered RaceRoom for one reporter and drew it in grayscale for another, and froze Five Nights at Freddy's, when the r4 candidate put it on every launch's path, which is why it is opt-in per game.",
+      "order": 1,
+      "sha256": "0fabdffde07ef1ef041e95181ca1507db96919cf70acfa91a15c159718ad7611",
+      "size": 9766808,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/d9vk-dxvk-macos-3.1-20260916/d9vk-dxvk-macos-3.1-20260916.tar.xz",
+      "version": "dxvk-macos-3.1-20260916"
+    },
+    "dxmt": {
+      "extract": {
+        "into": "renderers/dxmt/wine",
+        "subpath": "v0.80"
+      },
+      "kind": "renderer",
+      "license": "MIT",
+      "sha256": "8f260e36b5739e68f3bad613381441385c4dc7b85b78ba8de653d5a6a264529d",
+      "size": 18681669,
+      "url": "https://github.com/3Shain/dxmt/releases/download/v0.80/dxmt-v0.80-builtin.tar.gz"
+    },
+    "lsfg": {
+      "extract": {
+        "into": "renderers/lsfg",
+        "subpath": "renderers/lsfg"
+      },
+      "kind": "renderer",
+      "license": "MIT",
+      "note": "Lossless Scaling frame generation: a MoltenVK shim that sits in front of the real driver as libMoltenVK.dylib, with libMoltenVK.real.dylib beside it pointing at the engine's own MoltenVK. Interpolates on the Vulkan path (DXVK, vkd3d-proton), on Metal for DXMT and D3DMetal, and on OpenGL. Needs the user's own lsfg-vk.dll from the Lossless Scaling Steam application (lsfg-vk beta branch); nothing of Lossless Scaling is shipped here. Off unless an environment turns it on, and DISABLE_LSFGM=1 turns it off for one process. Source: github.com/itsOwen/lsfg-metal (itsOwen, highball#109, #171), built by Scripts/build-lsfg.sh; the archive is the v0.7.1 release asset, pinned at its own release until it is mirrored under Highball's engine-components release (SHA-256 39e05545…, the same bytes either way).",
+      "order": 1,
+      "sha256": "39e05545fd26739d6b9bb419f87f426333d8342c1d71476d42b6c7845fb2787e",
+      "size": 405464,
+      "url": "https://github.com/itsOwen/lsfg-metal/releases/download/v0.7.1/lsfg-v0.7.1.tar.xz",
+      "version": "lsfg-v0.7.1"
+    },
+    "moltenvk": {
+      "extract": {
+        "into": "frameworks/libMoltenVK.dylib",
+        "subpath": "libMoltenVK.dylib"
+      },
+      "kind": "runtime",
+      "license": "Apache-2.0",
+      "note": "MoltenVK 1.4.1 rebuilt with Highball's shadow-import patch (spike/patches/moltenvk-shadow-import.patch, Scripts/build-moltenvk.sh). Replaces the Template's libMoltenVK.dylib. Off unless a launch sets MVK_SHADOW_IMPORT=1: with it, Wine's wow64 host-memory imports are backed by a private Metal buffer synced on every submit, which is what makes 32-bit native-Vulkan games (The Sims Legacy Collection) render instead of losing the device on every vkQueueSubmit.",
+      "order": 1,
+      "sha256": "fbed7b80d6dc2aeaba6fa7047c1fe64827d5004c28029fb43c2bc34f80c35228",
+      "size": 1674937,
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/moltenvk-1.4.1-shadow-import-1-x86_64.tar.gz",
+      "version": "1.4.1+shadow-import-1"
+    },
+    "runtime": {
+      "extract": {
+        "into": "frameworks",
+        "subpath": "Template-1.0.11.app/Contents/Frameworks"
+      },
+      "kind": "frameworks",
+      "license": "mixed (LGPL-2.1 GStreamer, Apache-2.0 MoltenVK, LGPL gnutls, ...)",
+      "sha256": "9fa15479e7ff6abd99c1d07be285fb95f41fc6991586502427152b1f7d6ccb8a",
+      "size": 84533420,
+      "url": "https://github.com/Sikarugir-App/Wrapper/releases/download/v1.0/Template-1.0.11.tar.xz"
+    },
+    "wine": {
+      "extract": {
+        "into": "engine",
+        "strip": "wswine.bundle"
+      },
+      "kind": "engine",
+      "license": "LGPL-2.1+",
+      "sha256": "9da7ee0cbf386522f3a9906943726d9c3c125dbbd9ab120e3cde80e88d6091b2",
+      "size": 166304096,
+      "url": "https://github.com/Sikarugir-App/Engines/releases/download/v1.0/WS12WineSikarugir10.0_6.tar.xz",
+      "version": "wine-10.0 (Sikarugir) revision 6"
+    },
+    "winetricks": {
+      "kind": "tool",
+      "license": "LGPL-2.1",
+      "note": "Pinned to upstream commit 5a59ea07 (20260125+dev, 2026-08-07) — the exact bytes 0.7.x verified with dotnet48. The old branch URL drifted and broke every fresh engine install (issues #27/#28); URLs here must be immutable.",
+      "sha256": "f35c29737ca08a583569e6a3752d52fbe23333c5acfad5f16c4177d25eaf3f4b",
+      "url": "https://raw.githubusercontent.com/Winetricks/winetricks/5a59ea07513b24093bd90fad943ecf9543cf05bc/src/winetricks"
+    }
+  },
+  "baseEnv": {
+    "DYLD_FALLBACK_FRAMEWORK_PATH": "${frameworks}",
+    "DYLD_FALLBACK_LIBRARY_PATH": "${frameworks}:${frameworks}/GStreamer.framework/Versions/1.0/lib",
+    "GST_PLUGIN_PATH": "${frameworks}/GStreamer.framework/Versions/1.0/lib/gstreamer-1.0",
+    "WINEDEBUG": "fixme-all",
+    "D3DM_MTL4": "0"
+  },
+  "licenses": {
+    "apple-gptk-license-2023-08-17": {
+      "applies": [
+        "renderers/d3dmetal (bundled in the Sikarugir Template: D3DMetal.framework sha1 1405e5c6… identical to GPTK 3.0-3)",
+        "renderers/d3dmetal (GPTK 4.0 beta 2 redist: D3DMetal-4.0b2)"
+      ],
+      "summary": "Apple Game Porting Toolkit license: non-commercial use/distribution only; no modification; use scoped to developing, testing or evaluating games on Apple hardware.",
+      "text": "spike/d3dmetal-license.txt"
+    }
+  },
+  "verified": {
+    "date": "2026-09-22",
+    "macos": "27.0",
+    "chip": "Apple M2",
+    "result": "Not installed end to end from this manifest. The pinned archive is the published lsfg-metal v0.7.1 asset, its SHA-256 checked against the release. The component itself was measured by placing it in an r5 engine by hand: GStreamer's libgstapplemedia.dylib loads with the shim on the path and fails the same load against v0.7.0, and Absolute Drift ran 60 s at 2x through DXVK and through DXMT at about 30 source fps shown at about 60, with no warnings in the shim log."
+  }
+}
