@@ -157,7 +157,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // one. SettingsView asks for it as it appears; this is the fallback once launch settles.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { MainWindow.ensureOpen() }
     }
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// Closing the library while a game or Steam runs keeps Highball open in the Dock. Quitting
+    /// there put the "still running" question on top of the game, with Stop as its default
+    /// button, and a HoYoPlay user (discussion #132) read it as the game telling them to quit.
+    /// A Dock click brings the window back (applicationShouldHandleReopen). With nothing from
+    /// Windows running, closing the last window quits as before.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        !(appState?.wineProcessesRunning() ?? false)
+    }
 
     /// Dock click with only Settings on screen: SwiftUI sees a visible window and opens nothing,
     /// so bring the main window back ourselves (issue #58).
