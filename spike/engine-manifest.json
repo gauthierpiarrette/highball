@@ -141,7 +141,7 @@
       "order": 1,
       "sha256": "39e05545fd26739d6b9bb419f87f426333d8342c1d71476d42b6c7845fb2787e",
       "size": 405464,
-      "url": "https://github.com/itsOwen/lsfg-metal/releases/download/v0.7.1/lsfg-v0.7.1.tar.xz",
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/lsfg-metal-0.7.1.tar.xz",
       "version": "lsfg-v0.7.1"
     }
   },
@@ -168,7 +168,7 @@
     "date": "2026-09-22",
     "macos": "27.0",
     "chip": "Apple M2",
-    "result": "Not installed end to end from this manifest. The pinned archive is the published lsfg-metal v0.7.1 asset, its SHA-256 checked against the release. The component itself was measured by placing it in an r5 engine by hand: GStreamer's libgstapplemedia.dylib loads with the shim on the path and fails the same load against v0.7.0, and Absolute Drift ran 60 s at 2x through DXVK and through DXMT at about 30 source fps shown at about 60, with no warnings in the shim log."
+    "result": "Installed end to end from this manifest by the pull request's own install check on 2026-09-22, a fresh install on a GitHub macOS 15 runner: engine with lsfg, bottle creation, wow64, a bare wine smoke and vcrun2022 all passed. The pinned archive is a byte copy of the published lsfg-metal v0.7.1 asset, mirrored under Highball's engine-components release on 2026-09-24 with its SHA-256 unchanged. The component itself was measured by placing it in an r5 engine by hand: GStreamer's libgstapplemedia.dylib loads with the shim on the path and fails the same load against v0.7.0, and Absolute Drift ran 60 s at 2x through DXVK and through DXMT at about 30 source fps shown at about 60, with no warnings in the shim log."
   },
   "licenses": {
     "apple-gptk-license-2023-08-17": {
