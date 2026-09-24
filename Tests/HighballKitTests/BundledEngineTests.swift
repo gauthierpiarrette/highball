@@ -49,7 +49,7 @@ final class BundledEngineTests: XCTestCase {
         let all = try manifests() + [try EngineManifest.load(from: engines.deletingLastPathComponent().appending(path: "engine-manifest.json"))]
         func one(_ id: String) throws -> EngineManifest { try XCTUnwrap(all.first { $0.id == id }, "\(id) missing") }
         let v070 = ("fa496bb3947f52652fc3856c4a0413c7e5603e19c7dd6936dfc5d76be756b0f9", "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/lsfg-metal-0.7.0.tar.xz")
-        let v071 = ("39e05545fd26739d6b9bb419f87f426333d8342c1d71476d42b6c7845fb2787e", "https://github.com/itsOwen/lsfg-metal/releases/download/v0.7.1/lsfg-v0.7.1.tar.xz")
+        let v071 = ("39e05545fd26739d6b9bb419f87f426333d8342c1d71476d42b6c7845fb2787e", "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/lsfg-metal-0.7.1.tar.xz")
         for (variantID, baseID, shim071) in [("x64-sikarugir10.0_6-r9", "x64-sikarugir10.0_6-r5", true), ("x64-sikarugir10.0_6-r10", "x64-sikarugir10.0_6-r6", true), ("x64-sikarugir10.0_6-r7", "x64-sikarugir10.0_6-r5", false), ("x64-sikarugir10.0_6-r8", "x64-sikarugir10.0_6-r6", false)] {
             let variant = try one(variantID), base = try one(baseID)
             XCTAssertEqual(variant.minMacOS, base.minMacOS, "\(variantID) must keep \(baseID)'s floor")
