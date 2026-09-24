@@ -81,7 +81,16 @@ public enum SteamRestart {
         if liveFrameGen != wantedFrameGen {
             reasons.append("it runs with frame generation \(frameGenerationName(of: live)) and the game wants \(frameGenerationName(of: wanted))")
         }
-        for key in custom.sorted() where !inherited.contains(where: { $0.0 == key }) && live[key] != wanted[key] {
+        // The game inherits the client's DLL overrides too, and two of their sources are not in
+        // `custom`: the environment's DLL overrides field and a recipe's dllOverride steps. So
+        // winhttp=n,b added while Steam ran never reached the game, and a mod loader sitting
+        // beside the exe was skipped (highball#172). A renderer change restarts the client above
+        // and changes this string with it, so it is only named when it differs on its own.
+        if live["WINEDLLPATH_PREPEND"] == wanted["WINEDLLPATH_PREPEND"],
+           live["WINEDLLOVERRIDES"] != wanted["WINEDLLOVERRIDES"] {
+            reasons.append("it runs with different DLL overrides than the game wants")
+        }
+        for key in custom.sorted() where key != "WINEDLLOVERRIDES" && !inherited.contains(where: { $0.0 == key }) && live[key] != wanted[key] {
             switch (live[key], wanted[key]) {
             case (nil, let want?): reasons.append("it runs without \(key)=\(want)")
             case (let have?, nil): reasons.append("it runs with \(key)=\(have) and the game does not set it")

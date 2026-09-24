@@ -85,6 +85,31 @@ final class SteamRestartTests: XCTestCase {
         XCTAssertNil(SteamRestart.reason(live: dxvk, wanted: wanted, wantedRenderer: "dxvk"))
     }
 
+    // highball#172: winhttp=n,b put in the DLL overrides field while Steam ran. The field is not a
+    // custom variable, so nothing compared it, -applaunch went to the old client, and the game
+    // inherited overrides without it: the mod loader's winhttp.dll beside the exe never loaded.
+    func testDLLOverridesAddedWhileTheClientRunsRestartIt() {
+        var live = dxvk; live["WINEDLLOVERRIDES"] = "winemenubuilder.exe=d;dxgi,d3d9,d3d10core,d3d11=n,b"
+        var wanted = dxvk; wanted["WINEDLLOVERRIDES"] = "winemenubuilder.exe=d;winhttp=n,b;dxgi,d3d9,d3d10core,d3d11=n,b"
+        XCTAssertEqual(SteamRestart.reason(live: live, wanted: wanted, wantedRenderer: "dxvk"),
+                       "it runs with different DLL overrides than the game wants")
+        XCTAssertNil(SteamRestart.reason(live: wanted, wanted: wanted, wantedRenderer: "dxvk"))
+    }
+
+    func testARendererChangeIsNotAlsoReportedAsAnOverridesChange() {
+        var live = dxvk; live["WINEDLLPATH_PREPEND"] = "/e/dxmt/wine"; live["WINEDLLOVERRIDES"] = "dxgi,d3d11,d3d10core=n,b"
+        var wanted = dxvk; wanted["WINEDLLOVERRIDES"] = "dxgi,d3d9,d3d10core,d3d11=n,b"
+        XCTAssertEqual(SteamRestart.reason(live: live, wanted: wanted, wantedRenderer: "dxvk"),
+                       "it runs with a different renderer than dxvk")
+    }
+
+    func testOverridesTypedAsACustomVariableAreNamedOnce() {
+        var live = dxvk; live["WINEDLLOVERRIDES"] = "winemenubuilder.exe=d"
+        var wanted = dxvk; wanted["WINEDLLOVERRIDES"] = "winhttp=n,b;winemenubuilder.exe=d"
+        XCTAssertEqual(SteamRestart.reason(live: live, wanted: wanted, wantedRenderer: "dxvk", custom: ["WINEDLLOVERRIDES"]),
+                       "it runs with different DLL overrides than the game wants")
+    }
+
     func testOnlyTheClientsOwnProcessesCountAsTheClient() {
         XCTAssertTrue(SteamRestart.isClientProcess(argv0: "C:\\Program Files (x86)\\Steam\\steam.exe"))
         XCTAssertTrue(SteamRestart.isClientProcess(argv0: "C:\\Program Files (x86)\\Steam\\bin\\cef\\cef.win7x64\\steamwebhelper.exe"))
