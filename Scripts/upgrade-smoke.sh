@@ -99,7 +99,13 @@ if [ "$SCREEN" = 1 ]; then
     # System Events answers 0 for every app when Accessibility is denied to this shell, and the
     # failure then reads like an app regression (2026-09-24: an afternoon spent on it, the grant had
     # gone with an editor update). CG still sees the window, so ask it before blaming the app.
-    cg=$("$ROOT/Scripts/winlist" 2>/dev/null | grep "pid=$pid" | grep -c on=true)
+    # grep -c exits 1 on a zero count, which under set -e killed the script before fail() could
+    # say "no window" (the 3ebeb3a gate, 2026-09-25: an empty log instead of a verdict).
+    cg=$("$ROOT/Scripts/winlist" 2>/dev/null | grep "pid=$pid" | grep -c on=true || true)
+    # What each side saw, so a failure can be read without rerunning it (the 3ebeb3a gate saw the
+    # app make its window within a second yet counted none for 30 s, and the log had nothing).
+    echo "   CG windows for pid $pid:"; "$ROOT/Scripts/winlist" 2>/dev/null | grep "pid=$pid" | sed 's/^/     /' || true
+    echo "   System Events: $(osascript -e "tell application \"System Events\" to name of every process whose unix id is $pid" 2>&1 | head -c 200)"
     kill "$pid" 2>/dev/null || true
     [ "$cg" -ge 1 ] && fail "the window is on screen but System Events cannot see it: Accessibility is denied to this shell (System Settings, Privacy & Security, Accessibility)"
     fail "no window after 30 s"
