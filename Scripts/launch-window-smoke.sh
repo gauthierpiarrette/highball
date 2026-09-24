@@ -23,6 +23,13 @@ pkill -f "$BIN" 2>/dev/null; sleep 1
 HIGHBALL_HOME="$H" "$BIN" >/dev/null 2>&1 & sleep 6
 osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $(pid)) to true" >/dev/null 2>&1; sleep 1
 echo "after launch:        $(wins)"
+# Every step below goes through System Events, which answers with nothing for every app when
+# Accessibility is denied to this shell, and the smoke then fails as "no main window" with each
+# line blank (2026-09-24). CG still sees the window, so tell the two apart before going on.
+if [ -z "$(wins)" ] && [ "$("$ROOT/Scripts/winlist" 2>/dev/null | grep "pid=$(pid)" | grep -c on=true)" -ge 1 ]; then
+  pkill -f "$BIN" 2>/dev/null; rm -rf "$H"; record false "accessibility denied"
+  echo "LAUNCH WINDOW SMOKE FAILED: the window is on screen but System Events cannot see it: Accessibility is denied to this shell (System Settings, Privacy & Security, Accessibility)"; exit 1
+fi
 osascript -e "tell application \"System Events\" to tell (first process whose unix id is $(pid)) to keystroke \",\" using command down" >/dev/null 2>&1; sleep 2
 echo "after Cmd-,:         $(wins)"
 osascript -e "tell application \"System Events\" to tell (first process whose unix id is $(pid)) to click button 1 of window \"Highball\"" >/dev/null 2>&1; sleep 1

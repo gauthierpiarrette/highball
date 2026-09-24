@@ -95,7 +95,15 @@ if [ "$SCREEN" = 1 ]; then
     sleep 1; n=$((n+1))
     win=$(osascript -e "tell application \"System Events\" to count windows of (first process whose unix id is $pid)" 2>/dev/null || echo 0)
   done
-  [ "$win" -ge 1 ] || { kill "$pid" 2>/dev/null || true; fail "no window after 30 s"; }
+  if [ "$win" -lt 1 ]; then
+    # System Events answers 0 for every app when Accessibility is denied to this shell, and the
+    # failure then reads like an app regression (2026-09-24: an afternoon spent on it, the grant had
+    # gone with an editor update). CG still sees the window, so ask it before blaming the app.
+    cg=$("$ROOT/Scripts/winlist" 2>/dev/null | grep "pid=$pid" | grep -c on=true)
+    kill "$pid" 2>/dev/null || true
+    [ "$cg" -ge 1 ] && fail "the window is on screen but System Events cannot see it: Accessibility is denied to this shell (System Settings, Privacy & Security, Accessibility)"
+    fail "no window after 30 s"
+  fi
   sleep 4
   screencapture -x "$ROOT/private/upgrade-smoke/library.png" 2>/dev/null || true
   kill "$pid" 2>/dev/null || true
