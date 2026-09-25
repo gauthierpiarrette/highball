@@ -8,6 +8,7 @@
   <a href="https://github.com/gauthierpiarrette/highball/actions/workflows/ci.yml"><img src="https://github.com/gauthierpiarrette/highball/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/gauthierpiarrette/highball/stargazers"><img src="https://img.shields.io/github/stars/gauthierpiarrette/highball?logo=github&label=stars" alt="GitHub stars"></a>
   <img src="https://img.shields.io/badge/Apple%20Silicon-macOS%2014%2B-lightgrey" alt="Apple Silicon, macOS 14+">
+  <a href="https://discord.gg/WnyYpXuf67"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord: join the Highball server"></a>
 </p>
 
 <p align="center"><img src=".github/assets/app.png" width="760" alt="Highball’s Library under the Steam filter: twelve games in one cover grid, each with its source badge and the open database’s verdict, all Verified"></p>
