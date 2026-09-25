@@ -3,3 +3,6 @@ contact_links:
   - name: Game or launcher compatibility report
     url: https://github.com/gauthierpiarrette/highball-db/issues/new/choose
     about: "How did a game run? That data belongs in the open database."
+  - name: Quick question or help
+    url: https://discord.gg/WnyYpXuf67
+    about: "The Highball Discord. Bugs still go in an issue here, so the fix is on record."

@@ -104,7 +104,7 @@ to the current directory, with `highball-db` as a sibling folder.
 
 Played something? `highball report` files the result to the open database (community reports
 already cover M4, M5 and macOS 15). The in-app **Report a Problem** button is for bugs in
-Highball itself.
+Highball itself. Questions and quick help: the [Highball Discord](https://discord.gg/WnyYpXuf67).
 
 ## Why Highball is built this way
 
