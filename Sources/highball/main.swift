@@ -390,11 +390,21 @@ struct Run: AsyncParsableCommand {
         await BottleStore.preflight(runner: runner, bottle: b) { print($0) }
         let echo: @Sendable (String) -> Void = { print($0) }
         let out: (@Sendable (String) -> Void)? = verbose ? echo : nil
+        // A Steam game launched from here gets what Play gives it: the variables its recipe
+        // scoped to it (highball#198), found from the -applaunch id. Anything else gets none.
+        let scoped: [String: String] = {
+            guard let i = arguments.firstIndex(of: "-applaunch"), i + 1 < arguments.count,
+                  let appid = Int(arguments[i + 1]) else { return [:] }
+            let db = GameDB(directories: GameDB.defaultDirectories())
+            return b.settings.environment(forGame: db[appid]?.id)
+        }()
+        if !scoped.isEmpty { print("with the game's own variables: " + scoped.keys.sorted().joined(separator: ", ")) }
         let result: LaunchResult
         if let pin = b.settings.pins.first(where: { $0.name.lowercased() == program.lowercased() }) {
             var p = pin
             if let renderer { p.renderer = renderer }
             p.arguments += arguments
+            p.environment.merge(scoped) { _, new in new }
             if p.path.lowercased().hasSuffix("steam/steam.exe") {
                 switch WineRunner.steamInvocation(clientRunning: runner.steamIsRunning(), arguments: p.arguments) {
                 case .forward:
@@ -413,7 +423,7 @@ struct Run: AsyncParsableCommand {
             }
         } else if program.contains(":") || program.contains("\\") {
             let exe = WineReparsePoint.resolve(b.resolve(windowsPath: program), driveC: b.driveC) ?? b.resolve(windowsPath: program)
-            result = try await runner.start(exe, arguments: arguments, renderer: renderer,
+            result = try await runner.start(exe, arguments: arguments, renderer: renderer, extraEnvironment: scoped,
                                             workingDirectory: exe.deletingLastPathComponent(), onOutput: out)
         } else if FileManager.default.fileExists(atPath: program) {
             let exe = URL(fileURLWithPath: program)
@@ -527,10 +537,10 @@ struct Verify: AsyncParsableCommand {
         let eng = try EngineStore().engine(b.settings.engineID)
         var library = SteamLibrary.games(in: b).filter(\.isReady)
         if !games.isEmpty { library = library.filter { games.contains($0.appid) } }
+        let db = GameDB(directories: GameDB.defaultDirectories())
         if !includeAnticheat {
             // Compliance guard: never auto-run titles with anti-cheat. Verifying those is a
             // deliberate human decision (--include-anticheat), not something a batch does.
-            let db = GameDB(directories: GameDB.defaultDirectories())
             let skipped = library.filter { db[$0.appid]?.anticheat != nil || db[$0.appid]?.isBlocked == true }
             if !skipped.isEmpty { print("skipping (anti-cheat): " + skipped.map(\.name).joined(separator: ", ")) }
             library.removeAll { db[$0.appid]?.anticheat != nil || db[$0.appid]?.isBlocked == true }
@@ -547,7 +557,9 @@ struct Verify: AsyncParsableCommand {
         for game in library {
             for r in rs {
                 do {
-                    let o = try await verifier.run(game: game, renderer: r, runSeconds: seconds) { print($0) }
+                    // The game's own scoped variables ride along, as they do from Play (highball#198).
+                    let o = try await verifier.run(game: game, renderer: r, runSeconds: seconds,
+                                                   gameEnvironment: b.settings.environment(forGame: db[game.appid]?.id)) { print($0) }
                     results.append(o)
                 } catch { print("[\(game.name)] \(r.rawValue): error \(error)") }
             }

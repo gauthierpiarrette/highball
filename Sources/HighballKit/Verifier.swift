@@ -39,7 +39,9 @@ public struct Verifier {
 
     /// Kills the bottle, launches `game` through a silent Steam under `renderer`, waits for the
     /// game process, samples the screen, and classifies the outcome.
-    public func run(game: SteamGame, renderer: Renderer, runSeconds: Int = 90, log: (@Sendable (String) -> Void)? = nil) async throws -> VerifyOutcome {
+    /// `gameEnvironment` is what the game's recipe scoped to it (highball#198), so a verdict is
+    /// taken with the variables Play would give the game, not the bottle-wide ones alone.
+    public func run(game: SteamGame, renderer: Renderer, runSeconds: Int = 90, gameEnvironment: [String: String] = [:], log: (@Sendable (String) -> Void)? = nil) async throws -> VerifyOutcome {
         // Wine processes show Windows-style command lines (backslashes); cover both separators.
         let markers = ["steamapps/common/\(game.installdir)/", "steamapps\\common\\\(game.installdir)\\"]
         func gameAlive() -> Bool {
@@ -65,7 +67,7 @@ public struct Verifier {
         let runStart = Date()
         let launch = Task {
             try await runner.start(steam, arguments: ["-silent", "-applaunch", String(game.appid)], renderer: renderer,
-                                   extraEnvironment: ["DXMT_LOG_LEVEL": "info"])
+                                   extraEnvironment: gameEnvironment.merging(["DXMT_LOG_LEVEL": "info"]) { _, new in new })
         }
 
         // Wait up to 6 minutes for the game process (cold silent Steam needs ~2 min first).
