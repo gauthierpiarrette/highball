@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.9.37</title>
+      <description><![CDATA[Closing the window with a game running no longer quits, DLL overrides restart Steam, r9 default engine with lsfg-metal 0.7.1]]></description>
+      <pubDate>Fri, 25 Sep 2026 12:42:17 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.9.37/Highball-0.9.37.zip" sparkle:version="0.9.37" sparkle:shortVersionString="0.9.37" sparkle:edSignature="qp17VdLBEv0T28OFBZc+lC8+fhUZkaSVmRLYBa2tIaRxHv+Zs49ApgJrd7yhrxMXO6aF0Roiivlgd0oaV08ADg==" length="3938915" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.9.36</title>
       <description><![CDATA[Uninstall a game from its page or its tile: Steam and the Epic tools do their own removing, so their libraries stay right. Drop an image on a tile or a game's page to set its cover. Installing runtimes and fonts now writes its own log, so a failure can be reported with what the installer actually said.]]></description>
       <pubDate>Tue, 22 Sep 2026 19:23:01 +0200</pubDate>
