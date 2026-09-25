@@ -14,7 +14,9 @@ struct LibraryView: View {
     @Environment(\.openSettings) private var openSettings
     @State private var search = ""
     @State private var sourceFilter: LibrarySource?
-    @State private var installedOnly = false
+    /// On by default: the owned Steam library (highball#199) must not change what the library
+    /// shows until someone asks for it; switching Installed off reveals owned games.
+    @State private var installedOnly = true
     @State private var verifiedOnly = false
 
     private var filtered: [LibraryItem] {

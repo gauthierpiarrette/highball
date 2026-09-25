@@ -12,6 +12,7 @@ enum L10n {
         "Frame generation (Lossless Scaling, beta)": "Génération d’images (Lossless Scaling, bêta)",
         "How frame generation works": "Comment fonctionne la génération d’images",
         "Off": "Désactivé",
+        "Steam asks where to put it.": "Steam demande où l’installer.",
         "Force vsync": "Forcer la VSync",
         "Warning": "Avertissement",
         "What this setting does": "Ce que fait ce réglage",

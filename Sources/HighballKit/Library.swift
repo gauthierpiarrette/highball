@@ -56,8 +56,11 @@ public enum LibraryIndex {
     /// Builds the unified item list. Pure: takes exactly what AppState already holds.
     /// Steam games dedup by appid across bottles — one tile per game, never per install;
     /// the primary bottle is where it was last played, then a ready copy, then name order.
+    /// `steamOwnedByBottle` adds the account's games that aren't installed anywhere
+    /// (SteamOwnedLibrary, highball#199), homed in the first bottle whose Steam owns them.
     public static func build(bottles: [Bottle],
                              steamByBottle: [String: [SteamGame]],
+                             steamOwnedByBottle: [String: [OwnedSteamGame]] = [:],
                              epicOwned: [EpicStore.Game],
                              epicInstalls: [String: String],
                              plays: [String: LibraryStore.PlayRecord] = [:]) -> [LibraryItem] {
@@ -80,13 +83,31 @@ public enum LibraryIndex {
             }!
             let acfPlayed = copies.compactMap(\.game.lastPlayed).max()
             let recorded = plays[id]?.lastPlayedAt
+            // The client's cached art when it has it (see OwnedSteamGame), the CDN otherwise.
+            let owned = steamOwnedByBottle.values.lazy.compactMap { $0.first { $0.appid == appid } }.first
             items.append(LibraryItem(
                 source: .steam, id: id, title: primary.game.name, bottleName: primary.bottle,
                 installed: primary.game.isReady, steamAppID: appid,
-                artworkTall: primary.game.capsuleImage, artworkWide: primary.game.headerImage,
+                artworkTall: owned?.localCapsule ?? primary.game.capsuleImage,
+                artworkWide: owned?.localHeader ?? primary.game.headerImage,
                 otherBottles: copies.map(\.bottle).filter { $0 != primary.bottle }.sorted(),
                 sizeOnDisk: primary.game.sizeOnDisk,
                 lastPlayed: [acfPlayed, recorded].compactMap { $0 }.max()))
+        }
+
+        // Steam games owned but not installed: one tile each, like Epic's, in the first bottle
+        // (by name) whose client lists them, where Install will hand them to Steam.
+        var ownedOnly = Set<Int>()
+        for bottle in bottles.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) {
+            for game in steamOwnedByBottle[bottle.name] ?? [] where byAppID[game.appid] == nil && !ownedOnly.contains(game.appid) {
+                ownedOnly.insert(game.appid)
+                let id = "steam:\(game.appid)"
+                items.append(LibraryItem(
+                    source: .steam, id: id, title: game.name, bottleName: bottle.name,
+                    installed: false, steamAppID: game.appid,
+                    artworkTall: game.capsuleImage, artworkWide: game.headerImage,
+                    lastPlayed: plays[id]?.lastPlayedAt))
+            }
         }
 
         // Epic: legendary installs one copy; the owning bottle is whichever drive_c
