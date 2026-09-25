@@ -152,6 +152,24 @@ public struct EngineStore: Sendable {
         return InstalledEngine(manifest: m, root: root)
     }
 
+    /// Copies facts a newer bundled manifest states about an engine into the installed copy of
+    /// that engine's manifest, so an engine installed before the fact was known behaves as the
+    /// app now knows it should (the r11 and r12 Direct3D 9 rule, highball#198). Only fields the
+    /// installed manifest does not set are written; returns the ids updated.
+    @discardableResult
+    public func adoptKnownFacts(known: [EngineManifest]) -> [String] {
+        var updated: [String] = []
+        for engine in (try? installedEngines()) ?? [] {
+            guard let fact = known.first(where: { $0.id == engine.id }) else { continue }
+            var m = engine.manifest
+            var changed = false
+            if m.direct3D9 == nil, let d9 = fact.direct3D9 { m.direct3D9 = d9; changed = true }
+            guard changed else { continue }
+            if (try? m.save(to: engine.root.appending(path: "manifest.json"))) != nil { updated.append(engine.id) }
+        }
+        return updated
+    }
+
     // MARK: Install
 
     /// Installs every component of `manifest`. Optional components are skipped unless their
@@ -438,6 +456,9 @@ public struct InstalledEngine: Sendable {
     public let root: URL
 
     public var id: String { manifest.id }
+    /// Direct3D 9 stays with Wine's own Direct3D in the automatic modes on this engine (see
+    /// `EngineManifest.direct3D9`).
+    public var direct3D9UsesWined3d: Bool { manifest.direct3D9 == "wined3d" }
     /// Short human name for UI ("Wine 10.0 (Sikarugir)" beats a manifest id).
     public var displayName: String {
         manifest.components["wine"]?.version ?? manifest.displayName

@@ -63,6 +63,14 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
     }
     public var requires: [String]?
     public var notes: [String]?
+    /// Which Direct3D 9 a game gets in the automatic modes (DXMT, D3DMetal): nil attaches DXVK's
+    /// d3d9 (the d9vk overlay) beside the Metal backend, "wined3d" leaves Direct3D 9 to Wine's
+    /// own, because on this engine that is the fast path. Measured on the Wine 11 tree: Half-Life
+    /// 2 131 fps on wined3d against 17 on DXVK's d3d9, Five Nights at Freddy's 40 fps on DXVK's
+    /// d3d9 where the Wine 10 engine gives 76 (highball#198, 2026-09-25). The explicit DXVK mode
+    /// keeps DXVK's d3d9 whatever this says: there Direct3D 9 through DXVK is the point (CS:GO
+    /// Legacy's CSM check needs it, highball#21).
+    public var direct3D9: String?
     public var components: [String: Component]
     public var baseEnv: [String: String]?
     /// License ids that gate optional renderers (e.g. `apple-gptk-license-2023-08-17` → d3dmetal).

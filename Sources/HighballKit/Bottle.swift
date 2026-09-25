@@ -93,6 +93,9 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
     /// default renderer's path, and an engine missing d9vk should still run D3D11 titles. The
     /// dxvk case keeps its hard failure, because there D3D9 is the whole point.
     private static func withD9VK(_ path: String, engine: InstalledEngine) -> String {
+        // An engine can say Direct3D 9 is faster on Wine's own (the Wine 11 tree, highball#198);
+        // then the automatic modes leave d9vk off and the explicit DXVK mode below keeps it.
+        if engine.direct3D9UsesWined3d { return path }
         guard let d9vk = engine.rendererDir("d9vk") else { return path }
         return [path, d9vk.appending(path: "wine").path].joined(separator: ":")
     }

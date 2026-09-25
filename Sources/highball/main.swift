@@ -375,6 +375,19 @@ struct PinCommand: AsyncParsableCommand {
     }
 }
 
+/// The engine manifests a repo checkout ships (`spike/engine-manifest.json`, `spike/engines/*.json`),
+/// found from the current directory as the recipe and database paths are. Facts they state
+/// about an installed engine are adopted into it before a launch, so a CLI launch matches the
+/// app's (the r11/r12 Direct3D 9 rule, highball#198). Nothing outside a checkout: no manifests.
+func adoptKnownEngineFacts() {
+    var urls = [URL(fileURLWithPath: "spike/engine-manifest.json")]
+    if let more = try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: "spike/engines"), includingPropertiesForKeys: nil) {
+        urls += more.filter { $0.pathExtension == "json" }
+    }
+    let known = urls.compactMap { try? EngineManifest.load(from: $0) }
+    if !known.isEmpty { EngineStore().adoptKnownFacts(known: known) }
+}
+
 struct Run: AsyncParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Run a program in a bottle: a pin name, a Windows path, or a Unix path.")
     @Argument var bottle: String
@@ -385,6 +398,7 @@ struct Run: AsyncParsableCommand {
 
     func run() async throws {
         let b = try BottleStore().get(bottle)
+        adoptKnownEngineFacts()
         let eng = try EngineStore().engine(b.settings.engineID)
         let runner = WineRunner(engine: eng, bottle: b)
         await BottleStore.preflight(runner: runner, bottle: b) { print($0) }
@@ -534,6 +548,7 @@ struct Verify: AsyncParsableCommand {
 
     func run() async throws {
         let b = try BottleStore().get(bottle)
+        adoptKnownEngineFacts()
         let eng = try EngineStore().engine(b.settings.engineID)
         var library = SteamLibrary.games(in: b).filter(\.isReady)
         if !games.isEmpty { library = library.filter { games.contains($0.appid) } }

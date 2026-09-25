@@ -127,7 +127,8 @@
     "Three patches make the tree behave like the default engine: the Windows user follows the macOS user (CrossOver hack 12735 reverted), WINEDLLPATH_PREPEND is honoured so the renderer overlays apply, and wined3d's automatic renderer is OpenGL first as upstream. winemac.so exports macdrv_functions, so the DXMT and D3DMetal bridges work. This engine ships no winemetal.dll of its own; the DXMT overlay carries it. Wine Mono and Gecko are included.",
     "DXMT here is Highball's branch (cross-process swapchains, DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1), needed by the EA client. D3DMetal is the Template's 3.0 with the timestamp shim in front, as on the default engine. Accepted licences carry over when a bottle moves.",
     "Moving a bottle here re-runs the Windows setup (different Wine build); moving back is the same step. Nothing installed in the bottle is removed either way.",
-    "r11, the base environment (2026-09-18): DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1 for every process. On the Wine 11 tree, browser UIs whose GPU process draws into another process's window need it or DXMT refuses the swapchain: Rockstar's sign-in then paints (verified 2026-09-05 and 2026-09-18), Battle.net's client stops crashing but its window stays black, and Steam's window comes into being where two cold starts without the flag created none, but it too stays black (measured on r10, 2026-09-18). So the flag is necessary on Wine 11 and not sufficient for Steam or Battle.net; the black browser is a separate Wine 11 problem still open."
+    "r11, the base environment (2026-09-18): DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1 for every process. On the Wine 11 tree, browser UIs whose GPU process draws into another process's window need it or DXMT refuses the swapchain: Rockstar's sign-in then paints (verified 2026-09-05 and 2026-09-18), Battle.net's client stops crashing but its window stays black, and Steam's window comes into being where two cold starts without the flag created none, but it too stays black (measured on r10, 2026-09-18). So the flag is necessary on Wine 11 and not sufficient for Steam or Battle.net; the black browser is a separate Wine 11 problem still open.",
+    "Direct3D 9 on this engine (0.9.38): in the automatic modes, DXMT and D3DMetal, a Direct3D 9 game uses Wine's own Direct3D, because DXVK's d3d9 on this tree is the slow path (Half-Life 2 131 fps on wined3d against 17 on DXVK, Five Nights at Freddy's 40 fps on DXVK against 76 with the Wine 10 engine's DXVK, measured 2026-09-24/25, highball#198). The explicit DXVK mode still gets DXVK's d3d9."
   ],
   "requires": [
     "rosetta2"
@@ -137,5 +138,6 @@
     "macos": "27.0",
     "chip": "M1 Pro",
     "result": "Installed end to end from this manifest here (every component's hash checked by the installer). Smoke on a clone of the re-w11 environment moved to this engine and repaired: The Last Flame Prologue on DXMT draws (window in 45 s, frames changing, no crash dialog), Five Nights at Freddy's (32-bit, Direct3D 9 on Wine's own Direct3D) draws, and the 32-bit game runs as one process with no start.exe in front of it, launched through Steam. Not tried on this build: DXVK, which does not start for Direct3D 9 on r11's MoltenVK either (highball#198); D3DMetal; the x87 sidecar itself, which is not shipped."
-  }
+  },
+  "direct3D9": "wined3d"
 }

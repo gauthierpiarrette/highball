@@ -611,6 +611,9 @@ final class AppState {
             let n = LogPruner.prune(directory: paths.logs)
             if n > 0 { appendLog("pruned \(n) old log file(s)") }
         }
+        // Facts a newer bundled manifest states about an installed engine reach its installed
+        // manifest here, before the engines are read (the r11/r12 Direct3D 9 rule, highball#198).
+        engineStore.adoptKnownFacts(known: Self.knownManifests)
         engines = (try? engineStore.installedEngines()) ?? []
         lsfgShimDirs = Dictionary(engines.compactMap { e in e.resolveLsfgShimDir().map { (e.id, $0) } }, uniquingKeysWith: { a, _ in a })
         bottles = (try? bottleStore.list()) ?? []
