@@ -90,7 +90,9 @@ public enum SteamRestart {
            live["WINEDLLOVERRIDES"] != wanted["WINEDLLOVERRIDES"] {
             reasons.append("it runs with different DLL overrides than the game wants")
         }
-        for key in custom.sorted() where key != "WINEDLLOVERRIDES" && !inherited.contains(where: { $0.0 == key }) && live[key] != wanted[key] {
+        // A set: a game's scoped variable arrives both in the bottle's list and in the launch's
+        // extra names, and one difference is one reason.
+        for key in Set(custom).sorted() where key != "WINEDLLOVERRIDES" && !inherited.contains(where: { $0.0 == key }) && live[key] != wanted[key] {
             switch (live[key], wanted[key]) {
             case (nil, let want?): reasons.append("it runs without \(key)=\(want)")
             case (let have?, nil): reasons.append("it runs with \(key)=\(have) and the game does not set it")
@@ -139,12 +141,14 @@ extension WineRunner {
     /// process working in a game folder): a wrong environment beats killing someone's game. That
     /// case comes back as `.kept` so the caller can say so; silently launching under the client's
     /// stack cost highball-db#48 six rounds, the game ran on DXMT while every log said D3DMetal.
-    public func restartSteamIfMismatched(renderer: Renderer?, mayRestart: Bool = true) async throws -> SteamRestart.Outcome {
+    public func restartSteamIfMismatched(renderer: Renderer?, extraEnvironment: [String: String] = [:], mayRestart: Bool = true) async throws -> SteamRestart.Outcome {
         guard let live = runningSteamEnvironment() else { return .noClient }
-        let wanted = try bottle.environment(engine: engine, renderer: renderer)
+        let wanted = try bottle.environment(engine: engine, renderer: renderer, extra: extraEnvironment)
+        // Every game's scoped variables count, not only this game's: a client started for the
+        // Sims carries MVK_SHADOW_IMPORT=1, and the next game must not inherit it (highball#198).
         guard let why = SteamRestart.reason(live: live, wanted: wanted,
                                             wantedRenderer: (renderer ?? bottle.settings.renderer).rawValue,
-                                            custom: Array(bottle.settings.environment.keys)) else { return .serves }
+                                            custom: bottle.settings.customEnvironmentKeys + Array(extraEnvironment.keys)) else { return .serves }
         if !mayRestart || steamGameIsRunning() { return .kept(why, live: SteamRestart.rendererName(ofLive: live)) }
         try await stopSteam()
         return .restarted(why)

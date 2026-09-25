@@ -507,7 +507,16 @@ public struct RecipeRunner: Sendable {
                 try Shell.capture("/bin/bash", [wt.path, "--unattended"] + verbs, env: env, log: logURL,
                                   logHeader: "# highball winetricks \(verbs.joined(separator: " ")) bottle=\(bottle.name) engine=\(engine.id)")
             case let .environment(name, value):
-                bottle.settings.environment[name] = value
+                // A game's variable is the game's: bottle-wide it reached every other program
+                // (the Sims' MVK_SHADOW_IMPORT=1 broke DXVK's Direct3D 9 for every game on the
+                // Wine 11 engines, highball#198). Launchers and tweaks keep the bottle-wide
+                // scope: a launcher's variable is for the client and what it starts.
+                if recipe.kind == .game {
+                    bottle.settings.gameEnvironment[recipe.id, default: [:]][name] = value
+                    if bottle.settings.environment[name] == value { bottle.settings.environment.removeValue(forKey: name) }
+                } else {
+                    bottle.settings.environment[name] = value
+                }
             case let .renderer(r):
                 bottle.settings.renderer = r
             case let .sync(m):
@@ -534,6 +543,11 @@ public struct RecipeRunner: Sendable {
                 log?("copied \(source.lastPathComponent) from the engine to \(to)\(asNative ? " as a native DLL" : "")")
             case let .pin(p):
                 if !bottle.settings.pins.contains(where: { $0.path == p.path }) { bottle.settings.pins.append(p) }
+                // The pin is how this game is launched, so the game's variables ride the pin.
+                if recipe.kind == .game, let scoped = bottle.settings.gameEnvironment[recipe.id], !scoped.isEmpty,
+                   let i = bottle.settings.pins.firstIndex(where: { $0.path == p.path }) {
+                    bottle.settings.pins[i].environment.merge(scoped) { _, new in new }
+                }
             case let .note(t):
                 notes.append(t)
             case let .dllOverride(v):
@@ -549,6 +563,7 @@ public struct RecipeRunner: Sendable {
         try bottle.save()
         return notes
     }
+
 
     private func downloadUnverified(_ url: URL) async throws -> URL {
         try paths.ensure()
@@ -589,5 +604,25 @@ public extension Recipe {
     func engineUnknown(current: EngineManifest, known: [EngineManifest]) -> String? {
         guard let id = engine, current.id != id, !known.contains(where: { $0.id == id }) else { return nil }
         return id
+    }
+}
+
+public extension Recipe {
+    /// Moves the variables a game recipe set bottle-wide, before scoping existed, to that game.
+    /// A bottle set up before 0.9.38 carries the recipe's variable in `environment` with the
+    /// recipe's exact value; it moves to `gameEnvironment[recipe.id]` and leaves the bottle-wide
+    /// list, so the next launch of any other game runs without it. A value the owner changed by
+    /// hand is not the recipe's and stays. Returns the names moved, in order, empty when nothing
+    /// was there to move, so a caller can save and say so only when something changed.
+    static func scopeLeakedEnvironment(of recipe: Recipe, in settings: inout BottleSettings) -> [String] {
+        guard recipe.kind == .game else { return [] }
+        var moved: [String] = []
+        for step in recipe.steps {
+            guard case let .environment(name, value) = step, settings.environment[name] == value else { continue }
+            settings.environment.removeValue(forKey: name)
+            settings.gameEnvironment[recipe.id, default: [:]][name] = value
+            moved.append(name)
+        }
+        return moved
     }
 }

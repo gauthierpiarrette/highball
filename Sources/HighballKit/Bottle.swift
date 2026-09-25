@@ -376,11 +376,30 @@ public struct BottleSettings: Codable, Sendable {
     /// is deleted, and the delete confirmation says so.
     public var keepFilesInside: Bool = false
     public var environment: [String: String] = [:]
+    /// Variables a game's recipe sets for that one game's launches, keyed by the recipe's id (the
+    /// db row's id). A recipe's environment step used to land in `environment` and reach every
+    /// program in the bottle: the Sims recipe's MVK_SHADOW_IMPORT=1 then broke DXVK's Direct3D 9
+    /// for every other game on the Wine 11 engines (highball#198). Merged into the launch after
+    /// `environment`, for the game the recipe is for and nothing else.
+    public var gameEnvironment: [String: [String: String]] = [:]
     public var pins: [Pin] = []
     public var recipes: [String] = []
     public var created: Date = Date()
 
-    enum CodingKeys: String, CodingKey { case formatVersion, name, engineID, renderer, rendererExplicit, windowsVersion, sync, metalHUD, advertiseAVX, dxvkAsync, fpsCap, frameGen, frameGenAdaptive, frameGenFlowScale, frameGenPerformance, frameGenForceVsync, commandIsControl, commandIsControlSynced, dpiScale, dllOverrides, dxvkAppConfig, dllOverridesSynced, keepFilesInside, environment, pins, recipes, created }
+    enum CodingKeys: String, CodingKey { case formatVersion, name, engineID, renderer, rendererExplicit, windowsVersion, sync, metalHUD, advertiseAVX, dxvkAsync, fpsCap, frameGen, frameGenAdaptive, frameGenFlowScale, frameGenPerformance, frameGenForceVsync, commandIsControl, commandIsControlSynced, dpiScale, dllOverrides, dxvkAppConfig, dllOverridesSynced, keepFilesInside, environment, gameEnvironment, pins, recipes, created }
+
+    /// The variables `gameID`'s recipe scoped to it; empty for a game without any, or with no id.
+    public func environment(forGame gameID: String?) -> [String: String] {
+        gameID.flatMap { gameEnvironment[$0] } ?? [:]
+    }
+
+    /// Every variable name a launch in this bottle can carry beyond the engine's own: the
+    /// bottle-wide ones and every game's scoped ones. A running Steam client started for one game
+    /// carries that game's variables, and the next game must not inherit them, so the restart
+    /// rule compares all of these names, not only the bottle-wide ones.
+    public var customEnvironmentKeys: [String] {
+        Array(Set(environment.keys).union(gameEnvironment.values.flatMap(\.keys)))
+    }
 
     public init(name: String, engineID: String) {
         self.name = name
@@ -422,6 +441,7 @@ public struct BottleSettings: Codable, Sendable {
         commandIsControl = try c.decodeIfPresent(Bool.self, forKey: .commandIsControl) ?? true
         commandIsControlSynced = try c.decodeIfPresent(Bool.self, forKey: .commandIsControlSynced)
         environment = try c.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
+        gameEnvironment = try c.decodeIfPresent([String: [String: String]].self, forKey: .gameEnvironment) ?? [:]
         pins = try c.decodeIfPresent([Pin].self, forKey: .pins) ?? []
         recipes = try c.decodeIfPresent([String].self, forKey: .recipes) ?? []
         created = try c.decodeIfPresent(Date.self, forKey: .created) ?? Date()

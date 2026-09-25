@@ -275,7 +275,7 @@ public struct WineRunner: Sendable {
         let wanted = try bottle.environment(engine: engine, renderer: renderer, extra: extraEnvironment)
         guard let why = SteamRestart.reason(live: live, wanted: wanted,
                                             wantedRenderer: (renderer ?? bottle.settings.renderer).rawValue,
-                                            custom: Array(bottle.settings.environment.keys)) else { return nil }
+                                            custom: bottle.settings.customEnvironmentKeys + Array(extraEnvironment.keys)) else { return nil }
         guard ProcessTable.isIdle(prefix: bottle.url) else {
             return "the environment's Windows services keep the stack they started with (\(why)); a program is still running, so the environment was not restarted"
         }

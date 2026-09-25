@@ -258,7 +258,21 @@ final class AppState {
     /// other mode"); nil lets the row and the environment decide.
     func play(_ item: LibraryItem, renderer: Renderer? = nil) {
         guard let bottleName = item.bottleName,
-              let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
+              let found = bottles.first(where: { $0.name == bottleName }) else { return }
+        var bottle = found
+        // A game whose recipe was applied before variables were scoped still has them bottle-wide,
+        // where every other program inherits them (highball#198). Move them to the game once; the
+        // launch below then carries them for this game only, and the log says what moved.
+        if let recipe = fixRecipe(for: item), bottle.settings.recipes.contains(recipe.id) {
+            var settings = bottle.settings
+            let moved = HighballKit.Recipe.scopeLeakedEnvironment(of: recipe, in: &settings)
+            if !moved.isEmpty {
+                bottle.settings = settings
+                try? bottle.save()
+                appendLog("\(item.title): \(moved.joined(separator: ", ")) now applies to this game only, not to everything in \(bottle.name).")
+                refresh()
+            }
+        }
         // The mode this launch will run with, whoever chose it: the caller, the row (unless the
         // environment's mode is an explicit choice), a pinned program's own, or the environment.
         // An engine that cannot run it must not be found out by Wine (#61: a fix recipe had set
@@ -1761,6 +1775,8 @@ final class AppState {
         let renderer = preferred ?? (bottle.settings.rendererExplicit ? nil : entry?.effectiveRenderer())
         // Per-game launch args ride the db (e.g. windowed for legacy CS:GO on macOS 26, #21).
         let extraArgs = entry?.effectiveLaunchArgs() ?? []
+        // The variables this game's recipe scoped to it (highball#198); other games get none of them.
+        let gameEnvironment = bottle.settings.environment(forGame: entry?.id)
         let markers = SessionWatch.markers(installdir: game.installdir)
         // The busy sheet covers the start only: Steam's client outlives the game and its launch
         // call says nothing about it, so the game's own processes decide when "starting" ends
@@ -1776,7 +1792,7 @@ final class AppState {
             // the game runs on the client's stack, and a report must not claim otherwise.
             var headerNote: String?
             var served = renderer ?? bottle.settings.renderer
-            switch try await runner.restartSteamIfMismatched(renderer: renderer, mayRestart: !sessionRuns(in: bottle)) {
+            switch try await runner.restartSteamIfMismatched(renderer: renderer, extraEnvironment: gameEnvironment, mayRestart: !sessionRuns(in: bottle)) {
             case .restarted(let why):
                 await MainActor.run { self.appendLog("Restarting Steam before \(game.name): \(why).") }
             case .kept(let why, let live):
@@ -1792,7 +1808,7 @@ final class AppState {
             let box = LaunchOutcome()
             let log = logLine(box)
             watchedLaunch(box) {
-                try await runner.start(steam, arguments: ["-silent", "-applaunch", String(game.appid)] + extraArgs, renderer: renderer, headerNote: note, onOutput: log)
+                try await runner.start(steam, arguments: ["-silent", "-applaunch", String(game.appid)] + extraArgs, renderer: renderer, extraEnvironment: gameEnvironment, headerNote: note, onOutput: log)
             }
             let handedOff = try await awaitHandoff(box, program: game.name, timeout: 360, exitEndsWait: false) {
                 SessionWatch.isAlive(markers: markers, ps: await Self.processList())
@@ -2040,9 +2056,11 @@ final class AppState {
                     appendLog("\(game.app_title): this build has no EpicGamesLauncher.exe stand-in, the Rockstar launcher may not accept the Epic copy")
                 }
             }
+            // The variables this game's recipe scoped to it (highball#198), on top of Legendary's.
+            let gameEnvironment = bottle.settings.environment(forGame: gameDB.byEpicAppName[game.app_name]?.id)
             watchedLaunch(box) {
                 try await runner.start(executable, arguments: arguments,
-                                       renderer: renderer, extraEnvironment: info.environment,
+                                       renderer: renderer, extraEnvironment: info.environment.merging(gameEnvironment) { _, new in new },
                                        workingDirectory: info.workingDirectory, onOutput: log)
             }
             let markers = SessionWatch.markers(executable: info.executable)
