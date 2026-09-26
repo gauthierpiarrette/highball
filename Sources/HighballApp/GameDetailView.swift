@@ -251,6 +251,22 @@ struct GameDetailView: View {
                             }
                         }
                         row(L("Engine"), (state.engine(for: bottle)?.displayName).map { "\($0) · \(bottle.settings.engineID)" } ?? bottle.settings.engineID)
+                        // Variables a fix scoped to this game (highball#198): the environment's own
+                        // editor shows only the environment-wide ones, so the page says what this
+                        // game gets on top of them.
+                        let scoped = bottle.settings.environment(forGame: entry?.id)
+                        if !scoped.isEmpty {
+                            HStack(alignment: .top, spacing: 12) {
+                                Text(L("This game's variables")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    ForEach(scoped.keys.sorted(), id: \.self) { key in
+                                        Text("\(key)=\(scoped[key] ?? "")").font(.callout.monospaced()).textSelection(.enabled)
+                                    }
+                                    Text(L("Set by this game's fix, applied to its launches only."))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(L("Environment")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
                             Text(bottle.name).font(.callout)
