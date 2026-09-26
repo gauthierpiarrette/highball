@@ -33,6 +33,9 @@ enum L10n {
         "This engine has no usable frame generation component. Build or install the component for this engine.": "Ce moteur ne dispose pas d’un composant de génération d’images utilisable. Compilez ou installez le composant pour ce moteur.",
         "The real MoltenVK override is unusable. Use a readable driver with a different filename from libMoltenVK.dylib.": "Le chemin personnalisé du véritable pilote MoltenVK est inutilisable. Utilisez un pilote lisible dont le nom diffère de libMoltenVK.dylib.",
         "The shader DLL override is not a readable file. Correct LSFGM_DLL_PATH or remove the override.": "Le chemin personnalisé de la DLL de shaders ne désigne pas un fichier lisible. Corrigez LSFGM_DLL_PATH ou supprimez cette valeur.",
+        "Use a Lossless Scaling DLL from elsewhere…": "Utiliser une DLL Lossless Scaling située ailleurs…",
+        "Choose lsfg-vk.dll from a Lossless Scaling install on its lsfg-vk beta branch": "Choisissez lsfg-vk.dll dans une installation de Lossless Scaling sur sa branche bêta lsfg-vk",
+        "Clear": "Effacer",
         "Install Lossless Scaling from Steam in any environment and select its lsfg-vk beta branch (Properties → Betas), or point LSFGM_DLL_PATH at its lsfg-vk.dll.": "Installez Lossless Scaling depuis Steam dans n'importe quel environnement et sélectionnez sa branche bêta lsfg-vk (Propriétés → Bêtas), ou faites pointer LSFGM_DLL_PATH vers son lsfg-vk.dll.",
         // Sidebar & shell
         "Update engine": "Mettre à jour le moteur",

@@ -1,5 +1,7 @@
+import AppKit
 import HighballKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Design tokens
 
@@ -391,6 +393,20 @@ struct BottleSettingsSheet: View {
                         case .off:
                             EmptyView()
                         }
+                        // The shader DLL is a plain file, so a copy of Lossless Scaling in another Wine
+                        // setup (CrossOver, a second account) serves as well as one installed here. A
+                        // picker beats typing LSFGM_DLL_PATH by hand (discussion #196).
+                        if liveBottle.settings.frameGen > 1 {
+                            HStack(spacing: 8) {
+                                Button(L("Use a Lossless Scaling DLL from elsewhere…")) { chooseFrameGenDLL() }
+                                    .controlSize(.small)
+                                if let override = liveBottle.settings.environment["LSFGM_DLL_PATH"], !override.isEmpty {
+                                    Text(override).font(.caption).foregroundStyle(.secondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                    Button(L("Clear")) { setFrameGenDLL(nil) }.buttonStyle(.link).controlSize(.small)
+                                }
+                            }
+                        }
                     }
                     Toggle(L("Metal performance HUD"), isOn: binding(\.metalHUD))
                     Toggle(L("DXVK async shader compilation (experimental — can skip draws while a shader compiles)"), isOn: binding(\.dxvkAsync))
@@ -512,6 +528,25 @@ struct BottleSettingsSheet: View {
         } message: {
             Text(L("Lossless Scaling inserts interpolated frames between the game's real frames to make motion look smoother.\n\nBy default the generated frames are paced to your display, so it never presents more than your screen's refresh rate. It therefore helps most when a game runs BELOW your refresh rate, for example a demanding game locked at 30 fps smoothed up to 60. On the built-in 60 Hz display a game already running above 60 is capped to 60 and feels worse, not better. It pays off on an external high-refresh monitor (120 Hz or more), where a 60 fps game becomes 120.\n\nIt also adds a little input lag, because a real frame is held back to interpolate.\n\nIt works with every graphics mode: DXVK and vkd3d-proton through Vulkan, DXMT and D3DMetal through Metal, and WineD3D on its own renderer, OpenGL or Vulkan.\n\nAfter changing any of these settings, stop the environment and relaunch so a Steam game picks up the new one.\n\nThis is a beta feature: some games may show artifacts, stutter or not start with it on. Turn it off if a game misbehaves.\n\nClick the ⓘ beside each setting to see what that one does."))
         }
+    }
+
+    /// Picks lsfg-vk.dll wherever it lives and records it as the environment's LSFGM_DLL_PATH,
+    /// the same variable the environment editor accepts by hand.
+    private func chooseFrameGenDLL() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if let dll = UTType(filenameExtension: "dll") { panel.allowedContentTypes = [dll] }
+        panel.message = L("Choose lsfg-vk.dll from a Lossless Scaling install on its lsfg-vk beta branch")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        setFrameGenDLL(url.path)
+    }
+
+    private func setFrameGenDLL(_ path: String?) {
+        var copy = state.bottles.first { $0.name == bottle.name } ?? bottle
+        if let path { copy.settings.environment["LSFGM_DLL_PATH"] = path }
+        else { copy.settings.environment.removeValue(forKey: "LSFGM_DLL_PATH") }
+        Task { @MainActor in state.update(copy) }
     }
 
     private func binding<T>(_ keyPath: WritableKeyPath<BottleSettings, T>) -> Binding<T> {
