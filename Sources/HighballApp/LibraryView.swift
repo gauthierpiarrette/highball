@@ -14,15 +14,18 @@ struct LibraryView: View {
     @Environment(\.openSettings) private var openSettings
     @State private var search = ""
     @State private var sourceFilter: LibrarySource?
-    /// On by default: the owned Steam library (highball#199) must not change what the library
+    /// On by default so the owned Steam library (highball#199) doesn't change what the library
     /// shows until someone asks for it; switching Installed off reveals owned games.
     @State private var installedOnly = true
+    /// Until the chip is touched, Installed hides only Steam's owned-only games: Epic's owned
+    /// games keep showing as they always have (#205). Once touched it applies to every source.
+    @State private var installedTouched = false
     @State private var verifiedOnly = false
 
     private var filtered: [LibraryItem] {
         state.libraryItems.filter { item in
             if let sourceFilter, item.source != sourceFilter { return false }
-            if installedOnly && !item.installed { return false }
+            if installedOnly && !item.installed && (installedTouched || item.source == .steam) { return false }
             if verifiedOnly {
                 guard state.gameDB.entry(for: item)?.status == "verified-local" else { return false }
             }
@@ -92,7 +95,7 @@ struct LibraryView: View {
             FilterChip(label: "Epic", on: sourceFilter == .epic) { sourceFilter = .epic }
             FilterChip(label: L("Programs"), on: sourceFilter == .pin) { sourceFilter = .pin }
             Divider().frame(height: 16)
-            FilterChip(label: L("Installed"), on: installedOnly) { installedOnly.toggle() }
+            FilterChip(label: L("Installed"), on: installedOnly) { installedOnly.toggle(); installedTouched = true }
             FilterChip(label: L("Verified"), on: verifiedOnly) { verifiedOnly.toggle() }
             Spacer()
         }
