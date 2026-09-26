@@ -16,6 +16,12 @@ struct GameDetailView: View {
     private var entry: GameDBEntry? { state.gameDB.entry(for: item) }
     private var bottle: Bottle? { item.bottleName.flatMap { name in state.bottles.first { $0.name == name } } }
     private var blocked: Bool { entry?.isBlocked == true }
+    /// Steam already has an appmanifest for it (downloading or updating), as opposed to a game
+    /// that is only owned.
+    private var steamHasManifest: Bool {
+        guard let name = item.bottleName, let appid = item.steamAppID else { return false }
+        return state.gamesByBottle[name]?.contains { $0.appid == appid } == true
+    }
     private var fixRecipe: HighballKit.Recipe? { state.fixRecipe(for: item) }
     private var fixApplied: Bool {
         guard let fixRecipe, let bottle else { return false }
@@ -137,6 +143,11 @@ struct GameDetailView: View {
                 Button(L("Install")) { state.install(item) }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                     .disabled(state.busy)
                 Text(String(format: L("Installs into %@."), state.defaultBottle?.name ?? L("your environment"))).font(.callout).foregroundStyle(.secondary)
+            } else if item.source == .steam, !steamHasManifest {
+                // Owned, never installed here (highball#199): Steam's own dialog takes it from here.
+                Button(L("Install")) { state.install(item) }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
+                    .disabled(state.busy)
+                Text(L("Steam asks where to put it.")).font(.callout).foregroundStyle(.secondary)
             } else if item.source == .steam {
                 Text(L("Not downloaded yet. Install it from the Steam window.")).font(.callout).foregroundStyle(.secondary)
                 if let b = bottle ?? state.defaultBottle { Button(L("Open Steam")) { state.showSteam(in: b) }.controlSize(.large) }

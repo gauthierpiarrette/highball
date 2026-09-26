@@ -22,6 +22,8 @@ final class AppState {
     /// before opening the window; the TabView binds its selection to it.
     var settingsTab: SettingsTab = .environments
     var gamesByBottle: [String: [SteamGame]] = [:]
+    /// The Steam account's games per bottle, installed or not (SteamOwnedLibrary, highball#199).
+    var steamOwnedByBottle: [String: [OwnedSteamGame]] = [:]
     var gameDB = GameDB(directories: [])
 
     // Long-running work
@@ -236,6 +238,7 @@ final class AppState {
 
     func rebuildLibrary() {
         libraryItems = LibraryIndex.build(bottles: bottles, steamByBottle: gamesByBottle,
+                                          steamOwnedByBottle: steamOwnedByBottle,
                                           epicOwned: epicOwned, epicInstalls: epicInstalls,
                                           plays: libraryPlays)
         if let deferred = deferredPlayLink { resolvePlayLink(deferred.request) }
@@ -380,9 +383,55 @@ final class AppState {
         }
     }
 
-    /// Epic-only today: installs into the item's resolved bottle, else the selected one,
-    /// else the first — a menu in the detail view refines it, never a modal prerequisite.
+    /// Reads each bottle's owned Steam games off the main thread: appinfo.vdf runs to megabytes
+    /// on a large library. Only a full refresh does this; the library changes rarely.
+    func steamOwnedRefresh() {
+        let bottles = self.bottles
+        Task.detached { [weak self] in
+            let owned = Dictionary(bottles.map { ($0.name, SteamOwnedLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
+            await MainActor.run {
+                guard let self, owned != self.steamOwnedByBottle else { return }
+                self.steamOwnedByBottle = owned
+                self.rebuildLibrary()
+            }
+        }
+    }
+
+    @ObservationIgnored private var steamLibrarySignatures: [String: String] = [:]
+
+    func steamLibraryMayHaveChanged(_ bottle: String, signature: String) {
+        guard steamLibrarySignatures[bottle] != signature else { return }
+        steamLibrarySignatures[bottle] = signature
+        steamOwnedRefresh()
+    }
+
+    /// Hands an owned Steam game to its bottle's Steam, whose own dialog asks where to put it:
+    /// a running client takes the steam:// URL; otherwise Steam starts as its pin does (with
+    /// the sync its window needs) and receives it as an argument. Nothing is automated.
+    func installSteamGame(_ item: LibraryItem) {
+        guard item.source == .steam, let appid = item.steamAppID,
+              let bottle = item.bottleName.flatMap({ name in bottles.first { $0.name == name } }) ?? defaultBottle,
+              let engine = engine(for: bottle) else { return }
+        let url = "steam://install/\(appid)"
+        appendLog("\(item.title): asking Steam to install it (\(url))")
+        let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
+        // The recipe's own Steam pin carries the environment Steam's window needs (sync off);
+        // a plain one stands in when the bottle has none.
+        let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
+        var pin = bottle.settings.pins.first(where: isSteamUI)
+            ?? Pin(name: "Steam", path: Pin.storagePath(for: steam, driveC: bottle.driveC))
+        pin.arguments.append(url)
+        Task { [weak self] in
+            if (try? await runner.forwardToRunningSteam([url])) == nil {
+                self?.launch(pin: pin, in: bottle)
+            }
+        }
+    }
+
+    /// Epic installs into the item's resolved bottle, else the selected one, else the first — a
+    /// menu in the detail view refines it, never a modal prerequisite. Steam hands off to Steam.
     func install(_ item: LibraryItem) {
+        if item.source == .steam { installSteamGame(item); return }
         guard item.source == .epic,
               let game = epicOwned.first(where: { $0.app_name == item.epicAppName }) else { return }
         guard let target = item.bottleName.flatMap({ name in bottles.first { $0.name == name } }) ?? defaultBottle else { return }
@@ -636,6 +685,7 @@ final class AppState {
         libraryPlays = libraryStore.load()
         libraryOverrides = libraryStore.rendererOverrides()
         rebuildLibrary()
+        steamOwnedRefresh()
         epicRefresh()
         maybeAutoUpdateEngine()
         if gameDB.byAppID.isEmpty {
@@ -1416,6 +1466,9 @@ final class AppState {
                         await MainActor.run { [self] in self.restartHungFirstStart(bottle) }
                         continue
                     }
+                    // The owned library fills in as the client loads it after sign-in (highball#199).
+                    let signature = SteamOwnedLibrary.signature(steamRoot: root)
+                    await MainActor.run { [self] in self.steamLibraryMayHaveChanged(bottle.name, signature: signature) }
                     // Steam can park a launch on a dialog nobody sees (issue #74).
                     if let waiting = SteamGameAction.pending(steamRoot: root) {
                         await MainActor.run { [self] in self.steamIsWaitingForAnAnswer(waiting, in: bottle) }
