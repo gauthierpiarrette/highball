@@ -56,7 +56,12 @@ struct LibraryView: View {
                                     LibraryTile(item: item, entry: entry(for: item), width: 128)
                                 }
                             }
+                            // Room inside the clip for a hovered tile's scale, stroke and shadow,
+                            // which the scroll view cut off at the top (2026-09-26). The negative
+                            // padding outside keeps the row where it was.
+                            .padding(.vertical, 14).padding(.horizontal, 10)
                         }
+                        .padding(.vertical, -14).padding(.horizontal, -10)
                     }
                 }
                 VStack(alignment: .leading, spacing: 12) {
