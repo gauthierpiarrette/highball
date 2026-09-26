@@ -32,6 +32,42 @@ public enum EnvText {
     }
 }
 
+public extension EnvText {
+    /// The entries of an environment that read as Wine DLL overrides typed into the wrong box: a
+    /// lowercase name (a DLL, never a variable) with an override order for a value, "winhttp=n,b"
+    /// or "mfplat=". Wine reads overrides from WINEDLLOVERRIDES and the registry only, so a
+    /// variable named winhttp does nothing, and two reporters set one in a day (highball#202, #203).
+    static func dllOverrideLookalikes(in environment: [String: String]) -> [(key: String, value: String)] {
+        environment.filter { key, value in
+            key == key.lowercased()
+                && value.trimmingCharacters(in: .whitespaces)
+                    .range(of: "^((n|b|native|builtin)(,(n|b|native|builtin))?|d|disabled)?$", options: .regularExpression) != nil
+        }
+        .sorted { $0.key < $1.key }
+        .map { (key: $0.key, value: $0.value) }
+    }
+}
+
+public extension BottleSettings {
+    /// Moves the override lookalikes of `environment` into `dllOverrides`, where Wine reads them.
+    /// Returns what moved, "name=order" each, in name order.
+    @discardableResult
+    mutating func adoptDllOverrideLookalikes() -> [String] {
+        let moved = EnvText.dllOverrideLookalikes(in: environment)
+        guard !moved.isEmpty else { return [] }
+        var parts = dllOverrides.split(separator: ";").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        var names: [String] = []
+        for entry in moved {
+            environment.removeValue(forKey: entry.key)
+            let text = "\(entry.key)=\(entry.value.trimmingCharacters(in: .whitespaces))"
+            if !parts.contains(text) { parts.append(text) }
+            names.append(text)
+        }
+        dllOverrides = parts.joined(separator: ";")
+        return names
+    }
+}
+
 /// Launch logs by name: "<stamp>-<environment>-<executable>.log", "-2.log" when two launches
 /// share a second. The stamp sorts, so the newest name is the newest launch.
 public enum LaunchLogs {

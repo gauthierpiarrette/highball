@@ -700,6 +700,11 @@ struct PinSettingsSheet: View {
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
                 Text(L("One KEY=VALUE per line, applied only to this program."))
                     .font(.caption).foregroundStyle(.secondary)
+                let lookalikes = EnvText.dllOverrideLookalikes(in: EnvText.parse(envText).environment)
+                if !lookalikes.isEmpty {
+                    Text(DllOverrideHint.text(for: lookalikes)).font(.caption).foregroundStyle(HB.amber)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Picker(L("Renderer"), selection: $pin.renderer) {
                 Text(L("Environment default")).tag(Renderer?.none)
@@ -741,6 +746,7 @@ struct EnvEditor: View {
     let bottle: Bottle
     @State private var text: String = ""
     @State private var ignored: [String] = []
+    @State private var lookalikes: [(key: String, value: String)] = []
     @State private var loaded = false
 
     var body: some View {
@@ -752,20 +758,45 @@ struct EnvEditor: View {
             if !ignored.isEmpty {
                 Text(L("Ignored, not KEY=VALUE: ") + ignored.joined(separator: ", ")).font(.caption).foregroundStyle(HB.amber)
             }
+            // A DLL override typed here as a variable never reaches Wine (highball#202, #203).
+            if !lookalikes.isEmpty {
+                Text(DllOverrideHint.text(for: lookalikes)).font(.caption).foregroundStyle(HB.amber)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(L("Move to DLL overrides")) {
+                    var copy = state.bottles.first { $0.name == bottle.name } ?? bottle
+                    copy.settings.adoptDllOverrideLookalikes()
+                    state.update(copy)
+                    text = EnvText.text(for: copy.settings.environment)
+                }
+                .controlSize(.small)
+            }
         }
         .onAppear {
             guard !loaded else { return }
             loaded = true
-            text = EnvText.text(for: (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.environment)
+            let live = (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.environment
+            text = EnvText.text(for: live)
+            lookalikes = EnvText.dllOverrideLookalikes(in: live)
         }
         .onChange(of: text) { _, newValue in
             let parsed = EnvText.parse(newValue)
             ignored = parsed.ignored
+            lookalikes = EnvText.dllOverrideLookalikes(in: parsed.environment)
             var copy = state.bottles.first { $0.name == bottle.name } ?? bottle
             guard copy.settings.environment != parsed.environment else { return }
             copy.settings.environment = parsed.environment
             state.update(copy)
         }
+    }
+}
+
+/// The one sentence both variable editors show under a DLL override typed as a variable.
+enum DllOverrideHint {
+    static func text(for entries: [(key: String, value: String)]) -> String {
+        let names = entries.map { "\($0.key)=\($0.value)" }.joined(separator: ", ")
+        return names + " " + (entries.count == 1
+            ? L("looks like a DLL override. Wine reads those only from the DLL overrides field, so as a variable it does nothing.")
+            : L("look like DLL overrides. Wine reads those only from the DLL overrides field, so as variables they do nothing."))
     }
 }
 

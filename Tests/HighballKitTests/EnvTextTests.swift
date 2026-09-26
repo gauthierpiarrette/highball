@@ -24,6 +24,23 @@ final class EnvTextTests: XCTestCase {
         XCTAssertEqual(WineRunner.dllOverridesIgnored(""), [])
     }
 
+    func testDllOverrideLookalikesAmongVariables() {
+        // Lowercase name plus an override order reads as a DLL override, whatever the box (highball#202, #203).
+        let env = ["winhttp": "n,b", "mfplat": "", "MVK_SHADOW_IMPORT": "1", "DXMT_METAL_HUD": "", "d3d11": "native", "path": "C:\\x"]
+        XCTAssertEqual(EnvText.dllOverrideLookalikes(in: env).map { "\($0.key)=\($0.value)" }, ["d3d11=native", "mfplat=", "winhttp=n,b"])
+        XCTAssertEqual(EnvText.dllOverrideLookalikes(in: ["WINEDEBUG": "-all"]).count, 0)
+    }
+
+    func testAdoptingLookalikesMovesThemIntoTheDllOverridesField() {
+        var s = BottleSettings(name: "t", engineID: "e")
+        s.dllOverrides = "version=n,b"
+        s.environment = ["winhttp": "n,b", "MVK_SHADOW_IMPORT": "1", "version": "n,b"]
+        XCTAssertEqual(s.adoptDllOverrideLookalikes(), ["version=n,b", "winhttp=n,b"])
+        XCTAssertEqual(s.dllOverrides, "version=n,b;winhttp=n,b")
+        XCTAssertEqual(s.environment, ["MVK_SHADOW_IMPORT": "1"])
+        XCTAssertEqual(s.adoptDllOverrideLookalikes(), [])
+    }
+
     func testNewestLaunchLogByName() {
         let names = ["2026-09-11T154113Z-Gaming-steam.exe.log", "2026-09-11T153459Z-Gaming-steam.exe.log",
                      "2026-09-11T154110Z-Gaming-reg.exe.log", "2026-09-11T160000Z-cx-steam-steam.exe.log",
