@@ -23,6 +23,7 @@ let package = Package(
             name: "HighballApp",
             dependencies: ["HighballKit", .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/HighballApp",
+            resources: [.process("Resources")],
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
         .testTarget(name: "HighballKitTests", dependencies: ["HighballKit"], path: "Tests/HighballKitTests"),
     ]

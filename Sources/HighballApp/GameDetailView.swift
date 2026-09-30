@@ -6,7 +6,6 @@ import HighballKit
 struct GameDetailView: View {
     @Environment(AppState.self) private var state
     let passedItem: LibraryItem
-    @State private var showBottleSettings = false
     @State private var coverDropTargeted = false
     /// The live row: after an install, a delete or a rename, the passed-in copy goes stale.
     private var item: LibraryItem { state.libraryItems.first { $0.id == passedItem.id } ?? passedItem }
@@ -44,20 +43,19 @@ struct GameDetailView: View {
                 hero
                 if let macBuild { macBlock(macBuild) }
                 verdictBlock
+                if showWhy { whyExplanation.frame(maxWidth: .infinity, alignment: .leading).hbPanel() }
                 playRow
                 if item.installed, !blocked { willDoCard }
                 advanced
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 28).padding(.vertical, 20)
-            .frame(maxWidth: 680, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 840, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .background(BottleBackdrop())
         .navigationTitle(item.title)
-        .sheet(isPresented: $showBottleSettings) {
-            if let bottle { BottleSettingsSheet(bottle: bottle) }
-        }
+
     }
 
     // MARK: Pieces
@@ -66,7 +64,7 @@ struct GameDetailView: View {
         ZStack(alignment: .bottomLeading) {
             Color.clear
                 .aspectRatio(460 / 215, contentMode: .fit)
-                .frame(maxWidth: 640)
+                .frame(maxWidth: 800)
                 .overlay {
                     // A chosen cover wins here as it does on the tile (#64: it never reached
                     // the page, which read the store's artwork only).
@@ -87,7 +85,7 @@ struct GameDetailView: View {
                 }
                 .clipped()
             LinearGradient(colors: [.black.opacity(0.8), .clear], startPoint: .bottom, endPoint: .center)
-                .frame(maxWidth: 640)
+                .frame(maxWidth: 800)
             Text(item.title)
                 .font(.system(size: 24, weight: .bold, design: .rounded))
                 .foregroundStyle(.white).shadow(radius: 4)
@@ -167,7 +165,7 @@ struct GameDetailView: View {
     private var playRow: some View {
         HStack(spacing: 14) {
             if let running {
-                Button(L("Stop")) { state.stopSession(running) }.buttonStyle(.bordered).controlSize(.large)
+                Button(L("Stop")) { state.stopSession(running) }.buttonStyle(HBActionStyle()).controlSize(.large)
                 TimelineView(.periodic(from: .now, by: 15)) { ctx in
                     Text(ActivityText.minutes(since: running.started, now: ctx.date)
                             .map { String(format: L("Running for %d min"), $0) } ?? L("Running"))
@@ -178,7 +176,7 @@ struct GameDetailView: View {
                 Button { state.playOnMac(item) } label: {
                     Label(L("Play on Mac"), systemImage: "play.fill").frame(minWidth: 96)
                 }
-                .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
+                .buttonStyle(HBActionStyle(primary: true)).controlSize(.large).tint(HB.amber)
                 if item.installed {
                     Button(L("Play the Windows version")) { state.play(item, windowsBuild: true) }
                         .controlSize(.large).disabled(state.busy || blocked)
@@ -189,7 +187,7 @@ struct GameDetailView: View {
                 Button { state.play(item) } label: {
                     Label(L("Play"), systemImage: "play.fill").frame(minWidth: 96)
                 }
-                .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
+                .buttonStyle(HBActionStyle(primary: true)).controlSize(.large).tint(HB.amber)
                 .disabled(state.busy || blocked)
                 if item.installedOnMac {
                     // The row put the Windows build first (a Mac build missing content); the Mac one stays a click away.
@@ -199,7 +197,7 @@ struct GameDetailView: View {
                         .font(.callout).foregroundStyle(.secondary)
                 }
             } else if item.source == .epic {
-                Button(L("Install")) { state.install(item) }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
+                Button(L("Install")) { state.install(item) }.buttonStyle(HBActionStyle(primary: true)).controlSize(.large).tint(HB.amber)
                     .disabled(state.busy)
                 Text(String(format: L("Installs into %@."), state.defaultBottle?.name ?? L("your environment"))).font(.callout).foregroundStyle(.secondary)
             } else if item.source == .steam, !steamHasManifest, state.macSteamBuild(for: item) != nil {
@@ -210,7 +208,7 @@ struct GameDetailView: View {
                         Button { state.installOnMac(item) } label: {
                             Label(state.steamForMacInstalled ? L("Install on Mac") : L("Get Steam for Mac"), systemImage: "apple.logo")
                         }
-                        .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
+                        .buttonStyle(HBActionStyle(primary: true)).controlSize(.large).tint(HB.amber)
                         Text(state.steamForMacInstalled ? L("Steam for Mac asks where to put it.")
                                                         : L("The Mac build installs through Steam for Mac."))
                             .font(.callout).foregroundStyle(.secondary)
@@ -221,7 +219,7 @@ struct GameDetailView: View {
                 }
             } else if item.source == .steam, !steamHasManifest {
                 // Owned, never installed here (highball#199): Steam's own dialog takes it from here.
-                Button(L("Install")) { state.install(item) }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
+                Button(L("Install")) { state.install(item) }.buttonStyle(HBActionStyle(primary: true)).controlSize(.large).tint(HB.amber)
                     .disabled(state.busy)
                 Text(L("Steam asks where to put it.")).font(.callout).foregroundStyle(.secondary)
             } else if item.source == .steam {
@@ -264,7 +262,7 @@ struct GameDetailView: View {
                 if entry != nil {
                     Button(L("Why these settings?")) { showWhy.toggle() }
                         .buttonStyle(.link).font(.caption)
-                        .popover(isPresented: $showWhy, arrowEdge: .bottom) { whyPopover }
+
                 }
             }
         }
@@ -275,7 +273,7 @@ struct GameDetailView: View {
     }
 
     /// The explanation, and the way out: the environment's own settings are one click away.
-    private var whyPopover: some View {
+    private var whyExplanation: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(L("Why these settings")).font(.headline)
             if let notes = entry?.notes { Text(notes).font(.callout) }
@@ -358,7 +356,7 @@ struct GameDetailView: View {
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(L("Environment")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
                             Text(bottle.name).font(.callout)
-                            Button(L("Environment settings…")) { showBottleSettings = true }.controlSize(.small)
+                            Button(L("Environment settings")) { state.navigate(.environmentSettings(bottle.name)) }.controlSize(.small)
                         }
                         if !item.otherBottles.isEmpty {
                             row(L("Also installed in"), item.otherBottles.joined(separator: ", "))

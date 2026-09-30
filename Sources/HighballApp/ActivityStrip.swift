@@ -4,14 +4,14 @@ import HighballKit
 /// One place for everything that takes time (UX plan §3.3): the busy operation with its bytes,
 /// stated range and elapsed time, a finished operation with its next step, and every running
 /// game. Always at the bottom of the window, never modal, never a bare spinner. Details opens
-/// the log sheet.
+/// the log page in the same window.
 struct ActivityStrip: View {
     @Environment(AppState.self) private var state
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if state.busy || state.doneState != nil || state.postPlay != nil || state.funnelOffer || !state.runningSessions.isEmpty || !steamBottles.isEmpty {
             VStack(spacing: 0) {
-                Divider()
                 VStack(spacing: 0) {
                     if state.busy {
                         busyRow
@@ -28,8 +28,9 @@ struct ActivityStrip: View {
                     }
                 }
             }
-            .background(.bar)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .hbGlass(radius: 18)
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
         }
     }
 
