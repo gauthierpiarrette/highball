@@ -32,8 +32,9 @@ swift build -c "$CONFIG" --product HighballApp
 APP=dist/Highball.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp ".build/$CONFIG/HighballApp" "$APP/Contents/MacOS/Highball"
-# SwiftPM owns the shared brand asset bundle used by the redesigned interface.
-cp -R ".build/$CONFIG/highball_HighballApp.bundle" "$APP/Contents/Resources/"
+# The app reads its brand mark from Bundle.main; Bundle.module resolves through a build-machine
+# path and makes a distributed app fail to launch on other Macs (PR #230, 2026-10-01).
+cp Sources/HighballApp/Resources/HighballMark.png "$APP/Contents/Resources/HighballMark.png"
 
 # Sparkle framework (SwiftPM artifact) — embedded, rpath is baked into the binary.
 SPARKLE_FW=$(ls -d .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-*/Sparkle.framework | head -1)

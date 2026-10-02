@@ -24,8 +24,8 @@ enum HB {
 
 struct HighballMark: View {
     var size: CGFloat = 40
-    // Decode once, including in bare SwiftPM builds and the assembled app bundle.
-    private static let mark: NSImage? = Bundle.module.url(forResource: "HighballMark", withExtension: "png")
+    // make-app.sh copies the mark into Contents/Resources for Bundle.main to find.
+    private static let mark: NSImage? = Bundle.main.url(forResource: "HighballMark", withExtension: "png")
         .flatMap { NSImage(contentsOf: $0) }
 
     var body: some View {
