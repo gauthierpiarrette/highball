@@ -9,9 +9,7 @@ struct HighballApp: App {
     @State private var state = AppState()
 
     var body: some Scene {
-        // The main window group is declared first: it is the scene SwiftUI opens at launch.
-        // Settings comes after it and is non-restorable (SettingsView), so a session that ended
-        // with only Settings open cannot come back as Settings alone (issue #58).
+        // Every destination belongs to the main window, including Settings (⌘,).
         WindowGroup("Highball", id: "main") {
             ContentView()
                 // One library window handles every play link; without this SwiftUI opens a new
@@ -23,20 +21,17 @@ struct HighballApp: App {
                 .frame(minWidth: 820, minHeight: 560)
                 .onAppear { state.refresh(); state.sweepTrash(); delegate.appState = state }
                 .onOpenURL { url in state.open(url: url) }
-                .alert(L("Rosetta is not working on this Mac"),
-                       isPresented: Binding(get: { state.rosettaMissing }, set: { if !$0 { state.rosettaMissing = false } })) {
-                    Button(L("Install Rosetta")) { state.installRosettaNow() }
-                    Button(L("Not now"), role: .cancel) { state.rosettaMissing = false }
-                } message: { Text(L("Highball's Wine engine is Intel code and needs Rosetta, Apple's translation layer. A macOS update can remove it. Highball can install it now, or run in Terminal: softwareupdate --install-rosetta --agree-to-license")) }
-                .alert(String(format: L("Open %@ in Highball?"), state.pendingPlayLink?.title ?? ""),
-                       isPresented: Binding(get: { state.pendingPlayLink != nil }, set: { if !$0 { state.pendingPlayLink = nil } })) {
-                    Button(L("Play")) { if let item = state.pendingPlayLink { state.pendingPlayLink = nil; state.play(item) } }
-                    Button(L("Cancel"), role: .cancel) { state.pendingPlayLink = nil }
-                } message: { Text(L("This link did not come from one of your Highball apps, so it asks first.")) }
+
         }
-        .windowResizability(.contentSize)
+        .defaultSize(width: 1080, height: 720)
+        .windowResizability(.contentMinSize)
         .commands {
-            CommandGroup(after: .newItem) {
+            CommandGroup(replacing: .appSettings) {
+                Button(L("Settings…")) { state.openSettings() }.keyboardShortcut(",")
+            }
+            CommandGroup(replacing: .newItem) {
+                Button(L("Add games")) { state.select(.addGames); MainWindow.ensureOpen() }.keyboardShortcut("n")
+                Button(L("Search")) { state.select(.search); MainWindow.ensureOpen() }.keyboardShortcut("f")
                 Button(L("A Windows program I have…")) { state.chooseProgramToRun() }
                     .keyboardShortcut("o")
                     .disabled(state.busy || state.bottles.isEmpty)
@@ -51,7 +46,6 @@ struct HighballApp: App {
                 }
             }
         }
-        Settings { SettingsView().environment(state).preferredColorScheme(.dark) }
     }
 }
 
@@ -98,6 +92,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: delegate, userDriverDelegate: nil)
         super.init()
     }
+    var quitApproved = false
+
     /// Set from the App's onAppear so quit-time can reach the bottles.
     weak var appState: AppState? { didSet { flushPendingOpens() } }
     /// Files Finder asked us to open before the window existed (a double-click that launched the app).
@@ -120,21 +116,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// game or Steam runs would strand them with no UI attached. Ask instead of leaking.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let state = appState, state.wineProcessesRunning() else { return .terminateNow }
-        let alert = NSAlert()
-        alert.messageText = L("Windows programs are still running")
-        alert.informativeText = L("Stop them and quit, or leave them running? A game left running keeps playing without Highball — quit it from inside the game when you're done.")
-        alert.addButton(withTitle: L("Stop Everything & Quit"))
-        alert.addButton(withTitle: L("Leave Running & Quit"))
-        alert.addButton(withTitle: L("Cancel"))
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            state.killAllBottles()
-            return .terminateNow
-        case .alertSecondButtonReturn:
-            return .terminateNow
-        default:
-            return .terminateCancel
-        }
+        if quitApproved { return .terminateNow }
+        state.pendingQuit = true
+        state.navigate(.decision)
+        MainWindow.ensureOpen()
+        NSApp.activate(ignoringOtherApps: true)
+        return .terminateCancel
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -153,8 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            let icon = NSImage(contentsOf: iconURL) {
             NSApp.applicationIconImage = icon
         }
-        // Issue #58: if window restoration brought back only the Settings window, open the main
-        // one. SettingsView asks for it as it appears; this is the fallback once launch settles.
+        // Restore the main surface if launch restoration did not produce a visible window.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { MainWindow.ensureOpen() }
     }
     /// Closing the library while a game or Steam runs keeps Highball open in the Dock. Quitting
@@ -166,8 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         !(appState?.wineProcessesRunning() ?? false)
     }
 
-    /// Dock click with only Settings on screen: SwiftUI sees a visible window and opens nothing,
-    /// so bring the main window back ourselves (issue #58).
+    /// Bring the main window back when the user reopens the app from the Dock.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard !MainWindow.isOpen, MainWindow.opener != nil else { return true }
         MainWindow.ensureOpen()
@@ -177,331 +162,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct ContentView: View {
     @Environment(AppState.self) private var state
-
-    /// Where a dropped or chosen program runs: the environment page it came from, else the default.
-    private var runTarget: Bottle? {
-        state.bottles.first { $0.name == state.pendingRunBottle } ?? state.defaultBottle
-    }
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        @Bindable var state = state
-        screen
-        // Everything that takes time lives on one strip at the bottom, never modal (UX plan 0.5).
-        .safeAreaInset(edge: .bottom, spacing: 0) { ActivityStrip() }
-        // A Windows program dropped anywhere on the window, or picked from Add games and ⌘O,
-        // runs in the environment it was dropped on, else the default one.
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            guard let provider = providers.first else { return false }
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                guard let url else { return }
-                if ["exe", "msi", "bat"].contains(url.pathExtension.lowercased()) {
-                    Task { @MainActor in state.pendingRunBottle = nil; state.pendingRun = url }
-                } else {
+        AppShell()
+            .onAppear { MainWindow.opener = { openWindow(id: "main") } }
+            .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                guard let provider = providers.first else { return false }
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url else { return }
                     Task { @MainActor in
-                        state.fail(HighballError.failed(String(format: L("'%@' isn't a Windows program. You can drop .exe, .msi or .bat files here."), url.lastPathComponent)))
-                    }
-                }
-            }
-            return true
-        }
-        .runDroppedDialog(state, target: runTarget)
-        .sheet(isPresented: $state.showLog) { LogSheet() }
-        .sheet(isPresented: $state.showGPTKLicense) { GPTKLicenseSheet() }
-        .d3dMetalAsk(state)
-        .engineAsk(state)
-        .updateAsk(state)
-        .uninstallAsk(state)
-        .rendererTrialAsk(state)
-        .modesetTrialAsk(state)
-        .homeMoveAsk(state)
-        .sheet(isPresented: $state.showEpicSignIn) { EpicSignInSheet() }
-        .errorAlert(state)
-        .sheet(isPresented: Binding(get: { state.showErrorDetails }, set: { state.showErrorDetails = $0 })) {
-            ErrorDetailsSheet(text: state.errorDetailsText)
-        }
-        .crashAlert(state, title: crashTitle)
-    }
-
-    /// The window itself: the unplugged-drive screen, onboarding, or the library.
-    @ViewBuilder private var screen: some View {
-        if let missing = state.homeUnavailable {
-            VStack(spacing: 14) {
-                Image(systemName: "externaldrive.badge.questionmark").font(.system(size: 44)).foregroundStyle(.secondary)
-                Text(L("Your Highball folder is not connected")).font(.title2.bold())
-                Text(String(format: L("Highball keeps its engines and environments in %@, and that location is not available right now. Connect the drive and relaunch, or go back to the default location on this Mac."), missing.path))
-                    .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 520)
-                HStack {
-                    Button(L("Relaunch")) { AppState.relaunch() }.buttonStyle(.borderedProminent)
-                    Button(L("Use the default location")) { state.useDefaultHome() }
-                }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(40)
-        } else if state.needsOnboarding {
-            OnboardingView()
-        } else {
-            // One library, full width (UX plan Phase 1): no sidebar, no bottles in the way.
-            // Environments and the engine live in Settings (⌘,).
-            NavigationStack { LibraryView() }
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Menu {
-                            Button(state.defaultBottle.map(state.steamInstalled) == true ? L("Open Steam") : L("Install Steam")) { state.installSteam() }
-                            if state.epicSignedIn {
-                                // The menu said "Connect" even once connected (0.8.0 feedback).
-                                Button(L("Epic account connected")) {}.disabled(true)
-                            } else {
-                                Button(L("Connect Epic account…")) { state.showEpicSignIn = true }
-                            }
-                            Divider()
-                            ForEach(BottleView.launcherMeta.filter { $0.id != "steam" }, id: \.id) { meta in
-                                Button(String(format: state.launcherInstalled(meta.id) ? L("Open %@") : L("Install %@"), meta.short)) {
-                                    state.openOrInstallLauncher(meta.id, short: meta.short)
-                                }
-                            }
-                            Divider()
-                            Button(L("A Windows program I have…")) { state.chooseProgramToRun() }
-                        } label: {
-                            Label(L("Add games"), systemImage: "plus")
+                        if ["exe", "msi", "bat"].contains(url.pathExtension.lowercased()) {
+                            state.pendingRunBottle = nil; state.pendingRun = url
+                        } else {
+                            state.fail(HighballError.failed(String(format: L("'%@' isn't a Windows program. You can drop .exe, .msi or .bat files here."), url.lastPathComponent)))
                         }
-                        .disabled(state.busy || state.bottles.isEmpty)
-                    }
-                    ToolbarItem(placement: .automatic) {
-                        SettingsLink { Label(L("Settings"), systemImage: "gearshape") }
                     }
                 }
-        }
-    }
-    private var crashTitle: String {
-        guard let s = state.crashSuggestion else { return "" }
-        return s.seconds < 2 ? String(format: L("%@ quit right away"), s.program) : String(format: L("%@ quit after %d seconds"), s.program, s.seconds)
+                return true
+            }
     }
 }
 
-private func homeMoveAskMessage(to target: URL, from source: URL) -> String {
-    let copy = String(format: L("Engines, environments and downloads copy to %@, get checked, and are then removed from %@. Highball relaunches when it is done. Nothing is removed until the copy checks out."), target.path, source.path)
-    guard let warning = HighballPaths.locationWarning(target) else { return copy }
-    return L(warning) + "\n\n" + copy
-}
-
-// The main window's dialogs, one function each. Chained in `body` they were a single
-// expression that Xcode 16's type checker gave up on ("unable to type-check this expression
-// in reasonable time", CI and the nightly E2E on 2026-09-08) while Xcode 26 took it fine.
-private extension View {
-    @MainActor func runDroppedDialog(_ state: AppState, target: Bottle?) -> some View {
-        self.confirmationDialog(String(format: L("Run %@ in %@?"), state.pendingRun?.lastPathComponent ?? "", target?.name ?? ""),
-                            isPresented: .init(get: { state.pendingRun != nil }, set: { if !$0 { state.pendingRun = nil; state.pendingRunBottle = nil } }),
-                            titleVisibility: .visible) {
-            Button(L("Run")) { if let u = state.pendingRun, let b = target { state.runDropped(u, in: b, andPin: false) }; state.pendingRun = nil }
-            Button(L("Run and add to Programs")) { if let u = state.pendingRun, let b = target { state.runDropped(u, in: b, andPin: true) }; state.pendingRun = nil }
-            Button(L("Cancel"), role: .cancel) { state.pendingRun = nil }
-        }
-    }
-    @MainActor func d3dMetalAsk(_ state: AppState) -> some View {
-        // Asked at the first game that needs it, never at install (UX plan §3.5). Nothing
-        // downloads: D3DMetal is already inside the engine and accepting flips a flag.
-        self.alert(String(format: L("%@ needs Apple's DirectX 12 support"), state.pendingD3DMetal?.item.title ?? ""),
-               isPresented: .init(get: { state.pendingD3DMetal != nil }, set: { if !$0 { state.pendingD3DMetal = nil } }),
-               presenting: state.pendingD3DMetal) { pending in
-            Button(L("Turn it on and play")) { state.enableD3DMetalAndPlay() }
-            if let other = GamePageCopy.otherWorkingRenderer(state.gameDB.entry(for: pending.item)) {
-                Button(String(format: L("Play with %@"), GamePageCopy.plainName(other))) { state.playPendingD3DMetal(with: other) }
-            } else if state.gameDB.entry(for: pending.item)?.effectiveRenderer() != .d3dmetal {
-                // The ask came from the environment's setting, not a row that needs D3DMetal:
-                // the default mode is a real way out (#61 had none short of a new bottle).
-                Button(String(format: L("Play with %@"), GamePageCopy.plainName(.dxmt))) { state.playPendingD3DMetal(with: .dxmt) }
-            }
-            Button(L("Read Apple's licence")) {
-                state.licenseEngine = pending.engine
-                state.pendingD3DMetal = nil
-                state.loadGPTKLicense(); state.showGPTKLicense = true
-            }
-            Button(L("Not now"), role: .cancel) { state.pendingD3DMetal = nil }
-        } message: { pending in
-            Text(GamePageCopy.d3dMetalAsk(title: pending.item.title, entry: state.gameDB.entry(for: pending.item)))
-        }
-    }
-    @MainActor func engineAsk(_ state: AppState) -> some View {
-        self.alert(state.pendingEngine.map { String(format: L("%@ needs the %@ engine"), $0.recipe.title, GamePageCopy.shortEngineName($0.manifest)) } ?? "",
-               isPresented: .init(get: { state.pendingEngine != nil }, set: { if !$0 { state.pendingEngine = nil } }),
-               presenting: state.pendingEngine) { pending in
-            Button(L("Move this environment")) { state.moveEnvironment(for: pending.recipe, bottle: pending.bottle, to: pending.manifest) }
-            Button(String(format: L("New environment for %@"), pending.recipe.title)) { state.createEnvironment(for: pending.recipe, on: pending.manifest) }
-            Button(L("Not now"), role: .cancel) { state.pendingEngine = nil }
-        } message: { pending in
-            Text(GamePageCopy.engineAsk(recipe: pending.recipe, manifest: pending.manifest, installed: state.engines.contains { $0.id == pending.manifest.id }))
-        }
-    }
-    @MainActor func updateAsk(_ state: AppState) -> some View {
-        self.alert(state.pendingUpdate.map { String(format: L("%@ needs a newer Highball"), $0.recipe.title) } ?? "",
-               isPresented: .init(get: { state.pendingUpdate != nil }, set: { if !$0 { state.pendingUpdate = nil } }),
-               presenting: state.pendingUpdate) { pending in
-            Button(L("Check for Updates…")) {
-                state.pendingUpdate = nil
-                (NSApp.delegate as? AppDelegate)?.updaterController.updater.checkForUpdates()
-            }
-            if pending.play != nil {
-                Button(L("Play without the fix")) { state.playWithoutTheFix() }
-            }
-            Button(L("Not now"), role: .cancel) { state.pendingUpdate = nil }
-        } message: { pending in
-            Text(GamePageCopy.updateAsk(recipe: pending.recipe, engineID: pending.engineID, canPlay: pending.play != nil))
-        }
-    }
-    @MainActor func uninstallAsk(_ state: AppState) -> some View {
-        self.alert(state.pendingUninstall.map { String(format: L("Remove %@?"), $0.item.title) } ?? "",
-               isPresented: .init(get: { state.pendingUninstall != nil }, set: { if !$0 { state.pendingUninstall = nil } }),
-               presenting: state.pendingUninstall) { pending in
-            if Uninstall.isActionable(pending.route) {
-                Button(L("Remove"), role: .destructive) { state.uninstallConfirmed() }
-            }
-            Button(L("Cancel"), role: .cancel) { state.pendingUninstall = nil }
-        } message: { pending in
-            Text(Uninstall.confirmation(route: pending.route, sizeOnDisk: pending.item.sizeOnDisk))
-        }
-    }
-
-    @MainActor func rendererTrialAsk(_ state: AppState) -> some View {
-        self.alert(state.rendererTrial.map { String(format: L("Try %@ for %@ next time?"), GamePageCopy.plainName($0.next), $0.title) } ?? "",
-               isPresented: .init(get: { state.rendererTrial != nil }, set: { if !$0 { state.rendererTrial = nil } }),
-               presenting: state.rendererTrial) { trial in
-            Button(String(format: L("Use %@ for this game"), GamePageCopy.plainName(trial.next))) { state.acceptRendererTrial() }
-            Button(L("Report how it went…")) {
-                state.rendererTrial = nil
-                let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
-                Task.detached { let url = BugReport.url(version: version); await MainActor.run { NSWorkspace.shared.open(url) } }
-            }
-            Button(L("Not now"), role: .cancel) { state.rendererTrial = nil }
-        } message: { trial in
-            Text(String(format: L("It ran with %@. Another mode often suits a game better on this Mac, and old DirectX 9 games in particular do badly on Wine's own Direct3D. This changes the mode for this game only; the environment keeps its own. Undo it any time under Advanced on the game's page."), GamePageCopy.plainName(trial.current)))
-        }
-    }
-    /// The offer that follows a "had problems" on a game whose log shows a fullscreen mode
-    /// change the Mac never made (highball#67, #103): the window in the corner, the mouse
-    /// landing elsewhere. One click, this game only.
-    @MainActor func modesetTrialAsk(_ state: AppState) -> some View {
-        self.alert(state.modesetTrial.map { String(format: L("Scale %@ to the screen next time?"), $0.title) } ?? "",
-               isPresented: .init(get: { state.modesetTrial != nil }, set: { if !$0 { state.modesetTrial = nil } }),
-               presenting: state.modesetTrial) { _ in
-            Button(L("Scale it to the screen")) { state.acceptModesetTrial() }
-            Button(L("Not now"), role: .cancel) { state.modesetTrial = nil }
-        } message: { _ in
-            Text(L("Its last run asked Windows for a fullscreen size this Mac did not switch to. That is what leaves a game small in a corner, or with the mouse landing away from what it draws. Highball can have Wine report the change as done and scale the game to the screen instead. This game only; undo it under Advanced on its page."))
-        }
-    }
-
-    @MainActor func homeMoveAsk(_ state: AppState) -> some View {
-        self.alert(state.pendingHome.map { String(format: L("Move Highball's data to %@?"), $0.lastPathComponent) } ?? "",
-               isPresented: .init(get: { state.pendingHome != nil }, set: { if !$0 { state.pendingHome = nil } }),
-               presenting: state.pendingHome) { target in
-            Button(L("Move now")) { state.moveHome(to: target) }
-            Button(L("Cancel"), role: .cancel) { state.pendingHome = nil }
-        } message: { target in
-            Text(homeMoveAskMessage(to: target, from: state.paths.home))
-        }
-    }
-    @MainActor func errorAlert(_ state: AppState) -> some View {
-        // A partial delete succeeded — the bottle is gone and the name is free — so framing it as
-        // a failure, with an invitation to file a bug, misreads what happened. Same alert, honest
-        // title, and no Report button for something that is not a problem to report.
-        self.alert(state.errorIsPartialSuccess ? L("Some files couldn't be removed") : (state.errorRecovery.map { L($0.headline) } ?? L("Something went wrong")),
-               isPresented: .init(
-            get: { state.errorMessage != nil },
-            set: { if !$0 { state.errorMessage = nil } })) {
-            // One button that does the next thing, when the failure has one (UX plan §3.6).
-            if let r = state.errorRecovery, let title = r.actionTitle, !state.errorIsPartialSuccess {
-                Button(L(title)) {
-                    let retry = state.errorRetry, bottle = state.errorBottle
-                    state.errorMessage = nil
-                    switch r.action {
-                    case .retry: retry?()
-                    case .repairBottle: if let bottle { state.repairBottle(bottle) } else { retry?() }
-                    case let .reinstallEngine(id): state.reinstallEngine(id)
-                    case .none: break
-                    }
-                }
-            }
-            Button(L("Details…")) { state.showErrorDetails = true; state.errorMessage = nil }
-            if !state.errorIsPartialSuccess {
-                Button(L("Report this problem…")) {
-                    state.errorMessage = nil
-                    NSWorkspace.shared.open(BugReport.url(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"))
-                }
-            }
-            Button("OK", role: .cancel) { state.errorMessage = nil }
-        } message: {
-            // The meaning, in words; exit codes, paths and raw output live behind Details.
-            Text(state.errorIsPartialSuccess ? (state.errorMessage ?? "") : (state.errorRecovery?.meaning ?? ""))
-        }
-    }
-    @MainActor func crashAlert(_ state: AppState, title: String) -> some View {
-        self.alert(title, isPresented: Binding(get: { state.crashSuggestion != nil }, set: { if !$0 { state.crashSuggestion = nil } }),
-               presenting: state.crashSuggestion) { s in
-            Button(s.itemID == nil ? "Use \(s.renderer.rawValue.uppercased())" : String(format: L("Use %@ for this game"), s.renderer.rawValue.uppercased())) {
-                if let itemID = s.itemID {
-                    state.setRendererOverride(s.renderer, for: itemID)   // this game only; the environment keeps its mode
-                } else if var bottle = state.bottles.first(where: { $0.name == s.bottleName }) {
-                    bottle.settings.renderer = s.renderer
-                    bottle.settings.rendererExplicit = true   // the user picked it; recipes must not clobber it (#29)
-                    state.update(bottle)
-                }
-            }
-            if let alt = s.alternateEngine {
-                Button(String(format: L("Try engine %@"), alt.id)) {
-                    if let bottle = state.bottles.first(where: { $0.name == s.bottleName }) { state.moveBottle(bottle, to: alt) }
-                }
-            }
-            Button(L("Show the log")) { NSWorkspace.shared.open(URL(fileURLWithPath: s.logPath)) }
-            Button(L("Keep current"), role: .cancel) {}
-        } message: { s in
-            // What was detected, then what it usually means, then the one next thing. No path
-            // on this surface: the log is one click away (UX plan §3.6).
-            let seen = String(format: L("It was running with %@ and quit after %d seconds without an error the app could read."),
-                              s.current.rawValue.uppercased(), s.seconds)
-            let next = s.alternateEngine.map { alt in
-                String(format: L("That usually means the graphics mode doesn't suit it on this Mac. Highball can switch this bottle to %@, or move it to engine %@."),
-                       s.renderer.rawValue.uppercased(), alt.id)
-            } ?? String(format: L("That usually means the graphics mode doesn't suit it on this Mac. Highball can switch this bottle to %@."),
-                        s.renderer.rawValue.uppercased())
-            Text(seen + " " + next)
-        }
-    }
-}
-
-struct CreateBottleSheet: View {
+struct NewEnvironmentPage: View {
     @Environment(AppState.self) private var state
-    @Environment(\.dismiss) private var dismiss
     @State private var name = "play"
     @State private var installSteam = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(L("New environment")).font(.title2.bold())
-            TextField(L("Name"), text: $name).textFieldStyle(.roundedBorder).frame(width: 260)
-            if let problem = nameProblem, !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                Text(L(problem)).font(.caption).foregroundStyle(.orange).frame(maxWidth: 380, alignment: .leading)
-            }
-            Toggle(L("Install Steam in it (recommended)"), isOn: $installSteam)
-            Text(L("An environment is an isolated Windows install. First boot takes about 90 seconds; installing Steam adds a download and a slow one-time client update."))
-                .font(.callout).foregroundStyle(.secondary).frame(maxWidth: 380, alignment: .leading)
-            HStack {
-                Spacer()
-                Button(L("Cancel")) { dismiss() }
-                Button(state.busy ? L("Working…") : L("Create")) {
-                    dismiss()
-                    state.createBottle(name: name, recipeID: installSteam ? "steam" : nil)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                HStack(spacing: 16) {
+                    Image(systemName: "square.stack.3d.up")
+                        .font(.system(size: 27, weight: .light)).foregroundStyle(HB.amber)
+                        .frame(width: 64, height: 64).hbPanel(radius: 20)
+                    SettingsHeading(title: L("New environment"), subtitle: L("A separate space for games that need their own settings."))
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(nameProblem != nil || state.busy)
+                VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(L("Name")).font(.callout.weight(.semibold))
+                        TextField(L("Name"), text: $name).textFieldStyle(.plain).font(.system(size: 16))
+                            .padding(16).background(HB.ground.opacity(0.6), in: RoundedRectangle(cornerRadius: 13))
+                            .overlay(RoundedRectangle(cornerRadius: 13).stroke(HB.cardStroke))
+                        if let problem = nameProblem, !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                            Text(L(problem)).font(.caption).foregroundStyle(HB.warn)
+                        }
+                    }
+                    Divider().opacity(0.4)
+                    HStack(spacing: 14) {
+                        Image(systemName: "gamecontroller").font(.title2).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(L("Install Steam")).font(.callout.weight(.semibold))
+                            Text(L("Ready to sign in when setup finishes.")).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Toggle(L("Install Steam"), isOn: $installSteam).labelsHidden().toggleStyle(.switch)
+                    }
+                }.padding(24).hbPanel(radius: 22)
+                Label(L("First setup takes about 90 seconds. Steam adds a download and a one-time client update."), systemImage: "clock")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HBGlassGroup {
+                    HStack(spacing: 12) {
+                        Button(state.busy ? L("Working…") : L("Create environment")) {
+                            state.goBack()
+                            state.createBottle(name: name, recipeID: installSteam ? "steam" : nil)
+                        }
+                        .buttonStyle(HBActionStyle(primary: true)).keyboardShortcut(.defaultAction)
+                        .disabled(nameProblem != nil || state.busy)
+                        Button(L("Cancel")) { state.goBack() }.buttonStyle(HBActionStyle())
+                    }
+                }
             }
+            .frame(maxWidth: 650, alignment: .leading).padding(36)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(24)
     }
 
     private var nameProblem: String? { BottleStore.nameProblem(name) }
 }
 
-struct LogSheet: View {
+struct ActivityPage: View {
     @Environment(AppState.self) private var state
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -513,7 +254,7 @@ struct LogSheet: View {
                 }
                 Text(state.busy ? state.busyTitle : (state.doneState?.title ?? L("Done"))).font(.headline)
                 Spacer()
-                Button(state.busy ? "Hide" : "Close") { dismiss() }
+                Button(state.busy ? "Hide" : "Close") { state.showLog = false }
             }
             if !state.stage.isEmpty {
                 Label(state.stage, systemImage: "clock")
@@ -544,34 +285,37 @@ struct LogSheet: View {
                 }
             }
             if !state.busy, let done = state.doneState, let ctaTitle = done.ctaTitle {
-                Button(ctaTitle) { dismiss(); done.cta?() }
-                    .buttonStyle(.borderedProminent)
+                Button(ctaTitle) { state.showLog = false; done.cta?() }
+                    .buttonStyle(HBActionStyle(primary: true))
             }
-            DisclosureGroup(L("Details")) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L("Activity log")).font(.caption).foregroundStyle(.secondary)
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 1) {
                             ForEach(Array(state.logLines.enumerated()), id: \.offset) { i, line in
                                 Text(line).font(.system(size: 11, design: .monospaced))
+                                    .textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .id(i)
                             }
                         }
                     }
                     .onChange(of: state.logLines.count) { _, n in proxy.scrollTo(max(0, n - 1)) }
-                    .frame(height: 240)
+                    .onAppear { proxy.scrollTo(max(0, state.logLines.count - 1)) }
+                    .frame(minHeight: 300, maxHeight: .infinity)
                     .background(.quaternary.opacity(0.4))
                 }
             }
-            .frame(width: 620)
+            .frame(maxWidth: .infinity)
         }
         .padding(16)
     }
 }
 
 /// The raw description of a failure: what a report needs, kept off the primary surface.
-struct ErrorDetailsSheet: View {
-    @Environment(\.dismiss) private var dismiss
+struct ErrorDetailsPage: View {
+    @Environment(AppState.self) private var state
     let text: String
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -583,7 +327,7 @@ struct ErrorDetailsSheet: View {
             HStack {
                 Button(L("Copy")) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
                 Spacer()
-                Button(L("Done")) { dismiss() }.keyboardShortcut(.defaultAction)
+                Button(L("Done")) { state.showErrorDetails = false }.keyboardShortcut(.defaultAction)
             }
         }
         .padding(16)

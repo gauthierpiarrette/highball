@@ -3,11 +3,43 @@ import Foundation
 import HighballKit
 import Observation
 
-/// The three Settings tabs, so a deep link can select one.
-enum SettingsTab: Hashable { case environments, engine, troubleshooting }
+/// Settings destinations, shared with deep links from the library.
+enum SettingsTab: String, CaseIterable, Hashable { case environments, engine, storage, updates, troubleshooting }
 
 @Observable @MainActor
 final class AppState {
+    var section: AppSection = .home
+    var navigation: [AppRoute] = []
+    var librarySearch = ""
+    var searchFocusRequest = 0
+    var verifiedLibrarySections: Set<AppSection> = []
+    var selectedEnvironmentName: String?
+    var selectedEngineEnvironmentName: String?
+    var environmentSettingsSections: [String: EnvironmentSettingsSection] = [:]
+    var pendingEnvironmentDeletion: String?
+    var pendingQuit = false
+
+    func select(_ section: AppSection) {
+        self.section = section
+        if section == .search { searchFocusRequest += 1 }
+        navigation = []
+        showLog = false; showGPTKLicense = false; showEpicSignIn = false; showErrorDetails = false
+    }
+
+    func navigate(_ route: AppRoute) {
+        if navigation.last != route { navigation.append(route) }
+    }
+
+    func goBack() {
+        if !navigation.isEmpty { navigation.removeLast() }
+    }
+
+    func openSettings(_ tab: SettingsTab = .environments) {
+        settingsTab = tab
+        select(tab == .engine ? .engines : .settings)
+        MainWindow.ensureOpen()
+    }
+
     var engines: [InstalledEngine] = []
     /// frame generation shim directory per engine id, resolved once in refresh() so the settings view does not repair links on every redraw
     var lsfgShimDirs: [String: URL] = [:]
@@ -18,8 +50,7 @@ final class AppState {
     /// Bottles with a delete in flight. Their rows show it and refuse a second click.
     var deletingBottles: Set<String> = []
     var selectedBottle: String?
-    /// Which Settings tab to show. A deep link (the library's "Open Troubleshooting") sets it
-    /// before opening the window; the TabView binds its selection to it.
+    /// Category within the main window's Settings destination.
     var settingsTab: SettingsTab = .environments
     var gamesByBottle: [String: [SteamGame]] = [:]
     /// The Steam account's games per bottle, installed or not (SteamOwnedLibrary, highball#199).
@@ -28,6 +59,16 @@ final class AppState {
 
     // Long-running work
     var busy = false
+    struct EngineChange {
+        let bottleName: String
+        let source: String
+        let target: String
+        let title: String
+        init(bottleName: String, source: String, target: String, title: String = L("Switching engine")) {
+            self.bottleName = bottleName; self.source = source; self.target = target; self.title = title
+        }
+    }
+    var engineChange: EngineChange?
     var busyTitle = ""
     var stage = ""
     var logLines: [String] = []
@@ -182,6 +223,8 @@ final class AppState {
     /// Steam client makes it wait for the next launch (EngineStore.autoUpdateAllowed).
     private var autoUpdateTried = false
     func maybeAutoUpdateEngine() {
+        // Local UI review uses real engines, but does not initiate engine downloads.
+        if Bundle.main.object(forInfoDictionaryKey: "HighballDisableAutomaticEngineUpdates") as? Bool == true { return }
         guard !autoUpdateTried, !busy, !needsOnboarding, runningSessions.isEmpty,
               let update = engineUpdate, let current = defaultEngine,
               EngineStore.autoUpdateAllowed(from: current.manifest, to: update) else { return }
@@ -233,6 +276,7 @@ final class AppState {
     /// Which primary surface the detail column shows. `selectedBottle` keeps backing every
     /// bottle action and the File-menu commands; it just stopped being the router.
     var libraryItems: [LibraryItem] = []
+    var libraryLoading = true
     var libraryPlays: [String: LibraryStore.PlayRecord] = [:]
     var libraryStore: LibraryStore { LibraryStore(paths: paths) }
 
@@ -241,6 +285,7 @@ final class AppState {
                                           steamOwnedByBottle: steamOwnedByBottle, macInstalled: macSteamGames,
                                           epicOwned: epicOwned, epicInstalls: epicInstalls,
                                           plays: libraryPlays)
+        libraryLoading = false
         if let deferred = deferredPlayLink { resolvePlayLink(deferred.request) }
         refreshMacFlags()
     }
@@ -822,11 +867,17 @@ final class AppState {
         let title = String(format: L("Updating engine to %@"), manifest.id)
         runBusy(title, expected: L("usually a few minutes"),
                 done: DoneState(title: L("Engine updated"), ctaTitle: nil, cta: nil),
-                stop: .cancelTask(label: L("Stop"))) { [self] in
+                stop: .cancelTask(label: L("Stop")),
+                engineChange: EngineChange(bottleName: L("Compatible environments"), source: oldID, target: manifest.id,
+                                           title: L("Updating engine"))) { [self] in
             let fresh = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
                 Task { @MainActor in self.reportDownload(name, received: received, total: total) }
             }
-            await MainActor.run { self.appendLog("engine \(fresh.id) installed") }
+            await MainActor.run {
+                self.appendLog("engine \(fresh.id) installed")
+                self.busyStop = nil; self.busyProgress = nil
+                self.stage = L("Updating compatible environments…")
+            }
             // Whether the prefix survives is a question about THIS bottle's engine, not about the
             // default engine's own step. Comparing old (the previous default) to fresh moved a
             // bottle sitting on a different Wine build across builds whenever the default's own
@@ -902,7 +953,8 @@ final class AppState {
         guard bottle.settings.engineID != target.id, !busy else { return }
         let title = String(format: L("Moving '%@' to %@"), bottle.name, target.id)
         runBusy(title, expected: L("a minute or two when the Windows setup re-runs"),
-                done: done ?? DoneState(title: L("Engine switched"), ctaTitle: nil, cta: nil)) { [self] in
+                done: done ?? DoneState(title: L("Engine switched"), ctaTitle: nil, cta: nil),
+                engineChange: EngineChange(bottleName: bottle.name, source: bottle.settings.engineID, target: target.id)) { [self] in
             try await performMove(bottle, to: target)
         }
     }
@@ -961,21 +1013,21 @@ final class AppState {
         if let h = ProgressParser.hint(for: line) { stageHint = h }
     }
 
-    /// Runs one long operation on the activity strip. The strip is the surface: the log sheet
-    /// opens only from its Details button (or `showLogSheet` for the rare case that needs it).
-    private func runBusy(_ title: String, expected: String? = nil, showLogSheet: Bool = false,
+    /// Runs one long operation on the activity strip. The strip is the surface: the log page
+    /// opens only from its Details button (or `showActivityPage` for the rare case that needs it).
+    private func runBusy(_ title: String, expected: String? = nil, showActivityPage: Bool = false,
                          done: DoneState? = nil, stop: BusyStop? = nil, cleanup: (() -> Void)? = nil,
+                         engineChange: EngineChange? = nil,
                          _ work: @escaping () async throws -> Void) {
-        // One busy operation at a time: a second call would reset the sheet's state under the
+        // One busy operation at a time: a second call would reset the activity state under the
         // first and end it early when the second finishes (found in review, 2026-09-04).
         guard !busy else { return }
-        busy = true; busyTitle = title; stage = ""; stageHint = ""; logLines = []; showLog = showLogSheet
+        self.engineChange = engineChange
+        busy = true; busyTitle = title; stage = ""; stageHint = ""; logLines = []; showLog = showActivityPage
         busyStartedAt = Date(); busyExpected = expected; lastOutputAt = nil; doneState = nil
         busyStop = stop; busyProgress = nil; transferRate = nil; transferSamples = []; stopRequested = false
         busyTask = Task {
-            // On failure, dismiss the log sheet ourselves: SwiftUI defers the error alert
-            // until the sheet closes, so a stuck sheet showed "Done" over a failed install
-            // and hid the alert until the user clicked Close (issues #27/#28).
+            // On failure, return from the log so the recovery page is visible immediately.
             do {
                 try await work()
                 let d = done ?? DoneState(title: L("Done"), ctaTitle: nil, cta: nil)
@@ -993,13 +1045,14 @@ final class AppState {
                     doneState = DoneState(title: stop?.stoppedTitle ?? L("Stopped."), ctaTitle: nil, cta: nil)
                     appendLog("stopped by the user")
                 } else {
-                    // A retry is the same operation with the same closure; the sheet's own state
+                    // A retry is the same operation with the same closure; the activity state
                     // resets when runBusy starts again.
-                    fail(error, retry: { [weak self] in self?.runBusy(title, expected: expected, showLogSheet: showLogSheet, done: done, stop: stop, cleanup: cleanup, work) })
+                    fail(error, retry: { [weak self] in self?.runBusy(title, expected: expected, showActivityPage: showActivityPage, done: done, stop: stop, cleanup: cleanup, engineChange: engineChange, work) })
                 }
             }
             cleanup?()
             let repairAfterStop = stopRequested ? stop?.bottleToRepair : nil
+            self.engineChange = nil
             busy = false; busyStop = nil; busyProgress = nil; transferRate = nil; busyTask = nil
             refresh()
             if let bottle = repairAfterStop, let fresh = bottles.first(where: { $0.name == bottle.name }) {
@@ -1879,9 +1932,9 @@ final class AppState {
         // The row and its Delete item stay on screen for the whole operation, so without this a
         // second click started a second delete and the loser reported "missing" for a delete that
         // was in fact succeeding.
-        guard !deletingBottles.contains(name) else { return }
+        guard !busy, !deletingBottles.contains(name) else { return }
         deletingBottles.insert(name)
-        runBusy(String(format: L("Deleting the %@ environment"), name), showLogSheet: false,
+        runBusy(String(format: L("Deleting the %@ environment"), name), showActivityPage: false,
                 cleanup: { [weak self] in self?.deletingBottles.remove(name) }) { [self] in
             let store = bottleStore
             let killer = killerFor(name)
@@ -2282,7 +2335,7 @@ final class AppState {
         if let retinaAt100 { copy.settings.retinaAt100 = retinaAt100 }
         update(copy)
         let retina = copy.settings.retinaAt100
-        runBusy("Applying display scaling", showLogSheet: false) { [self] in
+        runBusy("Applying display scaling", showActivityPage: false) { [self] in
             try await WineRunner(paths: paths, engine: engine, bottle: copy).setDpi(logPixels: scale, retinaAt100: retina)
         }
     }
@@ -2404,11 +2457,17 @@ final class AppState {
         let title = String(format: L("Downloading engine %@"), manifest.id)
         runBusy(title, expected: L("usually a few minutes"),
                 done: done ?? DoneState(title: L("Engine switched"), ctaTitle: nil, cta: nil),
-                stop: .cancelTask(label: L("Stop"))) { [self] in
+                stop: .cancelTask(label: L("Stop")),
+                engineChange: EngineChange(bottleName: bottle.name, source: bottle.settings.engineID, target: id)) { [self] in
             let fresh = try await engineStore.install(manifest, accepted: accepted) { name, received, total in
                 Task { @MainActor in self.reportDownload(name, received: received, total: total) }
             }
-            await MainActor.run { self.appendLog("engine \(fresh.id) installed"); self.refresh() }
+            await MainActor.run {
+                self.appendLog("engine \(fresh.id) installed"); self.refresh()
+                // Cancelling a download is safe; interrupting Windows setup is not.
+                self.busyStop = nil; self.busyProgress = nil
+                self.stage = L("Preparing your environment…")
+            }
             try await performMove(bottle, to: fresh)
         }
     }

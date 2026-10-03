@@ -5,183 +5,185 @@ import HighballKit
 /// for the whole app target.
 typealias LibraryItem = HighballKit.LibraryItem
 
-// One Library (Phase 2): the app's primary surface. One uniform cover grid across all
-// bottles and sources — store is a corner badge and a filter chip, never a section; the
-// bottle is a per-game property on the detail page, never the navigation.
+// Home emphasizes installed games. The sidebar exposes source and status collections.
 
 struct LibraryView: View {
     @Environment(AppState.self) private var state
-    @Environment(\.openSettings) private var openSettings
-    @State private var search = ""
-    @State private var sourceFilter: LibrarySource?
-    /// On by default so the owned Steam library (highball#199) doesn't change what the library
-    /// shows until someone asks for it; switching Installed off reveals owned games.
-    @State private var installedOnly = true
-    /// Until the chip is touched, Installed hides only Steam's owned-only games: Epic's owned
-    /// games keep showing as they always have (#205). Once touched it applies to every source.
-    @State private var installedTouched = false
-    @State private var verifiedOnly = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let section: AppSection
+    @FocusState private var searchFocused: Bool
+    /// Matches the adaptive download grid's column width, including its maximum.
+    private func homeDownloadWidth(in contentWidth: CGFloat) -> CGFloat {
+        guard contentWidth > 0 else { return 120 }
+        let columns = max(1, floor((contentWidth + 18) / (115 + 18)))
+        return min(145, (contentWidth - (columns - 1) * 18) / columns)
+    }
+    private var search: String { section == .search ? state.librarySearch : "" }
+    private var verifiedOnly: Bool { section != .home && state.verifiedLibrarySections.contains(section) }
+    private var verifiedBinding: Binding<Bool> {
+        Binding(get: { verifiedOnly }, set: { value in
+            if value { state.verifiedLibrarySections.insert(section) }
+            else { state.verifiedLibrarySections.remove(section) }
+        })
+    }
 
-    private var filtered: [LibraryItem] {
+    private var items: [LibraryItem] {
         state.libraryItems.filter { item in
-            if let sourceFilter, item.source != sourceFilter { return false }
-            if installedOnly && !item.installedAnywhere && (installedTouched || item.source == .steam) { return false }
-            if verifiedOnly {
-                guard state.gameDB.entry(for: item)?.status == "verified-local" else { return false }
+            switch section {
+            case .installed: if !item.installedAnywhere { return false }
+            case .downloads: if item.installedAnywhere { return false }
+            case .steam: if item.source != .steam { return false }
+            case .epic: if item.source != .epic { return false }
+            case .programs: if item.source != .pin { return false }
+            default: break
             }
-            if !search.isEmpty && !item.title.localizedCaseInsensitiveContains(search) { return false }
-            return true
+            if verifiedOnly && state.gameDB.entry(for: item)?.status != "verified-local" { return false }
+            return search.isEmpty || item.title.localizedCaseInsensitiveContains(search)
         }
     }
-
-    /// Only once the grid needs it: with a handful of games the row would repeat every tile.
-    private var continueItems: [LibraryItem] {
-        guard state.libraryItems.count > 6 else { return [] }
-        return state.libraryItems
-            .filter { $0.lastPlayed != nil && $0.installedAnywhere }
-            .sorted { ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast) }
-            .prefix(10).map { $0 }
+    private var installed: [LibraryItem] {
+        items.filter(\.installedAnywhere).sorted {
+            if $0.lastPlayed != $1.lastPlayed { return ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast) }
+            return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
     }
+    private var downloadable: [LibraryItem] { items.filter { !$0.installedAnywhere } }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                filterBar
-                if !continueItems.isEmpty && search.isEmpty && sourceFilter == nil {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HB.eyebrow(L("Continue playing"))
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            LazyHStack(spacing: 14) {
-                                ForEach(continueItems) { item in
-                                    LibraryTile(item: item, entry: entry(for: item), width: 128)
-                                }
-                            }
-                            // Room inside the clip for a hovered tile's scale, stroke and shadow,
-                            // which the scroll view cut off at the top (2026-09-26). The negative
-                            // padding outside keeps the row where it was.
-                            .padding(.vertical, 14).padding(.horizontal, 10)
+        @Bindable var state = state
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 30) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(section.title).font(.system(size: 34, weight: .bold, design: .rounded))
+                        Spacer()
+                        if section == .home {
+                            Button(L("Add games")) { state.select(.addGames) }.buttonStyle(HBActionStyle())
+                        } else {
+                            Toggle(L("Verified only"), isOn: verifiedBinding).toggleStyle(.checkbox).font(.caption)
                         }
-                        .padding(.vertical, -14).padding(.horizontal, -10)
                     }
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        HB.eyebrow(L("Library"))
-                        Text("\(filtered.count)").font(.caption.monospaced()).foregroundStyle(.tertiary)
+                    if section == .search {
+                        TextField(L("Search your games"), text: $state.librarySearch).textFieldStyle(.roundedBorder).controlSize(.large)
+                            .focused($searchFocused)
                     }
-                    if filtered.isEmpty {
-                        emptyState
+                    if items.isEmpty { emptyState }
+                    else if section == .home {
+                        if !installed.isEmpty {
+                            VStack(alignment: .leading, spacing: 15) {
+                                sectionHeading(L("Installed games"), count: installed.count, destination: .installed)
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    LazyHStack(spacing: 18) {
+                                        ForEach(installed) { item in FeaturedGame(item: item, width: homeDownloadWidth(in: geometry.size.width - 64) * 1.5) }
+                                    }.padding(.vertical, 8).padding(.horizontal, 4)
+                                }.padding(.vertical, -8).padding(.horizontal, -4)
+                            }
+                        } else {
+                            ContentUnavailableView(L("Your next game starts here"), systemImage: "gamecontroller",
+                                                   description: Text(L("Choose a game below to install, or connect a store.")))
+                        }
+                        if !downloadable.isEmpty {
+                            VStack(alignment: .leading, spacing: 15) {
+                                sectionHeading(L("Ready to download"), count: downloadable.count, destination: .downloads)
+                                // A small overview keeps Home short. The full collection is one click away.
+                                gameGrid(Array(downloadable.prefix(12)), minimum: 115, maximum: 145)
+                            }
+                        }
                     } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140, maximum: 190), spacing: 14)],
-                                  spacing: 18) {
-                            ForEach(filtered) { item in
-                                LibraryTile(item: item, entry: entry(for: item))
-                            }
-                        }
+                        Text(items.count == 1 ? L("1 game") : String(format: L("%d games"), items.count)).font(.caption).foregroundStyle(.secondary)
+                        gameGrid(items, minimum: section == .installed ? 170 : 125, maximum: section == .installed ? 220 : 165)
                     }
                 }
+                .padding(32).frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 28).padding(.top, 18).padding(.bottom, 40)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(BottleBackdrop())
-        .searchable(text: $search, prompt: L("Search your games"))
-        .navigationDestination(for: LibraryItem.self) { GameDetailView(passedItem: $0) }
+        .animation(HB.motion(reduceMotion), value: verifiedOnly)
+        .id(section)
+        .onAppear { searchFocused = section == .search }
+        .onChange(of: state.searchFocusRequest) { _, _ in searchFocused = section == .search }
     }
 
-    private func entry(for item: LibraryItem) -> GameDBEntry? {
-        state.gameDB.entry(for: item)
-    }
-
-    private var filterBar: some View {
-        HStack(spacing: 8) {
-            FilterChip(label: L("All"), on: sourceFilter == nil) { sourceFilter = nil }
-            FilterChip(label: "Steam", on: sourceFilter == .steam) { sourceFilter = .steam }
-            FilterChip(label: "Epic", on: sourceFilter == .epic) { sourceFilter = .epic }
-            FilterChip(label: L("Programs"), on: sourceFilter == .pin) { sourceFilter = .pin }
-            Divider().frame(height: 16)
-            FilterChip(label: L("Installed"), on: installedOnly) { installedOnly.toggle(); installedTouched = true }
-            FilterChip(label: L("Verified"), on: verifiedOnly) { verifiedOnly.toggle() }
+    private func sectionHeading(_ title: String, count: Int, destination: AppSection) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(.title3.weight(.semibold))
+            Text("\(count)").font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
             Spacer()
+            Button(L("See all")) { state.select(destination) }.buttonStyle(.link).font(.caption)
+        }
+    }
+
+    private func gameGrid(_ games: [LibraryItem], minimum: CGFloat, maximum: CGFloat) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: minimum, maximum: maximum), spacing: 18)], spacing: 24) {
+            ForEach(games) { item in LibraryTile(item: item, entry: state.gameDB.entry(for: item)) }
         }
     }
 
     @ViewBuilder private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if state.bottles.isEmpty {
-                if state.busy {
-                    Text(L("Highball is preparing your Windows environment. Your games will appear here."))
-                        .foregroundStyle(.secondary)
-                } else if !state.damagedBottles.isEmpty {
-                    // A present-but-unreadable environment must never look like a brand-new install:
-                    // the games are likely still on disk, so point at recovery, not "prepare one".
-                    Text(state.damagedBottles.count == 1
-                         ? L("An environment needs attention — Highball can't read its settings, so its games aren't showing.")
-                         : L("Some environments need attention — Highball can't read their settings, so their games aren't showing."))
-                        .foregroundStyle(.secondary)
-                    Button(L("Open Troubleshooting")) { state.settingsTab = .troubleshooting; openSettings() }
-                        .buttonStyle(.borderedProminent).tint(HB.amber)
-                } else {
-                    // An engine without an environment: an older install, or a stopped first run.
-                    Text(L("One more step: Highball prepares a Windows environment for your games."))
-                        .foregroundStyle(.secondary)
-                    Button(L("Prepare it now")) { state.makeDefaultEnvironment() }
-                        .buttonStyle(.borderedProminent).tint(HB.amber)
-                }
-            } else if state.libraryItems.isEmpty {
-                whereAreYourGames
-            } else {
-                Text(L("Nothing matches these filters.")).foregroundStyle(.secondary)
-            }
+        if state.libraryLoading {
+            HStack(spacing: 12) {
+                ProgressView().controlSize(.small)
+                Text(L("Loading your library…")).font(.callout).foregroundStyle(.secondary)
+            }.padding(.vertical, 32)
+        } else if !search.isEmpty || verifiedOnly {
+            ContentUnavailableView(L("No matching games"), systemImage: "magnifyingglass", description: Text(L("Try another search or turn off the filter.")))
+        } else if !state.damagedBottles.isEmpty && state.bottles.isEmpty {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(L("An environment needs attention. Your games may still be on disk.")).foregroundStyle(.secondary)
+                Button(L("Open Troubleshooting")) { state.openSettings(.troubleshooting) }
+            }.padding(.vertical, 32)
+        } else {
+            VStack(alignment: .leading, spacing: 18) {
+                Text(section == .downloads ? L("All your games are installed") : L("Build your library")).font(.title2.weight(.semibold))
+                Text(L("Connect Steam or Epic, or add a Windows program from your Mac.")).foregroundStyle(.secondary)
+                Button(L("Add games")) { state.select(.addGames) }.buttonStyle(HBActionStyle(primary: true))
+            }.padding(.vertical, 32)
         }
-        .padding(.vertical, 24)
     }
+}
 
-    /// Where your games are is a question anyone can answer (UX plan §3.2); Steam is not
-    /// installed unasked, and a GOG or standalone user never waits for its first boot.
-    private var whereAreYourGames: some View {
-        VStack(alignment: .center, spacing: 22) {
-            VStack(spacing: 6) {
-                Text(L("Where are your games?")).font(.title.weight(.semibold))
-                Text(L("Pick one to start. You can add the others any time.")).foregroundStyle(.secondary)
-            }
-            HStack(alignment: .top, spacing: 14) {
-                sourceCard(symbol: "gamecontroller.fill", accent: true, title: L("Steam"),
-                           text: L("Install Steam and sign in. Your Steam library shows up here. Its first start takes 15 to 25 minutes."),
-                           button: state.defaultBottle.map(state.steamInstalled) == true ? L("Open Steam") : L("Install Steam")) { state.installSteam() }
-                sourceCard(symbol: "bag.fill", accent: false, title: L("Epic Games"),
-                           text: L("Connect your Epic account. Your games install straight into Highball."),
-                           button: L("Connect Epic")) { state.showEpicSignIn = true }
-                sourceCard(symbol: "folder.fill", accent: false, title: L("A Windows program I have"),
-                           text: L("An installer or game from your Mac. Or drop it onto this window."),
-                           button: L("Choose a file…")) { state.chooseProgramToRun() }
-            }
-            Text(L("Battle.net, GOG Galaxy, the EA app, Ubisoft Connect and Rockstar are under Add games."))
-                .font(.caption).foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 40)
+/// Large installed-game artwork, with one clear launch action and a separate details link.
+private struct FeaturedGame: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let item: LibraryItem
+    let width: CGFloat
+    @State private var hovering = false
+    @State private var coverDropTargeted = false
+    private var playable: Bool {
+        !state.busy && (state.prefersMacBuild(item) || (item.installed && state.gameDB.entry(for: item)?.isBlocked != true))
     }
-
-    private func sourceCard(symbol: String, accent: Bool, title: String, text: String, button: String, action: @escaping () -> Void) -> some View {
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Image(systemName: symbol).font(.title3)
-                .frame(width: 42, height: 42)
-                .background(Circle().fill(accent ? HB.amber : Color.white.opacity(0.08)))
-                .foregroundStyle(accent ? Color.black : Color.secondary)
-            Text(title).font(.headline)
-            Text(text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-            if accent {
-                Button(button, action: action).buttonStyle(.borderedProminent).tint(HB.amber).disabled(state.busy)
-            } else {
-                Button(button, action: action).buttonStyle(.bordered).disabled(state.busy)
+            Button { state.navigate(.game(item)) } label: {
+                ZStack(alignment: .bottomLeading) {
+                    // Steam's portrait covers are 2:3. Fit custom and fallback art too.
+                    CoverArt(item: item, contentMode: .fit).frame(width: width, height: width * 1.5)
+                    LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
+                    SourceBadge(source: item.source, mac: state.macSteamBuild(for: item)).padding(14)
+                }.clipShape(RoundedRectangle(cornerRadius: 16))
+                    .onDrop(of: [.image], isTargeted: $coverDropTargeted) { providers in
+                        state.acceptCoverDrop(providers, for: item)
+                    }
+                    .overlay(RoundedRectangle(cornerRadius: 16)
+                        .stroke(coverDropTargeted ? HB.amber : .clear, lineWidth: 2))
+            }.buttonStyle(.plain).accessibilityLabel(item.title)
+            HStack(spacing: 10) {
+                Button { state.navigate(.game(item)) } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                        Text(L("Installed")).font(.caption).foregroundStyle(.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }.buttonStyle(.plain)
+                Button { state.play(item) } label: {
+                    Image(systemName: "play.fill").font(.system(size: 12, weight: .semibold))
+                        .frame(width: 34, height: 34).hbGlass(radius: 17, interactive: true)
+                }.buttonStyle(.plain).disabled(!playable).accessibilityLabel(String(format: L("Play %@"), item.title))
             }
-        }
-        .padding(18)
-        .frame(width: 250, height: 230, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(HB.card))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(accent ? HB.amber.opacity(0.5) : HB.cardStroke))
+        }.frame(width: width)
+        .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
+        .animation(HB.motion(reduceMotion), value: hovering)
+        .onHover { hovering = $0 }
+        .contextMenu { GameContextActions(item: item, playable: playable) }
     }
 }
 
@@ -193,12 +195,12 @@ struct FilterChip: View {
         Button(action: action) {
             Text(label)
                 .font(.system(size: 12.5, weight: .semibold))
-                .padding(.horizontal, 12).padding(.vertical, 4)
-                .background(Capsule().fill(on ? HB.amber : HB.card))
-                .overlay(Capsule().stroke(on ? HB.amber : HB.cardStroke))
+                .padding(.horizontal, 13).padding(.vertical, 7)
+                .background(Capsule().fill(on ? HB.amber : .clear))
                 .foregroundStyle(on ? Color(red: 0.13, green: 0.08, blue: 0.01) : .secondary)
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? [.isSelected] : [])
     }
 }
 
@@ -209,6 +211,7 @@ struct LibraryTile: View {
     let item: LibraryItem
     let entry: GameDBEntry?
     var width: CGFloat? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
     @State private var coverDropTargeted = false
 
@@ -217,7 +220,7 @@ struct LibraryTile: View {
     private var playable: Bool { (state.prefersMacBuild(item) || (item.installed && !blocked)) && !state.busy }
 
     var body: some View {
-        NavigationLink(value: item) {
+        Button { state.navigate(.game(item)) } label: {
             VStack(alignment: .leading, spacing: 6) {
                 ZStack {
                     CoverArt(item: item)
@@ -271,7 +274,7 @@ struct LibraryTile: View {
                 .overlay(RoundedRectangle(cornerRadius: 9)
                     .stroke(coverDropTargeted ? HB.amber : (hovering ? HB.amber.opacity(0.55) : HB.cardStroke),
                             lineWidth: coverDropTargeted ? 2 : 1))
-                .scaleEffect(hovering ? 1.02 : 1)
+                .scaleEffect(hovering && !reduceMotion ? 1.025 : 1)
                 .shadow(color: .black.opacity(hovering ? 0.4 : 0.2), radius: hovering ? 12 : 5, y: 3)
 
                 Text(item.title)
@@ -287,7 +290,7 @@ struct LibraryTile: View {
             .frame(width: width)
         }
         .buttonStyle(.plain)
-        .animation(.spring(duration: 0.2), value: hovering)
+        .animation(HB.motion(reduceMotion), value: hovering)
         // Continuous hover, not onHover: onHover only reports crossing the tile's edge, so a
         // game started from the play button took the screen with the pointer still inside, the
         // exit never came, and the play button stayed on that tile after coming back, while the
@@ -303,39 +306,48 @@ struct LibraryTile: View {
             hovering = false
         }
         .help(Self.tooltip(entry?.notes) ?? item.title)
-        .contextMenu {
-            if let appid = item.steamAppID, let running = state.session(forAppID: appid) {
-                Button(L("Stop")) { state.stopSession(running) }
-            } else if playable { Button(L("Play")) { state.play(item) } }
-            if MacAppStub.existing(for: item.title) != nil {
-                Button(L("Remove the Mac app")) { state.removeMacApp(title: item.title) }
-            } else if playable, item.installed, PlayLink.target(for: item) != nil {
-                Button(L("Make a Mac app…")) { state.makeMacApp(for: item) }
-            }
-            Button(L("Choose cover image…")) { state.chooseCover(for: item) }
-            if state.coverStore.coverURL(for: item.id) != nil {
-                Button(L("Reset cover")) { state.resetCover(for: item) }
-            }
-            // A program someone added by hand leaves the library from its tile, not only from
-            // the environment's programs list (highball-db#68). Steam and Epic entries follow
-            // their stores' libraries, so they have no such button.
-            if item.source == .pin, let bottleName = item.bottleName,
-               let bottle = state.bottles.first(where: { $0.name == bottleName }),
-               let pin = bottle.settings.pins.first(where: { $0.id == item.pinID }) {
-                Divider()
-                Button(L("Remove from list"), role: .destructive) { state.removePin(pin, from: bottle) }
-            }
-            // Removing the game itself, not just the entry: asked for on r/macgaming because
-            // there was nowhere to do it (highball#185).
-            if item.installed {
-                Divider()
-                Button(L("Uninstall…"), role: .destructive) { state.askUninstall(item) }
-            }
-        }
+        .contextMenu { GameContextActions(item: item, playable: playable) }
         .accessibilityLabel("\(item.title), \(item.source.rawValue)\(item.installedOnMac ? ", " + L("Installed in Steam for Mac") : item.installed ? "" : ", " + L("Not installed"))")
     }
 
     private var verdict: (String, Color)? { verdictLabel(entry?.status) }
+}
+
+/// The same game actions are available from Home and the full library.
+private struct GameContextActions: View {
+    @Environment(AppState.self) private var state
+    let item: LibraryItem
+    let playable: Bool
+
+    @ViewBuilder var body: some View {
+        if let appid = item.steamAppID, let running = state.session(forAppID: appid) {
+            Button(L("Stop")) { state.stopSession(running) }
+        } else if playable { Button(L("Play")) { state.play(item) } }
+        if MacAppStub.existing(for: item.title) != nil {
+            Button(L("Remove the Mac app")) { state.removeMacApp(title: item.title) }
+        } else if playable, item.installed, PlayLink.target(for: item) != nil {
+            Button(L("Make a Mac app…")) { state.makeMacApp(for: item) }
+        }
+        Button(L("Choose cover image…")) { state.chooseCover(for: item) }
+        if state.coverStore.coverURL(for: item.id) != nil {
+            Button(L("Reset cover")) { state.resetCover(for: item) }
+        }
+        // A program someone added by hand leaves the library from its tile, not only from
+        // the environment's programs list (highball-db#68). Steam and Epic entries follow
+        // their stores' libraries, so they have no such button.
+        if item.source == .pin, let bottleName = item.bottleName,
+           let bottle = state.bottles.first(where: { $0.name == bottleName }),
+           let pin = bottle.settings.pins.first(where: { $0.id == item.pinID }) {
+            Divider()
+            Button(L("Remove from list"), role: .destructive) { state.removePin(pin, from: bottle) }
+        }
+        // Removing the game itself, not just the entry: asked for on r/macgaming because
+        // there was nowhere to do it (highball#185).
+        if item.installed {
+            Divider()
+            Button(L("Uninstall…"), role: .destructive) { state.askUninstall(item) }
+        }
+    }
 }
 
 /// Shared verdict mapping (was embedded in GameCard).
@@ -379,6 +391,7 @@ struct SourceBadge: View {
 struct CoverArt: View {
     @Environment(AppState.self) private var state
     let item: LibraryItem
+    var contentMode: ContentMode = .fill
     @State private var stage = 0
 
     private var url: URL? {
@@ -391,7 +404,7 @@ struct CoverArt: View {
 
     var body: some View {
         // The tile takes the size its parent proposes; the image lives in an overlay, so its
-        // own dimensions never take part in layout and the crop is a plain clip. The previous
+        // own dimensions never take part in layout. The previous
         // GeometryReader-and-frame form rendered nothing on a macOS 27 beta for any image whose
         // aspect was not exactly 2:3 (#64): a chosen cover, or Steam's wide fallback art.
         Color.clear
@@ -399,12 +412,12 @@ struct CoverArt: View {
                 // A user-chosen cover always wins (coverVersion invalidates after changes).
                 if let custom = state.coverStore.coverURL(for: item.id),
                    let image = NSImage(contentsOf: custom) {
-                    Image(nsImage: image).resizable().scaledToFill().id(state.coverVersion)
+                    Image(nsImage: image).resizable().aspectRatio(contentMode: contentMode).id(state.coverVersion)
                 } else if let url {
                     AsyncImage(url: url) { phase in
                         switch phase {
                         case .success(let image):
-                            image.resizable().scaledToFill()
+                            image.resizable().aspectRatio(contentMode: contentMode)
                         case .failure:
                             placeholder.onAppear { stage += 1 }
                         default:
@@ -415,6 +428,7 @@ struct CoverArt: View {
                     placeholder
                 }
             }
+            .background(HB.card)
             .clipped()
             // clipped() trims the drawing, not hit testing: a wide cover scaled to fill (Steam's
             // fallback art, Half-Life 2's demo, Heartopia) still caught the pointer over the
