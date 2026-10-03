@@ -127,4 +127,13 @@ final class SteamRestartTests: XCTestCase {
         XCTAssertEqual(SteamRestart.rendererName(ofLive: ["WINEDLLPATH_PREPEND": "/e/x/renderers/dxmt/wine:\(base)/d9vk/wine"]), "dxmt")
         XCTAssertEqual(SteamRestart.rendererName(ofLive: [:]), "wined3d")
     }
+
+    /// The audio buffer library loads when a process starts and the game inherits it from the
+    /// client, so a client running without it is restarted for a launch that wants it (highball#127).
+    func testAClientWithoutTheAudioLibraryIsRestartedForALaunchThatWantsIt() {
+        let base = ["WINEDLLPATH_PREPEND": "/e/dxmt", "WINEMSYNC": "1"]
+        var wanted = base; wanted["DYLD_INSERT_LIBRARIES"] = "/e/frameworks/libhbaudiobuf.dylib"
+        XCTAssertNotNil(SteamRestart.reason(live: base, wanted: wanted, wantedRenderer: "dxmt"))
+        XCTAssertNil(SteamRestart.reason(live: wanted, wanted: wanted, wantedRenderer: "dxmt"))
+    }
 }

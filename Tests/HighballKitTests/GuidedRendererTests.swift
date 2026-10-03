@@ -44,6 +44,16 @@ final class GuidedRendererTests: XCTestCase {
         XCTAssertEqual(Renderer.choose(requested: nil, gameOverride: .dxvk, row: .d3dmetal, environmentExplicit: false, pin: nil, environment: .dxmt, nativeVulkan: true), .dxmt, "a native-Vulkan title ignores rows and overrides")
     }
 
+    /// highball-db#195: Kingdom Hearts was set to DXMT for itself and ran on DXVK, because the
+    /// override only fed the licence check and never reached the launch. It must travel as the
+    /// launch's own request, so the launch and the Steam restart check both see it.
+    func testTheGamesOwnModeTravelsWithTheLaunch() {
+        XCTAssertEqual(Renderer.launchRequest(requested: nil, gameOverride: .dxmt), .dxmt, "THE BUG: the game's own mode is what the launch asks for")
+        XCTAssertEqual(Renderer.launchRequest(requested: .d3dmetal, gameOverride: .dxmt), .d3dmetal, "the caller's choice still wins")
+        XCTAssertNil(Renderer.launchRequest(requested: nil, gameOverride: nil), "no choice: the row and the environment decide later")
+        XCTAssertNil(Renderer.launchRequest(requested: nil, gameOverride: .dxmt, nativeVulkan: true), "a native-Vulkan title ignores overrides, as in choose")
+    }
+
     func testNativeVulkanRowDecodesAndSpeaks() throws {
         let json = #"{"id":"sims","title":"The Sims Legacy Collection","steam_appid":3314060,"status":"verified-local","renderer":"dxvk","nativeVulkan":true}"#
         let entry = try JSONDecoder().decode(GameDBEntry.self, from: Data(json.utf8))

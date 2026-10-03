@@ -1,16 +1,13 @@
 {
   "$schema": "https://highball.app/schemas/engine-manifest/v0",
-  "id": "x64-sikarugir10.0_6-r19",
-  "displayName": "Wine 10.0 (Sikarugir, focus, msync and audio fixes) + DXMT (Highball build, 2026-09) + D3DMetal 3.0 + MoltenVK 1.4.1 (shadow-import patch) + DXVK 3.1 macOS fork Direct3D 9 (opt-in per game)",
+  "id": "x64-sikarugir10.0_6-r13",
+  "displayName": "Wine 10.0 (Sikarugir) + DXMT (Highball build, 2026-09) + D3DMetal 3.0 + MoltenVK 1.4.1 (shadow-import patch) + DXVK 3.1 macOS fork Direct3D 9 (opt-in per game)",
   "arch": "x86_64",
   "minMacOS": "14.0",
   "requires": [
     "rosetta2"
   ],
   "notes": [
-    "r19 (2026-10-01): r17 plus the audio buffer library (audiobuf component, highball#127). At 48 kHz the Mac asked Wine's audio driver for 10.7 ms at a time, more than a game that keeps one 10 ms period queued has, and the driver played the shortfall as silence. Measured on an M4 with macOS 27.0 with raw captures of each game's menu music: Counter-Strike 2 went from 324 dropouts in two minutes to none, and Half-Life 2, Among Us and Five Nights at Freddy's had none either way. The cap is per process, so other apps keep their audio as it was. Every other component is byte-identical to r17, so only a 2 KB archive is new.",
-    "r17 (2026-10-01): r15 with msync's registration leak fixed (wineserver and ntdll-unix components, highball#224). A wait on several objects that lost a race left the thread registered in the wineserver and nothing removed it, so an object that is rarely signaled gained a list node each time: the pool ran out (\"msync: warn: node memory pool exhausted\" on every allocation after that) and the wineserver grew for as long as the game ran. Measured on an M4 with macOS 27.0 with a reproducer (a worker sets an auto-reset event in a loop while the main thread waits on two objects): r15's wineserver went from 19 MB to 83 MB in 30 s with the pool exhausted, with these two files it stayed at 17 MB with no warning and waits ran faster (about 979k a second against 596k). Heartopia (90 s) and Five Nights at Freddy's (60 s, 32-bit) ran under msync on it with a steady wineserver. Every other component is byte-identical to r15, so only a 435 KB archive is new.",
-    "r15 (2026-09-30): r13 with the Mac driver's focus fixed (winemac component, highball#182). Wine 10.0's driver sent a game a made-up WM_MOUSEACTIVATE with a title-bar hit before giving it focus back, and Unity takes that as a click in the title bar and then ignores the focus gain: after Cmd+Tab, a click on another app or a Dock restore, Unity games kept drawing and dropped every click and key until restarted (Among Us, Umamusume, Heartopia; upstream b568eaac4a, Wine bug 48121, fixed in wine-10.6). Separately, when a game made its own window key without becoming the foreground window (Heartopia's Unity player at start), the driver dropped the focus event macOS sent back, so Wine kept the desktop as foreground and raw input never reached the game: its mouse was dead from the first frame (CrossOver Hack #18896, which CrossOver 26.3 carries). Measured on an M4 with macOS 27.0 before publishing, with this winemac.so in place: Among Us, Umamusume and Heartopia take input after every way of leaving and coming back that failed before, Heartopia takes its first click at start where it took none, Five Nights at Freddy's and the Half-Life 2 demo are unchanged, and the Steam client ran on it throughout. DXMT also carries a fix for a start-up crash (Among Us, 8 of 12 launches on r13, 0 of 12 on this build), see the dxmt component. Every other component is byte-identical to r13, so only the 160 KB winemac archive and the 19 MB DXMT archive are new.",
     "r13 (2026-09-28): r11 with Highball's DXMT build (fork branch highball-20260928, 5c50790) in place of upstream v0.80. DXMT opens Wine's D3DKMT adapter by a LUID made from the GPU's IOKit registry ID, which this Wine's Mac driver does not assign (Wine 11's does), so no D3DKMT device existed and an Unreal game that creates a shared render target at start died with CreateTexture2D E_FAIL: ContractVille (highball#202) and the Gold Mining Simulator 2 demo (highball#215), while the same games start on the Wine 11 engines. This build no longer fails a shared texture when no D3DKMT device is there: the texture is created as a private one, which is all the game's own rendering needs, and the log says so once. Measured on an M1 Pro, macOS 27.0, before publishing: ContractVille no longer crashes at start on DXMT here (it then meets this Wine's own stall on its loading screen, a separate fault its entry describes), CloverPit's demo still runs. Every other component is byte-identical to r11, so only the 19 MB DXMT archive is new.",
     "r11 (2026-09-27): r9 without the lsfg component. Its author asked for lsfg-metal to leave Highball over a licensing dispute he did not want to carry, so it is no longer distributed: no engine ships it and the archives come down once this build has reached everyone. Every remaining component is byte-identical to r5, so nothing new downloads. An environment already on r9 keeps the files it has; frame generation is simply not offered on this engine.",
     "Engine is Gcenx's Sikarugir build of upstream Wine 10.0: exports macdrv_functions from winemac.so (required by both DXMT and D3DMetal bridges) and supports WINEDLLPATH_PREPEND for per-bottle renderer overlays.",
@@ -63,10 +60,10 @@
       },
       "kind": "renderer",
       "license": "MIT (Highball branch of DXMT: SwapDeviceContextState, cross-process opt-in)",
-      "sha256": "96feaf5d98d3c6cdc3edea9503e2891d435df8d5bfdf7d3f6998a56ec62bbd58",
-      "size": 18923969,
-      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/dxmt-highball-20260930T161516Z-a444716/dxmt-highball-20260930T161516Z-a444716.tar.gz",
-      "note": "DXMT from Highball's fork (gauthierpiarrette/dxmt, branch highball-20260928 at 5c50790): upstream main of 2026-09-16 (v0.80 plus five months of upstream work, among it keyed-mutex and shared-resource support and DXGI functions Steam's overlay can hook) plus four Highball changes: cross-process swapchains behind DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN (off by default), SwapDeviceContextState implemented instead of aborting, 2D textures answering IDXGISurface, and the one that matters on this Wine: a shared texture with no D3DKMT device behind it is created as a private one, with one error line, instead of failing the game. On this Wine the driver assigns GPU LUIDs of its own, so DXMT's lookup of its adapter fails (the build also tries the primary display's name, which fails here too) and there is never a D3DKMT device; before this build every shared texture then died at creation. This revision's DXMT is that branch plus a444716 (branch highball-20260930): the encoding context's Metal device is declared before the command helpers whose constructors build pipelines through it. Declared after them it was still uninitialised memory there, and a game could die at start in newComputePipelineStateWithDescriptor sent to a garbage object: Among Us's 64-bit build did in 8 of 12 launches on r13, and in none of 12 with this build. The bug is in upstream DXMT too."
+      "sha256": "1b02c65ce31c49b2ae658b4dc9c5edf374ab3a36888bbd172aa2785b2055a551",
+      "size": 18923879,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/dxmt-highball-20260928T092049Z-5c50790/dxmt-highball-20260928T092049Z-5c50790.tar.gz",
+      "note": "DXMT from Highball's fork (gauthierpiarrette/dxmt, branch highball-20260928 at 5c50790): upstream main of 2026-09-16 (v0.80 plus five months of upstream work, among it keyed-mutex and shared-resource support and DXGI functions Steam's overlay can hook) plus four Highball changes: cross-process swapchains behind DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN (off by default), SwapDeviceContextState implemented instead of aborting, 2D textures answering IDXGISurface, and the one that matters on this Wine: a shared texture with no D3DKMT device behind it is created as a private one, with one error line, instead of failing the game. On this Wine the driver assigns GPU LUIDs of its own, so DXMT's lookup of its adapter fails (the build also tries the primary display's name, which fails here too) and there is never a D3DKMT device; before this build every shared texture then died at creation."
     },
     "d3dmetal-tsshim": {
       "kind": "renderer",
@@ -123,62 +120,6 @@
         "i386-windows/d3d9.dll"
       ],
       "note": "The metalsharp DXVK-MacOS v3.1-macos1.0 Direct3D 9 (DXVK 3.1 with the Gcenx MoltenVK work), both architectures, stamped as Wine builtins. Not on any launch's search path: the template's DXVK-Kegworks 1.10.4 d9vk stays the Direct3D 9 every game gets. A game's recipe copies this one beside the game's executable with a per-program native override when the row says the newer layer is the one that runs it (RaceRoom, highball-db#60). It rendered RaceRoom for one reporter and drew it in grayscale for another, and froze Five Nights at Freddy's, when the r4 candidate put it on every launch's path, which is why it is opt-in per game."
-    },
-    "winemac": {
-      "kind": "patch",
-      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/winemac-focus-20260930/winemac-focus-20260930.tar.xz",
-      "sha256": "0192214d7d5c7cc8acd13dcacb0c27e8313ef0c64c51b91a93deff0a851a8974",
-      "size": 162192,
-      "license": "LGPL-2.1+ (Wine; the change in source form is spike/patches/winemac-sikarugir10.0-focus.patch)",
-      "version": "20260930",
-      "order": 1,
-      "extract": {
-        "subpath": "winemac.so",
-        "into": "engine/lib/wine/x86_64-unix/winemac.so"
-      },
-      "note": "The Wine archive's winemac.so (sha256 4cbf65e3…) with three byte edits, made and checked by Scripts/build-winemac-focus.sh, re-signed ad hoc under its own identifier: upstream b568eaac4a (no made-up WM_MOUSEACTIVATE when macOS gives a window focus, Wine bug 48121) and both halves of CrossOver Hack #18896 (the driver no longer drops the focus event for a window Wine made key). Replaces the file after the Wine archive unpacks (order 1)."
-    },
-    "wineserver": {
-      "kind": "patch",
-      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/wine10-msync-20261001/wine10-msync-20261001.tar.xz",
-      "sha256": "c5f47326fab52d92bd072225c385365da12e615ac2b732dd51c6d085570fcac9",
-      "size": 434740,
-      "license": "LGPL-2.1+ (Wine; the same change in source form, for the CrossOver tree, is highball-engine's patches/0014-msync-unregister-early-return.patch)",
-      "version": "20261001",
-      "order": 1,
-      "extract": {
-        "subpath": "wineserver",
-        "into": "engine/bin/wineserver"
-      },
-      "note": "The Wine archive's wineserver (sha256 6dfe1f9d…) with one byte edit, made and checked by Scripts/build-wine10-msync.sh, re-signed ad hoc under its own identifier: a wait registration that meets a signaled object at index i unregisters objects 0..i-1 whenever i > 0 (it skipped i = 1 and left object 0 registered). Replaces the file after the Wine archive unpacks (order 1). Shares its archive with the ntdll-unix component, which is downloaded once."
-    },
-    "ntdll-unix": {
-      "kind": "patch",
-      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/wine10-msync-20261001/wine10-msync-20261001.tar.xz",
-      "sha256": "c5f47326fab52d92bd072225c385365da12e615ac2b732dd51c6d085570fcac9",
-      "size": 434740,
-      "license": "LGPL-2.1+ (Wine; the same change in source form, for the CrossOver tree, is highball-engine's patches/0014-msync-unregister-early-return.patch)",
-      "version": "20261001",
-      "order": 1,
-      "extract": {
-        "subpath": "ntdll.so",
-        "into": "engine/lib/wine/x86_64-unix/ntdll.so"
-      },
-      "note": "The Wine archive's ntdll.so (sha256 8eae29d1…) with one edit, made and checked by Scripts/build-wine10-msync.sh, re-signed ad hoc under its own identifier: a wait on several objects that finds one available while its registration is in flight now calls server_remove_wait before returning, as its timeout path does, instead of leaving the wineserver holding the registration. Replaces the file after the Wine archive unpacks (order 1)."
-    },
-    "audiobuf": {
-      "kind": "runtime",
-      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/audiobuf-20261001/audiobuf-20261001.tar.xz",
-      "sha256": "037da88d5da0226b3e06778a2038a40d13bb278b8ff859b07eb0261b63a6f268",
-      "size": 2232,
-      "license": "MIT (Highball's own, source spike/audiobuf/audiobuf.c)",
-      "version": "20261001",
-      "order": 1,
-      "extract": {
-        "subpath": "libhbaudiobuf.dylib",
-        "into": "frameworks/libhbaudiobuf.dylib"
-      },
-      "note": "Highball's audio buffer library, built by Scripts/build-audiobuf.sh. Bottle.environment inserts it into Wine's processes with DYLD_INSERT_LIBRARIES, and it caps an output audio unit's I/O buffer at 5 ms before Wine starts it, so a game that keeps one 10 ms period queued no longer drops audio at 48 kHz (highball#127). HB_AUDIOBUF=0 in an environment's variables leaves it out."
     }
   },
   "alternatives": {
@@ -201,10 +142,10 @@
     "GST_PLUGIN_PATH": "${frameworks}/GStreamer.framework/Versions/1.0/lib/gstreamer-1.0"
   },
   "verified": {
-    "date": "2026-10-01",
+    "date": "2026-09-22",
     "macos": "27.0",
-    "chip": "Apple M4",
-    "result": "The library measured on r17 placed by hand (DYLD_INSERT_LIBRARIES on the environment): Counter-Strike 2 324 dropouts to none, Half-Life 2, Among Us and Five Nights at Freddy's unchanged at none, each game started and played its menu. The published archive was downloaded and matches this manifest's checksum."
+    "chip": "Apple M2",
+    "result": "Installed end to end from this manifest by the pull request's own install check on 2026-09-22, a fresh install on a GitHub macOS 15 runner: engine with lsfg, bottle creation, wow64, a bare wine smoke and vcrun2022 all passed. The pinned archive is a byte copy of the published lsfg-metal v0.7.1 asset, mirrored under Highball's engine-components release on 2026-09-24 with its SHA-256 unchanged. The component itself was measured by placing it in an r5 engine by hand: GStreamer's libgstapplemedia.dylib loads with the shim on the path and fails the same load against v0.7.0, and Absolute Drift ran 60 s at 2x through DXVK and through DXMT at about 30 source fps shown at about 60, with no warnings in the shim log."
   },
   "licenses": {
     "apple-gptk-license-2023-08-17": {

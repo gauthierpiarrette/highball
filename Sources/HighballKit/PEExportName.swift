@@ -32,6 +32,16 @@ public enum PEExportName {
         return out
     }
 
+    /// Whether the file at `url` is a Windows executable Wine can map: an MZ header whose
+    /// e_lfanew points at a PE signature. A steam.exe left empty or truncated by an interrupted
+    /// self-update passes a plain existence check, so the Steam row offered Open Steam, Wine's
+    /// loader fell back to start.exe, start.exe answered "File not found", and the crash alert
+    /// then proposed another graphics mode for a file that was never a program (highball#245).
+    public static func isWindowsExecutable(at url: URL) -> Bool {
+        guard let h = try? FileHandle(forReadingFrom: url), let head = try? h.read(upToCount: 65536) else { return false }
+        return isPE(head)
+    }
+
     // MARK: PE walking (PE32 and PE32+)
 
     private static func isPE(_ d: Data) -> Bool {

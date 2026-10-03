@@ -591,9 +591,17 @@ public extension Recipe {
     /// later revision of the same Wine build, since revisions are cumulative), or the app does
     /// not know the manifest. Same Wine is not enough on its own: r7 adds a builtin DLL r6
     /// lacks, and a bottle on r6 needs the offer.
-    func engineToOffer(current: EngineManifest, known: [EngineManifest]) -> EngineManifest? {
+    func engineToOffer(current: EngineManifest, known: [EngineManifest],
+                       macOS: String = Machine.macOSVersion()) -> EngineManifest? {
         guard let id = engine, let wanted = known.first(where: { $0.id == id }) else { return nil }
-        return EngineManifest.satisfies(current: current, wanted: wanted) ? nil : wanted
+        if EngineManifest.satisfies(current: current, wanted: wanted) { return nil }
+        // The newest shipped revision that carries the pin, not the pin itself. A pin names the
+        // revision a game was verified on, and the later revisions of its line fix what was
+        // found since (msync's leak in r13, among others), while a non-default engine never
+        // moves on its own. Offering the pin sent every new Red Dead player of 0.10.2 to the
+        // September r7 (highball-db#272). A revision this Mac cannot run is skipped.
+        return known.filter { EngineManifest.satisfies(current: $0, wanted: wanted) && $0.runs(onMacOS: macOS) }
+            .max { (EngineManifest.revision(of: $0.id) ?? 0) < (EngineManifest.revision(of: $1.id) ?? 0) } ?? wanted
     }
 
     /// The engine this recipe names when no manifest this build ships carries it and the

@@ -40,13 +40,17 @@ final class BundledEngineTests: XCTestCase {
 
     /// Frame generation left Highball on 2026-09-27 at its author's request (itsOwen's lsfg-metal,
     /// highball#171): no engine may ship the component any more. The revisions since are their
-    /// bases (r5 on the main line, r6 on the GPTK 4 line) with one component swapped: DXMT, which
-    /// moved from upstream's v0.80 release to Highball's own build on 2026-09-28, because v0.80's
-    /// D3DKMT adapter lookup fails on this Wine and every shared texture then died at creation
-    /// (ContractVille, highball#202). Everything else is byte-identical, so it is not downloaded
-    /// again, and the DXMT archive comes from Highball's own release page (a component URL has
-    /// to be ours to stay immutable, #27/#28).
-    func testNoEngineShipsFrameGenerationAndTheCurrentRevisionsAreTheirBasesPlusOurDXMT() throws {
+    /// bases (r5 on the main line, r6 on the GPTK 4 line) with DXMT swapped and one file added.
+    /// DXMT moved from upstream's v0.80 release to Highball's own build on 2026-09-28, because
+    /// v0.80's D3DKMT adapter lookup fails on this Wine and every shared texture then died at
+    /// creation (ContractVille, highball#202). The Mac driver's winemac.so is replaced on
+    /// 2026-09-30 so a game gets its focus back after the player leaves it (highball#182), and
+    /// wineserver and ntdll.so on 2026-10-01 so msync stops leaking wait registrations (highball#224),
+    /// and the audio buffer library is added the same day so games stop dropping sound (highball#127).
+    /// Everything else is byte-identical, so it is not downloaded again, and every new archive
+    /// comes from Highball's own release pages (a component URL has to be ours to stay immutable,
+    /// #27/#28).
+    func testNoEngineShipsFrameGenerationAndTheCurrentRevisionsAreTheirBasesPlusOurDXMTAndDriver() throws {
         let all = try manifests() + [try EngineManifest.load(from: engines.deletingLastPathComponent().appending(path: "engine-manifest.json"))]
         for m in all {
             XCTAssertNil(m.components["lsfg"], "\(m.id) still ships the lsfg component")
@@ -55,11 +59,12 @@ final class BundledEngineTests: XCTestCase {
             }
         }
         func one(_ id: String) throws -> EngineManifest { try XCTUnwrap(all.first { $0.id == id }, "\(id) missing") }
-        for (current, baseID) in [("x64-sikarugir10.0_6-r13", "x64-sikarugir10.0_6-r5"), ("x64-sikarugir10.0_6-r14", "x64-sikarugir10.0_6-r6")] {
+        for (current, baseID) in [("x64-sikarugir10.0_6-r19", "x64-sikarugir10.0_6-r5"), ("x64-sikarugir10.0_6-r20", "x64-sikarugir10.0_6-r6")] {
             let r = try one(current), base = try one(baseID)
             XCTAssertEqual(r.minMacOS, base.minMacOS, "\(current) must keep \(baseID)'s floor")
             XCTAssertEqual(r.baseEnv?["D3DM_MTL4"], base.baseEnv?["D3DM_MTL4"], "\(current) must keep \(baseID)'s Metal 4 setting")
-            XCTAssertEqual(Set(r.components.keys), Set(base.components.keys), "\(current) has exactly \(baseID)'s components")
+            XCTAssertEqual(Set(r.components.keys), Set(base.components.keys).union(["winemac", "wineserver", "ntdll-unix", "audiobuf"]),
+                           "\(current) has exactly \(baseID)'s components plus the driver, the msync fix and the audio library")
             for (name, component) in base.components where name != "dxmt" {
                 XCTAssertEqual(r.components[name]?.sha256, component.sha256, "\(name) drifted from \(baseID), so its download is not reused")
             }
@@ -67,7 +72,47 @@ final class BundledEngineTests: XCTestCase {
             XCTAssertTrue(dxmt.url.absoluteString.hasPrefix("https://github.com/gauthierpiarrette/highball-engine/releases/download/dxmt-highball-"),
                           "\(current)'s DXMT must be Highball's own build from its release page: \(dxmt.url)")
             XCTAssertNotEqual(dxmt.sha256, base.components["dxmt"]?.sha256, "\(current) must not carry \(baseID)'s v0.80 DXMT")
+
+            // The driver file is three byte edits to the Wine archive's own winemac.so
+            // (Scripts/build-winemac-focus.sh checks every byte it touches), so it is only valid
+            // over that exact archive, and only if it lands after it and on that one file.
+            let winemac = try XCTUnwrap(r.components["winemac"])
+            XCTAssertEqual(r.components["wine"]?.sha256, "9da7ee0cbf386522f3a9906943726d9c3c125dbbd9ab120e3cde80e88d6091b2",
+                           "\(current)'s driver was made for the Sikarugir 10.0_6 archive and no other")
+            XCTAssertEqual(winemac.extract?.into, "engine/lib/wine/x86_64-unix/winemac.so", "the driver replaces one file, the Wine archive's own")
+            XCTAssertGreaterThan(winemac.order ?? 0, r.components["wine"]?.order ?? 0, "the driver must unpack after the Wine archive it replaces a file of")
+            XCTAssertTrue(winemac.url.absoluteString.hasPrefix("https://github.com/gauthierpiarrette/highball-engine/releases/download/winemac-focus-"),
+                          "\(current)'s driver must come from Highball's own release page: \(winemac.url)")
+
+            // The msync fix is byte edits to the same archive's wineserver and ntdll.so
+            // (Scripts/build-wine10-msync.sh), one archive behind two single-file components.
+            for (name, into) in [("wineserver", "engine/bin/wineserver"), ("ntdll-unix", "engine/lib/wine/x86_64-unix/ntdll.so")] {
+                let c = try XCTUnwrap(r.components[name])
+                XCTAssertEqual(c.extract?.into, into, "\(current)/\(name) replaces one file, the Wine archive's own")
+                XCTAssertGreaterThan(c.order ?? 0, r.components["wine"]?.order ?? 0, "\(current)/\(name) must unpack after the Wine archive")
+                XCTAssertTrue(c.url.absoluteString.hasPrefix("https://github.com/gauthierpiarrette/highball-engine/releases/download/wine10-msync-"),
+                              "\(current)/\(name) must come from Highball's own release page: \(c.url)")
+            }
+            XCTAssertEqual(r.components["wineserver"]?.sha256, r.components["ntdll-unix"]?.sha256, "both files come from one archive, downloaded once")
+            XCTAssertFalse(EngineManifest.needsPrefixRefresh(from: base, to: r), "\(current) keeps the Wine archive, so environments move without the Windows setup")
+
+            // The audio library lands where InstalledEngine.audioBufferLibrary looks for it, from
+            // Highball's own release page.
+            let audio = try XCTUnwrap(r.components["audiobuf"])
+            XCTAssertEqual(audio.extract?.into, "frameworks/libhbaudiobuf.dylib", "\(current)'s audio library must land where Bottle.environment looks")
+            XCTAssertTrue(audio.url.absoluteString.hasPrefix("https://github.com/gauthierpiarrette/highball-engine/releases/download/audiobuf-"),
+                          "\(current)'s audio library must come from Highball's own release page: \(audio.url)")
         }
-        XCTAssertEqual(all.last?.id, "x64-sikarugir10.0_6-r13", "r13 is the default engine")
+        XCTAssertEqual(all.last?.id, "x64-sikarugir10.0_6-r19", "r19 is the default engine")
+        // The update to r19 moves r17 environments straight over, and leaves GPTK 4 ones (r18) for
+        // their own line's r20, which is where the walk must send them.
+        let shipped = Set(all.flatMap { $0.components.keys })
+        XCTAssertTrue(EngineStore.canMoveBottle(on: try one("x64-sikarugir10.0_6-r17"), to: try one("x64-sikarugir10.0_6-r19"), shipped: shipped))
+        XCTAssertFalse(EngineStore.canMoveBottle(on: try one("x64-sikarugir10.0_6-r18"), to: try one("x64-sikarugir10.0_6-r19"), shipped: shipped))
+        XCTAssertEqual(EngineStore.successor(for: try one("x64-sikarugir10.0_6-r18"), among: all, shipped: shipped, macOS: "27.0")?.id,
+                       "x64-sikarugir10.0_6-r20")
+        for rollback in ["x64-sikarugir10.0_6-r13", "x64-sikarugir10.0_6-r15", "x64-sikarugir10.0_6-r17"] {
+            XCTAssertNotNil(all.first { $0.id == rollback }, "\(rollback) stays offered for rollback")
+        }
     }
 }

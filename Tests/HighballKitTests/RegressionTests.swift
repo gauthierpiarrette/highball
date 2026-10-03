@@ -943,6 +943,39 @@ extension RegressionTests {
                        "engine not installed here: this build cannot tell, so it leaves the bottle alone")
     }
 
+    // 0.10.0's update moved r12 bottles (the GPTK 4 line: the default line's Wine build plus
+    // Apple's D3DMetal 4) onto r13, the default, and D3DMetal 4 was gone without a word. Same Wine
+    // is not enough: a move keeps every component the app still ships. The line's own newer
+    // revision is where such a bottle goes instead, and a withdrawn component (lsfg) holds nobody back.
+    func testAnUpdateNeverTakesAwayAShippedComponentAndFindsTheLinesOwnSuccessor() throws {
+        func manifest(_ id: String, _ names: [String], macOS: String = "14.0") throws -> EngineManifest {
+            let parts = (["wine"] + names).map { #""\#($0)":{"kind":"x","url":"https://x/\#($0)","sha256":"\#($0 == "wine" ? "aaaa" : $0)"}"# }
+            let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"\#(macOS)","components":{\#(parts.joined(separator: ","))}}"#
+            return try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8))
+        }
+        let r9  = try manifest("x64-sikarugir10.0_6-r9",  ["dxmt", "lsfg"])
+        let r13 = try manifest("x64-sikarugir10.0_6-r13", ["dxmt"])
+        let r14 = try manifest("x64-sikarugir10.0_6-r14", ["dxmt", "d3dmetal"], macOS: "27.0")
+        let r15 = try manifest("x64-sikarugir10.0_6-r15", ["dxmt", "winemac"])
+        let r16 = try manifest("x64-sikarugir10.0_6-r16", ["dxmt", "d3dmetal", "winemac"], macOS: "27.0")
+        let known = [r13, r14, r15, r16]
+        let shipped = Set(known.flatMap { $0.components.keys })
+
+        XCTAssertTrue(EngineStore.canMoveBottle(on: r13, to: r15, shipped: shipped), "the default line moves on")
+        XCTAssertFalse(EngineStore.canMoveBottle(on: r14, to: r15, shipped: shipped),
+                       "THE BUG: a GPTK 4 bottle must not be walked onto the default and lose D3DMetal 4")
+        XCTAssertEqual(EngineStore.componentsLost(from: r14, to: r15, shipped: shipped), ["d3dmetal"])
+        XCTAssertTrue(EngineStore.canMoveBottle(on: r9, to: r15, shipped: shipped),
+                      "lsfg ships nowhere any more, so it must not keep an r9 bottle off the default")
+
+        XCTAssertEqual(EngineStore.successor(for: r14, among: known, shipped: shipped, macOS: "27.0")?.id, "x64-sikarugir10.0_6-r16",
+                       "a GPTK 4 bottle goes to its own line's newer revision")
+        XCTAssertEqual(EngineStore.successor(for: r13, among: known, shipped: shipped, macOS: "27.0")?.id, "x64-sikarugir10.0_6-r15",
+                       "the default line shares revision numbers with GPTK 4 and must not be moved onto it")
+        XCTAssertNil(EngineStore.successor(for: r14, among: known, shipped: shipped, macOS: "26.6.2"),
+                     "no revision of the line runs below its floor, so the bottle stays where it is")
+    }
+
     // The same incident, second half: cleanup removed an engine the running build had never heard
     // of. Only the superseded default may go, and only when nothing runs on it.
     func testUpdateRemovesOnlyTheEngineItSuperseded() throws {

@@ -107,6 +107,17 @@ final class EnvironmentTests: XCTestCase {
         XCTAssertFalse(off.contains("dxvk.enableAsync = True"))
     }
 
+    // The launch header quotes the conf without its comments and without the CS:GO fallback,
+    // which is the same in every environment, while a section a recipe set stays (Discord, 2026-10-01).
+    func testDxvkConfigHeaderLinesDropTheConstantParts() {
+        XCTAssertEqual(Bottle.dxvkConfigHeaderLines(Bottle.dxvkConfig(async: false)), ["dxvk.enableAsync = False"])
+        let tuned = Bottle.dxvkConfig(async: true, appConfig: ["csgo.exe": ["d3d9.maxAvailableMemory": "4096"],
+                                                                "hl2.exe": ["dxvk.enableAsync": "False"]])
+        XCTAssertEqual(Bottle.dxvkConfigHeaderLines(tuned),
+                       ["dxvk.enableAsync = True", "[csgo.exe]", "d3d9.customDeviceId = 73BF", "d3d9.maxAvailableMemory = 4096",
+                        "dxvk.enableAsync = False", "[hl2.exe]", "dxvk.enableAsync = False"])
+    }
+
     // extra (per-pin environment from the program settings sheet) wins over bottle env.
     func testExtraEnvironmentWins() throws {
         var (engine, bottle) = try fixtures()
@@ -241,6 +252,23 @@ final class EnvironmentTests: XCTestCase {
         return engine
     }
 
+    /// highball#127: an engine that ships the audio buffer library gets it inserted into Wine's
+    /// processes, a library the player set keeps its place after it, and HB_AUDIOBUF=0 leaves it out.
+    func testTheAudioBufferLibraryIsInsertedOnlyWhenTheEngineShipsIt() throws {
+        let engine = try d3dmetalEngine()
+        defer { try? FileManager.default.removeItem(at: engine.root) }
+        var bottle = Bottle(url: URL(fileURLWithPath: "/tmp/hb-test-bottle"), settings: BottleSettings(name: "t", engineID: engine.id))
+        XCTAssertNil(try bottle.environment(engine: engine)["DYLD_INSERT_LIBRARIES"], "an engine without the library inserts nothing")
+        let lib = engine.frameworksDir.appending(path: "libhbaudiobuf.dylib")
+        try Data().write(to: lib)
+        XCTAssertEqual(try bottle.environment(engine: engine)["DYLD_INSERT_LIBRARIES"], lib.path)
+        bottle.settings.environment["DYLD_INSERT_LIBRARIES"] = "/x/own.dylib"
+        XCTAssertEqual(try bottle.environment(engine: engine)["DYLD_INSERT_LIBRARIES"], "\(lib.path):/x/own.dylib",
+                       "a library the player inserts stays, after ours")
+        bottle.settings.environment["HB_AUDIOBUF"] = "0"
+        XCTAssertEqual(try bottle.environment(engine: engine)["DYLD_INSERT_LIBRARIES"], "/x/own.dylib", "HB_AUDIOBUF=0 leaves ours out")
+    }
+
     // d3dmetal ships 64-bit only, so 32-bit direct3d 10/11 goes to dxmt after it, not to wined3d
     func testD3DMetalFallsBackToDXMTFor32BitGames() throws {
         let engine = try d3dmetalEngine()
@@ -265,6 +293,7 @@ final class EnvironmentTests: XCTestCase {
         bottle.settings.fpsCap = 45
         let env = try bottle.environment(engine: engine, renderer: .d3dmetal)
         XCTAssertEqual(env["DXMT_CONFIG"], "d3d11.preferredMaxFrameRate=45;")
+        XCTAssertEqual(env["D3DM_MAX_FPS"], "45", "the 64-bit games D3DMetal serves get its own cap")
         XCTAssertNil(env["DXVK_FRAME_RATE"], "d3dmetal has no dxvk cap channel")
     }
 }

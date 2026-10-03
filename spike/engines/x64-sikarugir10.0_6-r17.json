@@ -1,14 +1,13 @@
 {
   "$schema": "https://highball.app/schemas/engine-manifest/v0",
-  "id": "x64-sikarugir10.0_6-r19",
-  "displayName": "Wine 10.0 (Sikarugir, focus, msync and audio fixes) + DXMT (Highball build, 2026-09) + D3DMetal 3.0 + MoltenVK 1.4.1 (shadow-import patch) + DXVK 3.1 macOS fork Direct3D 9 (opt-in per game)",
+  "id": "x64-sikarugir10.0_6-r17",
+  "displayName": "Wine 10.0 (Sikarugir, focus and msync fixes) + DXMT (Highball build, 2026-09) + D3DMetal 3.0 + MoltenVK 1.4.1 (shadow-import patch) + DXVK 3.1 macOS fork Direct3D 9 (opt-in per game)",
   "arch": "x86_64",
   "minMacOS": "14.0",
   "requires": [
     "rosetta2"
   ],
   "notes": [
-    "r19 (2026-10-01): r17 plus the audio buffer library (audiobuf component, highball#127). At 48 kHz the Mac asked Wine's audio driver for 10.7 ms at a time, more than a game that keeps one 10 ms period queued has, and the driver played the shortfall as silence. Measured on an M4 with macOS 27.0 with raw captures of each game's menu music: Counter-Strike 2 went from 324 dropouts in two minutes to none, and Half-Life 2, Among Us and Five Nights at Freddy's had none either way. The cap is per process, so other apps keep their audio as it was. Every other component is byte-identical to r17, so only a 2 KB archive is new.",
     "r17 (2026-10-01): r15 with msync's registration leak fixed (wineserver and ntdll-unix components, highball#224). A wait on several objects that lost a race left the thread registered in the wineserver and nothing removed it, so an object that is rarely signaled gained a list node each time: the pool ran out (\"msync: warn: node memory pool exhausted\" on every allocation after that) and the wineserver grew for as long as the game ran. Measured on an M4 with macOS 27.0 with a reproducer (a worker sets an auto-reset event in a loop while the main thread waits on two objects): r15's wineserver went from 19 MB to 83 MB in 30 s with the pool exhausted, with these two files it stayed at 17 MB with no warning and waits ran faster (about 979k a second against 596k). Heartopia (90 s) and Five Nights at Freddy's (60 s, 32-bit) ran under msync on it with a steady wineserver. Every other component is byte-identical to r15, so only a 435 KB archive is new.",
     "r15 (2026-09-30): r13 with the Mac driver's focus fixed (winemac component, highball#182). Wine 10.0's driver sent a game a made-up WM_MOUSEACTIVATE with a title-bar hit before giving it focus back, and Unity takes that as a click in the title bar and then ignores the focus gain: after Cmd+Tab, a click on another app or a Dock restore, Unity games kept drawing and dropped every click and key until restarted (Among Us, Umamusume, Heartopia; upstream b568eaac4a, Wine bug 48121, fixed in wine-10.6). Separately, when a game made its own window key without becoming the foreground window (Heartopia's Unity player at start), the driver dropped the focus event macOS sent back, so Wine kept the desktop as foreground and raw input never reached the game: its mouse was dead from the first frame (CrossOver Hack #18896, which CrossOver 26.3 carries). Measured on an M4 with macOS 27.0 before publishing, with this winemac.so in place: Among Us, Umamusume and Heartopia take input after every way of leaving and coming back that failed before, Heartopia takes its first click at start where it took none, Five Nights at Freddy's and the Half-Life 2 demo are unchanged, and the Steam client ran on it throughout. DXMT also carries a fix for a start-up crash (Among Us, 8 of 12 launches on r13, 0 of 12 on this build), see the dxmt component. Every other component is byte-identical to r13, so only the 160 KB winemac archive and the 19 MB DXMT archive are new.",
     "r13 (2026-09-28): r11 with Highball's DXMT build (fork branch highball-20260928, 5c50790) in place of upstream v0.80. DXMT opens Wine's D3DKMT adapter by a LUID made from the GPU's IOKit registry ID, which this Wine's Mac driver does not assign (Wine 11's does), so no D3DKMT device existed and an Unreal game that creates a shared render target at start died with CreateTexture2D E_FAIL: ContractVille (highball#202) and the Gold Mining Simulator 2 demo (highball#215), while the same games start on the Wine 11 engines. This build no longer fails a shared texture when no D3DKMT device is there: the texture is created as a private one, which is all the game's own rendering needs, and the log says so once. Measured on an M1 Pro, macOS 27.0, before publishing: ContractVille no longer crashes at start on DXMT here (it then meets this Wine's own stall on its loading screen, a separate fault its entry describes), CloverPit's demo still runs. Every other component is byte-identical to r11, so only the 19 MB DXMT archive is new.",
@@ -165,20 +164,6 @@
         "into": "engine/lib/wine/x86_64-unix/ntdll.so"
       },
       "note": "The Wine archive's ntdll.so (sha256 8eae29d1…) with one edit, made and checked by Scripts/build-wine10-msync.sh, re-signed ad hoc under its own identifier: a wait on several objects that finds one available while its registration is in flight now calls server_remove_wait before returning, as its timeout path does, instead of leaving the wineserver holding the registration. Replaces the file after the Wine archive unpacks (order 1)."
-    },
-    "audiobuf": {
-      "kind": "runtime",
-      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/audiobuf-20261001/audiobuf-20261001.tar.xz",
-      "sha256": "037da88d5da0226b3e06778a2038a40d13bb278b8ff859b07eb0261b63a6f268",
-      "size": 2232,
-      "license": "MIT (Highball's own, source spike/audiobuf/audiobuf.c)",
-      "version": "20261001",
-      "order": 1,
-      "extract": {
-        "subpath": "libhbaudiobuf.dylib",
-        "into": "frameworks/libhbaudiobuf.dylib"
-      },
-      "note": "Highball's audio buffer library, built by Scripts/build-audiobuf.sh. Bottle.environment inserts it into Wine's processes with DYLD_INSERT_LIBRARIES, and it caps an output audio unit's I/O buffer at 5 ms before Wine starts it, so a game that keeps one 10 ms period queued no longer drops audio at 48 kHz (highball#127). HB_AUDIOBUF=0 in an environment's variables leaves it out."
     }
   },
   "alternatives": {
@@ -204,7 +189,7 @@
     "date": "2026-10-01",
     "macos": "27.0",
     "chip": "Apple M4",
-    "result": "The library measured on r17 placed by hand (DYLD_INSERT_LIBRARIES on the environment): Counter-Strike 2 324 dropouts to none, Half-Life 2, Among Us and Five Nights at Freddy's unchanged at none, each game started and played its menu. The published archive was downloaded and matches this manifest's checksum."
+    "result": "r15 with this manifest's wineserver and ntdll.so placed by hand (engine copy x64-sikarugir10.0_6-r15t): a new environment boots, the msync reproducer runs with a flat wineserver and no pool warning, Heartopia and Five Nights at Freddy's run under msync through Steam. The published archive was downloaded and matches this manifest's checksum."
   },
   "licenses": {
     "apple-gptk-license-2023-08-17": {

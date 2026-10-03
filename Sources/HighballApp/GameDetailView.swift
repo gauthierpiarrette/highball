@@ -41,6 +41,7 @@ struct GameDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 hero
+                renameEditor
                 if let macBuild { macBlock(macBuild) }
                 verdictBlock
                 if showWhy { whyExplanation.frame(maxWidth: .infinity, alignment: .leading).hbPanel() }
@@ -54,8 +55,7 @@ struct GameDetailView: View {
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .background(BottleBackdrop())
-        .navigationTitle(item.title)
-
+        .navigationTitle(state.displayTitle(item))
     }
 
     // MARK: Pieces
@@ -86,7 +86,7 @@ struct GameDetailView: View {
                 .clipped()
             LinearGradient(colors: [.black.opacity(0.8), .clear], startPoint: .bottom, endPoint: .center)
                 .frame(maxWidth: 800)
-            Text(item.title)
+            Text(state.displayTitle(item))
                 .font(.system(size: 24, weight: .bold, design: .rounded))
                 .foregroundStyle(.white).shadow(radius: 4)
                 .padding(14)
@@ -100,10 +100,30 @@ struct GameDetailView: View {
             .stroke(coverDropTargeted ? HB.amber : HB.cardStroke, lineWidth: coverDropTargeted ? 2 : 1))
     }
 
+    /// Rename stays in the game page so the library's naming feature does not open a modal.
+    @ViewBuilder private var renameEditor: some View {
+        if state.renaming?.id == item.id {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(String(format: L("The store keeps calling it %@. Leave the field empty to go back to that name."), item.title))
+                    .font(.caption).foregroundStyle(.secondary)
+                TextField(L("Name"), text: Binding(get: { state.renameText }, set: { state.renameText = $0 }))
+                    .textFieldStyle(.roundedBorder).controlSize(.large)
+                HStack(spacing: 10) {
+                    Spacer()
+                    Button(L("Cancel")) { state.renaming = nil }.buttonStyle(HBActionStyle())
+                    Button(L("Rename")) { state.rename(item, to: state.renameText) }
+                        .buttonStyle(HBActionStyle(primary: true))
+                }
+            }
+            .padding(16)
+            .hbPanel()
+        }
+    }
+
     private var verdictColor: Color {
         switch entry?.status {
         case "verified-local": return HB.good
-        case "blocked-anticheat": return HB.bad
+        case let s? where s.hasPrefix("blocked-"): return HB.bad
         case nil: return .secondary
         default: return HB.amber
         }
@@ -193,7 +213,9 @@ struct GameDetailView: View {
                     // The row put the Windows build first (a Mac build missing content); the Mac one stays a click away.
                     Button(L("Play on Mac")) { state.playOnMac(item) }.controlSize(.large)
                 } else {
-                    Text(blocked ? L("Its anti-cheat does not run on macOS.") : L("Highball will ask how it went when you finish."))
+                    Text(!blocked ? L("Highball will ask how it went when you finish.")
+                         : entry?.status == "blocked-publisher" ? L("Its publisher stops it on macOS on purpose.")
+                         : L("Its anti-cheat does not run on macOS."))
                         .font(.callout).foregroundStyle(.secondary)
                 }
             } else if item.source == .epic {

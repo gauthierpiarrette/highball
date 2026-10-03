@@ -81,6 +81,12 @@ public enum SteamRestart {
         if liveFrameGen != wantedFrameGen {
             reasons.append("it runs with frame generation \(frameGenerationName(of: live)) and the game wants \(frameGenerationName(of: wanted))")
         }
+        // A library inserted into Wine's processes (the audio buffer fix, highball#127) loads when a
+        // process starts and the game inherits it from the client, so a client started without it
+        // would hand the game a launch without it.
+        if live["DYLD_INSERT_LIBRARIES"] != wanted["DYLD_INSERT_LIBRARIES"] {
+            reasons.append("it runs with different inserted libraries than the game wants")
+        }
         // The game inherits the client's DLL overrides too, and two of their sources are not in
         // `custom`: the environment's DLL overrides field and a recipe's dllOverride steps. So
         // winhttp=n,b added while Steam ran never reached the game, and a mod loader sitting

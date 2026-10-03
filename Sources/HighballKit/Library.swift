@@ -344,3 +344,38 @@ public struct CoverStore: Sendable {
         try? FileManager.default.removeItem(at: existing)
     }
 }
+
+/// The names people give library entries themselves, beside the covers they choose: a Steam
+/// title in a language they do not read, a program added by hand under its file name, a game
+/// they call something else (asked for on Discord, 2026-10-01). One JSON file in the home,
+/// keyed by the library item's id, so a rename survives rebuilds of the library and never
+/// touches the store's own title, which the database lookup and Steam itself keep using.
+public struct NameStore: Sendable {
+    public let paths: HighballPaths
+    public init(paths: HighballPaths = HighballPaths()) { self.paths = paths }
+
+    var file: URL { paths.home.appending(path: "names.json") }
+
+    /// Every custom name, by item id. An unreadable file reads as no names, never as an error.
+    public func names() -> [String: String] {
+        guard let d = try? Data(contentsOf: file) else { return [:] }
+        return (try? JSONDecoder().decode([String: String].self, from: d)) ?? [:]
+    }
+
+    public func name(for id: String) -> String? { names()[id] }
+
+    /// Sets a name, or clears it when the name is empty once trimmed: a blank is a reset, not a
+    /// game called nothing.
+    public func setName(_ name: String?, for id: String) throws {
+        var all = names()
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmed.isEmpty { all.removeValue(forKey: id) } else { all[id] = trimmed }
+        if all.isEmpty {
+            try? FileManager.default.removeItem(at: file)
+            return
+        }
+        try FileManager.default.createDirectory(at: paths.home, withIntermediateDirectories: true)
+        let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try enc.encode(all).write(to: file, options: .atomic)
+    }
+}

@@ -21,6 +21,9 @@ public enum GamePageCopy {
             let name = entry.anticheat?.names.first ?? "its anti-cheat"
             return Verdict(headline: "Can't run: \(name).",
                            detail: entry.anticheat?.note ?? "Its anti-cheat does not run on macOS.")
+        case "blocked-publisher":
+            return Verdict(headline: "Can't run: its publisher blocks macOS.",
+                           detail: "The game stops itself when it finds macOS, whatever the engine or graphics mode.")
         case "verified-local":
             let chip = entry.verified?.chip.map(shortChip)
             var head = chip.map { "Verified on an \($0)." } ?? "Verified on this project's own Mac."

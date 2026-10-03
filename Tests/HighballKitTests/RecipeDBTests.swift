@@ -12,6 +12,27 @@ final class RecipeDBTests: XCTestCase {
             .deletingLastPathComponent().appending(path: "highball-db")
     }
 
+    /// highball-db#195: Wine Mono writes the same NDP v4 Release value as Microsoft's .NET 4.8.1
+    /// (0x82348), so a registry marker called .NET installed in every environment, the
+    /// Dependencies panel offered no Install, and a mixed-mode launcher kept failing under Mono.
+    /// The shipped recipe must look for the real runtime, clr.dll, which Mono never installs.
+    func testDotNet48IsNotInstalledWhereOnlyWineMonoIs() throws {
+        let f = dbRoot.appending(path: "recipes/tweaks/dotnet48.json")
+        guard FileManager.default.fileExists(atPath: f.path) else { throw XCTSkip("highball-db checkout not found next to the repo") }
+        let recipe = try JSONDecoder.highball.decode(Recipe.self, from: Data(contentsOf: f))
+        let dir = FileManager.default.temporaryDirectory.appending(path: "hb-dotnet-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let framework = dir.appending(path: "drive_c/windows/Microsoft.NET/Framework/v4.0.30319")
+        try FileManager.default.createDirectory(at: framework, withIntermediateDirectories: true)
+        try "WINE REGISTRY Version 2\n\n[Software\\\\Microsoft\\\\NET Framework Setup\\\\NDP\\\\v4\\\\Full] 1788462370\n\"Install\"=dword:00000001\n\"Release\"=dword:00082348\n"
+            .write(to: dir.appending(path: "system.reg"), atomically: true, encoding: .utf8)
+        try Data().write(to: framework.appending(path: "mscorlib.dll"))   // Mono leaves this one too
+        let bottle = Bottle(url: dir, settings: BottleSettings(name: "mono", engineID: "e"))
+        XCTAssertFalse(recipe.isInstalled(in: bottle), "THE BUG: Wine Mono alone must not count as .NET Framework 4.8")
+        try Data().write(to: framework.appending(path: "clr.dll"))
+        XCTAssertTrue(recipe.isInstalled(in: bottle), "the real runtime counts")
+    }
+
     func testAllShippedRecipesDecode() throws {
         let recipes = dbRoot.appending(path: "recipes")
         guard FileManager.default.fileExists(atPath: recipes.path) else {
@@ -49,7 +70,7 @@ final class RecipeDBTests: XCTestCase {
             do {
                 let e = try JSONDecoder.highball.decode(GameDBEntry.self, from: Data(contentsOf: f))
                 XCTAssertFalse(e.id.isEmpty, f.lastPathComponent)
-                XCTAssertTrue(["verified-local", "reported-upstream", "community", "blocked-anticheat"].contains(e.status),
+                XCTAssertTrue(["verified-local", "reported-upstream", "community", "blocked-anticheat", "blocked-publisher"].contains(e.status),
                               "\(f.lastPathComponent): unknown status '\(e.status)'")
             } catch {
                 XCTFail("\(f.lastPathComponent) failed to decode: \(error)")

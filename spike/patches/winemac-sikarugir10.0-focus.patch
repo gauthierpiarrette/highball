@@ -1,0 +1,68 @@
+Wine 10.0 Mac driver: give a game its focus back when macOS gives the window focus.
+
+Highball's default engines (x64-sikarugir10.0_6, the main line and the GPTK 4 line) are Gcenx's
+Sikarugir build of Wine 10.0, which has no public source for this revision, so these changes ship as
+three byte edits to its winemac.so (Scripts/build-winemac-focus.sh makes the file from the published
+tarball and checks every byte it touches). This file is the same change in source form, against
+wine-10.0's dlls/winemac.drv.
+
+1. window.c, macdrv_window_got_focus: upstream b568eaac4a (wine-10.6, Wine bug 48121). Wine 10 sent
+   the game a made-up WM_MOUSEACTIVATE with a non-client hit (HTMENU) before activating it. Unity
+   treats that as a click that started in the title bar and ignores the focus gain that follows, so
+   after Cmd+Tab, a click on another app or a Dock restore the game kept drawing but dropped every
+   click and key (highball#182).
+
+2. and 3. cocoa_window.m, makeFocused and windowDidBecomeKey: CrossOver Hack #18896, as CrossOver
+   26.3 ships it. When Wine itself made a window key (a game calling SetFocus on a window that is
+   not the foreground one, which Heartopia's Unity player does at start), the driver dropped the
+   focus event macOS sent back, so the window was key on the Mac while Wine kept another window as
+   foreground. Raw input only reaches the foreground window, so such a game started with a dead
+   mouse. With these, the event reaches Wine and the window becomes the foreground.
+
+diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -2130,8 +2130,8 @@
+         [self makeKeyWindow];
+         causing_becomeKeyWindow = nil;
+ 
+-        [queue discardEventsMatchingMask:event_mask_for_type(WINDOW_GOT_FOCUS) |
+-                                         event_mask_for_type(WINDOW_LOST_FOCUS)
++        /* CrossOver Hack #18896: don't discard WINDOW_GOT_FOCUS events */
++        [queue discardEventsMatchingMask:event_mask_for_type(WINDOW_LOST_FOCUS)
+                                forWindow:self];
+     }
+ 
+@@ -2907,7 +2907,7 @@
+         if (event)
+             [self flagsChanged:event];
+ 
+-        if (causing_becomeKeyWindow == self) return;
++        /* CrossOver Hack #18896: don't return here based on causing_becomeKeyWindow */
+ 
+         [controller windowGotFocus:self];
+     }
+diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -1899,17 +1899,9 @@
+ 
+     if (can_window_become_foreground(hwnd) && !(style & WS_MINIMIZE))
+     {
+-        /* simulate a mouse click on the menu to find out
+-         * whether the window wants to be activated */
+-        LRESULT ma = send_message(hwnd, WM_MOUSEACTIVATE,
+-                                  (WPARAM)NtUserGetAncestor(hwnd, GA_ROOT),
+-                                  MAKELONG(HTMENU, WM_LBUTTONDOWN));
+-        if (ma != MA_NOACTIVATEANDEAT && ma != MA_NOACTIVATE)
+-        {
+-            TRACE("setting foreground window to %p\n", hwnd);
+-            NtUserSetForegroundWindow(hwnd);
+-            return;
+-        }
++        TRACE("setting foreground window to %p\n", hwnd);
++        NtUserSetForegroundWindow(hwnd);
++        return;
+     }
+ 
+     TRACE("win %p/%p rejecting focus\n", hwnd, event->window);

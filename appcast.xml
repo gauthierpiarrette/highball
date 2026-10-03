@@ -5,6 +5,38 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.10.4</title>
+      <description><![CDATA[The Wine 11 engine gets the DXMT fix (r16, highball#240), nine new games and corrected rows]]></description>
+      <pubDate>Sat, 03 Oct 2026 00:52:11 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.10.4/Highball-0.10.4.zip" sparkle:version="0.10.4" sparkle:shortVersionString="0.10.4" sparkle:edSignature="wRl6Kez10uqiO9bZMzuFlwCFX8ytM2lqC3xKvnDfKI1IScfZnLTuHQUiD1jbLyq9X1DefhyVxK1ZA+LuY/cICA==" length="4269388" type="application/octet-stream"/>
+    </item>
+    <item>
+      <title>Highball 0.10.3</title>
+      <description><![CDATA[Sound no longer drops out in games that keep little audio queued, the Rockstar Games Launcher installs again on the Wine 11 engine, and a game that needs that engine gets its newest revision]]></description>
+      <pubDate>Fri, 02 Oct 2026 21:27:30 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.10.3/Highball-0.10.3.zip" sparkle:version="0.10.3" sparkle:shortVersionString="0.10.3" sparkle:edSignature="SrJ6sGLidMG5eExvBRtTaEXlvOumHUHv0XQUhz3QxAC5hiQQ98BUsXa5wsKK5nnCXv8TwCjwil6Xe14rrpn2CQ==" length="4246028" type="application/octet-stream"/>
+    </item>
+    <item>
+      <title>Highball 0.10.2</title>
+      <description><![CDATA[Long sessions no longer freeze on msync, and the frame rate cap reaches Apple's DirectX 12 mode]]></description>
+      <pubDate>Thu, 01 Oct 2026 20:18:42 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.10.2/Highball-0.10.2.zip" sparkle:version="0.10.2" sparkle:shortVersionString="0.10.2" sparkle:edSignature="KCuRQlHUTsk5E7XTipgViY0x64xMTi1cszAAQUvzNILx4fd83Wr1SZoH2gHIBFkaoG6IdnVs1/CHNdM7A68fAw==" length="4206899" type="application/octet-stream"/>
+    </item>
+    <item>
+      <title>Highball 0.10.1</title>
+      <description><![CDATA[Games keep their mouse and keyboard after you switch away and come back]]></description>
+      <pubDate>Wed, 30 Sep 2026 19:06:06 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.10.1/Highball-0.10.1.zip" sparkle:version="0.10.1" sparkle:shortVersionString="0.10.1" sparkle:edSignature="NJKBrNUMAHNI5cxTc5LmKpcgquCGaUjfOOSyq8wMVsgw8wDZPOc8xWXad7R1TeTIRP863CUtWI8LZc3Vz0afCA==" length="4172868" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.10.0</title>
       <description><![CDATA[The default engine no longer lets a shared texture crash a game at start, on Highball's own DXMT build]]></description>
       <pubDate>Mon, 28 Sep 2026 19:41:17 +0200</pubDate>

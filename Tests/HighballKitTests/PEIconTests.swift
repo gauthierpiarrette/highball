@@ -39,6 +39,21 @@ final class PEIconTests: XCTestCase {
         XCTAssertEqual(PEIcon.bestExecutable(in: dir)?.lastPathComponent, "Game-Win64-Shipping.exe")
     }
 
+    /// highball#156: Counter-Strike 2 keeps its program at game/bin/win64/cs2.exe, four levels
+    /// down. Nothing was found, so the game's page hid its per-program settings (Display mode).
+    func testAProgramFourLevelsDownIsFoundWhenNothingShallowerIs() throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "hb-exe-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir.appending(path: "game/bin/win64"), withIntermediateDirectories: true)
+        try Data(count: 100).write(to: dir.appending(path: "game/bin/win64/cs2.exe"))
+        try Data(count: 900).write(to: dir.appending(path: "game/bin/win64/steamerrorreporter64.exe"))
+        XCTAssertEqual(PEIcon.bestExecutable(in: dir)?.lastPathComponent, "cs2.exe")
+        // A program within three levels still wins, as before: the deeper search only runs when
+        // the usual one finds nothing, so no game that had a program changes it.
+        try Data(count: 10).write(to: dir.appending(path: "start.exe"))
+        XCTAssertEqual(PEIcon.bestExecutable(in: dir)?.lastPathComponent, "start.exe")
+    }
+
     func testARealProgramOnThisMacWhenThereIsOne() throws {
         let candidates = [
             "Library/Application Support/Highball/bottles/Gaming/drive_c/highball/ahk/AutoHotkeyU64.exe",

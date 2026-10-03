@@ -281,13 +281,49 @@ final class AppState {
     var libraryStore: LibraryStore { LibraryStore(paths: paths) }
 
     func rebuildLibrary() {
+        customNames = nameStore.names()
         libraryItems = LibraryIndex.build(bottles: bottles, steamByBottle: gamesByBottle,
                                           steamOwnedByBottle: steamOwnedByBottle, macInstalled: macSteamGames,
                                           epicOwned: epicOwned, epicInstalls: epicInstalls,
                                           plays: libraryPlays)
+        sortLibraryByDisplayTitle()
         libraryLoading = false
         if let deferred = deferredPlayLink { resolvePlayLink(deferred.request) }
         refreshMacFlags()
+    }
+
+    // MARK: Names people give their games
+
+    /// Custom names by item id (NameStore). A renamed game sorts, searches and shows under its
+    /// new name; the store's own title stays the key for the database and for Steam.
+    var customNames: [String: String] = [:]
+    var nameStore: NameStore { NameStore(paths: paths) }
+    /// The game whose inline rename field is open, and the text in it.
+    var renaming: LibraryItem?
+    var renameText = ""
+
+    func displayTitle(_ item: LibraryItem) -> String { customNames[item.id] ?? item.title }
+
+    func beginRename(_ item: LibraryItem) {
+        renameText = displayTitle(item)
+        renaming = item
+    }
+
+    /// Saves the name in the field; a blank resets to the store's title.
+    func rename(_ item: LibraryItem, to name: String) {
+        do {
+            try nameStore.setName(name, for: item.id)
+            customNames = nameStore.names()
+            sortLibraryByDisplayTitle()
+        } catch { fail(error) }
+        renaming = nil
+    }
+
+    func resetName(for item: LibraryItem) { rename(item, to: "") }
+
+    private func sortLibraryByDisplayTitle() {
+        guard !customNames.isEmpty else { return }
+        libraryItems.sort { displayTitle($0).localizedCaseInsensitiveCompare(displayTitle($1)) == .orderedAscending }
     }
 
     // MARK: Mac builds on Steam
@@ -401,7 +437,10 @@ final class AppState {
         // D3DMetal on a bottle whose engine had no licence accepted, and every launch in it
         // died with "missing renderer"). A licence is asked for here, once, in context; a mode
         // the engine simply lacks degrades to one it has, and the log says so.
-        var renderer = renderer
+        // The game's own mode is part of what this launch asks for, so every path below carries
+        // it: the Steam restart check, the launch after a fix recipe, Epic (highball-db#195).
+        var renderer = Renderer.launchRequest(requested: renderer, gameOverride: rendererOverride(for: item),
+                                              nativeVulkan: gameDB.entry(for: item)?.nativeVulkan == true)
         if let engine = engine(for: bottle) {
             let entry = gameDB.entry(for: item)
             let pinMode = item.pinID.flatMap { id in bottle.settings.pins.first { $0.id == id }?.renderer }
@@ -476,9 +515,9 @@ final class AppState {
             applyRecipe(recipe.id, to: bottle, then: DoneState(
                 title: String(format: L("%@ installed"), recipe.title),
                 ctaTitle: String(format: L("Play %@"), item.title),
-                cta: { [weak self] in
+                cta: { [weak self, renderer] in
                     guard let self, let fresh = self.bottles.first(where: { $0.name == bottleName }) else { return }
-                    self.launch(item, in: fresh)
+                    self.launch(item, in: fresh, renderer: renderer)
                 }))
             return
         }
@@ -776,6 +815,7 @@ final class AppState {
 
     func refresh() {
         executableCache.removeAll()
+        executableMisses.removeAll()
         if !prunedLogsThisRun {
             prunedLogsThisRun = true
             let n = LogPruner.prune(directory: paths.logs)
@@ -880,6 +920,11 @@ final class AppState {
             // update happened to be component-only: on 2026-09-09 a 0.8.9 build walked bottles
             // from the Wine 11 engine onto its Wine 10 default because r1 to r2 was same-Wine.
             let installedNow = try engineStore.installedEngines()
+            let known = Self.knownManifests
+            let shipped = Set(known.flatMap { $0.components.keys })
+            // Bottles whose engine offers something the new default does not (the GPTK 4 line's
+            // D3DMetal 4): they go to their own line's newest revision instead, after this loop.
+            var leftBehind: [(Bottle, InstalledEngine)] = []
             for var bottle in try bottleStore.list() where bottle.settings.engineID != fresh.id {
                 guard let bottleEngine = installedNow.first(where: { $0.id == bottle.settings.engineID }) else {
                     await MainActor.run { self.appendLog("bottle '\(bottle.name)' stays on \(bottle.settings.engineID): that engine is not installed here, so this build cannot tell whether its Wine matches") }
@@ -889,6 +934,12 @@ final class AppState {
                     await MainActor.run { self.appendLog("bottle '\(bottle.name)' stays on \(bottle.settings.engineID): the new engine has a different Wine build; switch it from the bottle's settings when you want") }
                     continue
                 }
+                let lost = EngineStore.componentsLost(from: bottleEngine.manifest, to: fresh.manifest, shipped: shipped)
+                guard lost.isEmpty else {
+                    await MainActor.run { self.appendLog("bottle '\(bottle.name)' stays on \(bottle.settings.engineID) for now: \(fresh.id) does not carry its \(lost.joined(separator: ", "))") }
+                    leftBehind.append((bottle, bottleEngine))
+                    continue
+                }
                 let runnerOld = WineRunner(paths: paths, engine: bottleEngine, bottle: bottle)
                 try? runnerOld.kill()
                 try? await Task.sleep(for: .seconds(2))
@@ -896,6 +947,24 @@ final class AppState {
                 if !bottle.supportsDLSS(engine: fresh) { bottle.settings.dlssEnabled = false }
                 try bottle.save()
                 await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(fresh.id) (same Wine, no prefix refresh needed)") }
+            }
+            for (stayed, bottleEngine) in leftBehind {
+                var bottle = stayed
+                guard let next = EngineStore.successor(for: bottleEngine.manifest, among: known, shipped: shipped) else { continue }
+                let target: InstalledEngine
+                if let have = try engineStore.installedEngines().first(where: { $0.id == next.id && $0.isComplete }) {
+                    target = have
+                } else {
+                    target = try await engineStore.install(next, accepted: accepted) { name, received, total in
+                        Task { @MainActor in self.reportDownload(name, received: received, total: total) }
+                    }
+                }
+                let runnerOld = WineRunner(paths: paths, engine: bottleEngine, bottle: bottle)
+                try? runnerOld.kill()
+                try? await Task.sleep(for: .seconds(2))
+                bottle.settings.engineID = target.id
+                try bottle.save()
+                await MainActor.run { self.appendLog("bottle '\(bottle.name)' moved to \(target.id), the newer revision of its own engine (same Wine, nothing it had is lost)") }
             }
             // Clean up only the engine this update superseded. Anything else stays, including an
             // engine this build has never heard of: a newer Highball may have installed it, and
@@ -1182,8 +1251,12 @@ final class AppState {
             }))
     }
 
+    /// Steam counts as installed when its steam.exe is a Windows executable, not merely a file: an
+    /// empty or truncated one, the leftover of an interrupted self-update, showed Open Steam and
+    /// then a crash alert proposing another graphics mode (highball#245). Now the row offers the
+    /// installer again, which writes a fresh client over it and keeps the rest of the folder.
     func steamInstalled(in bottle: Bottle) -> Bool {
-        FileManager.default.fileExists(atPath: bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe").path)
+        PEExportName.isWindowsExecutable(at: bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe"))
     }
 
     /// A game the row says needs D3DMetal, on an engine where it is not enabled yet: Play asks
@@ -1381,10 +1454,15 @@ final class AppState {
     /// Finding it walks the game's folder, so the answer is kept per item until the next
     /// library refresh: views ask on every evaluation.
     private var executableCache: [String: URL] = [:]
+    /// Installed games whose folder holds no program the search recognises, kept for the same
+    /// span: without it a page would walk such a folder five levels deep on every evaluation.
+    private var executableMisses: Set<String> = []
     func programExecutable(for item: LibraryItem) -> URL? {
         if let hit = executableCache[item.id] { return hit }
+        if executableMisses.contains(item.id) { return nil }
         let found = findProgramExecutable(for: item)
         if let found { executableCache[item.id] = found }
+        else if programFolder(for: item) != nil { executableMisses.insert(item.id) }
         return found
     }
     private func findProgramExecutable(for item: LibraryItem) -> URL? {
@@ -1846,6 +1924,13 @@ final class AppState {
                 }
                 return SessionWatch.isAlive(markers: markers, ps: await Self.processList())
             } crashed: { result in
+                // A program whose file is not a Windows executable never ran: Wine's loader hands
+                // it to start.exe, which reports "File not found" within seconds. Another graphics
+                // mode cannot help, so say what is wrong instead of proposing one (highball#245).
+                guard PEExportName.isWindowsExecutable(at: pin.executableURL(driveC: bottle.driveC)) else {
+                    self.appendLog("\(pin.name) did not start: its file is not a Windows program (empty or cut short), so Wine could not run it. Install it again; for Steam, the Steam row offers the installer.")
+                    return
+                }
                 let current = pin.renderer ?? bottle.settings.renderer
                 self.crashSuggestion = CrashSuggestion(program: pin.name, bottleName: bottle.name,
                                                        renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil, vkd3dAvailable: engine.rendererDir("vkd3d") != nil),

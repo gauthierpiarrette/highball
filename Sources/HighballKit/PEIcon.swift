@@ -17,14 +17,22 @@ public enum PEIcon {
     }
 
     /// The program most likely to be the game in a folder: the largest .exe up to three levels
-    /// down whose name does not say installer, crash handler or redistributable.
+    /// down whose name does not say installer, crash handler or redistributable. A folder with
+    /// none that shallow is searched two levels deeper: Source 2 games keep theirs at
+    /// game/bin/win64 (Counter-Strike 2's cs2.exe is four levels down), and finding nothing hid
+    /// every per-program setting on the game's page, Display mode among them (highball#156). A
+    /// folder with a program within three levels keeps the answer it always had.
     public static func bestExecutable(in dir: URL) -> URL? {
+        bestExecutable(in: dir, maxLevel: 3) ?? bestExecutable(in: dir, maxLevel: 5)
+    }
+
+    static func bestExecutable(in dir: URL, maxLevel: Int) -> URL? {
         let fm = FileManager.default
         let excluded = ["unins", "setup", "redist", "crash", "report", "vc_redist", "vcredist", "dxsetup", "dotnet", "directx", "easyanticheat", "installscript", "launcher_", "helper"]
         guard let e = fm.enumerator(at: dir, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey], options: [.skipsHiddenFiles]) else { return nil }
         var best: (URL, Int)?
         for case let url as URL in e {
-            if e.level > 3 { e.skipDescendants(); continue }
+            if e.level > maxLevel { e.skipDescendants(); continue }
             guard url.pathExtension.lowercased() == "exe" else { continue }
             let name = url.lastPathComponent.lowercased()
             if excluded.contains(where: { name.contains($0) }) { continue }

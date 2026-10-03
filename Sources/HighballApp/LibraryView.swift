@@ -38,13 +38,15 @@ struct LibraryView: View {
             default: break
             }
             if verifiedOnly && state.gameDB.entry(for: item)?.status != "verified-local" { return false }
-            return search.isEmpty || item.title.localizedCaseInsensitiveContains(search)
+            if !search.isEmpty && !item.title.localizedCaseInsensitiveContains(search)
+                && !state.displayTitle(item).localizedCaseInsensitiveContains(search) { return false }
+            return true
         }
     }
     private var installed: [LibraryItem] {
         items.filter(\.installedAnywhere).sorted {
             if $0.lastPlayed != $1.lastPlayed { return ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast) }
-            return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+            return state.displayTitle($0).localizedStandardCompare(state.displayTitle($1)) == .orderedAscending
         }
     }
     private var downloadable: [LibraryItem] { items.filter { !$0.installedAnywhere } }
@@ -166,18 +168,18 @@ private struct FeaturedGame: View {
                     }
                     .overlay(RoundedRectangle(cornerRadius: 16)
                         .stroke(coverDropTargeted ? HB.amber : .clear, lineWidth: 2))
-            }.buttonStyle(.plain).accessibilityLabel(item.title)
+            }.buttonStyle(.plain).accessibilityLabel(state.displayTitle(item))
             HStack(spacing: 10) {
                 Button { state.navigate(.game(item)) } label: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(item.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                        Text(state.displayTitle(item)).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                         Text(L("Installed")).font(.caption).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }.buttonStyle(.plain)
                 Button { state.play(item) } label: {
                     Image(systemName: "play.fill").font(.system(size: 12, weight: .semibold))
                         .frame(width: 34, height: 34).hbGlass(radius: 17, interactive: true)
-                }.buttonStyle(.plain).disabled(!playable).accessibilityLabel(String(format: L("Play %@"), item.title))
+                }.buttonStyle(.plain).disabled(!playable).accessibilityLabel(String(format: L("Play %@"), state.displayTitle(item)))
             }
         }.frame(width: width)
         .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
@@ -264,6 +266,7 @@ struct LibraryTile: View {
                 }
                 .aspectRatio(2 / 3, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 9))
+                .contentShape(RoundedRectangle(cornerRadius: 9))   // hits stop where the cover is drawn, see CoverArt
                 // An image dropped on the tile becomes the cover, so nobody has to walk a file
                 // browser for it (highball#175). Only images are claimed here, so a dropped
                 // Windows program still reaches the window's own handler and runs.
@@ -276,7 +279,7 @@ struct LibraryTile: View {
                 .scaleEffect(hovering && !reduceMotion ? 1.025 : 1)
                 .shadow(color: .black.opacity(hovering ? 0.4 : 0.2), radius: hovering ? 12 : 5, y: 3)
 
-                Text(item.title)
+                Text(state.displayTitle(item))
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
                     .foregroundStyle(.primary)
@@ -304,9 +307,9 @@ struct LibraryTile: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
             hovering = false
         }
-        .help(Self.tooltip(entry?.notes) ?? item.title)
+        .help(Self.tooltip(entry?.notes) ?? state.displayTitle(item))
         .contextMenu { GameContextActions(item: item, playable: playable) }
-        .accessibilityLabel("\(item.title), \(item.source.rawValue)\(item.installedOnMac ? ", " + L("Installed in Steam for Mac") : item.installed ? "" : ", " + L("Not installed"))")
+        .accessibilityLabel("\(state.displayTitle(item)), \(item.source.rawValue)\(item.installedOnMac ? ", " + L("Installed in Steam for Mac") : item.installed ? "" : ", " + L("Not installed"))")
     }
 
     private var verdict: (String, Color)? { verdictLabel(entry?.status) }
@@ -330,6 +333,13 @@ private struct GameContextActions: View {
         Button(L("Choose cover image…")) { state.chooseCover(for: item) }
         if state.coverStore.coverURL(for: item.id) != nil {
             Button(L("Reset cover")) { state.resetCover(for: item) }
+        }
+        Button(L("Rename…")) {
+            state.beginRename(item)
+            state.navigate(.game(item))
+        }
+        if state.customNames[item.id] != nil {
+            Button(L("Reset name")) { state.resetName(for: item) }
         }
         // A program someone added by hand leaves the library from its tile, not only from
         // the environment's programs list (highball-db#68). Steam and Epic entries follow
@@ -355,7 +365,7 @@ func verdictLabel(_ status: String?) -> (String, Color)? {
     case "verified-local": return (L("Verified"), HB.good)
     case "reported-upstream": return (L("Reported"), Color(red: 0.55, green: 0.70, blue: 0.90))
     case "community": return (L("Community"), HB.warn)
-    case "blocked-anticheat": return (L("Blocked"), HB.bad)
+    case let s? where s.hasPrefix("blocked-"): return (L("Blocked"), HB.bad)
     default: return nil
     }
 }
@@ -429,6 +439,11 @@ struct CoverArt: View {
             }
             .background(HB.card)
             .clipped()
+            // clipped() trims the drawing, not hit testing: a wide cover scaled to fill (Steam's
+            // fallback art, Half-Life 2's demo, Heartopia) still caught the pointer over the
+            // neighbouring tiles, so the tile to the left showed the next one's play button and
+            // its clicks went nowhere (seen on an M4, 2026-10-01). Hits stop at the visible cover.
+            .contentShape(Rectangle())
     }
 
     private var placeholder: some View {

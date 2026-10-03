@@ -29,6 +29,14 @@ if Scripts/winlist 2>/dev/null | grep -qE "loginwindow[[:space:]]+\|\|[[:space:]
   python3 -c "import json,time;json.dump({'passed':False,'locked':True,'epoch':int(time.time()),'date':time.strftime('%Y-%m-%d'),'commit':'$COMMIT','required':['unit','upgrade','firstrun','launch-window'],'checks':{}},open('$OUT/latest.json','w'),indent=2)"
   exit 3
 fi
+# A Highball already open (the installed one, say) makes every copy the smokes launch start with
+# no window, since they share its bundle id, and upgrade-smoke then "fails" (2026-09-30: 0.9.39
+# was open, and 0.9.39 itself launched as a second copy showed no window either). Stop and say so.
+OPEN=$(pgrep -fl "^[^ ]*Highball\.app/Contents/MacOS/Highball( |$)" | grep -v "/dist/Highball.app/" | head -1)   # argv[0] only, not a shell that names the path
+if [ -n "$OPEN" ]; then
+  echo "gate: another Highball is open ($OPEN); quit it and run again (nothing was tested)" >&2
+  exit 3
+fi
 echo "gate: building dist/Highball.app from the working tree"
 Scripts/make-app.sh >"$OUT/make-app.log" 2>&1 || { echo "gate: make-app failed, see $OUT/make-app.log" >&2; exit 2; }
 
@@ -47,14 +55,17 @@ run unit swift test
 run upgrade Scripts/upgrade-smoke.sh --screen
 run firstrun Scripts/firstrun-smoke.sh --screen
 run launch-window Scripts/launch-window-smoke.sh
+# Engine probes (Scripts/engine-probe-smoke.sh): one Windows program per Wine-on-macOS patch,
+# run in a throwaway environment on the newest Wine 11 engine this build ships. Required since
+# 2026-10-02: engines r11 to r14 shipped with GetLastError returning a pointer after any window
+# callback, the Rockstar Games Launcher refused to install on them for two weeks, and the probe
+# of the day made no display call, so the gate never saw it (highball-db#272).
+run engine-probe Scripts/engine-probe-smoke.sh
 echo "gate: advisory checks"
 run game Scripts/game-smoke.sh
 # Advisory until its false-fail rate is zero, like every new check: the process-environment
 # invariant behind the 2026-09-18 launcher fixes (see Scripts/env-invariant-smoke.sh).
 run env-invariant Scripts/env-invariant-smoke.sh
-# Engine probes (Scripts/engine-probe-smoke.sh): one Windows program per Wine-on-macOS patch,
-# run in an environment on the engine that carries it. lasterr covers patch 0011 (r11+).
-run engine-probe Scripts/engine-probe-smoke.sh
 [ $WITH_RENDER = 1 ] && run render Scripts/render-smoke.sh
 
 passed=true

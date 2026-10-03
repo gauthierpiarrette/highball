@@ -81,7 +81,7 @@ public struct GameDBEntry: Codable, Sendable {
     /// Legendary's app name for the Epic copy (#63: an Epic copy of a row's game matched nothing,
     /// so Play never asked for D3DMetal and DXMT refused the DirectX 12 game).
     public var epic_app_name: String?
-    public var status: String       // verified-local | reported-upstream | community | blocked-anticheat
+    public var status: String       // verified-local | reported-upstream | community | blocked-anticheat | blocked-publisher
     public var renderer: Renderer?
     /// The game draws with Vulkan directly (The Sims Legacy Collection): every graphics mode is a
     /// Direct3D layer, so none applies, and the page must say so instead of offering a choice (#44).
@@ -129,7 +129,9 @@ public struct GameDBEntry: Codable, Sendable {
     /// false` marks a Mac port that no longer runs, which outranks the store's flag (MacSteamBuild).
     public var nativeMac: NativeMacInfo?
 
-    public var isBlocked: Bool { status == "blocked-anticheat" }
+    /// Any kind of block: kernel anti-cheat, or a publisher that stops the game on macOS on purpose
+    /// (World of Warships). The game cannot run, so no renderer advice and no Play.
+    public var isBlocked: Bool { status.hasPrefix("blocked-") }
 
     /// The renderer the row recommends on the given OS version, nil for "the bottle's own".
     public func effectiveRenderer(osMajor: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion) -> Renderer? {

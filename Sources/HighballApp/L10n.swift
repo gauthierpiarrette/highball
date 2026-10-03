@@ -261,6 +261,10 @@ enum L10n {
         "Windows program": "Programme Windows",
         "Choose cover image…": "Choisir une image de couverture…",
         "Reset cover": "Réinitialiser la couverture",
+        "Rename…": "Renommer…",
+        "Rename": "Renommer",
+        "Reset name": "Rétablir le nom",
+        "The store keeps calling it %@. Leave the field empty to go back to that name.": "La boutique continue de l’appeler %@. Laissez le champ vide pour revenir à ce nom.",
         "Choose a cover image for %@": "Choisir une image de couverture pour %@",
         "Apply %@ fix": "Appliquer le correctif %@",
         "%@ needs a one-time setup to run the way it was verified.":
@@ -415,6 +419,7 @@ enum L10n {
         "It played fine": "Ça a bien marché",
         "It was running with %@ and quit after %d seconds without an error the app could read.": "Il tournait avec %@ et s'est fermé après %d secondes sans erreur lisible par l'app.",
         "Its anti-cheat does not run on macOS.": "Son anti-triche ne fonctionne pas sur macOS.",
+        "Its publisher stops it on macOS on purpose.": "Son éditeur l'arrête volontairement sur macOS.",
         "Launch arguments": "Arguments de lancement",
         "New environment…": "Nouvel environnement…",
         "No row in the compatibility database yet.": "Pas encore d'entrée dans la base de compatibilité.",

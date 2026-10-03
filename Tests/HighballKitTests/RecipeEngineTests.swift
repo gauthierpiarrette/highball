@@ -65,6 +65,27 @@ final class RecipeEngineTests: XCTestCase {
         XCTAssertFalse(EngineManifest.needsPrefixRefresh(from: r5, to: r7), "same Wine, no component asks: the prefix stays")
     }
 
+    /// Red Dead's recipe pins r7, the revision it was verified on. Highball 0.10.2 offered a new
+    /// player on the default engine exactly r7, five revisions behind the Wine 11 engine it
+    /// shipped, with the msync leak and without the x87 and LastError fixes, and a non-default
+    /// engine never moves on its own (highball-db#272). The offer is the newest shipped revision
+    /// that carries the pin, skipping one this Mac cannot run.
+    func testTheNewestRevisionCarryingThePinIsOffered() throws {
+        let wine10 = try manifest(id: "x64-sikarugir10.0_6-r17", wine: "aaa")
+        let r7 = try manifest(id: "x64-crossover26.3-r7", wine: "bbb")
+        let r12 = try manifest(id: "x64-crossover26.3-r12", wine: "ccc")
+        let r13 = try manifest(id: "x64-crossover26.3-r13", wine: "ccc")
+        let r = try recipe(engine: "x64-crossover26.3-r7")
+        XCTAssertEqual(r.engineToOffer(current: wine10, known: [r13, wine10, r7, r12])?.id, r13.id)
+        XCTAssertNil(r.engineToOffer(current: r7, known: [wine10, r7, r12, r13]), "already on the pin, it stays")
+        XCTAssertEqual(r.engineToOffer(current: wine10, known: [wine10, r7])?.id, r7.id, "the pin itself when nothing newer ships")
+        let tall = try JSONDecoder().decode(EngineManifest.self, from: Data("""
+        {"id": "x64-crossover26.3-r14", "displayName": "t", "arch": "x86_64", "minMacOS": "28.0",
+         "components": {"wine": {"kind": "engine", "url": "https://example.invalid/ccc.tar.gz", "sha256": "ccc", "size": 1000}}}
+        """.utf8))
+        XCTAssertEqual(r.engineToOffer(current: wine10, known: [wine10, r7, r13, tall], macOS: "27.0")?.id, r13.id, "a revision this Mac cannot run is skipped")
+    }
+
     /// r12 rebuilt Wine with more patches than r11, and a bottle on r12 was offered r11 for The
     /// Last Flame's pin, a downgrade. A later revision of the line counts whatever its Wine
     /// digest, and an earlier bottle is still offered the pin.
@@ -75,8 +96,8 @@ final class RecipeEngineTests: XCTestCase {
         let wine10 = try manifest(id: "x64-sikarugir10.0_6-r13", wine: "aaa")
         let r = try recipe(engine: "x64-crossover26.3-r11")
         XCTAssertNil(r.engineToOffer(current: r12, known: [wine10, r10, r11, r12]), "r12 carries r11")
-        XCTAssertEqual(r.engineToOffer(current: r10, known: [wine10, r10, r11, r12])?.id, r11.id)
-        XCTAssertEqual(r.engineToOffer(current: wine10, known: [wine10, r10, r11, r12])?.id, r11.id, "another line")
+        XCTAssertEqual(r.engineToOffer(current: r10, known: [wine10, r10, r11, r12])?.id, r12.id, "the newest revision carrying the pin")
+        XCTAssertEqual(r.engineToOffer(current: wine10, known: [wine10, r10, r11, r12])?.id, r12.id, "another line")
         XCTAssertNil(r.engineUnknown(current: r12, known: [wine10, r12]), "a build without r11 on a bottle past it asks for nothing")
         XCTAssertEqual(r.engineUnknown(current: r10, known: [wine10, r10]), r11.id)
         XCTAssertEqual(EngineManifest.line(of: "x64-sikarugir10.0_6-r14"), "x64-sikarugir10.0_6")
@@ -99,7 +120,8 @@ final class RecipeEngineTests: XCTestCase {
         let gptk6 = try engine("x64-sikarugir10.0_6-r6", ["dxmt", "d3dmetal"])
         let gptk14 = try engine("x64-sikarugir10.0_6-r14", ["dxmt", "d3dmetal"])
         let def5 = try engine("x64-sikarugir10.0_6-r5", ["dxmt"])
-        XCTAssertEqual(try recipe(engine: gptk6.id).engineToOffer(current: def13, known: [def5, gptk6, def13, gptk14])?.id, gptk6.id)
+        XCTAssertEqual(try recipe(engine: gptk6.id).engineToOffer(current: def13, known: [def5, gptk6, def13, gptk14])?.id, gptk14.id,
+                       "the newest GPTK 4 revision, never the default line's higher number")
         XCTAssertNil(try recipe(engine: gptk6.id).engineToOffer(current: gptk14, known: [def5, gptk6, def13, gptk14]))
         XCTAssertNil(try recipe(engine: def5.id).engineToOffer(current: gptk14, known: [def5, gptk6, def13, gptk14]))
         XCTAssertNil(try recipe(engine: def5.id).engineToOffer(current: def13, known: [def5, gptk6, def13, gptk14]))

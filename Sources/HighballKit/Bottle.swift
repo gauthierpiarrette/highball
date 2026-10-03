@@ -714,7 +714,12 @@ public struct Bottle: Sendable {
             switch r {
             case .dxvk: env["DXVK_FRAME_RATE"] = String(settings.fpsCap)
             case .vkd3d: env["DXVK_FRAME_RATE"] = String(settings.fpsCap); env["VKD3D_FRAME_RATE"] = String(settings.fpsCap)
-            case .dxmt, .d3dmetal: env["DXMT_CONFIG"] = "d3d11.preferredMaxFrameRate=\(settings.fpsCap);" // 32-bit titles on d3dmetal run on dxmt
+            case .dxmt: env["DXMT_CONFIG"] = "d3d11.preferredMaxFrameRate=\(settings.fpsCap);"
+            case .d3dmetal:
+                env["DXMT_CONFIG"] = "d3d11.preferredMaxFrameRate=\(settings.fpsCap);" // 32-bit titles on d3dmetal run on dxmt
+                // D3DMetal reads its own cap (D3DMetal 4, the GPTK 4 engines; earlier builds ignore
+                // it). Without it the cap never reached a 64-bit game in this mode.
+                env["D3DM_MAX_FPS"] = String(settings.fpsCap)
             default: break
             }
         }
@@ -793,6 +798,16 @@ public struct Bottle: Sendable {
             env["DISABLE_LSFGM"] = "1"
             if case .unavailable(let reason) = frameGeneration { env["HB_LSFG_UNAVAILABLE"] = reason }
         }
+        // Wine's Mac audio driver let the device pull its whole buffer at once, 10.7 ms at 48 kHz,
+        // more than a game that keeps one 10 ms period queued has, and played the shortfall as
+        // silence: 324 dropouts in two minutes of Counter-Strike 2's menu (highball#127, Deadlock
+        // #187). An engine that ships libhbaudiobuf.dylib gets it inserted into Wine's processes,
+        // where it caps the audio unit's buffer at 5 ms. HB_AUDIOBUF=0 in an environment's
+        // variables leaves it out.
+        if let lib = engine.audioBufferLibrary, env["HB_AUDIOBUF"] != "0" {
+            let inserted = (env["DYLD_INSERT_LIBRARIES"] ?? "").split(separator: ":").map(String.init)
+            env["DYLD_INSERT_LIBRARIES"] = ([lib.path] + inserted.filter { $0 != lib.path }).joined(separator: ":")
+        }
         return env
     }
 
@@ -854,6 +869,31 @@ public struct Bottle: Sendable {
     /// has never been validated either: measured on an M1 Pro, a Source D3D9 map load
     /// took 11.1 s with and without it. Both stay because they are individually
     /// defensible, not because they are known to help. Do not restate the old rationale.
+    static let csgoFallback = ["dxvk.enableAsync": "False", "d3d9.maxAvailableMemory": "2048",
+                               "d3d9.customDeviceId": "73BF"]
+
+    /// The generated conf as a launch header quotes it: without the comment lines, and without
+    /// the [csgo.exe] section when it is only the fallback above, which is the same in every
+    /// environment and made a player ask why their World of Warships log mentioned CS:GO
+    /// (Discord, 2026-10-01). A section a recipe set or changed stays, since that is per-game.
+    public static func dxvkConfigHeaderLines(_ conf: String) -> [String] {
+        let fallbackLines = csgoFallback.map { "\($0.key) = \($0.value)" }.sorted()
+        var out: [String] = []
+        var section: [String] = []   // the section being read, its [name] line first
+        func flush() {
+            if !(section.first == "[csgo.exe]" && section.dropFirst().sorted() == fallbackLines) { out += section }
+            section = []
+        }
+        for raw in conf.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            if line.hasPrefix("[") { flush(); section = [line]; continue }
+            if section.isEmpty { out.append(line) } else { section.append(line) }
+        }
+        flush()
+        return out
+    }
+
     public static func dxvkConfig(async: Bool, appConfig: [String: [String: String]] = [:]) -> String {
         // FALLBACK, kept deliberately (do not delete yet): legacy CS:GO can only be started
         // from Steam's own launch-option chooser, so it never passes the app's Play-gate and a
@@ -866,8 +906,6 @@ public struct Bottle: Sendable {
         // because each is individually sound, not because they fixed it. The same knowledge
         // (recipe dxvkconfig step); recipe-set values OVERRIDE this fallback. Remove after
         // a deprecation window once recipe coverage is the norm.
-        let csgoFallback = ["dxvk.enableAsync": "False", "d3d9.maxAvailableMemory": "2048",
-                            "d3d9.customDeviceId": "73BF"]
         var merged = appConfig
         merged["csgo.exe"] = csgoFallback.merging(merged["csgo.exe"] ?? [:]) { _, recipe in recipe }
 
@@ -985,5 +1023,15 @@ public extension Renderer {
                        pin: Renderer?, environment: Renderer, nativeVulkan: Bool = false) -> Renderer {
         if nativeVulkan { return requested ?? environment }
         return requested ?? gameOverride ?? (environmentExplicit ? nil : row) ?? pin ?? environment
+    }
+
+    /// What a Play asks the launch for, before rows, pins and the environment are weighed: the
+    /// caller's mode, else the game's own override (none for a native-Vulkan title, as in
+    /// `choose`). The override has to travel with the launch as a request. Until 2026-09-30 it
+    /// only fed the licence check, so the launch fell back to the row or the environment and
+    /// restarted Steam to match that: a game set to DXMT ran on DXVK with no word said
+    /// (highball-db#195, Kingdom Hearts), ever since per-game modes existed.
+    static func launchRequest(requested: Renderer?, gameOverride: Renderer?, nativeVulkan: Bool = false) -> Renderer? {
+        requested ?? (nativeVulkan ? nil : gameOverride)
     }
 }

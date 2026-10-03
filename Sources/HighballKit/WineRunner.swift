@@ -92,7 +92,7 @@ public struct WineRunner: Sendable {
         // reader ask for a second file that Repair may already have rewritten.
         if env["DXVK_CONFIG_FILE"] != nil,
            let conf = try? String(contentsOf: bottle.dxvkConfigURL, encoding: .utf8) {
-            out += conf.split(separator: "\n").map { "#   \($0)\n" }.joined()
+            out += Bottle.dxvkConfigHeaderLines(conf).map { "#   \($0)\n" }.joined()
         }
         return out
     }

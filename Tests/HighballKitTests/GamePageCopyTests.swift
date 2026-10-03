@@ -38,6 +38,18 @@ final class GamePageCopyTests: XCTestCase {
         XCTAssertEqual(GamePageCopy.verdict(e, myChip: "Apple M1", today: today).headline, "Can't run: Vanguard.")
     }
 
+    /// World of Warships stops itself on macOS on purpose: blocked like an anti-cheat game (no
+    /// Play, no renderer), but the page must not blame an anti-cheat it does not have.
+    func testAPublisherBlockIsBlockedAndSaysWhose() throws {
+        let e = try entry(#"{"id":"x","title":"X","steam_appid":1,"status":"blocked-publisher","renderer":null}"#)
+        XCTAssertTrue(e.isBlocked)
+        XCTAssertEqual(GamePageCopy.verdict(e, myChip: "Apple M1", today: today).headline, "Can't run: its publisher blocks macOS.")
+        let anticheat = try entry(#"{"id":"y","title":"Y","steam_appid":2,"status":"blocked-anticheat"}"#)
+        XCTAssertTrue(anticheat.isBlocked, "the anti-cheat block keeps its behaviour")
+        let community = try entry(#"{"id":"z","title":"Z","steam_appid":3,"status":"community"}"#)
+        XCTAssertFalse(community.isBlocked)
+    }
+
     /// An opt-in fix is never Play's to apply (highball-db#60): the page says so instead of
     /// listing steps Play will not take, and decoding keeps the flag.
     func testAnOptInFixIsLeftToTheOwner() throws {

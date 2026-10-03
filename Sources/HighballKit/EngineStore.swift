@@ -95,9 +95,44 @@ public struct EngineStore: Sendable {
     /// component-only (2026-09-09, a 0.8.9 build moved Wine 11 bottles onto its Wine 10 default
     /// because r1 to r2 was same-Wine, and their prefixes are a different format).
     /// A bottle whose engine is not installed here returns false: this build cannot tell.
-    public static func canMoveBottle(on bottleEngine: EngineManifest?, to fresh: EngineManifest) -> Bool {
-        guard let bottleEngine else { return false }
-        return !EngineManifest.needsPrefixRefresh(from: bottleEngine, to: fresh)
+    ///
+    /// Same Wine is not enough on its own: the move must also keep what the bottle's engine
+    /// offers. The GPTK 4 line (r6, r12, r14) shares the default line's Wine build and adds Apple's
+    /// D3DMetal 4, and 0.10.0's update walked those bottles onto the default engine, taking
+    /// D3DMetal 4 away without a word. `shipped` names every component this app still ships in any
+    /// of its manifests: one the bottle's engine has and `fresh` lacks holds the bottle back, unless
+    /// no manifest ships it any more (lsfg, withdrawn at its author's request, must not keep r7 and
+    /// r9 bottles off every later engine).
+    public static func canMoveBottle(on bottleEngine: EngineManifest?, to fresh: EngineManifest, shipped: Set<String>? = nil) -> Bool {
+        guard let bottleEngine, !EngineManifest.needsPrefixRefresh(from: bottleEngine, to: fresh) else { return false }
+        return componentsLost(from: bottleEngine, to: fresh, shipped: shipped).isEmpty
+    }
+
+    /// The components a move from `old` to `new` would take away, among those still shipped.
+    public static func componentsLost(from old: EngineManifest, to new: EngineManifest, shipped: Set<String>?) -> [String] {
+        guard let shipped else { return [] }
+        return old.components.keys.filter { shipped.contains($0) && new.components[$0] == nil }.sorted()
+    }
+
+    /// Where a bottle the default engine's update left behind should go instead: among `known`,
+    /// a later revision of the bottle's own engine line that runs on this macOS and takes the
+    /// bottle there without a first boot and without losing a shipped component. Of those, the
+    /// one adding the fewest components (the same variant, not a bigger one: the default line and
+    /// the GPTK 4 line share revision numbers), then the newest. A GPTK 4 bottle on r14 gets r16
+    /// this way when the default moves from r13 to r15, and an r13 bottle would get r15, not r16.
+    public static func successor(for bottleEngine: EngineManifest, among known: [EngineManifest],
+                                 shipped: Set<String>, macOS: String = EngineManifest.currentMacOS) -> EngineManifest? {
+        let candidates = known.filter { m in
+            m.id != bottleEngine.id
+                && EngineManifest.isAtOrAfter(current: m.id, wanted: bottleEngine.id)
+                && m.runs(onMacOS: macOS)
+                && canMoveBottle(on: bottleEngine, to: m, shipped: shipped)
+        }
+        func added(_ m: EngineManifest) -> Int { m.components.keys.filter { bottleEngine.components[$0] == nil }.count }
+        return candidates.min { a, b in
+            if added(a) != added(b) { return added(a) < added(b) }
+            return a.id.compare(b.id, options: .numeric) == .orderedDescending
+        }
     }
 
     /// The one engine an update may delete: the default it just superseded, and only when no
@@ -466,6 +501,12 @@ public struct InstalledEngine: Sendable {
     }
     public var engineDir: URL { root.appending(path: "engine", directoryHint: .isDirectory) }
     public var frameworksDir: URL { root.appending(path: "frameworks", directoryHint: .isDirectory) }
+    /// The library that keeps Wine's audio pulls under half a period (highball#127), when the
+    /// engine ships it as a component. Bottle.environment inserts it into Wine's processes.
+    public var audioBufferLibrary: URL? {
+        let lib = frameworksDir.appending(path: "libhbaudiobuf.dylib")
+        return FileManager.default.fileExists(atPath: lib.path) ? lib : nil
+    }
     public var renderersDir: URL { root.appending(path: "renderers", directoryHint: .isDirectory) }
     public var wineBinary: URL { engineDir.appending(path: "bin/wine") }
     public var wineserverBinary: URL { engineDir.appending(path: "bin/wineserver") }

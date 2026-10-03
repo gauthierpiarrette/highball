@@ -224,8 +224,12 @@ public enum BugReport {
     static let maxLogsExamined = 15
     /// GitHub answers a request URI over roughly 8 KB with 414, and percent-encoding a log can
     /// several-fold its length (every newline becomes %0A), so the ENCODED url is what must be
-    /// budgeted — not the digest's character count.
-    static let maxURLCharacters = 7000
+    /// budgeted — not the digest's character count. Someone not signed in to GitHub is sent to
+    /// the login page with the whole link as its return address, and that page answers "Whoops,
+    /// something went wrong!" once the address passes about 7 KB (a report link of about 5.8 KB),
+    /// then drops the address altogether, report and all, past about 6.4 KB. Measured on
+    /// 2026-10-01 after a player hit the error page.
+    static let maxURLCharacters = 5000
     /// A single launch here has produced a 167 MB log, so never read one whole. The banner and
     /// the effective configuration are written when the game creates its device, early in its
     /// output; the runaway repetition that makes a log enormous always comes later. Kept modest
