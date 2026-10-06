@@ -9,6 +9,22 @@ func L(_ en: String) -> String {
 
 enum L10n {
     static let fr: [String: String] = [
+        "Game settings": "Réglages du jeu",
+        "About this game": "À propos de ce jeu",
+        "View on Steam": "Voir sur Steam",
+        "Read more": "Lire la suite",
+        "Developer": "Développeur",
+        "Publisher": "Éditeur",
+        "Release date": "Date de sortie",
+        "Game information and screenshots from Steam.": "Informations et captures d’écran fournies par Steam.",
+        "Loading game information…": "Chargement des informations du jeu…",
+        "Steam information is unavailable. You can still play and manage this game.": "Les informations Steam sont indisponibles. Vous pouvez toujours jouer et gérer ce jeu.",
+        "Previous image": "Image précédente",
+        "Next image": "Image suivante",
+        "Game artwork": "Visuel du jeu",
+        "Screenshot %d": "Capture d’écran %d",
+        "No image available": "Aucune image disponible",
+        "To play with the environment's own graphics mode instead, change it under Game settings below; Highball then leaves it alone for every game in that environment.": "Pour jouer avec le mode graphique de l’environnement, modifiez-le dans les Réglages du jeu ci-dessous ; Highball le conserve alors pour tous les jeux de cet environnement.",
         "Back": "Retour",
         "Display": "Affichage",
         "Changes save automatically": "Les modifications sont enregistrées automatiquement",
