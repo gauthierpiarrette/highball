@@ -108,10 +108,10 @@ struct GameDetailView: View {
                             scroll.scrollTo("game-settings", anchor: .top)
                         }
                     } label: {
-                        Image(systemName: "gearshape.fill").font(.title3)
-                            .frame(width: 24, height: 30).padding(8)
+                        Image(systemName: "gearshape.fill").font(.title3.weight(.semibold))
+                            .frame(width: 24, height: 24).padding(.vertical, 8)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.bordered).controlSize(.large)
                     .accessibilityLabel(L("Game settings"))
                     .help(L("Game settings"))
                 }
@@ -265,7 +265,7 @@ struct GameDetailView: View {
 
     private func primaryActionLabel(_ title: String, symbol: String) -> some View {
         Label(title, systemImage: symbol).font(.title3.weight(.semibold))
-            .frame(maxWidth: .infinity).padding(.vertical, 8)
+            .frame(maxWidth: .infinity).frame(height: 24).padding(.vertical, 8)
     }
 
     private var playRow: some View {
