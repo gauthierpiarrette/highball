@@ -10,10 +10,13 @@ WORK="$(mktemp -d)"
 echo "[moltenvk] tag $TAG, work dir $WORK"
 git clone -q --depth 1 --branch "$TAG" https://github.com/KhronosGroup/MoltenVK.git "$WORK/src"
 cd "$WORK/src"
-# Every moltenvk-*.patch in spike/patches, in name order: shadow-import (the Sims, 32-bit Vulkan
-# titles) and linear-fallback (Red Dead Redemption 2's linear 3D and mipmapped images).
-for PATCH in "$PATCHES"/moltenvk-*.patch; do
-  case "$PATCH" in *moltenvk-shadow-imported-host-memory.patch) continue;; esac
+# The patches, by name (spike/patches/moltenvk-<name>.patch), in this order: shadow-import (the Sims,
+# 32-bit Vulkan titles) and linear-fallback (Red Dead Redemption 2's linear 3D and mipmapped images). The
+# Wine 11 engines ship 1.4.2 with both; the Wine 10 engines ship 1.4.1 with shadow-import only, which
+# MVK_PATCHES="shadow-import" builds. The package name lists the patches it carries.
+read -r -a PATCH_NAMES <<< "${MVK_PATCHES:-shadow-import linear-fallback}"
+for NAME_ in "${PATCH_NAMES[@]}"; do
+  PATCH="$PATCHES/moltenvk-$NAME_.patch"
   echo "[moltenvk] applying $(basename "$PATCH")"
   git apply --check "$PATCH" && git apply "$PATCH"
 done
@@ -24,11 +27,14 @@ xcodebuild build -project MoltenVKPackaging.xcodeproj -scheme "MoltenVK Package 
 # under Package/Release, and `find | head -1` picked one without the patch markers.
 DYLIB="Package/Release/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib"
 test -f "$DYLIB"
-for MARK in "HIGHBALL shadow-import" "HIGHBALL linear-fallback"; do
-  strings "$DYLIB" | grep -q "$MARK" || { echo "patch missing from build: $MARK"; exit 1; }
+# Read the strings once: `strings | grep -q` under pipefail failed when grep stopped reading early
+# and strings died of SIGPIPE, which reads as a missing patch (2026-10-07).
+MARKS="$(strings -a "$DYLIB")"
+for NAME_ in "${PATCH_NAMES[@]}"; do
+  grep -q "HIGHBALL $NAME_" <<< "$MARKS" || { echo "patch missing from build: $NAME_"; exit 1; }
 done
 mkdir -p "$OUT/pkg" && cp "$DYLIB" "$OUT/pkg/libMoltenVK.dylib"
-NAME="moltenvk-${TAG#v}-shadow-import-1-linear-fallback-1-x86_64.tar.gz"
+NAME="moltenvk-${TAG#v}$(printf -- "-%s-1" "${PATCH_NAMES[@]}")-x86_64.tar.gz"
 tar -czf "$OUT/$NAME" -C "$OUT/pkg" libMoltenVK.dylib
 echo "[moltenvk] $OUT/$NAME"
 echo "  sha256: $(shasum -a 256 "$OUT/$NAME" | awk '{print $1}')"
