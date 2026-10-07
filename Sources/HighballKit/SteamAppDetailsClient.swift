@@ -1,7 +1,8 @@
 import Foundation
 
 /// Shared store appdetails transport for native Mac flags and game-page information.
-/// Full responses are cached once per language; unavailable pages persist for a day.
+/// Full responses are cached once per language; only explicit unavailable-page replies persist
+/// for a day. Transport errors can retry on the next open without discarding stale details.
 public actor SteamAppDetailsClient {
     public enum Language: String, Sendable { case english, french }
     public static let shared = SteamAppDetailsClient()
@@ -41,9 +42,10 @@ public actor SteamAppDetailsClient {
         let key = "\(appID)-\(language.rawValue)"
         let file = directory.appending(path: "\(key).json")
         let record = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(Record.self, from: $0) }
-        let cached = record?.version == 1 ? record : nil
+        let cached = record.flatMap { [1, 2].contains($0.version) ? $0 : nil }
         if let data = cached?.data, let checked = cached?.checked, now.timeIntervalSince(checked) < Self.maxAge { return data }
-        if let failed = cached?.failed, now.timeIntervalSince(failed) < Self.failureAge { return cached?.data }
+        // Version 1 also persisted transport failures; don't let those block an online retry.
+        if cached?.version == 2, let failed = cached?.failed, now.timeIntervalSince(failed) < Self.failureAge { return cached?.data }
         if let stoppedUntil, now < stoppedUntil { return cached?.data }
         if let task = pending[key] { return await task.value }
         // The task includes cache writes and refusal handling before other callers resume.
@@ -59,11 +61,20 @@ public actor SteamAppDetailsClient {
         let response = try? await fetch(url)
         if response?.1 == 429 || response?.1 == 403 { stoppedUntil = now.addingTimeInterval(Self.failureAge) }
         if let (data, status) = response, status == 200, data.count <= 2_000_000, Self.valid(data, appID: appID) {
-            save(Record(version: 1, checked: now, data: data, failed: nil), to: file)
+            save(Record(version: 2, checked: now, data: data, failed: nil), to: file)
             return data
         }
-        save(Record(version: 1, checked: cached?.checked ?? now, data: cached?.data, failed: now), to: file)
+        if let (data, status) = response, status == 200, data.count <= 2_000_000,
+           Self.unavailable(data, appID: appID) {
+            save(Record(version: 2, checked: cached?.checked ?? now, data: cached?.data, failed: now), to: file)
+        }
         return cached?.data
+    }
+
+    private static func unavailable(_ data: Data, appID: Int) -> Bool {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let app = json[String(appID)] as? [String: Any] else { return false }
+        return app["success"] as? Bool == false
     }
 
     private static func valid(_ data: Data, appID: Int) -> Bool {

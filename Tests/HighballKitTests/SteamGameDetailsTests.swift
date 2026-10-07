@@ -59,11 +59,11 @@ final class SteamGameDetailsTests: XCTestCase {
     func testCacheSurvivesRelaunchAndLanguagesHaveSeparateCopies() async throws {
         let directory = try cacheDirectory(), now = Date(timeIntervalSince1970: 1000)
         let probe = FetchProbe(data: sample)
-        let store = SteamGameDetailsStore(directory: directory, fetch: { await probe.fetch($0) })
+        let store = SteamGameDetailsStore(directory: directory, fetch: { try await probe.fetch($0) })
         let first = await store.details(appID: 42, now: now)
         let second = await store.details(appID: 42, now: now.addingTimeInterval(60))
         XCTAssertEqual(first, second)
-        let relaunched = SteamGameDetailsStore(directory: directory, fetch: { await probe.fetch($0) })
+        let relaunched = SteamGameDetailsStore(directory: directory, fetch: { try await probe.fetch($0) })
         let persisted = await relaunched.details(appID: 42, now: now.addingTimeInterval(120))
         XCTAssertEqual(first, persisted)
         let englishCalls = await probe.calls
@@ -77,7 +77,7 @@ final class SteamGameDetailsTests: XCTestCase {
     func testExpiredCopyRemainsAvailableWhenSteamRateLimitsAndRetryIsBackedOff() async throws {
         let directory = try cacheDirectory(), now = Date(timeIntervalSince1970: 1000)
         let probe = FetchProbe(data: sample)
-        let store = SteamGameDetailsStore(directory: directory, fetch: { await probe.fetch($0) })
+        let store = SteamGameDetailsStore(directory: directory, fetch: { try await probe.fetch($0) })
         let original = await store.details(appID: 42, now: now)
         await probe.setStatus(429)
         let later = now.addingTimeInterval(SteamGameDetailsStore.maxAge + 1)
@@ -96,7 +96,7 @@ final class SteamGameDetailsTests: XCTestCase {
 
     func testOverlappingPagesShareOneRequest() async throws {
         let probe = FetchProbe(data: sample, delay: true)
-        let store = SteamGameDetailsStore(directory: try cacheDirectory(), fetch: { await probe.fetch($0) })
+        let store = SteamGameDetailsStore(directory: try cacheDirectory(), fetch: { try await probe.fetch($0) })
         async let first = store.details(appID: 42)
         async let second = store.details(appID: 42)
         let (a, b) = await (first, second)
@@ -109,10 +109,10 @@ final class SteamGameDetailsTests: XCTestCase {
     func testUnavailablePageFailureSurvivesRelaunchForADay() async throws {
         let directory = try cacheDirectory(), now = Date(timeIntervalSince1970: 1000)
         let probe = FetchProbe(data: Data(#"{"42":{"success":false}}"#.utf8))
-        let store = SteamGameDetailsStore(directory: directory, fetch: { await probe.fetch($0) })
+        let store = SteamGameDetailsStore(directory: directory, fetch: { try await probe.fetch($0) })
         let missing = await store.details(appID: 42, now: now)
         XCTAssertNil(missing)
-        let relaunched = SteamGameDetailsStore(directory: directory, fetch: { await probe.fetch($0) })
+        let relaunched = SteamGameDetailsStore(directory: directory, fetch: { try await probe.fetch($0) })
         _ = await relaunched.details(appID: 42, now: now.addingTimeInterval(23 * 3600))
         let beforeExpiry = await probe.calls
         XCTAssertEqual(beforeExpiry.count, 1)
@@ -125,7 +125,7 @@ final class SteamGameDetailsTests: XCTestCase {
         for flagsFirst in [false, true] {
             let directory = try cacheDirectory(), now = Date(timeIntervalSince1970: 1000)
             let probe = FetchProbe(data: sample)
-            let client = SteamAppDetailsClient(directory: directory, fetch: { await probe.fetch($0) })
+            let client = SteamAppDetailsClient(directory: directory, fetch: { try await probe.fetch($0) })
             let details = SteamGameDetailsStore(client: client)
             let flags = MacFlagStore(file: directory.appending(path: "mac-flags.json"))
             if flagsFirst { _ = await flags.refresh([42], now: now, client: client) }
@@ -142,7 +142,7 @@ final class SteamGameDetailsTests: XCTestCase {
         let directory = try cacheDirectory(), now = Date(timeIntervalSince1970: 1000)
         let probe = FetchProbe(data: sample)
         await probe.setStatus(429)
-        let client = SteamAppDetailsClient(directory: directory, fetch: { await probe.fetch($0) })
+        let client = SteamAppDetailsClient(directory: directory, fetch: { try await probe.fetch($0) })
         let flags = MacFlagStore(file: directory.appending(path: "mac-flags.json"))
         let mac = await flags.refresh([42, 43, 44], now: now, client: client)
         XCTAssertTrue(mac.isEmpty)
@@ -150,17 +150,79 @@ final class SteamGameDetailsTests: XCTestCase {
         XCTAssertNil(game)
         let calls = await probe.calls
         XCTAssertEqual(calls.count, 1)
-        let relaunched = SteamAppDetailsClient(directory: directory, fetch: { await probe.fetch($0) })
+        let relaunched = SteamAppDetailsClient(directory: directory, fetch: { try await probe.fetch($0) })
         _ = await relaunched.appDetails(appID: 42, now: now.addingTimeInterval(60))
         let afterRelaunch = await probe.calls
-        XCTAssertEqual(afterRelaunch.count, 1)
+        XCTAssertEqual(afterRelaunch.count, 2)
+    }
+
+    func testConnectionErrorsRetryOnNextOpenAndAfterRelaunch() async throws {
+        for error in [URLError.Code.notConnectedToInternet, .timedOut, .networkConnectionLost] {
+            for relaunch in [false, true] {
+                let directory = try cacheDirectory(), now = Date(timeIntervalSince1970: 1000)
+                let probe = FetchProbe(data: sample)
+                await probe.setError(error)
+                let store = SteamGameDetailsStore(directory: directory, fetch: { try await probe.fetch($0) })
+                let offline = await store.details(appID: 42, now: now)
+                XCTAssertNil(offline)
+                await probe.setError(nil)
+                let next = relaunch ? SteamGameDetailsStore(directory: directory, fetch: { try await probe.fetch($0) }) : store
+                let online = await next.details(appID: 42, now: now.addingTimeInterval(1))
+                XCTAssertNotNil(online)
+                let calls = await probe.calls
+                XCTAssertEqual(calls.count, 2)
+            }
+        }
+    }
+
+    func testStaleDetailsSurviveATimeoutWithoutDelayingNextRetry() async throws {
+        let directory = try cacheDirectory(), now = Date(timeIntervalSince1970: 1000)
+        let probe = FetchProbe(data: sample)
+        let store = SteamGameDetailsStore(directory: directory, fetch: { try await probe.fetch($0) })
+        let original = await store.details(appID: 42, now: now)
+        await probe.setError(.timedOut)
+        let expired = now.addingTimeInterval(SteamGameDetailsStore.maxAge + 1)
+        let offline = await store.details(appID: 42, now: expired)
+        XCTAssertEqual(offline, original)
+        await probe.setError(nil)
+        let online = await store.details(appID: 42, now: expired.addingTimeInterval(1))
+        XCTAssertEqual(online, original)
+        let calls = await probe.calls
+        XCTAssertEqual(calls.count, 3)
+    }
+
+    func testMalformedAndServerErrorRepliesAreNotCachedForADay() async throws {
+        for (data, status) in [(Data("not JSON".utf8), 200), (sample, 500),
+                               (Data(#"{"43":{"success":false}}"#.utf8), 200)] {
+            let probe = FetchProbe(data: data)
+            await probe.setStatus(status)
+            let store = SteamGameDetailsStore(directory: try cacheDirectory(), fetch: { try await probe.fetch($0) })
+            _ = await store.details(appID: 42)
+            _ = await store.details(appID: 42)
+            let calls = await probe.calls
+            XCTAssertEqual(calls.count, 2)
+        }
+    }
+
+    func testLegacyFailureCacheDoesNotBlockRetry() async throws {
+        let directory = try cacheDirectory(), now = Date(timeIntervalSince1970: 1000)
+        // Version 1 cannot distinguish an offline lookup from Steam's explicit success:false.
+        let legacy = try JSONSerialization.data(withJSONObject: ["version": 1,
+            "checked": now.timeIntervalSinceReferenceDate, "failed": now.timeIntervalSinceReferenceDate])
+        try legacy.write(to: directory.appending(path: "42-english.json"))
+        let probe = FetchProbe(data: sample)
+        let store = SteamGameDetailsStore(directory: directory, fetch: { try await probe.fetch($0) })
+        let recovered = await store.details(appID: 42, now: now.addingTimeInterval(1))
+        XCTAssertNotNil(recovered)
+        let calls = await probe.calls
+        XCTAssertEqual(calls.count, 1)
     }
 
     func testCorruptCacheRefetchesAndInvalidAppDoesNotRequest() async throws {
         let directory = try cacheDirectory()
         try Data("bad cache".utf8).write(to: directory.appending(path: "42-english.json"))
         let probe = FetchProbe(data: sample)
-        let store = SteamGameDetailsStore(directory: directory, fetch: { await probe.fetch($0) })
+        let store = SteamGameDetailsStore(directory: directory, fetch: { try await probe.fetch($0) })
         let invalid = await store.details(appID: -1)
         XCTAssertNil(invalid)
         let recovered = await store.details(appID: 42)
@@ -174,11 +236,14 @@ private actor FetchProbe {
     let data: Data
     let delay: Bool
     var status = 200
+    var error: URLError.Code?
     var calls: [URL] = []
     init(data: Data, delay: Bool = false) { self.data = data; self.delay = delay }
     func setStatus(_ status: Int) { self.status = status }
-    func fetch(_ url: URL) async -> (Data, Int) {
+    func setError(_ error: URLError.Code?) { self.error = error }
+    func fetch(_ url: URL) async throws -> (Data, Int) {
         calls.append(url)
+        if let error { throw URLError(error) }
         if delay { try? await Task.sleep(for: .milliseconds(50)) }
         return (data, status)
     }
