@@ -1,0 +1,245 @@
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCmdQueries.mm b/MoltenVK/MoltenVK/Commands/MVKCmdQueries.mm
+index 878c2b7..59a6676 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCmdQueries.mm
++++ b/MoltenVK/MoltenVK/Commands/MVKCmdQueries.mm
+@@ -149,6 +149,9 @@
+         _queryPool->deferCopyResults(_query, _queryCount, _destBuffer, _destOffset, _destStride, _flags);
+     } else {
+         _queryPool->encodeCopyResults(cmdEncoder, _query, _queryCount, _destBuffer, _destOffset, _destStride, _flags);
++        // HIGHBALL shadow-readback: query results copied into a buffer the app reads.
++        cmdEncoder->recordShadowWrite(_destBuffer, _destBuffer->getMTLBufferOffset() + _destOffset,
++                                      std::max<VkDeviceSize>(_destStride * _queryCount, 16));
+     }
+ }
+ 
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCmdTransfer.mm b/MoltenVK/MoltenVK/Commands/MVKCmdTransfer.mm
+index a3ef8cb..d5f88a3 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCmdTransfer.mm
++++ b/MoltenVK/MoltenVK/Commands/MVKCmdTransfer.mm
+@@ -1047,6 +1047,7 @@ static inline MTLPixelFormat getDepthStencilAspectFormat(const MTLPixelFormat fo
+ 					 destinationOffset: (dstMTLBuffOffset + cpyRgn.dstOffset)
+ 								  size: cpyRgn.size];
+ 		}
++		cmdEncoder->recordShadowWrite(_dstBuffer, dstMTLBuffOffset + cpyRgn.dstOffset, cpyRgn.size);	// HIGHBALL shadow-readback
+ 	}
+ }
+ 
+@@ -1182,6 +1183,8 @@ static inline MTLPixelFormat getDepthStencilAspectFormat(const MTLPixelFormat fo
+ 			blitOptions |= MTLBlitOptionRowLinearPVRTC;
+ 		}
+ 
++		NSUInteger shadowBytesPerImg = bytesPerImg;	// HIGHBALL shadow-readback
++
+ 		// Don't supply bytes per image if not an arrayed texture
+ 		if ( !isArrayTexture() ) { bytesPerImg = 0; }
+ 
+@@ -1215,6 +1218,11 @@ static inline MTLPixelFormat getDepthStencilAspectFormat(const MTLPixelFormat fo
+                                     options: blitOptions];
+             }
+         }
++        // HIGHBALL shadow-readback: an image read back into a buffer (a thumbnail, a screenshot).
++        if ( !_toImage ) {
++            cmdEncoder->recordShadowWrite(_buffer, mtlBuffOffset,
++                                          (VkDeviceSize)shadowBytesPerImg * layCnt * std::max<NSUInteger>(mtlTxtSize.depth, 1));
++        }
+     }
+ }
+ 
+@@ -1712,6 +1720,7 @@ static inline MTLPixelFormat getDepthStencilAspectFormat(const MTLPixelFormat fo
+ 
+ 	id<MTLBuffer> dstMTLBuff = _dstBuffer->getMTLBuffer();
+ 	NSUInteger dstMTLBuffOffset = _dstBuffer->getMTLBufferOffset() + _dstOffset;
++	cmdEncoder->recordShadowWrite(_dstBuffer, dstMTLBuffOffset, (VkDeviceSize)_wordCount * sizeof(_dataValue));	// HIGHBALL shadow-readback
+ 
+ 	// Determine the number of full threadgroups we can dispatch to cover the buffer content efficiently.
+ 	// Some GPU's report different values for max threadgroup width between the pipeline state and device,
+@@ -1784,6 +1793,7 @@ static inline MTLPixelFormat getDepthStencilAspectFormat(const MTLPixelFormat fo
+                       toBuffer: dstMTLBuff
+              destinationOffset: dstMTLBuffOffset
+                           size: _dataSize];
++    cmdEncoder->recordShadowWrite(_dstBuffer, dstMTLBuffOffset, _dataSize);	// HIGHBALL shadow-readback
+ 
+     // Return the MTLBuffer allocation to the pool once the command buffer is done with it
+     [cmdEncoder->_mtlCmdBuffer addCompletedHandler: ^(id<MTLCommandBuffer> mcb) {
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.h b/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.h
+index 2a6dcb8..e16010d 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.h
++++ b/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.h
+@@ -30,6 +30,8 @@
+ 
+ class MVKCommandPool;
+ class MVKQueueCommandBufferSubmission;
++class MVKBuffer;
++class MVKDeviceMemory;
+ class MVKCommandEncoder;
+ class MVKCommandEncodingPool;
+ class MVKRenderPass;
+@@ -59,6 +61,11 @@ typedef struct MVKCommandEncodingContext {
+ 	BarrierFenceSlots fenceSlots;
+ 
+ 	void syncFences(MVKDevice *device, id<MTLCommandBuffer> mtlCommandBuffer);
++
++	// HIGHBALL shadow-readback: ranges this submission's commands write into shadowed host memory,
++	// copied back when it completes. Only a queue submission's context collects them.
++	bool tracksShadowWrites = false;
++	std::vector<std::tuple<MVKDeviceMemory*, VkDeviceSize, VkDeviceSize>> shadowWrites;
+ 	MVKRenderPass* getRenderPass() { return _renderPass; }
+ 	MVKFramebuffer* getFramebuffer() { return _framebuffer; }
+ 	void setRenderingContext(MVKRenderPass* renderPass, MVKFramebuffer* framebuffer);
+@@ -253,6 +260,9 @@ public:
+ 
+ 	/** Encode commands from the command buffer onto the Metal command buffer. */
+ 	void encode(id<MTLCommandBuffer> mtlCmdBuff, MVKCommandEncodingContext* pEncodingContext);
++
++	/** HIGHBALL shadow-readback: notes a GPU write into a buffer, at an offset into its MTLBuffer. */
++	void recordShadowWrite(MVKBuffer* buffer, VkDeviceSize mtlBufferOffset, VkDeviceSize length);
+     
+     void beginEncoding(id<MTLCommandBuffer> mtlCmdBuff, MVKCommandEncodingContext* pEncodingContext);
+     void encodeCommands(MVKCommand* command);
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm b/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm
+index 707c267..19299a4 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm
++++ b/MoltenVK/MoltenVK/Commands/MVKCommandBuffer.mm
+@@ -25,6 +25,8 @@
+ #include "MVKFoundation.h"
+ #include "MVKCmdDraw.h"
+ #include "MVKCmdRendering.h"
++#include "MVKBuffer.h"
++#include "MVKDeviceMemory.h"
+ #include <sys/mman.h>
+ 
+ using namespace std;
+@@ -1406,3 +1408,13 @@ static bool shouldStartNewEncoder(MVKCommandUse prev, MVKCommandUse next) {
+         default:                                            return @"Unknown Use ComputeEncoder";
+     }
+ }
++
++// HIGHBALL shadow-readback: a write into host memory imported under MVK_SHADOW_IMPORT lands in the
++// private MTLBuffer, so the range is kept from the next upload and copied back on completion.
++void MVKCommandEncoder::recordShadowWrite(MVKBuffer* buffer, VkDeviceSize mtlBufferOffset, VkDeviceSize length) {
++	if ( !buffer || !_pEncodingContext || !_pEncodingContext->tracksShadowWrites || length == 0 ) { return; }
++	MVKDeviceMemory* mem = buffer->getDeviceMemory();
++	if ( !mem || !mem->isShadowed() || mem->getMTLHeap() ) { return; }
++	mem->addPendingGPUWrite(mtlBufferOffset, length);
++	_pEncodingContext->shadowWrites.emplace_back(mem, mtlBufferOffset, length);
++}
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.h b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.h
+index dd05973..dffe530 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.h
+@@ -188,9 +188,17 @@ protected:
+ 	// HIGHBALL EXPERIMENT: imported host memory backed by a private copy instead of no-copy.
+ 	void* _pShadowHost = nullptr;
+ 	NSUInteger _shadowLen = 0;
++	// HIGHBALL shadow-readback: ranges a submission still in flight writes on the GPU. The copy to
++	// the GPU before each submit leaves them alone, and they are copied back to the imported pages
++	// when that submission completes, before its fence and semaphores are signalled.
++	std::mutex _shadowRangesLock;
++	std::vector<std::pair<VkDeviceSize, VkDeviceSize>> _pendingGPUWrites;
+ public:
+ 	void syncShadowToDevice();
+ 	void syncShadowFromDevice();
++	bool isShadowed() { return _pShadowHost != nullptr; }
++	void addPendingGPUWrite(VkDeviceSize offset, VkDeviceSize length);
++	void completeGPUWrite(VkDeviceSize offset, VkDeviceSize length);
+ 	VkExternalMemoryHandleTypeFlags _externalMemoryHandleType = 0u;
+ };
+ 
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm
+index 788e553..8756c7b 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDeviceMemory.mm
+@@ -25,6 +25,8 @@
+ #include <cstdlib>
+ #include <stdlib.h>
+ #include <os/lock.h>
++#include <algorithm>
++#include <atomic>
+ 
+ using namespace std;
+ 
+@@ -487,7 +489,43 @@
+ }
+ 
+ void MVKDeviceMemory::syncShadowToDevice() {
+-	if (_pShadowHost && _mtlBuffer) { memcpy(_mtlBuffer.contents, _pShadowHost, _shadowLen); }
++	if ( !(_pShadowHost && _mtlBuffer) ) { return; }
++	uint8_t* dst = (uint8_t*)_mtlBuffer.contents;
++	const uint8_t* src = (const uint8_t*)_pShadowHost;
++	std::lock_guard<std::mutex> lock(_shadowRangesLock);
++	if (_pendingGPUWrites.empty()) { memcpy(dst, src, _shadowLen); return; }
++	// HIGHBALL shadow-readback: copy around the ranges a submission still in flight writes.
++	auto pending = _pendingGPUWrites;
++	std::sort(pending.begin(), pending.end());
++	VkDeviceSize pos = 0;
++	for (auto& r : pending) {
++		VkDeviceSize start = std::min<VkDeviceSize>(r.first, _shadowLen);
++		VkDeviceSize end = std::min<VkDeviceSize>(r.first + r.second, _shadowLen);
++		if (start > pos) { memcpy(dst + pos, src + pos, start - pos); }
++		pos = std::max(pos, end);
++	}
++	if (pos < _shadowLen) { memcpy(dst + pos, src + pos, _shadowLen - pos); }
++}
++
++void MVKDeviceMemory::addPendingGPUWrite(VkDeviceSize offset, VkDeviceSize length) {
++	if ( !_pShadowHost || offset >= _shadowLen || length == 0 ) { return; }
++	length = std::min<VkDeviceSize>(length, _shadowLen - offset);
++	static std::atomic<bool> logged(false);
++	if ( !logged.exchange(true) ) {
++		MVKLogInfo("HIGHBALL shadow-readback: GPU writes into imported host memory are copied back when their submission completes.");
++	}
++	std::lock_guard<std::mutex> lock(_shadowRangesLock);
++	_pendingGPUWrites.emplace_back(offset, length);
++}
++
++void MVKDeviceMemory::completeGPUWrite(VkDeviceSize offset, VkDeviceSize length) {
++	if ( !(_pShadowHost && _mtlBuffer) || offset >= _shadowLen || length == 0 ) { return; }
++	length = std::min<VkDeviceSize>(length, _shadowLen - offset);
++	std::lock_guard<std::mutex> lock(_shadowRangesLock);
++	memcpy((uint8_t*)_pShadowHost + offset, (const uint8_t*)_mtlBuffer.contents + offset, length);
++	for (auto it = _pendingGPUWrites.begin(); it != _pendingGPUWrites.end(); ++it) {
++		if (it->first == offset && it->second == length) { _pendingGPUWrites.erase(it); break; }
++	}
+ }
+ 
+ void MVKDeviceMemory::syncShadowFromDevice() {
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm b/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm
+index 0ebc336..fce42d5 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKQueue.mm
+@@ -24,6 +24,7 @@
+ #include "MVKFoundation.h"
+ #include "MVKOSExtensions.h"
+ #include "MVKGPUCapture.h"
++#include "MVKDeviceMemory.h"
+ 
+ using namespace std;
+ 
+@@ -571,6 +572,11 @@
+ // and the app immediately destroys objects. Rare, but it has been encountered.
+ void MVKQueueCommandBufferSubmission::finish() {
+ 
++	// HIGHBALL shadow-readback: what this submission wrote into shadowed host memory reaches the
++	// imported pages before any fence or semaphore tells the app the work is done.
++	for (auto& w : _encodingContext.shadowWrites) { std::get<0>(w)->completeGPUWrite(std::get<1>(w), std::get<2>(w)); }
++	_encodingContext.shadowWrites.clear();
++
+ 	// Performed here instead of as part of execute() for rare case where app destroys queue
+ 	// immediately after a waitIdle() is cleared by fence below, taking the capture scope with it.
+ 	_queue->_submissionCaptureScope->endScope();
+@@ -598,6 +604,7 @@
+ 	_commandUse(cmdUse) {
+ 	
+ 	if (_fence) { _fence->retain(); }
++	_encodingContext.tracksShadowWrites = true;	// HIGHBALL shadow-readback
+ 
+ 	// pSubmit can be null if just tracking the fence alone
+ 	if (pSubmit) {
+@@ -625,6 +632,7 @@
+ 	_commandUse(cmdUse) {
+ 	
+ 	if (_fence) { _fence->retain(); }
++	_encodingContext.tracksShadowWrites = true;	// HIGHBALL shadow-readback
+ 
+     // pSubmit can be null if just tracking the fence alone
+     if (pSubmit) {

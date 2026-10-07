@@ -14,6 +14,10 @@ cd "$WORK/src"
 # 32-bit Vulkan titles) and linear-fallback (Red Dead Redemption 2's linear 3D and mipmapped images). The
 # Wine 11 engines ship 1.4.2 with both; the Wine 10 engines ship 1.4.1 with shadow-import only, which
 # MVK_PATCHES="shadow-import" builds. The package name lists the patches it carries.
+# shadow-readback (2026-10-08, highball#283) goes after shadow-import: it copies what the GPU writes into the
+# shadowed memory back to the game's pages when a submission completes, so a 32-bit game's readbacks stop being
+# stale; MVK_PATCHES="shadow-import shadow-readback" built moltenvk-1.4.1-shadow-import-1-shadow-readback-1, published
+# in the engine-components release and not yet referenced by any engine manifest.
 read -r -a PATCH_NAMES <<< "${MVK_PATCHES:-shadow-import linear-fallback}"
 for NAME_ in "${PATCH_NAMES[@]}"; do
   PATCH="$PATCHES/moltenvk-$NAME_.patch"
