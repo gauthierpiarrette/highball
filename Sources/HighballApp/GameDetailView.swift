@@ -7,7 +7,7 @@ struct GameDetailView: View {
     let passedItem: LibraryItem
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var storeDetails: SteamGameDetails?
-    @State private var loadingDetails = false
+    @State private var loadingDetails = true
     @State private var expandedDescription = false
     @State private var selectedGalleryURL: URL?
     @State private var choseGalleryImage = false
@@ -46,7 +46,7 @@ struct GameDetailView: View {
     }
     private var engineName: String? { bottle.flatMap { state.engine(for: $0) }?.displayName }
 
-    private var storeAppID: Int? { item.steamAppID ?? entry?.steam_appid }
+    private var storeAppID: Int? { item.steamAppID }
 
     var body: some View {
         GeometryReader { geometry in
@@ -63,9 +63,9 @@ struct GameDetailView: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         } else {
+                            overview(scroll: scroll)
                             GameMediaGallery(item: item, details: storeDetails, width: width,
                                              selectedURL: $selectedGalleryURL, choseImage: $choseGalleryImage)
-                            overview(scroll: scroll)
                         }
                         aboutGame
                         if bottle != nil {
@@ -99,6 +99,8 @@ struct GameDetailView: View {
                 .font(.system(size: 30, weight: .bold, design: .rounded))
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+            if let macBuild { macBlock(macBuild) }
+            verdictBlock
             HStack(alignment: .top, spacing: 10) {
                 playRow.frame(maxWidth: .infinity, alignment: .leading)
                 if bottle != nil {
@@ -116,10 +118,8 @@ struct GameDetailView: View {
                     .help(L("Game settings"))
                 }
             }
-            verdictBlock
             if item.installed, !blocked { willDoCard }
             libraryInfo
-            if let macBuild { macBlock(macBuild) }
         }
     }
 
@@ -134,8 +134,8 @@ struct GameDetailView: View {
             }
         }
         .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-        .background(HB.card, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(HB.cardStroke))
+        .background(HB.card, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(HB.cardStroke))
     }
 
     @ViewBuilder private var aboutGame: some View {
@@ -169,17 +169,14 @@ struct GameDetailView: View {
                 Text(L("Game information and screenshots from Steam.")).font(.caption).foregroundStyle(.tertiary)
             }
             .padding(24).frame(maxWidth: .infinity, alignment: .leading)
-            .background(HB.card, in: RoundedRectangle(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(HB.cardStroke))
+            .background(HB.card, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(HB.cardStroke))
         } else if storeAppID != nil {
             HStack(spacing: 10) {
                 if loadingDetails {
                     ProgressView().controlSize(.small)
                     Text(L("Loading game information…")).font(.callout).foregroundStyle(.secondary)
                 } else {
-                    Text(L("Steam information is unavailable. You can still play and manage this game."))
-                        .font(.callout).foregroundStyle(.secondary)
-                    Spacer()
                     if let appID = storeAppID, let url = URL(string: "https://store.steampowered.com/app/\(appID)/") {
                         Link(L("View on Steam"), destination: url).font(.callout)
                     }
@@ -339,6 +336,17 @@ struct GameDetailView: View {
         }
     }
 
+    private func localizedWillDo(_ line: GamePageCopy.WillDo) -> String {
+        guard let recipe = fixRecipe, recipe.isOptIn else { return line.text }
+        if line.text == "Keep the \(recipe.title) fix you applied under Game settings" {
+            return String(format: L("Keep the %@ fix you applied under Game settings"), recipe.title)
+        }
+        if line.text == "Leave the optional \(recipe.title) fix alone; it is under Game settings for when the notes say your Mac needs it" {
+            return String(format: L("Leave the optional %@ fix alone; it is under Game settings for when the notes say your Mac needs it"), recipe.title)
+        }
+        return line.text
+    }
+
     private var willDoCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Next to Play on Mac, "Play" alone would read as the Mac build's.
@@ -349,7 +357,7 @@ struct GameDetailView: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(line.cost == nil || line.done ? HB.good : HB.amber)
                         .frame(width: 14)
-                    Text(line.text).font(.callout)
+                    Text(localizedWillDo(line)).font(.callout)
                     if let cost = line.cost {
                         Text(cost).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     }
@@ -377,8 +385,8 @@ struct GameDetailView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 16).fill(HB.card))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(HB.cardStroke))
+        .background(RoundedRectangle(cornerRadius: 12).fill(HB.card))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(HB.cardStroke))
     }
 
     /// The explanation, and the way out: the environment's own settings are one click away.

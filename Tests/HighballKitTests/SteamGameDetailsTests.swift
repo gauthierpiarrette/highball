@@ -4,7 +4,7 @@ import XCTest
 final class SteamGameDetailsTests: XCTestCase {
     private let sample = Data(#"""
     {"42":{"success":true,"data":{"steam_appid":42,
-      "short_description":"Explore &amp; survive &#8212; together.",
+      "platforms":{"mac":true},"short_description":"Explore &amp; survive &#8212; together.",
       "about_the_game":"<h2>A world</h2><p>Play &lt;your way&gt;.</p><script>hidden()</script><ul><li>Explore</li><li>Build</li></ul>",
       "header_image":"https://shared.akamai.steamstatic.com/header.jpg",
       "screenshots":[
@@ -88,7 +88,7 @@ final class SteamGameDetailsTests: XCTestCase {
         let calls = await probe.calls
         XCTAssertEqual(calls.count, 2)
         await probe.setStatus(200)
-        let recovered = await store.details(appID: 42, now: later.addingTimeInterval(301))
+        let recovered = await store.details(appID: 42, now: later.addingTimeInterval(SteamAppDetailsClient.failureAge + 1))
         XCTAssertEqual(recovered, original)
         let afterRetry = await probe.calls
         XCTAssertEqual(afterRetry.count, 3)
@@ -104,6 +104,56 @@ final class SteamGameDetailsTests: XCTestCase {
         XCTAssertEqual(a, b)
         let calls = await probe.calls
         XCTAssertEqual(calls.count, 1)
+    }
+
+    func testUnavailablePageFailureSurvivesRelaunchForADay() async throws {
+        let directory = try cacheDirectory(), now = Date(timeIntervalSince1970: 1000)
+        let probe = FetchProbe(data: Data(#"{"42":{"success":false}}"#.utf8))
+        let store = SteamGameDetailsStore(directory: directory, fetch: { await probe.fetch($0) })
+        let missing = await store.details(appID: 42, now: now)
+        XCTAssertNil(missing)
+        let relaunched = SteamGameDetailsStore(directory: directory, fetch: { await probe.fetch($0) })
+        _ = await relaunched.details(appID: 42, now: now.addingTimeInterval(23 * 3600))
+        let beforeExpiry = await probe.calls
+        XCTAssertEqual(beforeExpiry.count, 1)
+        _ = await relaunched.details(appID: 42, now: now.addingTimeInterval(24 * 3600 + 1))
+        let afterExpiry = await probe.calls
+        XCTAssertEqual(afterExpiry.count, 2)
+    }
+
+    func testMacFlagsAndGameDetailsShareOneResponseInEitherOrder() async throws {
+        for flagsFirst in [false, true] {
+            let directory = try cacheDirectory(), now = Date(timeIntervalSince1970: 1000)
+            let probe = FetchProbe(data: sample)
+            let client = SteamAppDetailsClient(directory: directory, fetch: { await probe.fetch($0) })
+            let details = SteamGameDetailsStore(client: client)
+            let flags = MacFlagStore(file: directory.appending(path: "mac-flags.json"))
+            if flagsFirst { _ = await flags.refresh([42], now: now, client: client) }
+            let game = await details.details(appID: 42, now: now)
+            let mac = await flags.refresh([42], now: now, client: client)
+            XCTAssertNotNil(game)
+            XCTAssertEqual(mac[42], true)
+            let calls = await probe.calls
+            XCTAssertEqual(calls.count, 1)
+        }
+    }
+
+    func testRateLimitStopsBothConsumersAndDoesNotInventNegativeMacFlags() async throws {
+        let directory = try cacheDirectory(), now = Date(timeIntervalSince1970: 1000)
+        let probe = FetchProbe(data: sample)
+        await probe.setStatus(429)
+        let client = SteamAppDetailsClient(directory: directory, fetch: { await probe.fetch($0) })
+        let flags = MacFlagStore(file: directory.appending(path: "mac-flags.json"))
+        let mac = await flags.refresh([42, 43, 44], now: now, client: client)
+        XCTAssertTrue(mac.isEmpty)
+        let game = await SteamGameDetailsStore(client: client).details(appID: 45, now: now)
+        XCTAssertNil(game)
+        let calls = await probe.calls
+        XCTAssertEqual(calls.count, 1)
+        let relaunched = SteamAppDetailsClient(directory: directory, fetch: { await probe.fetch($0) })
+        _ = await relaunched.appDetails(appID: 42, now: now.addingTimeInterval(60))
+        let afterRelaunch = await probe.calls
+        XCTAssertEqual(afterRelaunch.count, 1)
     }
 
     func testCorruptCacheRefetchesAndInvalidAppDoesNotRequest() async throws {

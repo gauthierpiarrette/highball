@@ -75,62 +75,21 @@ public struct SteamGameDetails: Codable, Sendable, Equatable {
     }
 }
 
-/// One request when a page is opened, cached for a week. A failed refresh retains the old copy;
-/// failures are backed off for five minutes and overlapping requests share one task.
-public actor SteamGameDetailsStore {
-    public enum Language: String, Sendable { case english, french }
-    public static let shared = SteamGameDetailsStore()
-    static let maxAge: TimeInterval = 7 * 24 * 3600
-    private struct Record: Codable { let version: Int; let checked: Date; let details: SteamGameDetails }
-    private let directory: URL
-    private let fetch: @Sendable (URL) async throws -> (Data, Int)
-    private var pending: [String: Task<SteamGameDetails?, Never>] = [:]
-    private var failed: [String: Date] = [:]
+/// Presentation decoder over the same appdetails client used by native Mac detection.
+public struct SteamGameDetailsStore: Sendable {
+    public typealias Language = SteamAppDetailsClient.Language
+    public static let shared = SteamGameDetailsStore(client: .shared)
+    static let maxAge = SteamAppDetailsClient.maxAge
+    private let client: SteamAppDetailsClient
 
-    public init(directory: URL? = nil) {
-        self.directory = directory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appending(path: "Highball/SteamDetails", directoryHint: .isDirectory)
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 15
-        configuration.timeoutIntervalForResource = 20
-        let session = URLSession(configuration: configuration)
-        fetch = { url in
-            let (data, response) = try await session.data(from: url)
-            return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
-        }
-    }
+    public init(client: SteamAppDetailsClient = .shared) { self.client = client }
 
     init(directory: URL, fetch: @escaping @Sendable (URL) async throws -> (Data, Int)) {
-        self.directory = directory; self.fetch = fetch
+        client = SteamAppDetailsClient(directory: directory, fetch: fetch)
     }
 
     public func details(appID: Int, language: Language = .english, now: Date = Date()) async -> SteamGameDetails? {
-        guard appID > 0 else { return nil }
-        let key = "\(appID)-\(language.rawValue)"
-        let file = directory.appending(path: "\(key).json")
-        let record = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(Record.self, from: $0) }
-        let cached = record?.version == 1 && record?.details.appID == appID ? record : nil
-        if let cached, now.timeIntervalSince(cached.checked) < Self.maxAge { return cached.details }
-        if let failure = failed[key], now.timeIntervalSince(failure) < 300 { return cached?.details }
-        if let task = pending[key] { return await task.value ?? cached?.details }
-        let url = URL(string: "https://store.steampowered.com/api/appdetails?appids=\(appID)&l=\(language.rawValue)")!
-        let fetch = self.fetch
-        let task = Task<SteamGameDetails?, Never> {
-            guard let (data, status) = try? await fetch(url), status == 200, data.count <= 2_000_000 else { return nil }
-            return SteamGameDetails.parse(data, appID: appID)
-        }
-        pending[key] = task
-        let result = await task.value
-        pending[key] = nil
-        if let result {
-            failed[key] = nil
-            if let data = try? JSONEncoder().encode(Record(version: 1, checked: now, details: result)) {
-                try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                try? data.write(to: file, options: .atomic)
-            }
-            return result
-        }
-        failed[key] = now
-        return cached?.details
+        guard let data = await client.appDetails(appID: appID, language: language, now: now) else { return nil }
+        return SteamGameDetails.parse(data, appID: appID)
     }
 }

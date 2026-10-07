@@ -49,9 +49,10 @@ public struct NativeMacInfo: Codable, Sendable, Equatable {
 }
 
 /// Store `platforms.mac` flags, cached in `mac-flags.json` for two weeks. Only Steam games whose
-/// appinfo lists macOS are asked about (worthAsking), one request each: the store API takes one
-/// appid per `platforms` request and allows about 200 requests per five minutes. A failed or
-/// refused request is "don't know", never "no Mac version", so it's asked again next time.
+/// appinfo lists macOS are asked about (worthAsking), using the shared full appdetails response: the store API takes one
+/// appid per request and allows about 200 requests per five minutes. A failed or
+/// refused request is "don't know", never "no Mac version". The shared appdetails client
+/// remembers failures for a day and stops both consumers when Steam refuses requests.
 public struct MacFlagStore: Sendable {
     public struct Record: Codable, Sendable, Equatable {
         public var mac: Bool
@@ -91,21 +92,15 @@ public struct MacFlagStore: Sendable {
     }
 
     /// Asks the store about the appids not cached yet and returns every known flag.
-    public func refresh(_ appids: [Int], now: Date = Date()) async -> [Int: Bool] {
+    public func refresh(_ appids: [Int], now: Date = Date(), client: SteamAppDetailsClient = .shared) async -> [Int: Bool] {
         var known = load(now: now)
         let missing = appids.filter { known[$0] == nil }
         guard !missing.isEmpty else { return known }
-        let cfg = URLSessionConfiguration.ephemeral
-        cfg.timeoutIntervalForRequest = 15
-        let session = URLSession(configuration: cfg)
         var fetched: [Int: Bool] = [:]
         for appid in missing {
             if Task.isCancelled { break }
-            let url = URL(string: "https://store.steampowered.com/api/appdetails?appids=\(appid)&filters=platforms")!
-            guard let (data, response) = try? await session.data(from: url) else { continue }
-            let status = (response as? HTTPURLResponse)?.statusCode
-            if status == 429 || status == 403 { break }   // rate limited: the rest wait for next session
-            guard status == 200, let mac = Self.parse(data) else { continue }
+            guard let data = await client.appDetails(appID: appid, now: now),
+                  let mac = Self.parse(data) else { continue }
             fetched[appid] = mac
         }
         if !fetched.isEmpty { save(fetched, now: now) }
