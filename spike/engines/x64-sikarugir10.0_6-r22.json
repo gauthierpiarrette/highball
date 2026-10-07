@@ -1,14 +1,13 @@
 {
   "$schema": "https://highball.app/schemas/engine-manifest/v0",
-  "id": "x64-sikarugir10.0_6-r24",
-  "displayName": "Wine 10.0 (Sikarugir) r24",
+  "id": "x64-sikarugir10.0_6-r22",
+  "displayName": "Wine 10.0 (Sikarugir) r22",
   "arch": "x86_64",
   "minMacOS": "14.0",
   "requires": [
     "rosetta2"
   ],
   "notes": [
-    "r24 (2026-10-07): r22 with MoltenVK's shadow-import fixed so GPU results reach the game (moltenvk component, highball#283, highball-db#160, #174). Under MVK_SHADOW_IMPORT=1, which only The Sims Legacy Collection's recipe sets, the private Metal buffer behind imported host memory was copied to the GPU on every submit and never back, so everything a 32-bit Vulkan game read back from the GPU was stale: The Sims' lot thumbnails and family portraits came out as noise. The shadow-readback patch records the ranges a submission's copy, fill, update and query-results commands write into that memory, keeps the next submits' upload off them, and copies them back to the game's pages when the submission completes, before its fence and semaphores are signalled. Measured on an M4 with macOS 27.0 with a 32-bit test program (private/tools/vkrb): with the variable, every readback was stale on r22 and is right on this build, at 32 MB into a 64 MB allocation, next to bytes the program wrote during the submission (kept), and with a second submit in flight (20 rounds). The Sims starts and draws its neighbourhood with no lost device, Portal 2 under DXVK loads two maps with HDR, Direct3D 11 and Direct3D 9 test programs under DXVK give the same results, and without the variable nothing runs differently. Every other component is byte-identical to r22, so only the 1.7 MB MoltenVK archive is new.",
     "r22 (2026-10-06): r21 with the Mac driver's retina screen size fixed (winemac component). Retina resolution on, the Mac driver reported HORZRES and VERTRES twice the screen size that GetSystemMetrics, EnumDisplaySettings and DESKTOPHORZRES report (6912x4468 against 3456x2234 on an M1 Pro, 7680x4320 against 3840x2160 on an M4's 1920x1080 display), so a game sizing its window or its fullscreen picture from them got it twice too large: Team Fortress 2 placed its window off screen (athei), and Red Dead Redemption 2's 1080p fullscreen came out cropped for a player with Retina on (highball#261). With retina off the doubling shift was by zero, so nothing changes there. Every other component is byte-identical, so only the 160 KB winemac archive is new.",
     "r21 (2026-10-03): r19 plus the data execution prevention edit to ntdll.so (see the ntdll-unix component), the Wine 10 counterpart of the Wine 11 engine's r17. Every other file is byte-identical to r19.",
     "r19 (2026-10-01): r17 plus the audio buffer library (audiobuf component, highball#127). At 48 kHz the Mac asked Wine's audio driver for 10.7 ms at a time, more than a game that keeps one 10 ms period queued has, and the driver played the shortfall as silence. Measured on an M4 with macOS 27.0 with raw captures of each game's menu music: Counter-Strike 2 went from 324 dropouts in two minutes to none, and Half-Life 2, Among Us and Five Nights at Freddy's had none either way. The cap is per process, so other apps keep their audio as it was. Every other component is byte-identical to r17, so only a 2 KB archive is new.",
@@ -97,17 +96,17 @@
     },
     "moltenvk": {
       "kind": "runtime",
-      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/moltenvk-1.4.1-shadow-import-1-shadow-readback-1-x86_64.tar.gz",
-      "sha256": "4ad96a8ea08e0d3a6def2bfb6e0c427b2ce20a4109a0cb431f14957f7a721779",
-      "size": 1679215,
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/moltenvk-1.4.1-shadow-import-1-x86_64.tar.gz",
+      "sha256": "fbed7b80d6dc2aeaba6fa7047c1fe64827d5004c28029fb43c2bc34f80c35228",
+      "size": 1674937,
       "license": "Apache-2.0",
-      "version": "1.4.1+shadow-import-1+shadow-readback-1",
+      "version": "1.4.1+shadow-import-1",
       "order": 1,
       "extract": {
         "subpath": "libMoltenVK.dylib",
         "into": "frameworks/libMoltenVK.dylib"
       },
-      "note": "MoltenVK 1.4.1 rebuilt with Highball's shadow-import and shadow-readback patches (spike/patches/moltenvk-shadow-import.patch, spike/patches/moltenvk-shadow-readback.patch, Scripts/build-moltenvk.sh with MVK_PATCHES=\"shadow-import shadow-readback\"). Replaces the Template's libMoltenVK.dylib. Off unless a launch sets MVK_SHADOW_IMPORT=1: with it, Wine's wow64 host-memory imports are backed by a private Metal buffer synced on every submit, which is what makes 32-bit native-Vulkan games (The Sims Legacy Collection) render instead of losing the device on every vkQueueSubmit, and what the GPU writes into that memory with a copy, fill, update or query-results command is copied back to the game's pages when the submission completes."
+      "note": "MoltenVK 1.4.1 rebuilt with Highball's shadow-import patch (spike/patches/moltenvk-shadow-import.patch, Scripts/build-moltenvk.sh). Replaces the Template's libMoltenVK.dylib. Off unless a launch sets MVK_SHADOW_IMPORT=1: with it, Wine's wow64 host-memory imports are backed by a private Metal buffer synced on every submit, which is what makes 32-bit native-Vulkan games (The Sims Legacy Collection) render instead of losing the device on every vkQueueSubmit."
     },
     "d9vk-modern": {
       "kind": "renderer",
@@ -204,10 +203,10 @@
     "GST_PLUGIN_PATH": "${frameworks}/GStreamer.framework/Versions/1.0/lib/gstreamer-1.0"
   },
   "verified": {
-    "date": "2026-10-07",
+    "date": "2026-10-06",
     "macos": "27.0",
-    "chip": "Apple M4",
-    "result": "The published MoltenVK archive (checksum above) in a copy of engine r21's tree through a separate HIGHBALL_HOME (r21, r22 and r23 carry the same MoltenVK archive, fbed7b80): the 32-bit readback test passes all its cases with MVK_SHADOW_IMPORT=1 where that MoltenVK fails them all, and the 64-bit and variable-off runs pass on both. The Sims Legacy Collection starts and draws its neighbourhood with its four pools imported under the variable and no lost device. Portal 2 under DXVK loads sp_a1_intro1 and sp_a2_laser_intro with HDR and draws them. d3dpace (119.9 fps either way) and d3d9stall run under DXVK with no MoltenVK error. A saved lot's thumbnail was not driven in game."
+    "chip": "Apple M1 Pro",
+    "result": "The new winemac.so in a copy of the default engine's tree, probed with GetDeviceCaps, GetSystemMetrics and EnumDisplaySettings: Retina off, 1728x1117 everywhere, as before. Retina on, HORZRES and VERTRES 3456x2234, matching GetSystemMetrics and DESKTOPHORZRES, where the original driver gives 6912x4468. No game run on this revision yet. The published archive was downloaded and matches this manifest's checksum."
   },
   "licenses": {
     "apple-gptk-license-2023-08-17": {
