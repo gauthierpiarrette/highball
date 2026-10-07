@@ -171,11 +171,37 @@ public struct Recipe: Codable, Sendable, Identifiable {
     /// files back, and the environment still records the recipe as applied. Play then treats the
     /// recipe as not applied, so the copy comes back before the launch (2026-09-11: CS:GO Legacy
     /// reinstalled without its d3d9.dll would have launched on the wrong Direct3D).
-    public func artifactsPresent(driveC: URL) -> Bool {
+    /// `steamGames` are the environment's Steam games, so a copy placed in a game's folder on
+    /// another library counts (see `target(of:driveC:steamGames:)`).
+    public func artifactsPresent(driveC: URL, steamGames: [SteamGame] = []) -> Bool {
         steps.allSatisfy { step in
-            if case let .copy(_, to, _) = step { return FileManager.default.fileExists(atPath: driveC.appending(path: to).path) }
+            if case let .copy(_, to, _) = step {
+                return FileManager.default.fileExists(atPath: Self.target(of: to, driveC: driveC, steamGames: steamGames).path)
+            }
             return true
         }
+    }
+
+    /// Where a `file` or `copy` step's file goes. Steps name it under drive C, and a step for a
+    /// Steam game names the game's folder in the environment's own library
+    /// ("Program Files (x86)/Steam/steamapps/common/Portal 2/portal2/cfg/autoexec.cfg"). Steam
+    /// keeps other library folders too, often on an external disk (0.10.13 gave those a drive
+    /// letter), and a game installed there never got its fix: the file went into a folder on C
+    /// the game never reads. When the game's Steam manifest puts it in another library, the file
+    /// goes into the game's folder there. The manifest decides, not a folder on C: the old
+    /// behaviour left one behind for every game it missed. Every other path, and every game in
+    /// the environment's own library, lands where the step says, as before.
+    public static func target(of path: String, driveC: URL, steamGames: [SteamGame]) -> URL {
+        let standard = driveC.appending(path: path)
+        let steam = "Program Files (x86)/Steam", common = "\(steam)/steamapps/common/"
+        guard path.hasPrefix(common) else { return standard }
+        let parts = path.dropFirst(common.count).split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2, parts[0] != "..", !parts[1].split(separator: "/").contains(where: { $0 == ".." }),
+              let game = steamGames.first(where: { $0.installdir.caseInsensitiveCompare(parts[0]) == .orderedSame }),
+              let library = game.libraryRoot, let folder = game.installFolder,
+              library.standardizedFileURL.path != driveC.appending(path: steam).standardizedFileURL.path,
+              FileManager.default.fileExists(atPath: folder.path) else { return standard }
+        return folder.appending(path: parts[1])
     }
 
     /// True when applying the recipe changes what a launch inherits: the renderer, the sync
@@ -415,6 +441,10 @@ public struct RecipeRunner: Sendable {
                 notes.append("Kept this bottle's renderer (\(bottle.settings.renderer.rawValue)); the recipe suggests \(r.rawValue).")
             }
         }
+        // Read once, for the file and copy steps of a game installed in another Steam library.
+        let steamGames = recipe.steps.contains {
+            switch $0 { case .file, .copy: return true; default: return false }
+        } ? SteamLibrary.games(in: bottle) : []
         for (i, step) in recipe.steps.enumerated() {
             // The app parses these two lines into its progress display (#31): the step line
             // becomes the stage, the hint line the "this is slow, don't worry" text under it.
@@ -539,14 +569,16 @@ public struct RecipeRunner: Sendable {
                 bottle.settings.windowsVersion = v
                 try await runner.setWindowsVersion(v)
             case let .file(path, contents):
-                let url = bottle.driveC.appending(path: path)
+                let url = Recipe.target(of: path, driveC: bottle.driveC, steamGames: steamGames)
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try contents.write(to: url, atomically: true, encoding: .utf8)
+                if url != bottle.driveC.appending(path: path) { log?("[\(recipe.id)] wrote \(url.path), the game's folder in another Steam library") }
             case let .copy(from, to, asNative):
                 guard let source = Self.copySource(engineRoot: engine.root, from) else {
                     throw HighballError.invalid("copy step: '\(from)' is not a file inside the engine")
                 }
-                let dest = bottle.driveC.appending(path: to)
+                let dest = Recipe.target(of: to, driveC: bottle.driveC, steamGames: steamGames)
+                if dest != bottle.driveC.appending(path: to) { log?("[\(recipe.id)] copying to \(dest.path), the game's folder in another Steam library") }
                 try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
                 if FileManager.default.fileExists(atPath: dest.path) { try FileManager.default.removeItem(at: dest) }
                 if asNative {

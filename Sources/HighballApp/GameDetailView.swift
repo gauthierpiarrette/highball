@@ -28,7 +28,7 @@ struct GameDetailView: View {
     private var fixRecipe: HighballKit.Recipe? { state.fixRecipe(for: item) }
     private var fixApplied: Bool {
         guard let fixRecipe, let bottle else { return false }
-        return bottle.settings.recipes.contains(fixRecipe.id) && fixRecipe.artifactsPresent(driveC: bottle.driveC)
+        return bottle.settings.recipes.contains(fixRecipe.id) && fixRecipe.artifactsPresent(driveC: bottle.driveC, steamGames: state.gamesByBottle[bottle.name] ?? [])
     }
     private var running: GameSession? {
         if let appid = item.steamAppID, let s = state.session(forAppID: appid) { return s }

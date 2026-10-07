@@ -468,7 +468,7 @@ final class AppState {
         // An opt-in fix is the owner's call from the page, never Play's: it helps some Macs and
         // breaks others (RaceRoom's newer Direct3D 9, highball-db#60). Play leaves it alone.
         if let recipe = fixRecipe(for: item), !recipe.isOptIn,
-           !bottle.settings.recipes.contains(recipe.id) || !recipe.artifactsPresent(driveC: bottle.driveC),
+           !bottle.settings.recipes.contains(recipe.id) || !recipe.artifactsPresent(driveC: bottle.driveC, steamGames: gamesByBottle[bottle.name] ?? []),
            let engine = engine(for: bottle) {
             // The engine comes first, whatever the steps: a recipe of plain notes that names r7
             // used to auto-apply on r5 and launch there, so nobody was ever offered the engine
@@ -1434,7 +1434,7 @@ final class AppState {
             guard let self else { return }
             if target.installed { self.play(target) } else { self.installSteamGame(target) }
         }
-        if !env.settings.recipes.contains(recipe.id) || !recipe.artifactsPresent(driveC: env.driveC) {
+        if !env.settings.recipes.contains(recipe.id) || !recipe.artifactsPresent(driveC: env.driveC, steamGames: gamesByBottle[env.name] ?? []) {
             applyRecipe(recipe.id, to: env, then: DoneState(
                 title: String(format: L("%@ installed"), recipe.title),
                 ctaTitle: String(format: target.installed ? L("Play %@") : L("Install %@"), displayTitle(item)),
