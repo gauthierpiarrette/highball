@@ -72,6 +72,31 @@ public extension BottleSettings {
 /// share a second. The stamp sorts, so the newest name is the newest launch.
 public enum LaunchLogs {
     public static func newest(names: [String], bottle: String, executable: String) -> String? {
+        newestFirst(names: names, bottle: bottle, executable: executable).first
+    }
+
+    /// The newest of these logs that holds program output, else the newest. steam.exe asked of a
+    /// Steam that already runs hands the request over and exits at once, leaving a log of its
+    /// header and exit line only, while the game's lines go to the log of the client that serves
+    /// it. Opening Steam's window after a crash made "Show the last launch log" open such an
+    /// empty log instead of the crash (a player's Forza Horizon 5 log, 2026-10-07).
+    public static func newestWithOutput(names: [String], bottle: String, executable: String,
+                                        hasOutput: (String) -> Bool) -> String? {
+        let logs = newestFirst(names: names, bottle: bottle, executable: executable)
+        return logs.first(where: hasOutput) ?? logs.first
+    }
+
+    /// True when the log has a line besides the header and the exit line, which start with "#".
+    /// Only the first 64 KB are read: a header is a few hundred bytes.
+    public static func hasOutput(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        let text = String(decoding: (try? handle.read(upToCount: 65_536)) ?? Data(), as: UTF8.self)
+        return text.split(whereSeparator: \.isNewline).contains { !$0.hasPrefix("#") && !$0.allSatisfy(\.isWhitespace) }
+    }
+
+    /// One program's logs in one environment, newest first.
+    static func newestFirst(names: [String], bottle: String, executable: String) -> [String] {
         let mid = "-\(bottle)-\(executable)"
         let pattern = "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z" + NSRegularExpression.escapedPattern(for: mid) + "(-[0-9]+)?\\.log$"
         // "-2.log" follows ".log" inside one second, which plain string order gets backwards.
@@ -83,6 +108,6 @@ public enum LaunchLogs {
             return (stem, 1)
         }
         return names.filter { $0.range(of: pattern, options: .regularExpression) != nil }
-            .max { a, b in let ka = key(a), kb = key(b); return ka.0 == kb.0 ? ka.1 < kb.1 : ka.0 < kb.0 }
+            .sorted { a, b in let ka = key(a), kb = key(b); return ka.0 == kb.0 ? ka.1 > kb.1 : ka.0 > kb.0 }
     }
 }

@@ -51,4 +51,40 @@ final class EnvTextTests: XCTestCase {
         XCTAssertNil(LaunchLogs.newest(names: names, bottle: "Gaming", executable: "acs.exe"))
         XCTAssertNil(LaunchLogs.newest(names: names, bottle: "steam", executable: "steam.exe"), "an environment name that is a suffix of another must not match")
     }
+
+    /// Opening Steam's window after a game crashed handed the request to the running client and
+    /// left a newer, empty log; the game's page must still open the log with the crash in it.
+    func testTheLastLaunchLogSkipsAnEmptyHandOver() {
+        let play = "2026-10-07T181512Z-Games-steam.exe.log", open = "2026-10-07T181930Z-Games-steam.exe.log"
+        let older = "2026-10-06T100000Z-Games-steam.exe.log", sameSecond = "2026-10-07T181930Z-Games-steam.exe-2.log"
+        let names = [older, play, open, "2026-10-07T182000Z-Games-reg.exe.log"]
+        XCTAssertEqual(LaunchLogs.newestWithOutput(names: names, bottle: "Games", executable: "steam.exe") { $0 != open }, play)
+        XCTAssertEqual(LaunchLogs.newestWithOutput(names: names + [sameSecond], bottle: "Games", executable: "steam.exe") { $0 != open }, sameSecond,
+                       "a later launch in the same second that has output is the newest")
+        XCTAssertEqual(LaunchLogs.newestWithOutput(names: names, bottle: "Games", executable: "steam.exe") { _ in false }, open,
+                       "when no log has output, the newest as before")
+        XCTAssertNil(LaunchLogs.newestWithOutput(names: names, bottle: "Gaming", executable: "steam.exe") { _ in true })
+    }
+
+    func testALogOfHeaderAndExitLineOnlyHasNoOutput() throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "hb-logs-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let header = """
+        # gin x64-sikarugir10.0_6-r21 bottle=Games renderer=d3dmetal
+        # wine /Users/x/Library/Application Support/Highball/bottles/Games/drive_c/Program Files (x86)/Steam/steam.exe steam://open/main
+        # sync=msync winver=win11 dpi=96 dxvkAsync=false frameGen=off
+        # audio out=48000 Hz
+        #   dxvk.enableAsync = False
+
+        """
+        let handOver = dir.appending(path: "a.log"), crash = dir.appending(path: "b.log"), empty = dir.appending(path: "c.log")
+        try (header + "# exit=0 after 0s\n").write(to: handOver, atomically: true, encoding: .utf8)
+        try (header + "0124:err:seh:NtRaiseException Unhandled exception code c0000005\n# exit=0 after 61s\n").write(to: crash, atomically: true, encoding: .utf8)
+        try "".write(to: empty, atomically: true, encoding: .utf8)
+        XCTAssertFalse(LaunchLogs.hasOutput(handOver))
+        XCTAssertTrue(LaunchLogs.hasOutput(crash))
+        XCTAssertFalse(LaunchLogs.hasOutput(empty))
+        XCTAssertFalse(LaunchLogs.hasOutput(dir.appending(path: "missing.log")))
+    }
 }

@@ -2009,7 +2009,12 @@ final class AppState {
         default: return nil
         }
         let names = (try? FileManager.default.contentsOfDirectory(atPath: paths.logs.path)) ?? []
-        return LaunchLogs.newest(names: names, bottle: bottleName, executable: executable).map { paths.logs.appending(path: $0) }
+        // A Steam game's lines are in the log of the client that ran it, not in the empty one a
+        // later "open Steam" handed over to that client (LaunchLogs.newestWithOutput).
+        let name = item.source == .steam
+            ? LaunchLogs.newestWithOutput(names: names, bottle: bottleName, executable: executable) { LaunchLogs.hasOutput(paths.logs.appending(path: $0)) }
+            : LaunchLogs.newest(names: names, bottle: bottleName, executable: executable)
+        return name.map { paths.logs.appending(path: $0) }
     }
     private var sessionWatchers: [UUID: Task<Void, Never>] = [:]
 
