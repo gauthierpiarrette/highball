@@ -332,11 +332,17 @@ struct EnvironmentSettingsPage: View {
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(bottle.name).font(.title2.bold())
-                    Text(engine?.displayName ?? "").font(.caption).foregroundStyle(.secondary)
+                    // "Wine 10.0", as the engine prompts say it: the full build name and revision are
+                    // under Advanced, and at full length they crowded the title.
+                    Text(engine.map { GamePageCopy.shortEngineName($0.manifest) } ?? "")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
                 Text(L("Changes save automatically")).font(.caption).foregroundStyle(.secondary)
-                Button(L("Done")) { dismiss() }.keyboardShortcut(.defaultAction)
+                // In the Settings window the page already has Back, which does the same thing.
+                if !showsInlineBack {
+                    Button(L("Done")) { dismiss() }.keyboardShortcut(.defaultAction)
+                }
             }
             .padding(.horizontal, 20).padding(.top, 16)
             ScrollView(.horizontal, showsIndicators: false) {
