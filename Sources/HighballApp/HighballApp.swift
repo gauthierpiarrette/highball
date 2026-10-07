@@ -182,6 +182,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct ContentView: View {
     @Environment(AppState.self) private var state
+    #if DEBUG
+    @Environment(\.openSettings) private var openSettings
+    #endif
     @State private var showAddGames = false
 
     /// Where a dropped or chosen program runs: the environment page it came from, else the default.
@@ -259,6 +262,14 @@ struct ContentView: View {
             try? await Task.sleep(for: .seconds(4))
             guard let bottle = state.bottles.first(where: { $0.name == name }) else { return }
             state.showSteam(in: bottle)
+        }
+        // HB_DEBUG_SETTINGS="<environment>" opens the Settings window on that environment's settings
+        // page (EnvironmentsPane pushes it), so a script can capture the page without a click.
+        .task {
+            guard ProcessInfo.processInfo.environment["HB_DEBUG_SETTINGS"] != nil else { return }
+            try? await Task.sleep(for: .seconds(4))
+            state.settingsTab = .environments
+            openSettings()
         }
         // HB_DEBUG_PLAY="<library item id>" presses Play on that tile, so a script can capture
         // the questions Play asks (the engine ask, highball-db#318).

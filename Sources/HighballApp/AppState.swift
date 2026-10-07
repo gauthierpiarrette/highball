@@ -200,6 +200,12 @@ final class AppState {
     /// Steam client makes it wait for the next launch (EngineStore.autoUpdateAllowed).
     private var autoUpdateTried = false
     func maybeAutoUpdateEngine() {
+        #if DEBUG
+        // HB_DEBUG_NO_ENGINE_UPDATE=1 keeps a scratch build from downloading and applying an engine
+        // update in the home it is pointed at: one launched for screenshots on the test Mac pulled
+        // a whole engine into its real home (2026-10-06).
+        if ProcessInfo.processInfo.environment["HB_DEBUG_NO_ENGINE_UPDATE"] != nil { return }
+        #endif
         guard !autoUpdateTried, !busy, !needsOnboarding, runningSessions.isEmpty,
               let update = engineUpdate, let current = defaultEngine,
               EngineStore.autoUpdateAllowed(from: current.manifest, to: update) else { return }

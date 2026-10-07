@@ -141,6 +141,14 @@ struct EnvironmentsPane: View {
                 Button(L("Delete"), role: .destructive) { if let n = pendingDelete { state.deleteBottle(n) }; pendingDelete = nil }
                 Button(L("Cancel"), role: .cancel) { pendingDelete = nil }
             }
+            #if DEBUG
+            // HB_DEBUG_SETTINGS="<environment>" (see ContentView) lands on that environment's page.
+            .task {
+                if let name = ProcessInfo.processInfo.environment["HB_DEBUG_SETTINGS"], navigationPath.isEmpty {
+                    navigationPath.append(EnvironmentSettingsDestination(name: name))
+                }
+            }
+            #endif
         }
     }
 
