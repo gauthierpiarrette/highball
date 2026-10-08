@@ -246,6 +246,7 @@ static void patch_slot(void **slot, void *hook, void **saved)
     if (old) VirtualProtect(slot, sizeof(void *), old, &old);
 }
 
+static void log_gs_slots(const char *where);
 // Diagnostic only (HB_TSSHIM_DEBUG): log each resource the game creates, so a Metal assertion
 // such as "MTLTextureDescriptor has invalid pixelFormat (0)" (The Last Caretaker, 2026-09-19)
 // can be tied to the DXGI format D3DMetal failed to map. Forwarded untouched otherwise.
@@ -259,7 +260,7 @@ static void log_resource(const char *what, const D3D12_RESOURCE_DESC *d, HRESULT
 }
 static HRESULT STDMETHODCALLTYPE hook_CreateCommittedResource(ID3D12Device *dev, const D3D12_HEAP_PROPERTIES *hp, D3D12_HEAP_FLAGS hf, const D3D12_RESOURCE_DESC *d, D3D12_RESOURCE_STATES st, const D3D12_CLEAR_VALUE *cv, REFIID riid, void **out)
 {
-    if (dbg) { log_resource("CreateCommittedResource begin", d, 0); }
+    if (dbg) { log_gs_slots("CreateCommittedResource"); log_resource("CreateCommittedResource begin", d, 0); }
     HRESULT hr = real_CreateCommittedResource(dev, hp, hf, d, st, cv, riid, out);
     if (dbg) { log_resource("CreateCommittedResource done", d, hr); if (d && d->Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) LOG("  -> res=%p", out ? *out : NULL); }
     return hr;
@@ -329,9 +330,23 @@ static UINT parse_shader_model(const char *v)
     if (sscanf(v, "0x%x", &major) == 1 || sscanf(v, "%x", &major) == 1) return major;
     return 0;
 }
+// Diagnostic (HB_TSSHIM_DEBUG): what the calling thread's %gs slots hold against its TEB. On macOS
+// Wine runs PE code with the host thread block at %gs and mirrors a few TEB fields into it, so a
+// program that keeps its stack bounds or its current fiber in %gs:8, %gs:0x10 or %gs:0x20 itself
+// (Microsoft Flight Simulator 2024's fiber system) sees whatever the host keeps there (gin-msfs, 2026-10-09).
+static void log_gs_slots(const char *where)
+{
+    static LONG logged;
+    ULONG_PTR s08, s10, s20; NT_TIB *tib = (NT_TIB *)NtCurrentTeb();
+    if (InterlockedIncrement(&logged) > 40) return;
+    __asm__ volatile("movq %%gs:8,%0" : "=r"(s08)); __asm__ volatile("movq %%gs:0x10,%0" : "=r"(s10)); __asm__ volatile("movq %%gs:0x20,%0" : "=r"(s20));
+    LOG("%s: gs:8=%p gs:0x10=%p gs:0x20=%p | TEB StackBase=%p StackLimit=%p FiberData=%p", where, (void *)s08, (void *)s10, (void *)s20, tib->StackBase, tib->StackLimit, tib->FiberData);
+}
+
 static HRESULT STDMETHODCALLTYPE hook_CheckFeatureSupport(ID3D12Device *dev, D3D12_FEATURE feature, void *data, UINT size)
 {
     int is_sm = feature == D3D12_FEATURE_SHADER_MODEL && data && size >= sizeof(D3D12_FEATURE_DATA_SHADER_MODEL);
+    if (dbg) log_gs_slots("CheckFeatureSupport");
     UINT asked = is_sm ? ((D3D12_FEATURE_DATA_SHADER_MODEL *)data)->HighestShaderModel : 0;
     HRESULT hr = real_CheckFeatureSupport(dev, feature, data, size);
     if (is_sm && hr == E_INVALIDARG) {
