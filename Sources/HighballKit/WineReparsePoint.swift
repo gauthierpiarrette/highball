@@ -87,6 +87,19 @@ public enum WineReparsePoint {
         }
     }
 
+    /// The components of `url` below drive_c, or nil when it is not inside. Compared as built
+    /// first: `standardizedFileURL` drops a leading /private only from paths that exist, so drive_c
+    /// and a path through a link below it (which has no Mac side) can come out with different
+    /// prefixes (/tmp against /private/tmp).
+    static func componentsBelow(_ url: URL, driveC: URL) -> [String]? {
+        for (path, base) in [(url.path, driveC.path), (url.standardizedFileURL.path, driveC.standardizedFileURL.path)] {
+            let root = base.hasSuffix("/") ? String(base.dropLast()) : base
+            if path == root { return [] }
+            if path.hasPrefix(root + "/") { return String(path.dropFirst(root.count)).split(separator: "/").map(String.init) }
+        }
+        return nil
+    }
+
     // MARK: Following
 
     /// The Mac path `url` lands on when Wine resolves it, going through the stubs on the way
@@ -96,13 +109,11 @@ public enum WineReparsePoint {
     public static func follow(_ url: URL, driveC: URL) -> URL? {
         let fm = FileManager.default
         if fm.fileExists(atPath: url.path) { return url }
-        let path = url.standardizedFileURL.path
-        let base = driveC.standardizedFileURL.path
         var current: URL
         var remaining: ArraySlice<String>
-        if path == base || path.hasPrefix(base.hasSuffix("/") ? base : base + "/") {
+        if let below = componentsBelow(url, driveC: driveC) {
             current = driveC
-            remaining = String(path.dropFirst(base.count)).split(separator: "/").map(String.init)[...]
+            remaining = below[...]
         } else {
             current = URL(fileURLWithPath: "/")
             remaining = url.standardizedFileURL.pathComponents.dropFirst()[...]
@@ -127,12 +138,8 @@ public enum WineReparsePoint {
     /// The Windows path Wine knows a Mac path inside the bottle by: drive_c is C:, anything else
     /// goes through Z:, the Mac's root.
     public static func windowsPath(for url: URL, driveC: URL) -> String {
-        let path = url.standardizedFileURL.path
-        let base = driveC.standardizedFileURL.path
-        if path == base || path.hasPrefix(base.hasSuffix("/") ? base : base + "/") {
-            return "C:\\" + String(path.dropFirst(base.count)).split(separator: "/").joined(separator: "\\")
-        }
-        return "Z:" + path.replacingOccurrences(of: "/", with: "\\")
+        if let below = componentsBelow(url, driveC: driveC) { return "C:\\" + below.joined(separator: "\\") }
+        return "Z:" + url.standardizedFileURL.path.replacingOccurrences(of: "/", with: "\\")
     }
 
     // MARK: Undoing the old symlinks
@@ -195,12 +202,10 @@ public enum WineReparsePoint {
     /// `dematerialize` in each folder along `url` inside drive_c, which is all a launch needs.
     @discardableResult
     public static func dematerializeAlong(_ url: URL, driveC: URL) -> [URL] {
-        let path = url.standardizedFileURL.path
-        let base = driveC.standardizedFileURL.path
-        guard path.hasPrefix(base.hasSuffix("/") ? base : base + "/") else { return [] }
+        guard let below = componentsBelow(url, driveC: driveC), !below.isEmpty else { return [] }
         var current = driveC
         var removed: [URL] = []
-        for component in String(path.dropFirst(base.count)).split(separator: "/").map(String.init).dropLast() {
+        for component in below.dropLast() {
             removed += dematerialize(in: current, driveC: driveC)
             current = current.appending(path: component)
         }

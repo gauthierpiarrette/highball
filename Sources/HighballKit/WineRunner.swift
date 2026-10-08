@@ -375,7 +375,7 @@ public struct WineRunner: Sendable {
         }
         // cwd = the exe's folder, as a Windows shortcut would — games with relative asset paths need it.
         // Wine gets the path through the link by its Windows name, since that path has no Mac side.
-        let throughLink = exe.standardizedFileURL.path != named.standardizedFileURL.path
+        let throughLink = exe.path != named.path
         return try await start(exe, arguments: pin.arguments, renderer: renderer, extraEnvironment: env,
                                workingDirectory: exe.deletingLastPathComponent(),
                                program: throughLink ? WineReparsePoint.windowsPath(for: named, driveC: bottle.driveC) : nil, onOutput: onOutput)

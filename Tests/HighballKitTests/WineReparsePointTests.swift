@@ -185,4 +185,18 @@ final class WineReparsePointTests: XCTestCase {
                        "depth 3 is found, depth 8 is beyond the cap")
         XCTAssertEqual(WineReparsePoint.dematerializeTree(under: driveC, driveC: driveC, maxDepth: 10).map(\.lastPathComponent), ["X"])
     }
+
+    func testABottleUnderPrivateKeepsItsDriveLetter() throws {
+        // /var is a link to /private/var. Standardizing drops /private only from paths that exist,
+        // so drive_c and a path through a link below it used to disagree, and a pin behind a link
+        // was handed to Wine as Z:\\private\\... (exit 53, seen with a scratch home in /private/tmp).
+        let real = URL(fileURLWithPath: "/private" + root.resolvingSymlinksInPath().path.replacingOccurrences(of: "/private", with: ""))
+        let driveC = real.appending(path: "drive_c")
+        let (dir, exe) = try makeEAInstall(under: driveC)
+        let named = dir.appending(path: "EA Desktop/EADesktop.exe")
+        XCTAssertEqual(WineReparsePoint.windowsPath(for: named, driveC: driveC), "C:\\Program Files\\Electronic Arts\\EA Desktop\\EA Desktop\\EADesktop.exe")
+        XCTAssertEqual(WineReparsePoint.follow(named, driveC: driveC)?.resolvingSymlinksInPath().path, exe.resolvingSymlinksInPath().path)
+        try makeOldLink(in: dir)
+        XCTAssertEqual(WineReparsePoint.dematerializeAlong(named, driveC: driveC).map(\.lastPathComponent), ["EA Desktop"])
+    }
 }

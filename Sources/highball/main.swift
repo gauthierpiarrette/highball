@@ -447,7 +447,7 @@ struct Run: AsyncParsableCommand {
             let exe = WineReparsePoint.follow(named, driveC: b.driveC) ?? named
             result = try await runner.start(exe, arguments: arguments, renderer: renderer, extraEnvironment: scoped,
                                             workingDirectory: exe.deletingLastPathComponent(),
-                                            program: exe.standardizedFileURL.path == named.standardizedFileURL.path ? nil : program, onOutput: out)
+                                            program: exe.path == named.path ? nil : program, onOutput: out)
         } else if FileManager.default.fileExists(atPath: program) {
             let exe = URL(fileURLWithPath: program)
             result = try await runner.start(exe, arguments: arguments, renderer: renderer,
