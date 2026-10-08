@@ -17,6 +17,12 @@
 // - ResolveSubresource from a multisampled depth texture into a colour texture ends in a Metal
 //   assertion that aborts the thread. The hook drops the call (HB_TSSHIM_DEPTHRESOLVE=1 lets it
 //   through, for a D3DMetal that has learned to do it).
+// - HB_TSSHIM_SHADER_MODEL=6_7 (off by default, a recipe sets it per game) makes the shader model
+//   query answer that model when the game asks for it or higher. D3DMetal says 6.6 and refuses
+//   nothing: measured with spike/smprobe (2026-10-08), it runs shaders compiled at 6.7, 6.8 and 6.9
+//   as long as they avoid QuadAny/QuadAll, GatherRaw, SampleCmpLevel and writable MSAA textures,
+//   whose pipelines it silently turns into no-ops. A game that only gates on the number
+//   (Microsoft Flight Simulator 2024, highball-db#6) can then start and show what it really needs.
 //
 // Build: x86_64-w64-mingw32-gcc -shared -O2 -Wall -static-libgcc -o d3d12.dll d3d12.c d3d12.def
 // then stamp the "Wine builtin DLL" marker so WINEDLLPATH_PREPEND picks it up.
@@ -312,12 +318,25 @@ static void STDMETHODCALLTYPE hook_CreateDepthStencilView(ID3D12Device *dev, ID3
 // 0x6a and stopped at "Your graphics card is not supported (FH206)" (M4, macOS 27.0, D3DMetal 4.0b2).
 // The Windows runtime the game ships knows its own enum, so on Windows the question never fails.
 static HRESULT (STDMETHODCALLTYPE *real_CheckFeatureSupport)(ID3D12Device *, D3D12_FEATURE, void *, UINT);
+// HB_TSSHIM_SHADER_MODEL: the model the query may answer beyond what D3DMetal says ("6_7", "6.7" or
+// "0x67"), 0 when unset. The Windows runtime answers min(asked, supported); with the option the
+// supported value is raised to at least this one, and nothing changes for a game that asks for less.
+static UINT sm_override;
+static UINT parse_shader_model(const char *v)
+{
+    unsigned major, minor;
+    if (sscanf(v, "%u_%u", &major, &minor) == 2 || sscanf(v, "%u.%u", &major, &minor) == 2) return (major << 4) | minor;
+    if (sscanf(v, "0x%x", &major) == 1 || sscanf(v, "%x", &major) == 1) return major;
+    return 0;
+}
 static HRESULT STDMETHODCALLTYPE hook_CheckFeatureSupport(ID3D12Device *dev, D3D12_FEATURE feature, void *data, UINT size)
 {
+    int is_sm = feature == D3D12_FEATURE_SHADER_MODEL && data && size >= sizeof(D3D12_FEATURE_DATA_SHADER_MODEL);
+    UINT asked = is_sm ? ((D3D12_FEATURE_DATA_SHADER_MODEL *)data)->HighestShaderModel : 0;
     HRESULT hr = real_CheckFeatureSupport(dev, feature, data, size);
-    if (feature == D3D12_FEATURE_SHADER_MODEL && hr == E_INVALIDARG && data && size >= sizeof(D3D12_FEATURE_DATA_SHADER_MODEL)) {
+    if (is_sm && hr == E_INVALIDARG) {
         D3D12_FEATURE_DATA_SHADER_MODEL *sm = data;
-        UINT asked = sm->HighestShaderModel, v;
+        UINT v;
         for (v = asked - 1; v >= D3D_SHADER_MODEL_6_0 && v < asked; v--) {
             sm->HighestShaderModel = v;
             if (SUCCEEDED(hr = real_CheckFeatureSupport(dev, feature, data, size))) break;
@@ -325,6 +344,14 @@ static HRESULT STDMETHODCALLTYPE hook_CheckFeatureSupport(ID3D12Device *dev, D3D
         if (FAILED(hr)) sm->HighestShaderModel = asked;
         LOG("shader model query for 0x%x answered as 0x%x (hr 0x%08lx)", asked, (unsigned)sm->HighestShaderModel, (unsigned long)hr);
     } else if (dbg) LOG("CheckFeatureSupport feature=%d size=%u hr=0x%08lx", (int)feature, size, (unsigned long)hr);
+    if (is_sm && sm_override) {
+        D3D12_FEATURE_DATA_SHADER_MODEL *sm = data;
+        UINT real_answer = SUCCEEDED(hr) ? sm->HighestShaderModel : 0, answer = asked < sm_override ? asked : sm_override;
+        if (answer > real_answer) {
+            sm->HighestShaderModel = answer; hr = S_OK;
+            LOG("shader model query for 0x%x answered as 0x%x through HB_TSSHIM_SHADER_MODEL (D3DMetal said 0x%x)", asked, answer, real_answer);
+        }
+    }
     return hr;
 }
 
@@ -477,12 +504,14 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         dbg = GetEnvironmentVariableA("HB_TSSHIM_DEBUG", NULL, 0) > 0;
         { char v[8]; idle = GetEnvironmentVariableA("HB_D3D12_TSSHIM", v, sizeof v) == 1 && v[0] == '0'; }   // kill switch
         { char v[8]; pass_depth_resolve = GetEnvironmentVariableA("HB_TSSHIM_DEPTHRESOLVE", v, sizeof v) == 1 && v[0] == '1'; }
+        { char v[16]; DWORD n = GetEnvironmentVariableA("HB_TSSHIM_SHADER_MODEL", v, sizeof v); if (n && n < sizeof v) sm_override = parse_shader_model(v); }
         if (!load_real()) return FALSE;
         RESOLVE(D3D12CoreCreateLayeredDevice); RESOLVE(D3D12CoreGetLayeredDeviceSize); RESOLVE(D3D12CoreRegisterLayers);
         RESOLVE(D3D12CreateRootSignatureDeserializer); RESOLVE(D3D12CreateVersionedRootSignatureDeserializer);
         RESOLVE(D3D12EnableExperimentalFeatures); RESOLVE(D3D12GetDebugInterface); RESOLVE(D3D12SerializeRootSignature);
         RESOLVE(D3D12SerializeVersionedRootSignature); RESOLVE(GetBehaviorValue);
-        LOG("loaded in front of the real d3d12.dll");
+        LOG("loaded in front of the real d3d12.dll%s", sm_override ? " with a shader model override" : "");
+        if (sm_override) LOG("HB_TSSHIM_SHADER_MODEL: the shader model query will answer up to 0x%x", sm_override);
     }
     return TRUE;
 }
