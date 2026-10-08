@@ -310,4 +310,26 @@ final class EnvironmentTests: XCTestCase {
         XCTAssertEqual(env["D3DM_MAX_FPS"], "45", "the 64-bit games D3DMetal serves get its own cap")
         XCTAssertNil(env["DXVK_FRAME_RATE"], "d3dmetal has no dxvk cap channel")
     }
+
+    // A game's own DXMT_CONFIG (GTA V's AMD identity, highball-db#72) keeps the frame cap, and the
+    // cap's absence or an explicit cap in the variable leave it as written.
+    func testAGameDXMTConfigKeepsTheFrameCap() throws {
+        let engine = try d3dmetalEngine()
+        defer { try? FileManager.default.removeItem(at: engine.root) }
+        try FileManager.default.createDirectory(at: engine.frameworksDir.appending(path: "renderer/dxmt/wine"), withIntermediateDirectories: true)
+        var bottle = Bottle(url: URL(fileURLWithPath: "/tmp/hb-test-bottle"),
+                            settings: BottleSettings(name: "t", engineID: engine.id))
+        let identity = #"dxgi.customVendorId=1002;dxgi.customDeviceId=73bf;dxgi.customDeviceDesc="AMD Radeon RX 6800 XT";"#
+        XCTAssertEqual(try bottle.environment(engine: engine, renderer: .dxmt, extra: ["DXMT_CONFIG": identity])["DXMT_CONFIG"], identity,
+                       "uncapped, the game's value stands as it is")
+        bottle.settings.fpsCap = 60
+        XCTAssertEqual(try bottle.environment(engine: engine, renderer: .dxmt, extra: ["DXMT_CONFIG": identity])["DXMT_CONFIG"],
+                       identity + "d3d11.preferredMaxFrameRate=60;")
+        XCTAssertEqual(try bottle.environment(engine: engine, renderer: .dxmt, extra: ["DXMT_CONFIG": "dxgi.customVendorId=1002"])["DXMT_CONFIG"],
+                       "dxgi.customVendorId=1002;d3d11.preferredMaxFrameRate=60;", "a value without its last ; still parses")
+        XCTAssertEqual(try bottle.environment(engine: engine, renderer: .dxmt, extra: ["DXMT_CONFIG": "d3d11.preferredMaxFrameRate=30;"])["DXMT_CONFIG"],
+                       "d3d11.preferredMaxFrameRate=30;", "a cap the game sets itself wins")
+        XCTAssertEqual(try bottle.environment(engine: engine, renderer: .dxmt)["DXMT_CONFIG"], "d3d11.preferredMaxFrameRate=60;",
+                       "without a game value nothing changes")
+    }
 }

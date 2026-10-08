@@ -776,6 +776,12 @@ public struct Bottle: Sendable {
         merge(&env, settings.environment)
         merge(&env, try effective.environment(engine: engine))
         merge(&env, extra)
+        // A game's recipe or the player may set DXMT_CONFIG too, a GPU identity for instance
+        // (GTA V falls back to 800x600 on an Apple GPU, highball-db#72), and the merges above
+        // replaced the frame cap's. DXMT reads ";"-separated settings, so both apply.
+        if settings.fpsCap > 0, r == .dxmt || r == .d3dmetal, let config = env["DXMT_CONFIG"], !config.contains("d3d11.preferredMaxFrameRate=") {
+            env["DXMT_CONFIG"] = (config.isEmpty || config.hasSuffix(";") ? config : config + ";") + "d3d11.preferredMaxFrameRate=\(settings.fpsCap);"
+        }
         // CrossOver's DLSS switch enables the renderer's NVIDIA extension bridge. DXMT ships
         // its DLLs under their normal names; Apple's D3DMetal bridge is named nvngx-on-metalfx
         // and is exposed as nvngx.dll in this bottle at launch (see prepareDLSSBridge).
