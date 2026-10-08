@@ -22,6 +22,12 @@ struct LibraryView: View {
     /// that read as a bug (highball#257).
     @AppStorage("library.installedOnly") private var installedOnly = false
     @AppStorage("library.verifiedOnly") private var verifiedOnly = false
+    #if DEBUG
+    /// HB_DEBUG_GAME="<title>": the first library item whose title contains it opens a few seconds after
+    /// launch, so a script can capture game pages without a click (highball#279's page was checked this
+    /// way). Compiled out of releases.
+    @State private var debugGame: LibraryItem?
+    #endif
 
     private var filtered: [LibraryItem] {
         state.libraryItems.filter { item in
@@ -95,6 +101,16 @@ struct LibraryView: View {
         .background(BottleBackdrop())
         .searchable(text: $search, prompt: L("Search your games"))
         .navigationDestination(for: LibraryItem.self) { GameDetailView(passedItem: $0) }
+        #if DEBUG
+        .navigationDestination(item: $debugGame) { GameDetailView(passedItem: $0) }
+        .task {
+            guard let wanted = ProcessInfo.processInfo.environment["HB_DEBUG_GAME"] else { return }
+            for _ in 0..<30 {
+                try? await Task.sleep(for: .seconds(1))
+                if let item = state.libraryItems.first(where: { $0.title.localizedCaseInsensitiveContains(wanted) }) { debugGame = item; return }
+            }
+        }
+        #endif
     }
 
     private func entry(for item: LibraryItem) -> GameDBEntry? {
