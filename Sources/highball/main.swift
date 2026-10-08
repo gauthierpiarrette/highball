@@ -442,9 +442,12 @@ struct Run: AsyncParsableCommand {
                 result = try await runner.start(pin: p, onOutput: out)
             }
         } else if program.contains(":") || program.contains("\\") {
-            let exe = WineReparsePoint.resolve(b.resolve(windowsPath: program), driveC: b.driveC) ?? b.resolve(windowsPath: program)
+            let named = b.resolve(windowsPath: program)
+            WineReparsePoint.dematerializeAlong(named, driveC: b.driveC)
+            let exe = WineReparsePoint.follow(named, driveC: b.driveC) ?? named
             result = try await runner.start(exe, arguments: arguments, renderer: renderer, extraEnvironment: scoped,
-                                            workingDirectory: exe.deletingLastPathComponent(), onOutput: out)
+                                            workingDirectory: exe.deletingLastPathComponent(),
+                                            program: exe.standardizedFileURL.path == named.standardizedFileURL.path ? nil : program, onOutput: out)
         } else if FileManager.default.fileExists(atPath: program) {
             let exe = URL(fileURLWithPath: program)
             result = try await runner.start(exe, arguments: arguments, renderer: renderer,

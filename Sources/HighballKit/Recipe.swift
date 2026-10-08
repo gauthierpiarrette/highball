@@ -464,6 +464,12 @@ public struct RecipeRunner: Sendable {
                 } else {
                     file = try await downloadUnverified(url)
                 }
+                // A Mac symlink an older Highball made beside a Windows link stops an installer that
+                // repairs or replaces the link (the EA app's repair: "Failed to remove reparse point",
+                // error 145, highball-db#318). Wine follows its own links, so they go.
+                for link in WineReparsePoint.dematerializeTree(under: bottle.driveC, driveC: bottle.driveC) {
+                    log?("[\(recipe.id)] removed the Mac link beside \(link.lastPathComponent), Wine follows the Windows link itself")
+                }
                 let isMSI = file.pathExtension.lowercased() == "msi" || url.lastPathComponent.lowercased().contains(".msi")
                 let wineArgs = isMSI ? ["msiexec", "/i", file.path, "/qn"] + arguments : [file.path] + arguments
                 let before = Set(ProcessTable.processes(ofPrefix: bottle.url))
@@ -516,11 +522,6 @@ public struct RecipeRunner: Sendable {
                 }
                 if result.exitStatus != 0 {
                     log?("[\(recipe.id)] \(label) exited with \(result.exitStatus)\(WineRunner.exitCodeNote(for: result.exitStatus)) — treating as done")
-                }
-                // Junctions the installer made (EA app: EA Desktop\EA Desktop → a versioned folder)
-                // are stubs nothing follows until they are host symlinks.
-                for link in WineReparsePoint.materializeTree(under: bottle.driveC, driveC: bottle.driveC) {
-                    log?("[\(recipe.id)] linked \(link.lastPathComponent) (a Windows junction the installer made, as a symlink)")
                 }
             case let .registry(key, name, type, data):
                 try await runner.regAdd(key: key, name: name, type: type, data: data)

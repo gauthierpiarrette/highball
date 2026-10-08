@@ -1,21 +1,26 @@
 import Foundation
 import Darwin
 
-/// Wine's on-disk form of an NTFS reparse point, and how to make it usable.
+/// Wine's on-disk form of an NTFS reparse point, and how Highball reads through it.
 ///
 /// When a Windows installer creates a directory junction or symbolic link, this Wine
-/// (10+, CrossOver 26) leaves an empty directory named after the link plus a trailing `?`,
-/// with the raw REPARSE_DATA_BUFFER in the `user.WINEREPARSE` extended attribute. Nothing on
-/// the host follows that, and Wine itself did not resolve it either: the EA app's installer
-/// makes one for `EA Desktop\EA Desktop`, and the client behind it was "not there" both to
-/// Highball and to programs inside the bottle. A real host symlink is followed by both, so this
-/// turns such stubs into symlinks, after installs and on demand when a path is missing.
+/// (11, CrossOver 26) leaves an empty directory named after the link plus a trailing `?`,
+/// with the raw REPARSE_DATA_BUFFER in the `user.WINEREPARSE` extended attribute. Wine follows
+/// it itself: on the Wine 11 engines r4 and r21, a program reads and lists through the link,
+/// starts a program behind it and removes it (measured 2026-10-08 with `mklink /J` and with
+/// the EA app's relative `mklink /D` layout). Nothing on the Mac follows it, so Highball's own
+/// checks go through `follow`, which writes nothing.
+///
+/// Highball used to turn such stubs into Mac symlinks of the same name. Wine then took the
+/// symlink for an ordinary folder, and removing the link failed with "Directory is not empty"
+/// (error 145): the EA app's repair stopped at "Failed to remove reparse point ... error=145"
+/// (highball-db#318). `dematerialize` takes those symlinks away again.
 public enum WineReparsePoint {
     public static let attribute = "user.WINEREPARSE"
     /// IO_REPARSE_TAG_SYMLINK and IO_REPARSE_TAG_MOUNT_POINT (a junction).
     static let symlinkTag: UInt32 = 0xA000_000C
     static let mountPointTag: UInt32 = 0xA000_0003
-    /// Stubs whose name is taken by the link are moved aside under this prefix.
+    /// Where an older Highball moved a stub whose name its symlink took.
     static let asidePrefix = ".wine-reparse-"
 
     public struct Decoded: Equatable, Sendable {
@@ -63,11 +68,6 @@ public enum WineReparsePoint {
         return decode(Data(buffer[0..<got]))
     }
 
-    /// `EA Desktop?` → `EA Desktop`. A stub without the marker keeps its name.
-    public static func linkName(forStub name: String) -> String {
-        name.hasSuffix("?") ? String(name.dropLast()) : name
-    }
-
     /// Where the target lives on the host: relative names hang off the stub's directory,
     /// absolute ones go through the bottle's drives (C: is drive_c, Z: is the host root).
     public static func hostTarget(_ decoded: Decoded, stubParent: URL, driveC: URL) -> URL? {
@@ -87,68 +87,13 @@ public enum WineReparsePoint {
         }
     }
 
-    // MARK: Materialising
+    // MARK: Following
 
-    /// Turns every reparse stub directly inside `dir` into a host symlink. Returns the links made.
-    /// Skips stubs whose target is not there (a link to nothing helps nobody) and names that are
-    /// already taken by something other than the stub itself.
-    @discardableResult
-    public static func materialize(in dir: URL, driveC: URL) -> [URL] {
-        let fm = FileManager.default
-        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return [] }
-        var made: [URL] = []
-        for name in names where !name.hasPrefix(asidePrefix) {
-            let stub = dir.appending(path: name)
-            guard let decoded = read(at: stub),
-                  let target = hostTarget(decoded, stubParent: dir, driveC: driveC),
-                  fm.fileExists(atPath: target.path) else { continue }
-            let linkName = linkName(forStub: name)
-            let link = dir.appending(path: linkName)
-            if linkName == name {
-                // The stub occupies the link's name: move the (empty) stub aside first.
-                let aside = dir.appending(path: asidePrefix + name)
-                try? fm.removeItem(at: aside)
-                guard (try? fm.moveItem(at: stub, to: aside)) != nil else { continue }
-            } else if (try? fm.attributesOfItem(atPath: link.path)) != nil {
-                continue // something already has that name; lstat semantics, so a dangling link counts too
-            }
-            let destination = decoded.isRelative
-                ? decoded.target.replacingOccurrences(of: "\\", with: "/")
-                : relativePath(from: dir, to: target)
-            if (try? fm.createSymbolicLink(atPath: link.path, withDestinationPath: destination)) != nil {
-                made.append(link)
-            }
-        }
-        return made
-    }
-
-    /// Materialises stubs anywhere under `root`, directories only, to a bounded depth: installers
-    /// put their links a few levels under Program Files, and game trees below that are huge.
-    /// `windows/` at the root is skipped.
-    @discardableResult
-    public static func materializeTree(under root: URL, driveC: URL, maxDepth: Int = 6) -> [URL] {
-        let fm = FileManager.default
-        var made: [URL] = []
-        func walk(_ dir: URL, depth: Int) {
-            made += materialize(in: dir, driveC: driveC)
-            guard depth < maxDepth,
-                  let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
-                                                            options: [.skipsHiddenFiles]) else { return }
-            for entry in entries {
-                let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-                guard values?.isDirectory == true, values?.isSymbolicLink != true else { continue }
-                if depth == 0, entry.lastPathComponent.lowercased() == "windows" { continue }
-                walk(entry, depth: depth + 1)
-            }
-        }
-        walk(root, depth: 0)
-        return made
-    }
-
-    /// `url` if it exists, else the same path after materialising the stubs that stood in its way,
-    /// or nil when something is still missing. Walks from the bottle's drive_c when the path is
-    /// inside it, so a missing pin costs a few directory reads and nothing more.
-    public static func resolve(_ url: URL, driveC: URL) -> URL? {
+    /// The Mac path `url` lands on when Wine resolves it, going through the stubs on the way
+    /// (a stub named after the component plus `?`, or one standing at the component's own name),
+    /// or nil when something along it is missing. Writes nothing. Walks from the bottle's drive_c
+    /// when `url` is inside it, so a path costs a few directory reads.
+    public static func follow(_ url: URL, driveC: URL) -> URL? {
         let fm = FileManager.default
         if fm.fileExists(atPath: url.path) { return url }
         let path = url.standardizedFileURL.path
@@ -163,26 +108,103 @@ public enum WineReparsePoint {
             remaining = url.standardizedFileURL.pathComponents.dropFirst()[...]
         }
         for component in remaining {
-            let next = current.appending(path: component)
-            if !fm.fileExists(atPath: next.path) {
-                materialize(in: current, driveC: driveC)
-                guard fm.fileExists(atPath: next.path) else { return nil }
+            let direct = current.appending(path: component)
+            if let decoded = read(at: direct), let target = hostTarget(decoded, stubParent: current, driveC: driveC),
+               fm.fileExists(atPath: target.path) {
+                current = target
+            } else if fm.fileExists(atPath: direct.path) {
+                current = direct
+            } else if let decoded = read(at: current.appending(path: component + "?")),
+                      let target = hostTarget(decoded, stubParent: current, driveC: driveC), fm.fileExists(atPath: target.path) {
+                current = target
+            } else {
+                return nil
             }
-            current = next
         }
         return current
     }
 
-    /// A relative symlink destination from `dir` to `target` (`../13.783.0.6296/EA Desktop`),
-    /// so the link survives the bottle being moved or renamed.
-    static func relativePath(from dir: URL, to target: URL) -> String {
-        let from = dir.standardizedFileURL.pathComponents
-        let to = target.standardizedFileURL.pathComponents
-        var common = 0
-        while common < from.count, common < to.count, from[common] == to[common] { common += 1 }
-        let ups = Array(repeating: "..", count: from.count - common)
-        let rest = Array(to[common...])
-        let parts = ups + rest
-        return parts.isEmpty ? "." : parts.joined(separator: "/")
+    /// The Windows path Wine knows a Mac path inside the bottle by: drive_c is C:, anything else
+    /// goes through Z:, the Mac's root.
+    public static func windowsPath(for url: URL, driveC: URL) -> String {
+        let path = url.standardizedFileURL.path
+        let base = driveC.standardizedFileURL.path
+        if path == base || path.hasPrefix(base.hasSuffix("/") ? base : base + "/") {
+            return "C:\\" + String(path.dropFirst(base.count)).split(separator: "/").joined(separator: "\\")
+        }
+        return "Z:" + path.replacingOccurrences(of: "/", with: "\\")
+    }
+
+    // MARK: Undoing the old symlinks
+
+    /// Removes the Mac symlinks an older Highball made for stubs directly inside `dir`: a symlink
+    /// whose target is the target of the stub beside it (`name?`) or of the stub it set aside
+    /// (`.wine-reparse-name`, which goes back to its name). Any other symlink is left alone.
+    /// Returns the links removed.
+    @discardableResult
+    public static func dematerialize(in dir: URL, driveC: URL) -> [URL] {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return [] }
+        var removed: [URL] = []
+        for name in names where !name.hasPrefix(asidePrefix) && !name.hasSuffix("?") {
+            let link = dir.appending(path: name)
+            guard (try? fm.destinationOfSymbolicLink(atPath: link.path)) != nil else { continue }
+            let landing = link.resolvingSymlinksInPath().standardizedFileURL.path
+            func pointsHere(_ stub: URL) -> Bool {
+                guard let decoded = read(at: stub), let target = hostTarget(decoded, stubParent: dir, driveC: driveC) else { return false }
+                return target.resolvingSymlinksInPath().standardizedFileURL.path == landing
+            }
+            let marked = dir.appending(path: name + "?")
+            let aside = dir.appending(path: asidePrefix + name)
+            if pointsHere(marked) {
+                guard (try? fm.removeItem(at: link)) != nil else { continue }
+            } else if pointsHere(aside) {
+                guard (try? fm.removeItem(at: link)) != nil else { continue }
+                try? fm.moveItem(at: aside, to: link)
+            } else {
+                continue
+            }
+            removed.append(link)
+        }
+        return removed
+    }
+
+    /// `dematerialize` anywhere under `root`, directories only, to a bounded depth: installers put
+    /// their links a few levels under Program Files, and game trees below that are huge.
+    /// `windows/` at the root is skipped, and symlinked folders are not entered.
+    @discardableResult
+    public static func dematerializeTree(under root: URL, driveC: URL, maxDepth: Int = 6) -> [URL] {
+        let fm = FileManager.default
+        var removed: [URL] = []
+        func walk(_ dir: URL, depth: Int) {
+            removed += dematerialize(in: dir, driveC: driveC)
+            guard depth < maxDepth,
+                  let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+                                                            options: [.skipsHiddenFiles]) else { return }
+            for entry in entries {
+                let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                guard values?.isDirectory == true, values?.isSymbolicLink != true else { continue }
+                if depth == 0, entry.lastPathComponent.lowercased() == "windows" { continue }
+                walk(entry, depth: depth + 1)
+            }
+        }
+        walk(root, depth: 0)
+        return removed
+    }
+
+    /// `dematerialize` in each folder along `url` inside drive_c, which is all a launch needs.
+    @discardableResult
+    public static func dematerializeAlong(_ url: URL, driveC: URL) -> [URL] {
+        let path = url.standardizedFileURL.path
+        let base = driveC.standardizedFileURL.path
+        guard path.hasPrefix(base.hasSuffix("/") ? base : base + "/") else { return [] }
+        var current = driveC
+        var removed: [URL] = []
+        for component in String(path.dropFirst(base.count)).split(separator: "/").map(String.init).dropLast() {
+            removed += dematerialize(in: current, driveC: driveC)
+            current = current.appending(path: component)
+        }
+        removed += dematerialize(in: current, driveC: driveC)
+        return removed
     }
 }

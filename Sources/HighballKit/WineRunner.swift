@@ -283,7 +283,9 @@ public struct WineRunner: Sendable {
     /// Runs the executable directly under `wine` (not `start /unix`) so the process stays attached and
     /// everything it and its children print lands in the log. The call returns when the program exits.
     @discardableResult
-    public func start(_ executable: URL, arguments: [String] = [], renderer: Renderer? = nil, extraEnvironment: [String: String] = [:], workingDirectory: URL? = nil, headerNote: String? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
+    /// `program` replaces the executable's Mac path on Wine's command line (a Windows path through
+    /// a link the Mac does not see), while `executable` still names the log and the checks.
+    public func start(_ executable: URL, arguments: [String] = [], renderer: Renderer? = nil, extraEnvironment: [String: String] = [:], workingDirectory: URL? = nil, headerNote: String? = nil, program: String? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
         await syncMacFontSubstitutes()
         await syncDllOverridesRegistry()
         await syncEngineAppDefaults()
@@ -313,7 +315,7 @@ public struct WineRunner: Sendable {
             onOutput?("note: \(rebooted)")
             note = [note, rebooted].compactMap { $0 }.joined(separator: "; ")
         }
-        return try await run([executable.path] + arguments, renderer: renderer, extraEnvironment: extraEnvironment, label: executable.lastPathComponent, workingDirectory: workingDirectory, headerNote: note, onOutput: onOutput)
+        return try await run([program ?? executable.path] + arguments, renderer: renderer, extraEnvironment: extraEnvironment, label: executable.lastPathComponent, workingDirectory: workingDirectory, headerNote: note, onOutput: onOutput)
     }
 
     /// Restarts the environment's Wine server before a program launch when the server, and so
@@ -349,10 +351,12 @@ public struct WineRunner: Sendable {
     /// Runs the pinned program, honouring its own renderer/env/args.
     @discardableResult
     public func start(pin: Pin, extraEnvironment: [String: String] = [:], onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
-        // A path behind a Windows junction the installer made (EA app) exists only once the
-        // junction stub is turned into a host symlink; do that before judging it missing.
-        let exe = WineReparsePoint.resolve(pin.executableURL(driveC: bottle.driveC), driveC: bottle.driveC)
-            ?? pin.executableURL(driveC: bottle.driveC)
+        // A program behind a link a Windows installer made (the EA app) is found through Wine's
+        // stub. A Mac symlink an older Highball made beside the stub goes first: Wine took it for a
+        // folder and could not remove the link, which stopped the EA app's repair (highball-db#318).
+        let named = pin.launchURL(driveC: bottle.driveC)
+        WineReparsePoint.dematerializeAlong(named, driveC: bottle.driveC)
+        let exe = pin.executableURL(driveC: bottle.driveC)
         // A pin whose target no longer exists otherwise dies deep in Wine with an opaque
         // c0000135 ("failed to open"). Catch it here with a message the user can act on.
         // Pins written before 0.7.6 stored only a filename, so old entries resolve to a
@@ -370,8 +374,11 @@ public struct WineRunner: Sendable {
             renderer = nil
         }
         // cwd = the exe's folder, as a Windows shortcut would — games with relative asset paths need it.
+        // Wine gets the path through the link by its Windows name, since that path has no Mac side.
+        let throughLink = exe.standardizedFileURL.path != named.standardizedFileURL.path
         return try await start(exe, arguments: pin.arguments, renderer: renderer, extraEnvironment: env,
-                               workingDirectory: exe.deletingLastPathComponent(), onOutput: onOutput)
+                               workingDirectory: exe.deletingLastPathComponent(),
+                               program: throughLink ? WineReparsePoint.windowsPath(for: named, driveC: bottle.driveC) : nil, onOutput: onOutput)
     }
 
     /// Steam's first self-update sometimes dies at a known Wine WoW64 spot and resumes cleanly

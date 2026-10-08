@@ -88,78 +88,101 @@ final class WineReparsePointTests: XCTestCase {
         let z = WineReparsePoint.hostTarget(.init(tag: 0, target: "Z:\\Users\\me\\x", isRelative: false), stubParent: parent, driveC: driveC)
         XCTAssertEqual(z?.path, "/Users/me/x")
         XCTAssertNil(WineReparsePoint.hostTarget(.init(tag: 0, target: "D:\\x", isRelative: false), stubParent: parent, driveC: driveC), "no such drive in a bottle")
-        XCTAssertEqual(WineReparsePoint.linkName(forStub: "EA Desktop?"), "EA Desktop")
-        XCTAssertEqual(WineReparsePoint.linkName(forStub: "plain"), "plain")
     }
 
-    // MARK: Materialising
+    // MARK: Following
 
-    func testStubBecomesARelativeHostSymlinkTheClientIsReachableThrough() throws {
+    func testFollowReachesTheClientThroughTheStubAndWritesNothing() throws {
         let driveC = root.appending(path: "drive_c")
-        let (dir, _) = try makeEAInstall(under: driveC)
-        let made = WineReparsePoint.materialize(in: dir, driveC: driveC)
-        XCTAssertEqual(made.map(\.lastPathComponent), ["EA Desktop"])
-        let link = dir.appending(path: "EA Desktop")
-        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link.path), "13.783.0.6296/EA Desktop", "relative, so a moved bottle keeps working")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: link.appending(path: "EADesktop.exe").path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appending(path: "EA Desktop?").path), "the stub is left for Wine")
-        XCTAssertEqual(WineReparsePoint.materialize(in: dir, driveC: driveC), [], "second pass: nothing left to do")
+        let (dir, exe) = try makeEAInstall(under: driveC)
+        let named = dir.appending(path: "EA Desktop/EADesktop.exe")
+        XCTAssertEqual(WineReparsePoint.follow(named, driveC: driveC)?.path, exe.standardizedFileURL.path)
+        XCTAssertNil(try? FileManager.default.attributesOfItem(atPath: dir.appending(path: "EA Desktop").path), "no Mac link is made")
+        XCTAssertNotNil(WineReparsePoint.read(at: dir.appending(path: "EA Desktop?")), "the stub stays for Wine")
+        XCTAssertNil(WineReparsePoint.follow(dir.appending(path: "EA Desktop/Missing.exe"), driveC: driveC))
+        XCTAssertNil(WineReparsePoint.follow(root.appending(path: "outside/nothing"), driveC: driveC))
     }
 
-    func testStubWithoutTheMarkerIsMovedAsideForTheLink() throws {
+    func testFollowGoesThroughAStubWithoutTheMarkerAndAnAbsoluteJunction() throws {
         let driveC = root.appending(path: "drive_c")
-        let (dir, _) = try makeEAInstall(under: driveC, stubName: "EA Desktop")
-        XCTAssertEqual(WineReparsePoint.materialize(in: dir, driveC: driveC).map(\.lastPathComponent), ["EA Desktop"])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appending(path: "EA Desktop/EADesktop.exe").path))
-        XCTAssertNotNil(WineReparsePoint.read(at: dir.appending(path: ".wine-reparse-EA Desktop")), "the stub survives, aside")
-    }
-
-    func testStubToNothingAndTakenNamesAreLeftAlone() throws {
-        let driveC = root.appending(path: "drive_c")
-        let dir = driveC.appending(path: "Program Files/Vendor")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try makeStub(in: dir, name: "Gone?", data: Self.blob(tag: 0xA000_000C, substitute: "9.9\\Gone", relative: true))
-        try makeStub(in: dir, name: "Taken?", data: Self.blob(tag: 0xA000_000C, substitute: "9.9\\Gone", relative: true))
-        try FileManager.default.createDirectory(at: dir.appending(path: "9.9/Gone"), withIntermediateDirectories: true)
-        try Data().write(to: dir.appending(path: "Taken"))
-        try makeStub(in: dir, name: "Nowhere?", data: Self.blob(tag: 0xA000_000C, substitute: "no\\such", relative: true))
-        let made = WineReparsePoint.materialize(in: dir, driveC: driveC)
-        XCTAssertEqual(made.map(\.lastPathComponent), ["Gone"])
-        XCTAssertEqual(try Data(contentsOf: dir.appending(path: "Taken")), Data(), "an existing file is never replaced")
-        XCTAssertNil(try? FileManager.default.destinationOfSymbolicLink(atPath: dir.appending(path: "Nowhere").path))
-    }
-
-    func testAbsoluteJunctionGetsARelativeLink() throws {
-        let driveC = root.appending(path: "drive_c")
-        let dir = driveC.appending(path: "Program Files/Vendor")
+        let (dir, exe) = try makeEAInstall(under: driveC, stubName: "EA Desktop")
+        XCTAssertEqual(WineReparsePoint.follow(dir.appending(path: "EA Desktop/EADesktop.exe"), driveC: driveC)?.path, exe.standardizedFileURL.path)
+        let vendor = driveC.appending(path: "Program Files/Vendor")
         try FileManager.default.createDirectory(at: driveC.appending(path: "ProgramData/Vendor/1.0"), withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try makeStub(in: dir, name: "Current?", data: Self.blob(tag: 0xA000_0003, substitute: "\\??\\C:\\ProgramData\\Vendor\\1.0", relative: false))
-        XCTAssertEqual(WineReparsePoint.materialize(in: dir, driveC: driveC).count, 1)
-        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: dir.appending(path: "Current").path), "../../ProgramData/Vendor/1.0")
+        try Data("x".utf8).write(to: driveC.appending(path: "ProgramData/Vendor/1.0/app.exe"))
+        try FileManager.default.createDirectory(at: vendor, withIntermediateDirectories: true)
+        try makeStub(in: vendor, name: "Current?", data: Self.blob(tag: 0xA000_0003, substitute: "\\??\\C:\\ProgramData\\Vendor\\1.0", relative: false))
+        XCTAssertEqual(WineReparsePoint.follow(vendor.appending(path: "Current/app.exe"), driveC: driveC)?.path,
+                       driveC.appending(path: "ProgramData/Vendor/1.0/app.exe").standardizedFileURL.path)
+        try makeStub(in: vendor, name: "Nowhere?", data: Self.blob(tag: 0xA000_000C, substitute: "no\\such", relative: true))
+        XCTAssertNil(WineReparsePoint.follow(vendor.appending(path: "Nowhere/app.exe"), driveC: driveC))
     }
 
-    func testResolveMaterialisesWhatStandsInThePathsWay() throws {
+    func testWindowsPaths() {
         let driveC = root.appending(path: "drive_c")
-        let (dir, _) = try makeEAInstall(under: driveC)
-        let pinned = dir.appending(path: "EA Desktop/EADesktop.exe")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: pinned.path))
-        XCTAssertEqual(WineReparsePoint.resolve(pinned, driveC: driveC)?.path, pinned.path)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: pinned.path))
-        XCTAssertNil(WineReparsePoint.resolve(dir.appending(path: "EA Desktop/Missing.exe"), driveC: driveC))
-        XCTAssertNil(WineReparsePoint.resolve(root.appending(path: "outside/nothing"), driveC: driveC))
+        XCTAssertEqual(WineReparsePoint.windowsPath(for: driveC.appending(path: "Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe"), driveC: driveC),
+                       "C:\\Program Files\\Electronic Arts\\EA Desktop\\EA Desktop\\EADesktop.exe")
+        XCTAssertEqual(WineReparsePoint.windowsPath(for: URL(fileURLWithPath: "/Volumes/Games/x.exe"), driveC: driveC), "Z:\\Volumes\\Games\\x.exe")
     }
 
-    func testTreeWalkFindsStubsAFewLevelsDownAndStopsAtTheDepthCap() throws {
+    func testAPinBehindALinkIsFoundOnTheMacAndLaunchedByItsOwnPath() throws {
         let driveC = root.appending(path: "drive_c")
-        let (dir, _) = try makeEAInstall(under: driveC)
+        let (_, exe) = try makeEAInstall(under: driveC)
+        let pin = Pin(name: "EA app", path: "Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe")
+        XCTAssertEqual(pin.executableURL(driveC: driveC).path, exe.standardizedFileURL.path, "checks, Finder and the PE read see the real file")
+        XCTAssertEqual(pin.launchURL(driveC: driveC).path, driveC.appending(path: pin.path).path, "Wine gets the path through the link")
+        let plain = Pin(name: "Notepad", path: "windows/notepad.exe")
+        XCTAssertEqual(plain.executableURL(driveC: driveC), plain.launchURL(driveC: driveC), "an ordinary pin is unchanged")
+    }
+
+    // MARK: Undoing the old symlinks
+
+    /// What an older Highball left: a relative Mac symlink at the link's name, beside the stub.
+    func makeOldLink(in dir: URL, name: String = "EA Desktop", to destination: String = "13.783.0.6296/EA Desktop") throws {
+        try FileManager.default.createSymbolicLink(atPath: dir.appending(path: name).path, withDestinationPath: destination)
+    }
+
+    func testDematerializeRemovesTheOldLinkAndNothingElse() throws {
+        let driveC = root.appending(path: "drive_c")
+        let (dir, exe) = try makeEAInstall(under: driveC)
+        try makeOldLink(in: dir)
+        try FileManager.default.createSymbolicLink(atPath: dir.appending(path: "Shortcut").path, withDestinationPath: "13.783.0.6296/EA Desktop")
+        try makeStub(in: dir, name: "Other?", data: Self.blob(tag: 0xA000_000C, substitute: "13.783.0.6296", relative: true))
+        try makeOldLink(in: dir, name: "Other", to: "13.783.0.6296/EA Desktop")
+        let removed = WineReparsePoint.dematerialize(in: dir, driveC: driveC)
+        XCTAssertEqual(removed.map(\.lastPathComponent), ["EA Desktop"])
+        XCTAssertNotNil(try? FileManager.default.destinationOfSymbolicLink(atPath: dir.appending(path: "Shortcut").path), "a symlink with no stub beside it stays")
+        XCTAssertNotNil(try? FileManager.default.destinationOfSymbolicLink(atPath: dir.appending(path: "Other").path), "a symlink pointing elsewhere than its stub stays")
+        XCTAssertNotNil(WineReparsePoint.read(at: dir.appending(path: "EA Desktop?")))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: exe.path), "the files behind the link are untouched")
+        XCTAssertEqual(WineReparsePoint.dematerialize(in: dir, driveC: driveC), [], "second pass: nothing left")
+    }
+
+    func testDematerializePutsAStubSetAsideBack() throws {
+        let driveC = root.appending(path: "drive_c")
+        let (dir, _) = try makeEAInstall(under: driveC, stubName: ".wine-reparse-EA Desktop")
+        try makeOldLink(in: dir)
+        XCTAssertEqual(WineReparsePoint.dematerialize(in: dir, driveC: driveC).map(\.lastPathComponent), ["EA Desktop"])
+        XCTAssertNil(try? FileManager.default.destinationOfSymbolicLink(atPath: dir.appending(path: "EA Desktop").path))
+        XCTAssertNotNil(WineReparsePoint.read(at: dir.appending(path: "EA Desktop")), "the stub is back at its own name")
+        XCTAssertNil(try? FileManager.default.attributesOfItem(atPath: dir.appending(path: ".wine-reparse-EA Desktop").path))
+    }
+
+    func testDematerializeAlongAPathAndThroughATree() throws {
+        let driveC = root.appending(path: "drive_c")
+        let (dir, exe) = try makeEAInstall(under: driveC)
+        try makeOldLink(in: dir)
+        let named = dir.appending(path: "EA Desktop/EADesktop.exe")
+        XCTAssertEqual(WineReparsePoint.dematerializeAlong(named, driveC: driveC).map(\.lastPathComponent), ["EA Desktop"])
+        XCTAssertEqual(WineReparsePoint.follow(named, driveC: driveC)?.path, exe.standardizedFileURL.path, "still reachable through the stub")
+        try makeOldLink(in: dir)
         try FileManager.default.createDirectory(at: driveC.appending(path: "windows/system32"), withIntermediateDirectories: true)
         let deep = driveC.appending(path: "a/b/c/d/e/f/g/h")
         try FileManager.default.createDirectory(at: deep.appending(path: "1.0/X"), withIntermediateDirectories: true)
         try makeStub(in: deep, name: "X?", data: Self.blob(tag: 0xA000_000C, substitute: "1.0\\X", relative: true))
-        let made = WineReparsePoint.materializeTree(under: driveC, driveC: driveC)
-        XCTAssertEqual(made.map(\.lastPathComponent), ["EA Desktop"], "depth 3 is found, depth 8 is beyond the cap")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appending(path: "EA Desktop/EADesktop.exe").path))
-        XCTAssertEqual(WineReparsePoint.materializeTree(under: driveC, driveC: driveC, maxDepth: 10).map(\.lastPathComponent), ["X"])
+        try makeOldLink(in: deep, name: "X", to: "1.0/X")
+        XCTAssertEqual(WineReparsePoint.dematerializeTree(under: driveC, driveC: driveC).map(\.lastPathComponent), ["EA Desktop"],
+                       "depth 3 is found, depth 8 is beyond the cap")
+        XCTAssertEqual(WineReparsePoint.dematerializeTree(under: driveC, driveC: driveC, maxDepth: 10).map(\.lastPathComponent), ["X"])
     }
 }

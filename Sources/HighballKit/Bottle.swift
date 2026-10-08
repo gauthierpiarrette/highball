@@ -254,6 +254,16 @@ public struct Pin: Codable, Sendable, Identifiable, Hashable {
 
     /// Where the pin's executable actually lives for a given bottle.
     public func executableURL(driveC: URL) -> URL {
+        let named = launchURL(driveC: driveC)
+        // Behind a link a Windows installer made (the EA app's EA Desktop\EA Desktop) the file is
+        // only reachable through Wine's stub; on the Mac it sits at the link's target.
+        if FileManager.default.fileExists(atPath: named.path) { return named }
+        return WineReparsePoint.follow(named, driveC: driveC) ?? named
+    }
+
+    /// The path the pin names, links and all: what Wine is given, so the program finds itself where
+    /// a Windows shortcut would start it.
+    public func launchURL(driveC: URL) -> URL {
         path.hasPrefix("/") ? URL(fileURLWithPath: path) : driveC.appending(path: path)
     }
 
