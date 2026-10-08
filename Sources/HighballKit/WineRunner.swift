@@ -282,9 +282,9 @@ public struct WineRunner: Sendable {
 
     /// Runs the executable directly under `wine` (not `start /unix`) so the process stays attached and
     /// everything it and its children print lands in the log. The call returns when the program exits.
-    @discardableResult
     /// `program` replaces the executable's Mac path on Wine's command line (a Windows path through
     /// a link the Mac does not see), while `executable` still names the log and the checks.
+    @discardableResult
     public func start(_ executable: URL, arguments: [String] = [], renderer: Renderer? = nil, extraEnvironment: [String: String] = [:], workingDirectory: URL? = nil, headerNote: String? = nil, program: String? = nil, onOutput: (@Sendable (String) -> Void)? = nil) async throws -> LaunchResult {
         await syncMacFontSubstitutes()
         await syncDllOverridesRegistry()
