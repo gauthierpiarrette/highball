@@ -87,18 +87,42 @@ final class BundledEngineTests: XCTestCase {
         }
         XCTAssertEqual(try one("x64-crossover26.3-r20").components["wine"]?.sha256, try one("x64-crossover26.3-r21").components["wine"]?.sha256,
                        "one Wine build behind both, downloaded once")
-        // Every older plain Wine 11 pin is offered r21 on macOS 27, never the D3DMetal 4 one.
+        // Every older plain Wine 11 pin is offered the newest plain revision on macOS 27 (r23 since the audio
+        // library joined, below), never a D3DMetal 4 one.
         for pin in ["x64-crossover26.3-r5", "x64-crossover26.3-r7", "x64-crossover26.3-r8", "x64-crossover26.3-r9", "x64-crossover26.3-r15", "x64-crossover26.3-r19"] {
             let wanted = try one(pin)
             let offered = all.filter { EngineManifest.satisfies(current: $0, wanted: wanted) && $0.runs(onMacOS: "27.0") }
                 .max { (EngineManifest.revision(of: $0.id) ?? 0) < (EngineManifest.revision(of: $1.id) ?? 0) }
-            XCTAssertEqual(offered?.id, "x64-crossover26.3-r21", "a pin on \(pin) must get the newest D3DMetal 3 revision")
+            XCTAssertEqual(offered?.id, "x64-crossover26.3-r23", "a pin on \(pin) must get the newest D3DMetal 3 revision")
         }
         let forzaPin = try one("x64-crossover26.3-r18")
         let forOffer = all.filter { EngineManifest.satisfies(current: $0, wanted: forzaPin) && $0.runs(onMacOS: "27.0") }
             .max { (EngineManifest.revision(of: $0.id) ?? 0) < (EngineManifest.revision(of: $1.id) ?? 0) }
-        XCTAssertEqual(forOffer?.id, "x64-crossover26.3-r20", "Forza Horizon 6's pin gets the retina-fixed D3DMetal 4 revision")
+        XCTAssertEqual(forOffer?.id, "x64-crossover26.3-r22", "Forza Horizon 6's pin gets the newest D3DMetal 4 revision")
         XCTAssertFalse(EngineManifest.satisfies(current: try one("x64-crossover26.3-r21"), wanted: forzaPin), "r21 lacks D3DMetal 4")
+    }
+
+    /// r23 is r21 and r22 is r20 with Highball's audio library added, the one the Wine 10 engines have carried
+    /// since r19: its buffer cap is a no-op on top of patch 0015, and its limiter turns a float mix that goes
+    /// over full scale down instead of letting the Mac clip it (Paperback, highball-db#349). Numbered like
+    /// r21 and r20, the D3DMetal 4 one below, so plain pins are offered r23 and Forza Horizon 6's r22.
+    func testR23AndR22AreR21AndR20WithTheAudioLibrary() throws {
+        let all = try manifests() + [try EngineManifest.load(from: engines.deletingLastPathComponent().appending(path: "engine-manifest.json"))]
+        func one(_ id: String) throws -> EngineManifest { try XCTUnwrap(all.first { $0.id == id }, "\(id) missing") }
+        for (new, old) in [("x64-crossover26.3-r23", "x64-crossover26.3-r21"), ("x64-crossover26.3-r22", "x64-crossover26.3-r20")] {
+            let n = try one(new), o = try one(old)
+            XCTAssertEqual(Set(n.components.keys), Set(o.components.keys).union(["audiobuf"]), "\(new) is \(old) plus the audio library")
+            for (name, c) in o.components {
+                XCTAssertEqual(n.components[name]?.sha256, c.sha256, "\(new)/\(name) must be \(old)'s, only the library is new")
+            }
+            let audio = try XCTUnwrap(n.components["audiobuf"])
+            XCTAssertEqual(audio.extract?.into, "frameworks/libhbaudiobuf.dylib", "where Bottle.environment looks for it")
+            XCTAssertEqual(audio.sha256, try one("x64-sikarugir10.0_6-r26").components["audiobuf"]?.sha256, "the same archive as the Wine 10 engines")
+            XCTAssertEqual(n.minMacOS, o.minMacOS)
+            XCTAssertEqual(n.baseEnv, o.baseEnv)
+            XCTAssertFalse(EngineManifest.needsPrefixRefresh(from: o, to: n), "same Wine: moving over skips the Windows setup")
+        }
+        XCTAssertFalse(EngineManifest.satisfies(current: try one("x64-crossover26.3-r23"), wanted: try one("x64-crossover26.3-r18")), "r23 lacks D3DMetal 4")
     }
 
     /// Frame generation left Highball on 2026-09-27 at its author's request (itsOwen's lsfg-metal,
@@ -117,6 +141,8 @@ final class BundledEngineTests: XCTestCase {
     /// VERTRES (highball#261), on the default line (r22) and on the D3DMetal 4 line (r23).
     /// On 2026-10-07 MoltenVK gains the shadow-readback patch, so a 32-bit Vulkan game's GPU results
     /// reach it under MVK_SHADOW_IMPORT=1 (The Sims' thumbnails, highball#283): r24 and r25.
+    /// On 2026-10-08 the audio library gains a limiter, so a game whose float mix goes over full scale
+    /// is turned down instead of clipped (highball-db#349): r26 and r27.
     /// Everything else is byte-identical, so it is not downloaded again, and every new archive
     /// comes from Highball's own release pages (a component URL has to be ours to stay immutable,
     /// #27/#28).
@@ -132,13 +158,14 @@ final class BundledEngineTests: XCTestCase {
         for (current, baseID) in [("x64-sikarugir10.0_6-r19", "x64-sikarugir10.0_6-r5"), ("x64-sikarugir10.0_6-r21", "x64-sikarugir10.0_6-r5"),
                                   ("x64-sikarugir10.0_6-r22", "x64-sikarugir10.0_6-r5"), ("x64-sikarugir10.0_6-r24", "x64-sikarugir10.0_6-r5"),
                                   ("x64-sikarugir10.0_6-r20", "x64-sikarugir10.0_6-r6"), ("x64-sikarugir10.0_6-r23", "x64-sikarugir10.0_6-r6"),
-                                  ("x64-sikarugir10.0_6-r25", "x64-sikarugir10.0_6-r6")] {
+                                  ("x64-sikarugir10.0_6-r25", "x64-sikarugir10.0_6-r6"), ("x64-sikarugir10.0_6-r26", "x64-sikarugir10.0_6-r5"),
+                                  ("x64-sikarugir10.0_6-r27", "x64-sikarugir10.0_6-r6")] {
             let r = try one(current), base = try one(baseID)
             XCTAssertEqual(r.minMacOS, base.minMacOS, "\(current) must keep \(baseID)'s floor")
             XCTAssertEqual(r.baseEnv?["D3DM_MTL4"], base.baseEnv?["D3DM_MTL4"], "\(current) must keep \(baseID)'s Metal 4 setting")
             XCTAssertEqual(Set(r.components.keys), Set(base.components.keys).union(["winemac", "wineserver", "ntdll-unix", "audiobuf"]),
                            "\(current) has exactly \(baseID)'s components plus the driver, the msync fix and the audio library")
-            let readback: Set = ["x64-sikarugir10.0_6-r24", "x64-sikarugir10.0_6-r25"]
+            let readback: Set = ["x64-sikarugir10.0_6-r24", "x64-sikarugir10.0_6-r25", "x64-sikarugir10.0_6-r26", "x64-sikarugir10.0_6-r27"]
             for (name, component) in base.components where name != "dxmt" && !(name == "moltenvk" && readback.contains(current)) {
                 XCTAssertEqual(r.components[name]?.sha256, component.sha256, "\(name) drifted from \(baseID), so its download is not reused")
             }
@@ -161,7 +188,7 @@ final class BundledEngineTests: XCTestCase {
             // The msync fix is byte edits to the same archive's wineserver and ntdll.so
             // (Scripts/build-wine10-msync.sh), one archive behind two single-file components. r21's
             // archive (Scripts/build-wine10-dep.sh) carries those edits plus the DEP one.
-            let archive = ["x64-sikarugir10.0_6-r21", "x64-sikarugir10.0_6-r22", "x64-sikarugir10.0_6-r24"].contains(current) ? "wine10-dep-" : "wine10-msync-"
+            let archive = ["x64-sikarugir10.0_6-r21", "x64-sikarugir10.0_6-r22", "x64-sikarugir10.0_6-r24", "x64-sikarugir10.0_6-r26"].contains(current) ? "wine10-dep-" : "wine10-msync-"
             for (name, into) in [("wineserver", "engine/bin/wineserver"), ("ntdll-unix", "engine/lib/wine/x86_64-unix/ntdll.so")] {
                 let c = try XCTUnwrap(r.components[name])
                 XCTAssertEqual(c.extract?.into, into, "\(current)/\(name) replaces one file, the Wine archive's own")
@@ -179,7 +206,7 @@ final class BundledEngineTests: XCTestCase {
             XCTAssertTrue(audio.url.absoluteString.hasPrefix("https://github.com/gauthierpiarrette/highball-engine/releases/download/audiobuf-"),
                           "\(current)'s audio library must come from Highball's own release page: \(audio.url)")
         }
-        XCTAssertEqual(all.last?.id, "x64-sikarugir10.0_6-r24", "r24 is the default engine")
+        XCTAssertEqual(all.last?.id, "x64-sikarugir10.0_6-r26", "r26 is the default engine")
         // r22 and r23 are r21 and r20 with only the driver changed: the retina fix rides one new
         // archive, and every other download is reused.
         for (fixed, before) in [("x64-sikarugir10.0_6-r22", "x64-sikarugir10.0_6-r21"), ("x64-sikarugir10.0_6-r23", "x64-sikarugir10.0_6-r20")] {
@@ -210,23 +237,44 @@ final class BundledEngineTests: XCTestCase {
         }
         XCTAssertEqual(try one("x64-sikarugir10.0_6-r24").components["moltenvk"]?.sha256, try one("x64-sikarugir10.0_6-r25").components["moltenvk"]?.sha256,
                        "one MoltenVK archive behind both lines, downloaded once")
+        // r26 and r27 are r24 and r25 with only the audio library changed: the limiter rides one 6 KB
+        // archive, the same for both lines, and every other download is reused.
+        for (fixed, before) in [("x64-sikarugir10.0_6-r26", "x64-sikarugir10.0_6-r24"), ("x64-sikarugir10.0_6-r27", "x64-sikarugir10.0_6-r25")] {
+            let r = try one(fixed), b = try one(before)
+            XCTAssertEqual(r.components["audiobuf"]?.version, "20261008", "\(fixed) carries the limiting audio library")
+            XCTAssertEqual(b.components["audiobuf"]?.version, "20261001", "\(before) keeps the library it shipped with")
+            XCTAssertTrue(r.components["audiobuf"]?.url.absoluteString.hasPrefix("https://github.com/gauthierpiarrette/highball-engine/releases/download/audiobuf-20261008/") == true,
+                          "\(fixed)'s audio library must come from Highball's own release page")
+            XCTAssertEqual(r.components["audiobuf"]?.extract?.into, b.components["audiobuf"]?.extract?.into, "it replaces the same file")
+            XCTAssertEqual(Set(r.components.keys), Set(b.components.keys))
+            for (name, c) in b.components where name != "audiobuf" {
+                XCTAssertEqual(r.components[name]?.sha256, c.sha256, "\(fixed)/\(name) must be \(before)'s, only the audio library changes")
+            }
+            XCTAssertEqual(r.minMacOS, b.minMacOS)
+            XCTAssertEqual(r.baseEnv, b.baseEnv)
+            XCTAssertFalse(EngineManifest.needsPrefixRefresh(from: b, to: r), "\(fixed) keeps the Wine archive, so environments move without the Windows setup")
+        }
+        XCTAssertEqual(try one("x64-sikarugir10.0_6-r26").components["audiobuf"]?.sha256, try one("x64-sikarugir10.0_6-r27").components["audiobuf"]?.sha256,
+                       "one audio library archive behind both lines, downloaded once")
         // The update to r21 moves r17 and r19 environments straight over, and leaves GPTK 4 ones (r18)
         // for their own line's r20, which is where the walk must send them.
         let shipped = Set(all.flatMap { $0.components.keys })
-        for from in ["x64-sikarugir10.0_6-r17", "x64-sikarugir10.0_6-r19", "x64-sikarugir10.0_6-r21", "x64-sikarugir10.0_6-r22"] {
-            XCTAssertTrue(EngineStore.canMoveBottle(on: try one(from), to: try one("x64-sikarugir10.0_6-r24"), shipped: shipped), "\(from) moves to r24")
+        for from in ["x64-sikarugir10.0_6-r17", "x64-sikarugir10.0_6-r19", "x64-sikarugir10.0_6-r21", "x64-sikarugir10.0_6-r22", "x64-sikarugir10.0_6-r24"] {
+            XCTAssertTrue(EngineStore.canMoveBottle(on: try one(from), to: try one("x64-sikarugir10.0_6-r26"), shipped: shipped), "\(from) moves to r26")
         }
-        XCTAssertFalse(EngineStore.canMoveBottle(on: try one("x64-sikarugir10.0_6-r18"), to: try one("x64-sikarugir10.0_6-r24"), shipped: shipped))
-        for gptk4 in ["x64-sikarugir10.0_6-r18", "x64-sikarugir10.0_6-r20", "x64-sikarugir10.0_6-r23"] {
+        XCTAssertFalse(EngineStore.canMoveBottle(on: try one("x64-sikarugir10.0_6-r18"), to: try one("x64-sikarugir10.0_6-r26"), shipped: shipped))
+        for gptk4 in ["x64-sikarugir10.0_6-r18", "x64-sikarugir10.0_6-r20", "x64-sikarugir10.0_6-r23", "x64-sikarugir10.0_6-r25"] {
             XCTAssertEqual(EngineStore.successor(for: try one(gptk4), among: all, shipped: shipped, macOS: "27.0")?.id,
-                           "x64-sikarugir10.0_6-r25", "\(gptk4) environments stay on the D3DMetal 4 line and get its fixes")
+                           "x64-sikarugir10.0_6-r27", "\(gptk4) environments stay on the D3DMetal 4 line and get its fixes")
         }
-        // r25 is numbered above r24, but a default-line environment left behind still takes r24: the walk
+        // r27 is numbered above r26, but a default-line environment left behind still takes r26: the walk
         // prefers the variant adding no component over the newest.
-        XCTAssertEqual(EngineStore.successor(for: try one("x64-sikarugir10.0_6-r22"), among: all, shipped: shipped, macOS: "27.0")?.id,
-                       "x64-sikarugir10.0_6-r24", "a default-line environment must not move to the D3DMetal 4 line")
+        for left in ["x64-sikarugir10.0_6-r22", "x64-sikarugir10.0_6-r24"] {
+            XCTAssertEqual(EngineStore.successor(for: try one(left), among: all, shipped: shipped, macOS: "27.0")?.id,
+                           "x64-sikarugir10.0_6-r26", "a default-line environment on \(left) must not move to the D3DMetal 4 line")
+        }
         for rollback in ["x64-sikarugir10.0_6-r13", "x64-sikarugir10.0_6-r15", "x64-sikarugir10.0_6-r17", "x64-sikarugir10.0_6-r19", "x64-sikarugir10.0_6-r21",
-                         "x64-sikarugir10.0_6-r22", "x64-sikarugir10.0_6-r23"] {
+                         "x64-sikarugir10.0_6-r22", "x64-sikarugir10.0_6-r23", "x64-sikarugir10.0_6-r24", "x64-sikarugir10.0_6-r25"] {
             XCTAssertNotNil(all.first { $0.id == rollback }, "\(rollback) stays offered for rollback")
         }
     }

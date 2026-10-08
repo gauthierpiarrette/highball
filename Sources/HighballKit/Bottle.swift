@@ -842,8 +842,10 @@ public struct Bottle: Sendable {
         // more than a game that keeps one 10 ms period queued has, and played the shortfall as
         // silence: 324 dropouts in two minutes of Counter-Strike 2's menu (highball#127, Deadlock
         // #187). An engine that ships libhbaudiobuf.dylib gets it inserted into Wine's processes,
-        // where it caps the audio unit's buffer at 5 ms. HB_AUDIOBUF=0 in an environment's
-        // variables leaves it out.
+        // where it caps the audio unit's buffer at 5 ms. Since 20261008 it also limits a float mix
+        // that goes over full scale, as the last stage of Windows' audio engine does, where the Mac
+        // would clip it (Paperback, highball-db#349). HB_AUDIOBUF=0 in an environment's variables
+        // leaves the library out, HB_AUDIOLIMIT=0 keeps it without the limiter.
         if let lib = engine.audioBufferLibrary, env["HB_AUDIOBUF"] != "0" {
             let inserted = (env["DYLD_INSERT_LIBRARIES"] ?? "").split(separator: ":").map(String.init)
             env["DYLD_INSERT_LIBRARIES"] = ([lib.path] + inserted.filter { $0 != lib.path }).joined(separator: ":")

@@ -1,14 +1,13 @@
 {
   "$schema": "https://highball.app/schemas/engine-manifest/v0",
-  "id": "x64-sikarugir10.0_6-r26",
-  "displayName": "Wine 10.0 (Sikarugir) r26",
+  "id": "x64-sikarugir10.0_6-r24",
+  "displayName": "Wine 10.0 (Sikarugir) r24",
   "arch": "x86_64",
   "minMacOS": "14.0",
   "requires": [
     "rosetta2"
   ],
   "notes": [
-    "r26 (2026-10-08): r24 with the audio library rebuilt to also limit float output like Windows' audio engine (audiobuf component, highball-db#349). Windows ends its shared-mode mix with a limiter, so a game may hand it samples above full scale and never clip. Wine passed them to Core Audio, which clipped them at the device, and loud passages crackled. Only that 6 KB archive changes, so environments move without the Windows setup. Measured on an M4, macOS 27.0 (2026-10-08), with this archive's library inserted into Wine 10 r21 and Wine 11 r17 environments: a WASAPI test tone recorded through ScreenCaptureKit passes sound under full scale unchanged (0.5 stays 0.5000, rms 0.3536) and holds a tone at 1.4 times full scale to 0.9923 with no sample over full scale, where HB_AUDIOLIMIT=0 lets 47,376 samples over through. No dropouts or clicks. The same code built as a prototype: Paperback's title music has nothing over full scale (2,586 samples in 30 s without) and is 0.4 dB quieter, Five Nights at Freddy's has nothing over (70 without).",
     "r24 (2026-10-07): r22 with MoltenVK's shadow-import fixed so GPU results reach the game (moltenvk component, highball#283, highball-db#160, #174). Under MVK_SHADOW_IMPORT=1, which only The Sims Legacy Collection's recipe sets, the private Metal buffer behind imported host memory was copied to the GPU on every submit and never back, so everything a 32-bit Vulkan game read back from the GPU was stale: The Sims' lot thumbnails and family portraits came out as noise. The shadow-readback patch records the ranges a submission's copy, fill, update and query-results commands write into that memory, keeps the next submits' upload off them, and copies them back to the game's pages when the submission completes, before its fence and semaphores are signalled. Measured on an M4 with macOS 27.0 with a 32-bit test program (private/tools/vkrb): with the variable, every readback was stale on r22 and is right on this build, at 32 MB into a 64 MB allocation, next to bytes the program wrote during the submission (kept), and with a second submit in flight (20 rounds). The Sims starts and draws its neighbourhood with no lost device, Portal 2 under DXVK loads two maps with HDR, Direct3D 11 and Direct3D 9 test programs under DXVK give the same results, and without the variable nothing runs differently. Every other component is byte-identical to r22, so only the 1.7 MB MoltenVK archive is new.",
     "r22 (2026-10-06): r21 with the Mac driver's retina screen size fixed (winemac component). Retina resolution on, the Mac driver reported HORZRES and VERTRES twice the screen size that GetSystemMetrics, EnumDisplaySettings and DESKTOPHORZRES report (6912x4468 against 3456x2234 on an M1 Pro, 7680x4320 against 3840x2160 on an M4's 1920x1080 display), so a game sizing its window or its fullscreen picture from them got it twice too large: Team Fortress 2 placed its window off screen (athei), and Red Dead Redemption 2's 1080p fullscreen came out cropped for a player with Retina on (highball#261). With retina off the doubling shift was by zero, so nothing changes there. Every other component is byte-identical, so only the 160 KB winemac archive is new.",
     "r21 (2026-10-03): r19 plus the data execution prevention edit to ntdll.so (see the ntdll-unix component), the Wine 10 counterpart of the Wine 11 engine's r17. Every other file is byte-identical to r19.",
@@ -172,17 +171,17 @@
     },
     "audiobuf": {
       "kind": "runtime",
-      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/audiobuf-20261008/audiobuf-20261008.tar.xz",
-      "sha256": "8b84fa43f7394a3865eef99f4afc97875f155872930cc9f69438ee4a918f17e5",
-      "size": 5700,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/audiobuf-20261001/audiobuf-20261001.tar.xz",
+      "sha256": "037da88d5da0226b3e06778a2038a40d13bb278b8ff859b07eb0261b63a6f268",
+      "size": 2232,
       "license": "MIT (Highball's own, source spike/audiobuf/audiobuf.c)",
-      "version": "20261008",
+      "version": "20261001",
       "order": 1,
       "extract": {
         "subpath": "libhbaudiobuf.dylib",
         "into": "frameworks/libhbaudiobuf.dylib"
       },
-      "note": "Highball's audio library, built by Scripts/build-audiobuf.sh. Bottle.environment inserts it into Wine's processes with DYLD_INSERT_LIBRARIES. It caps an output audio unit's I/O buffer at 5 ms before Wine starts it, so a game that keeps one 10 ms period queued no longer drops audio at 48 kHz (highball#127), and it limits float output like the last stage of Windows' audio engine, so a game whose mix goes over full scale is turned down instead of clipped at the speakers (highball-db#349). HB_AUDIOBUF=0 in an environment's variables leaves the library out, HB_AUDIOLIMIT=0 keeps it without the limiter."
+      "note": "Highball's audio buffer library, built by Scripts/build-audiobuf.sh. Bottle.environment inserts it into Wine's processes with DYLD_INSERT_LIBRARIES, and it caps an output audio unit's I/O buffer at 5 ms before Wine starts it, so a game that keeps one 10 ms period queued no longer drops audio at 48 kHz (highball#127). HB_AUDIOBUF=0 in an environment's variables leaves it out."
     }
   },
   "alternatives": {
@@ -205,10 +204,10 @@
     "GST_PLUGIN_PATH": "${frameworks}/GStreamer.framework/Versions/1.0/lib/gstreamer-1.0"
   },
   "verified": {
-    "date": "2026-10-08",
+    "date": "2026-10-07",
     "macos": "27.0",
     "chip": "Apple M4",
-    "result": "Installed from this manifest into an empty Highball folder on an M1 Pro (macOS 27.0) with Highball's installer: every file is r24's except frameworks/libhbaudiobuf.dylib, the universal, signed build in audiobuf-20261008. That file in Wine 10 and Wine 11 on an M4, measured as in the note. No game was run on this engine as a whole."
+    "result": "The published MoltenVK archive (checksum above) in a copy of engine r21's tree through a separate HIGHBALL_HOME (r21, r22 and r23 carry the same MoltenVK archive, fbed7b80): the 32-bit readback test passes all its cases with MVK_SHADOW_IMPORT=1 where that MoltenVK fails them all, and the 64-bit and variable-off runs pass on both. The Sims Legacy Collection starts and draws its neighbourhood with its four pools imported under the variable and no lost device. Portal 2 under DXVK loads sp_a1_intro1 and sp_a2_laser_intro with HDR and draws them. d3dpace (119.9 fps either way) and d3d9stall run under DXVK with no MoltenVK error. A saved lot's thumbnail was not driven in game."
   },
   "licenses": {
     "apple-gptk-license-2023-08-17": {
