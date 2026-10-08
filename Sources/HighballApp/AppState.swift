@@ -2043,6 +2043,7 @@ final class AppState {
     private func beginSession(_ session: GameSession, processList: String) {
         runningSessions.append(session)
         appendLog("\(session.title) is running")
+        bringForwardWhenItDraws(session)
         if !FunnelLog.records(in: paths.logs).contains(where: { $0.event == .firstGameProcess }) { funnel(.firstGameProcess) }
         sessionWatchers[session.id] = Task.detached { [weak self] in
             if let prefix = await self?.discordEnvironmentPrefix(for: session),
@@ -2071,6 +2072,35 @@ final class AppState {
             await MainActor.run { self?.endSession(session, reason: "ended") }
         }
         startDiscordWatch()
+    }
+
+    /// Since macOS 14 an app comes forward only when the app in front lets it, and a game Highball
+    /// started could open its first window behind Highball's: a key prompt the player never saw
+    /// (highball#286). While Highball is still the app in front, it hands over to the game's
+    /// process as soon as that process has a window on screen, checking every two seconds for
+    /// two minutes. Once the player has gone to another app, Highball is no longer in front and
+    /// the game waits its turn, as any app would.
+    private func bringForwardWhenItDraws(_ session: GameSession) {
+        guard let prefix = bottles.first(where: { $0.name == session.bottleName })?.url else { return }
+        Task { @MainActor [weak self] in
+            for _ in 0..<60 {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self, self.runningSessions.contains(session), NSApp.isActive else { return }
+                let pids = await Task.detached { SessionWatch.pids(ofPrefix: prefix, markers: session.markers) }.value
+                guard let pid = pids.first(where: Self.hasWindowOnScreen),
+                      let game = NSRunningApplication(processIdentifier: pid) else { continue }
+                let done = game.activate(from: .current, options: [])
+                self.appendLog(done ? "brought \(session.title) to the front" : "macOS kept \(session.title) behind")
+                return
+            }
+        }
+    }
+
+    /// Whether the process owns a normal window on screen. Owner and layer come without the
+    /// screen recording permission, which only window titles need.
+    private static func hasWindowOnScreen(_ pid: pid_t) -> Bool {
+        guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return false }
+        return windows.contains { ($0[kCGWindowOwnerPID as String] as? pid_t) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }
     }
 
     private func endSession(_ session: GameSession, reason: String) {
