@@ -1,0 +1,18 @@
+# name target source
+cs66_trivial cs_6_6 trivial_cs.hlsl
+cs67_trivial cs_6_7 trivial_cs.hlsl
+cs68_trivial cs_6_8 trivial_cs.hlsl
+cs69_trivial cs_6_9 trivial_cs.hlsl
+cs66_quadread cs_6_6 quadread_cs.hlsl
+cs67_quadany cs_6_7 quadany_cs.hlsl
+cs67_gatherraw cs_6_7 gatherraw_cs.hlsl
+cs67_intsample cs_6_7 intsample_cs.hlsl
+cs67_samplecmplevel cs_6_7 samplecmplevel_cs.hlsl
+cs67_progoffset cs_6_7 progoffset_cs.hlsl
+cs67_msaawrite cs_6_7 msaawrite_cs.hlsl
+vs66_fullscreen vs_6_6 fullscreen_vs.hlsl
+vs67_fullscreen vs_6_7 fullscreen_vs.hlsl
+ps66_flat ps_6_6 flat_ps.hlsl
+ps67_flat ps_6_7 flat_ps.hlsl
+ps67_quadany ps_6_7 quadany_ps.hlsl
+ps67_helperlanes ps_6_7 helperlanes_ps.hlsl
