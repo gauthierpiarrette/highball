@@ -454,7 +454,7 @@ private extension View {
             }
             Button(L("Not now"), role: .cancel) { state.rendererTrial = nil }
         } message: { trial in
-            Text(String(format: L("It ran with %@. Another mode often suits a game better on this Mac, and old DirectX 9 games in particular do badly on Wine's own Direct3D. This changes the mode for this game only; the environment keeps its own. Undo it any time under Advanced on the game's page."), GamePageCopy.plainName(trial.current)))
+            Text(String(format: L("It ran with %@. Another mode often suits a game better on this Mac, and old DirectX 9 games in particular do badly on Wine's own Direct3D. This changes the mode for this game only; the environment keeps its own. Undo it any time under Game settings on the game's page."), GamePageCopy.plainName(trial.current)))
         }
     }
     /// The offer that follows a "had problems" on a game whose log shows a fullscreen mode
@@ -467,7 +467,7 @@ private extension View {
             Button(L("Scale it to the screen")) { state.acceptModesetTrial() }
             Button(L("Not now"), role: .cancel) { state.modesetTrial = nil }
         } message: { _ in
-            Text(L("Its last run asked Windows for a fullscreen size this Mac did not switch to. That is what leaves a game small in a corner, or with the mouse landing away from what it draws. Highball can have Wine report the change as done and scale the game to the screen instead. This game only; undo it under Advanced on its page."))
+            Text(L("Its last run asked Windows for a fullscreen size this Mac did not switch to. That is what leaves a game small in a corner, or with the mouse landing away from what it draws. Highball can have Wine report the change as done and scale the game to the screen instead. This game only; undo it under Game settings on its page."))
         }
     }
 

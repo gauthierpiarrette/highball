@@ -1,12 +1,16 @@
 import SwiftUI
 import HighballKit
 
-/// A game's page (UX plan §3.5): a verdict written as a sentence, Play as the only button, an
-/// honest list of what Play will do, and every identifier behind one Advanced triangle.
+/// Media and store copy alongside the existing launch plan; game settings stay inline below.
 struct GameDetailView: View {
     @Environment(AppState.self) private var state
     let passedItem: LibraryItem
-    @State private var coverDropTargeted = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var storeDetails: SteamGameDetails?
+    @State private var loadingDetails = true
+    @State private var expandedDescription = false
+    @State private var selectedGalleryURL: URL?
+    @State private var choseGalleryImage = false
     /// The launch arguments being typed; saved on Return and when the page closes, so a space
     /// typed between two arguments is not normalised away mid-word.
     @State private var argsText = ""
@@ -42,65 +46,156 @@ struct GameDetailView: View {
     }
     private var engineName: String? { bottle.flatMap { state.engine(for: $0) }?.displayName }
 
+    private var storeAppID: Int? { item.steamAppID }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                hero
-                if let macBuild { macBlock(macBuild) }
-                verdictBlock
-                playRow
-                if item.installed, !blocked { willDoCard }
-                advanced
-                Spacer(minLength: 0)
+        GeometryReader { geometry in
+            ScrollViewReader { scroll in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 32) {
+                        let width = max(0, min(geometry.size.width - 64, 1320))
+                        if width >= 860 {
+                            HStack(alignment: .top, spacing: 32) {
+                                GameMediaGallery(item: item, details: storeDetails, width: (width - 32) * 0.58,
+                                                 selectedURL: $selectedGalleryURL, choseImage: $choseGalleryImage)
+                                    .frame(width: (width - 32) * 0.58)
+                                overview(scroll: scroll)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        } else {
+                            overview(scroll: scroll)
+                            GameMediaGallery(item: item, details: storeDetails, width: width,
+                                             selectedURL: $selectedGalleryURL, choseImage: $choseGalleryImage)
+                        }
+                        aboutGame
+                        if bottle != nil {
+                            advanced.id("game-settings")
+                        }
+                    }
+                    .padding(32)
+                    .frame(maxWidth: 1384, alignment: .leading)
+                    .frame(maxWidth: .infinity)
+                }
             }
-            .padding(.horizontal, 28).padding(.vertical, 20)
-            .frame(maxWidth: 680, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(BottleBackdrop())
         .navigationTitle(state.displayTitle(item))
+        .task(id: storeAppID) {
+            storeDetails = nil
+            expandedDescription = false
+            guard let appID = storeAppID else { loadingDetails = false; return }
+            loadingDetails = true
+            let language: SteamGameDetailsStore.Language = Locale.preferredLanguages.first?.hasPrefix("fr") == true ? .french : .english
+            let details = await SteamGameDetailsStore.shared.details(appID: appID, language: language)
+            guard !Task.isCancelled else { return }
+            storeDetails = details
+            loadingDetails = false
+        }
     }
 
-    // MARK: Pieces
-
-    private var hero: some View {
-        ZStack(alignment: .bottomLeading) {
-            Color.clear
-                .aspectRatio(460 / 215, contentMode: .fit)
-                .frame(maxWidth: 640)
-                .overlay {
-                    // A chosen cover wins here as it does on the tile (#64: it never reached
-                    // the page, which read the store's artwork only).
-                    if let custom = state.coverStore.coverURL(for: item.id), let image = NSImage(contentsOf: custom) {
-                        Image(nsImage: image).resizable().scaledToFill().id(state.coverVersion)
-                    } else {
-                        AsyncImage(url: item.artworkWide ?? item.artworkTall) { phase in
-                            if case .success(let image) = phase {
-                                image.resizable().scaledToFill()
-                            } else {
-                                ZStack {
-                                    LinearGradient(colors: [HB.card, HB.ground], startPoint: .top, endPoint: .bottom)
-                                    Image(systemName: "gamecontroller").font(.largeTitle).foregroundStyle(.quaternary)
-                                }
-                            }
+    private func overview(scroll: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text(state.displayTitle(item))
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            if let macBuild { macBlock(macBuild) }
+            verdictBlock
+            HStack(alignment: .top, spacing: 10) {
+                playRow.frame(maxWidth: .infinity, alignment: .leading)
+                if bottle != nil {
+                    Button {
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                            showAdvanced = true
+                            scroll.scrollTo("game-settings", anchor: .top)
                         }
+                    } label: {
+                        Image(systemName: "gearshape.fill").font(.title3.weight(.semibold))
+                            .frame(width: 24, height: 24).padding(.vertical, 8)
+                    }
+                    .buttonStyle(.bordered).controlSize(.large)
+                    .accessibilityLabel(L("Game settings"))
+                    .help(L("Game settings"))
+                }
+            }
+            if item.installed, !blocked { willDoCard }
+            libraryInfo
+        }
+    }
+
+    private var libraryInfo: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            row(L("Source"), item.source == .steam ? "Steam" : item.source == .epic ? "Epic Games" : L("Windows program"))
+            if item.sizeOnDisk > 0 {
+                row(L("Size on disk"), ByteCountFormatter.string(fromByteCount: item.sizeOnDisk, countStyle: .file))
+            }
+            if let played = item.lastPlayed {
+                row(L("Last played"), played.formatted(date: .abbreviated, time: .shortened))
+            }
+        }
+        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+        .background(HB.card, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(HB.cardStroke))
+    }
+
+    @ViewBuilder private var aboutGame: some View {
+        if let details = storeDetails {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    Text(L("About this game")).font(.title2.bold())
+                    Spacer()
+                    Link(destination: details.storeURL) { Label(L("View on Steam"), systemImage: "arrow.up.right") }
+                        .font(.callout)
+                }
+                if !details.summary.isEmpty {
+                    Text(verbatim: details.summary).font(.body).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
+                if !details.description.isEmpty, details.description != details.summary {
+                    DisclosureGroup(L("Read more"), isExpanded: $expandedDescription) {
+                        Text(verbatim: details.description).font(.body).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 10)
                     }
                 }
-                .clipped()
-            LinearGradient(colors: [.black.opacity(0.8), .clear], startPoint: .bottom, endPoint: .center)
-                .frame(maxWidth: 640)
-            Text(state.displayTitle(item))
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-                .foregroundStyle(.white).shadow(radius: 4)
-                .padding(14)
+                if !details.genres.isEmpty {
+                    Text(verbatim: details.genres.joined(separator: " · "))
+                        .font(.callout.weight(.medium)).foregroundStyle(HB.amber)
+                }
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: 40) { storeFacts(details) }
+                    VStack(alignment: .leading, spacing: 16) { storeFacts(details) }
+                }
+                Text(L("Game information and screenshots from Steam.")).font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(24).frame(maxWidth: .infinity, alignment: .leading)
+            .background(HB.card, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(HB.cardStroke))
+        } else if storeAppID != nil {
+            HStack(spacing: 10) {
+                if loadingDetails {
+                    ProgressView().controlSize(.small)
+                    Text(L("Loading game information…")).font(.callout).foregroundStyle(.secondary)
+                } else {
+                    if let appID = storeAppID, let url = URL(string: "https://store.steampowered.com/app/\(appID)/") {
+                        Link(L("View on Steam"), destination: url).font(.callout)
+                    }
+                }
+            }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        // Same as the tile: an image dropped on the hero becomes this game's cover (#175).
-        .onDrop(of: [.image], isTargeted: $coverDropTargeted) { providers in
-            state.acceptCoverDrop(providers, for: item)
-        }
-        .overlay(RoundedRectangle(cornerRadius: 12)
-            .stroke(coverDropTargeted ? HB.amber : HB.cardStroke, lineWidth: coverDropTargeted ? 2 : 1))
+    }
+
+    @ViewBuilder private func storeFacts(_ details: SteamGameDetails) -> some View {
+        if !details.developers.isEmpty { storeFact(L("Developer"), details.developers.joined(separator: ", ")) }
+        if !details.publishers.isEmpty { storeFact(L("Publisher"), details.publishers.joined(separator: ", ")) }
+        if let date = details.releaseDate { storeFact(L("Release date"), date) }
+    }
+
+    private func storeFact(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.caption).foregroundStyle(.tertiary)
+            Text(verbatim: value).font(.callout).textSelection(.enabled)
+        }.fixedSize(horizontal: false, vertical: true)
     }
 
     private var verdictColor: Color {
@@ -165,10 +260,15 @@ struct GameDetailView: View {
         }
     }
 
+    private func primaryActionLabel(_ title: String, symbol: String) -> some View {
+        Label(title, systemImage: symbol).font(.title3.weight(.semibold))
+            .frame(maxWidth: .infinity).frame(height: 24).padding(.vertical, 8)
+    }
+
     private var playRow: some View {
-        HStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             if let running {
-                Button(L("Stop")) { state.stopSession(running) }.buttonStyle(.bordered).controlSize(.large)
+                Button { state.stopSession(running) } label: { primaryActionLabel(L("Stop"), symbol: "stop.fill") }.buttonStyle(.bordered).controlSize(.large)
                 TimelineView(.periodic(from: .now, by: 15)) { ctx in
                     Text(ActivityText.minutes(since: running.started, now: ctx.date)
                             .map { String(format: L("Running for %d min"), $0) } ?? L("Running"))
@@ -177,7 +277,7 @@ struct GameDetailView: View {
             } else if state.prefersMacBuild(item) {
                 // The native build first; a Windows copy in a bottle stays one click away.
                 Button { state.playOnMac(item) } label: {
-                    Label(L("Play on Mac"), systemImage: "play.fill").frame(minWidth: 96)
+                    primaryActionLabel(L("Play on Mac"), symbol: "play.fill")
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                 if item.installed {
@@ -188,7 +288,7 @@ struct GameDetailView: View {
                 }
             } else if item.installed {
                 Button { state.play(item) } label: {
-                    Label(L("Play"), systemImage: "play.fill").frame(minWidth: 96)
+                    primaryActionLabel(L("Play"), symbol: "play.fill")
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                 .disabled(state.busy || blocked)
@@ -202,16 +302,16 @@ struct GameDetailView: View {
                         .font(.callout).foregroundStyle(.secondary)
                 }
             } else if item.source == .epic {
-                Button(L("Install")) { state.install(item) }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
+                Button { state.install(item) } label: { primaryActionLabel(L("Install"), symbol: "arrow.down") }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                     .disabled(state.busy)
                 Text(String(format: L("Installs into %@."), state.defaultBottle?.name ?? L("your environment"))).font(.callout).foregroundStyle(.secondary)
             } else if item.source == .steam, !steamHasManifest, state.macSteamBuild(for: item) != nil {
                 // A native build exists: that's the install on offer; the Windows one is the
                 // way around it, not the default.
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 10) {
                         Button { state.installOnMac(item) } label: {
-                            Label(state.steamForMacInstalled ? L("Install on Mac") : L("Get Steam for Mac"), systemImage: "apple.logo")
+                            primaryActionLabel(state.steamForMacInstalled ? L("Install on Mac") : L("Get Steam for Mac"), symbol: "apple.logo")
                         }
                         .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                         Text(state.steamForMacInstalled ? L("Steam for Mac asks where to put it.")
@@ -224,7 +324,7 @@ struct GameDetailView: View {
                 }
             } else if item.source == .steam, !steamHasManifest {
                 // Owned, never installed here (highball#199): Steam's own dialog takes it from here.
-                Button(L("Install")) { state.install(item) }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
+                Button { state.install(item) } label: { primaryActionLabel(L("Install"), symbol: "arrow.down") }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                     .disabled(state.busy)
                 Text(L("Steam asks where to put it.")).font(.callout).foregroundStyle(.secondary)
             } else if item.source == .steam {
@@ -234,6 +334,17 @@ struct GameDetailView: View {
                 Text(L("Not installed.")).font(.callout).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func localizedWillDo(_ line: GamePageCopy.WillDo) -> String {
+        guard let recipe = fixRecipe, recipe.isOptIn else { return line.text }
+        if line.text == "Keep the \(recipe.title) fix you applied under Game settings" {
+            return String(format: L("Keep the %@ fix you applied under Game settings"), recipe.title)
+        }
+        if line.text == "Leave the optional \(recipe.title) fix alone; it is under Game settings for when the notes say your Mac needs it" {
+            return String(format: L("Leave the optional %@ fix alone; it is under Game settings for when the notes say your Mac needs it"), recipe.title)
+        }
+        return line.text
     }
 
     private var willDoCard: some View {
@@ -246,7 +357,7 @@ struct GameDetailView: View {
                         .font(.caption.weight(.bold))
                         .foregroundStyle(line.cost == nil || line.done ? HB.good : HB.amber)
                         .frame(width: 14)
-                    Text(line.text).font(.callout)
+                    Text(localizedWillDo(line)).font(.callout)
                     if let cost = line.cost {
                         Text(cost).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     }
@@ -266,20 +377,20 @@ struct GameDetailView: View {
                 Text(entry == nil ? L("No row in the compatibility database yet.") : L("From the open compatibility database."))
                     .font(.caption).foregroundStyle(.secondary)
                 if entry != nil {
-                    Button(L("Why these settings?")) { showWhy.toggle() }
+                    Button(L("Why these settings?")) { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.15)) { showWhy.toggle() } }
                         .buttonStyle(.link).font(.caption)
-                        .popover(isPresented: $showWhy, arrowEdge: .bottom) { whyPopover }
                 }
             }
+            if showWhy { whyExplanation }
         }
-        .padding(14)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(HB.card))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(HB.cardStroke))
+        .background(RoundedRectangle(cornerRadius: 12).fill(HB.card))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(HB.cardStroke))
     }
 
     /// The explanation, and the way out: the environment's own settings are one click away.
-    private var whyPopover: some View {
+    private var whyExplanation: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(L("Why these settings")).font(.headline)
             if let notes = entry?.notes { Text(notes).font(.callout) }
@@ -296,10 +407,10 @@ struct GameDetailView: View {
                 }
             }
             Divider()
-            Text(L("To play with the environment's own graphics mode instead, change it under Advanced below; Highball then leaves it alone for every game in that environment."))
+            Text(L("To play with the environment's own graphics mode instead, change it under Game settings below; Highball then leaves it alone for every game in that environment."))
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(16).frame(width: 420)
+        .padding(.top, 8).frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var advanced: some View {
@@ -456,25 +567,15 @@ struct GameDetailView: View {
                 .padding(.top, 10)
             } label: {
                 // The whole row toggles, not only the chevron.
-                Button { withAnimation(.easeInOut(duration: 0.15)) { showAdvanced.toggle() } } label: {
+                Button { withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.15)) { showAdvanced.toggle() } } label: {
                     HStack(spacing: 8) {
-                        Text(L("Advanced")).font(.callout.weight(.medium))
+                        Text(L("Game settings")).font(.headline)
                         Text(L("graphics mode · engine · environment · files")).font(.caption.monospaced()).foregroundStyle(.tertiary)
                         Spacer(minLength: 0)
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-            }
-            Divider()
-            VStack(alignment: .leading, spacing: 8) {
-                row(L("Source"), item.source == .steam ? "Steam" : item.source == .epic ? "Epic Games" : L("Windows program"))
-                if item.sizeOnDisk > 0 {
-                    row(L("Size on disk"), ByteCountFormatter.string(fromByteCount: item.sizeOnDisk, countStyle: .file))
-                }
-                if let played = item.lastPlayed {
-                    row(L("Last played"), played.formatted(date: .abbreviated, time: .shortened))
-                }
             }
         }
         .padding(.top, 6)

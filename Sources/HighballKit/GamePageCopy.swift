@@ -128,8 +128,8 @@ public enum GamePageCopy {
             // Play does not touch an opt-in fix; the page says so rather than listing steps
             // Play will not take.
             items.append(WillDo(text: applied
-                                ? "Keep the \(recipe.title) fix you applied under Advanced"
-                                : "Leave the optional \(recipe.title) fix alone; it is under Advanced for when the notes say your Mac needs it",
+                                ? "Keep the \(recipe.title) fix you applied under Game settings"
+                                : "Leave the optional \(recipe.title) fix alone; it is under Game settings for when the notes say your Mac needs it",
                                 done: applied))
         } else if let recipe {
             for step in recipe.steps {
