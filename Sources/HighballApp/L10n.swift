@@ -404,6 +404,7 @@ enum L10n {
         "Pour your first game": "Servez votre premier jeu",
         "Install games inside Steam — they show up with artwork and a compatibility verdict.": "Installez des jeux dans Steam — ils apparaissent avec leur visuel et leur verdict de compatibilité.",
         "Install Steam in this bottle to start playing your Windows library.": "Installez Steam dans cette bouteille pour jouer à votre bibliothèque Windows.",
+        "Show Steam": "Afficher Steam",
         "Open Steam": "Ouvrir Steam",
         "Install Steam": "Installer Steam",
         "Delete this bottle? Its Windows drive and everything installed in it are removed.": "Supprimer cette bouteille ? Son disque Windows et tout ce qui y est installé seront effacés.",
