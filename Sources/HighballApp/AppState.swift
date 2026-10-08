@@ -1318,6 +1318,12 @@ final class AppState {
             }))
     }
 
+    /// The launcher shortcut never installs Steam or picks a different environment.
+    var defaultSteamBottle: Bottle? {
+        guard let bottle = defaultBottle, steamInstalled(in: bottle) else { return nil }
+        return bottle
+    }
+
     /// Steam counts as installed when its steam.exe is a Windows executable, not merely a file: an
     /// empty or truncated one, the leftover of an interrupted self-update, showed Open Steam and
     /// then a crash alert proposing another graphics mode (highball#245). Now the row offers the

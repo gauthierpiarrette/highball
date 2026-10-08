@@ -37,6 +37,11 @@ struct HighballApp: App {
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .newItem) {
+                if let bottle = state.defaultSteamBottle {
+                    Button(L("Open Steam")) { state.showSteam(in: bottle) }
+                        .keyboardShortcut("s", modifiers: [.command, .shift])
+                        .disabled(state.busy)
+                }
                 Button(L("A Windows program I have…")) { state.chooseProgramToRun() }
                     .keyboardShortcut("o")
                     .disabled(state.busy || state.bottles.isEmpty)
@@ -319,12 +324,18 @@ struct ContentView: View {
                         }
                     }
                     .toolbar {
-                        ToolbarItem(placement: .primaryAction) {
+                        ToolbarItemGroup(placement: .primaryAction) {
                             if !showAddGames {
                                 Button { showAddGames = true } label: {
                                     Label(L("Add games"), systemImage: "plus")
                                 }
                                 .disabled(state.busy || state.bottles.isEmpty)
+                                if let bottle = state.defaultSteamBottle {
+                                    Button("Steam") { state.showSteam(in: bottle) }
+                                        .disabled(state.busy)
+                                        .accessibilityLabel(L("Open Steam"))
+                                        .help(L("Open Steam"))
+                                }
                             }
                         }
                         ToolbarItem(placement: .automatic) {
