@@ -47,9 +47,13 @@ PY
   # downloads it before Play; the nightly does the same from the bundled manifest, so the
   # engine download path is exercised too and a missing engine is not counted as a failure.
   if [ "$engine" != default ] && ! $HB engine list 2>/dev/null | grep -q "^$engine	"; then
-    if [ -f "spike/engines/$engine.json" ]; then
+    # The default engine's manifest is spike/engine-manifest.json, not spike/engines/<id>.json, so a
+    # new default this Mac has not installed yet read as "not bundled" (r24, 2026-10-08).
+    mf="spike/engines/$engine.json"
+    [ -f "$mf" ] || { [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' spike/engine-manifest.json 2>/dev/null)" = "$engine" ] && mf=spike/engine-manifest.json; }
+    if [ -f "$mf" ]; then
       echo "[$id] installing engine $engine first"
-      $HB engine install "spike/engines/$engine.json" --accept-d3dmetal-license > "$OUT/$id-engine-install.log" 2>&1 || { echo "[$id] engine install FAILED (see $OUT/$id-engine-install.log)"; results+=("{\"id\":\"$id\",\"result\":\"engine-install-failed\"}"); continue; }
+      $HB engine install "$mf" --accept-d3dmetal-license > "$OUT/$id-engine-install.log" 2>&1 || { echo "[$id] engine install FAILED (see $OUT/$id-engine-install.log)"; results+=("{\"id\":\"$id\",\"result\":\"engine-install-failed\"}"); continue; }
     else
       echo "[$id] recipe engine $engine is not bundled"; results+=("{\"id\":\"$id\",\"result\":\"engine-unknown\"}"); continue
     fi
