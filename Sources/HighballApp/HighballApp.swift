@@ -326,16 +326,16 @@ struct ContentView: View {
                     .toolbar {
                         ToolbarItemGroup(placement: .primaryAction) {
                             if !showAddGames {
-                                Button { showAddGames = true } label: {
-                                    Label(L("Add games"), systemImage: "plus")
-                                }
-                                .disabled(state.busy || state.bottles.isEmpty)
                                 if let bottle = state.defaultSteamBottle {
                                     Button("Steam") { state.showSteam(in: bottle) }
                                         .disabled(state.busy)
                                         .accessibilityLabel(L("Open Steam"))
                                         .help(L("Open Steam"))
                                 }
+                                Button { showAddGames = true } label: {
+                                    Label(L("Add games"), systemImage: "plus")
+                                }
+                                .disabled(state.busy || state.bottles.isEmpty)
                             }
                         }
                         ToolbarItem(placement: .automatic) {
