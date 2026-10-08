@@ -28,17 +28,21 @@ public enum ActivityText {
     }
 
     /// "164 of 270 MB · 2.4 MB/s"; "240 KB" before the first megabyte so a live copy is not
-    /// stuck on "0 MB".
+    /// stuck on "0 MB", and "9.1 of 93.0 GB" from a gigabyte up, for a game download.
     public static func transfer(received: Int64, total: Int64?, rate: Double?) -> String {
         var parts: [String] = []
         if let total, total > 0 {
-            if total < 1_048_576 {
+            if total >= 1 << 30 {
+                parts.append("\(gigabytes(received)) of \(gigabytes(total)) GB")
+            } else if total < 1_048_576 {
                 parts.append("\(received / 1024) of \(total / 1024) KB")
             } else {
                 parts.append("\(megabytes(received)) of \(megabytes(total)) MB")
             }
         } else if received < 1_048_576 {
             parts.append("\(received / 1024) KB")
+        } else if received >= 1 << 30 {
+            parts.append("\(gigabytes(received)) GB")
         } else {
             parts.append("\(megabytes(received)) MB")
         }
@@ -69,6 +73,10 @@ public enum ActivityText {
     public static func elapsed(since start: Date, now: Date = Date()) -> (amount: Int, asSeconds: Bool) {
         let s = max(0, Int(now.timeIntervalSince(start)))
         return s < 60 ? (s, true) : (s / 60, false)
+    }
+
+    static func gigabytes(_ bytes: Int64) -> String {
+        String(format: "%.1f", Double(bytes) / 1_073_741_824)
     }
 
     static func megabytes(_ bytes: Int64) -> String {

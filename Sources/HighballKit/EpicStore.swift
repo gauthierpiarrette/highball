@@ -194,6 +194,21 @@ public struct EpicStore: Sendable {
         return try runStreaming(Self.installArguments(appName: appName, basePath: base.path), onLine: onLine)
     }
 
+    /// legendary's install log names the download's size before it starts ("Download size:
+    /// 95232.19 MiB (Compression savings: 2.1%)") and then, about once a second, how much has
+    /// arrived (" - Downloaded: 9075.51 MiB, Written: 9415.55 MiB"). The activity strip shows
+    /// them like an engine download's bytes (highball#287). Bytes, or nil for any other line.
+    public static func downloadSize(inLegendaryLine line: String) -> Int64? { mebibytes(after: "Download size:", in: line) }
+    public static func downloaded(inLegendaryLine line: String) -> Int64? { mebibytes(after: "- Downloaded:", in: line) }
+
+    private static func mebibytes(after label: String, in line: String) -> Int64? {
+        guard let r = line.range(of: label) else { return nil }
+        let rest = line[r.upperBound...].drop { $0 == " " }
+        let number = rest.prefix { $0.isNumber || $0 == "." }
+        guard !number.isEmpty, rest.dropFirst(number.count).hasPrefix(" MiB"), let value = Double(number) else { return nil }
+        return Int64(value * 1_048_576)
+    }
+
     static func uninstallArguments(appName: String) -> [String] { ["uninstall", appName, "-y"] }
 
     /// Removes a game legendary installed. Legendary owns the Epic install state, so it does the

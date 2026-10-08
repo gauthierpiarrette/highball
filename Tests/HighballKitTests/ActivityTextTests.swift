@@ -33,6 +33,12 @@ final class ActivityTextTests: XCTestCase {
         XCTAssertEqual(ActivityText.transfer(received: 5 << 20, total: 0, rate: 640 * 1024), "5 MB · 640 KB/s")
         XCTAssertEqual(ActivityText.transfer(received: 240 * 1024, total: nil, rate: nil), "240 KB")
         XCTAssertEqual(ActivityText.transfer(received: 0, total: nil, rate: nil), "0 KB")
+        // A game download reads in gigabytes (highball#287): GTA V Enhanced's 93 GB from Epic.
+        XCTAssertEqual(ActivityText.transfer(received: Int64(9075.51 * 1_048_576), total: Int64(95232.19 * 1_048_576), rate: 27.94 * 1_048_576),
+                       "8.9 of 93.0 GB · 27.9 MB/s")
+        XCTAssertEqual(ActivityText.transfer(received: 512 << 20, total: 2 << 30, rate: nil), "0.5 of 2.0 GB")
+        XCTAssertEqual(ActivityText.transfer(received: 3 << 30, total: nil, rate: nil), "3.0 GB")
+        XCTAssertEqual(ActivityText.transfer(received: 900 << 20, total: 1000 << 20, rate: nil), "900 of 1000 MB", "under a gigabyte stays in megabytes")
     }
 
     func testFractionAndSteps() {

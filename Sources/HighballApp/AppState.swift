@@ -1168,15 +1168,35 @@ final class AppState {
     /// Feeds the strip from a component download: a plain stage, moving bytes, a measured rate.
     private func reportDownload(_ name: String, received: Int64, total: Int64?) {
         let total = (total ?? 0) > 0 ? total : nil
+        recordTransfer(received: received, total: total)
+        stage = String(format: L("Downloading %@"), name)
+        if let total, received >= total {
+            appendLog("downloaded \(name), verifying and unpacking…")
+            busyProgress = nil; transferRate = nil; transferSamples = []
+        }
+    }
+
+    /// Moving bytes and the rate measured from them, for the strip's bar and numbers.
+    private func recordTransfer(received: Int64, total: Int64?) {
         if let last = transferSamples.last, received < last.bytes { transferSamples = [] }   // next component
         transferSamples.append(.init(bytes: received, at: Date()))
         if transferSamples.count > 40 { transferSamples.removeFirst(transferSamples.count - 40) }
         transferRate = ActivityText.rate(transferSamples)
         busyProgress = Transfer(received: received, total: total)
-        stage = String(format: L("Downloading %@"), name)
-        if let total, received >= total {
-            appendLog("downloaded \(name), verifying and unpacking…")
-            busyProgress = nil; transferRate = nil; transferSamples = []
+    }
+
+    /// The size legendary announced for the Epic download in progress, nil until it does.
+    private var epicDownloadTotal: Int64?
+
+    /// legendary prints the download's size, then how much has arrived about once a second. The
+    /// strip shows them as it does an engine download's: bar, bytes and measured rate, never
+    /// legendary's own time estimate, which stays in Details (ActivityText predicts nothing,
+    /// highball#287).
+    private func reportEpicDownload(_ line: String) {
+        if let total = EpicStore.downloadSize(inLegendaryLine: line) {
+            epicDownloadTotal = total > 0 ? total : nil
+        } else if busy, let received = EpicStore.downloaded(inLegendaryLine: line) {
+            recordTransfer(received: received, total: epicDownloadTotal)
         }
     }
 
@@ -2565,9 +2585,10 @@ final class AppState {
         runBusy("Installing \(game.app_title)", expected: L("a large download; you can leave it running"),
                 stop: .cancelTask(label: L("Stop"))) { [self] in
             let store = epicStore
+            epicDownloadTotal = nil
             let status = try await Task.detached {
                 try store.install(game.app_name, into: bottle) { line in
-                    Task { @MainActor in self.appendLog(line) }
+                    Task { @MainActor in self.appendLog(line); self.reportEpicDownload(line) }
                 }
             }.value
             guard status == 0 else {
