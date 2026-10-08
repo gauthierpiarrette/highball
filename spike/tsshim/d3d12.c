@@ -493,12 +493,28 @@ HRESULT WINAPI D3D12CreateDevice(IUnknown *adapter, D3D_FEATURE_LEVEL level, REF
     return hr;
 }
 
+// Experiment (HB_TSSHIM_WIDESTACK=1, gin-msfs 2026-10-08): a game with its own fiber system runs code on
+// stacks it allocated itself. On Windows it keeps NT_TIB.StackBase/StackLimit in step through gs:[8] and
+// gs:[0x10]; on macOS those slots are the host thread block, so Wine's TEB keeps the thread's original
+// bounds and its exception dispatcher refuses every frame on a fiber stack ("invalid frame ... unable to
+// dispatch exception", Microsoft Flight Simulator 2024 at BOOT_INIT). Widening the bounds on every thread
+// makes the dispatcher trust the game's frames, as Windows would with the bounds the game set.
+static int wide_stack;
+static void widen_stack_bounds(void)
+{
+    NT_TIB *tib = (NT_TIB *)NtCurrentTeb();
+    tib->StackLimit = (void *)0x10000;
+    tib->StackBase = (void *)0x00007ffffffe0000ULL;
+}
+
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
+    if (reason == DLL_THREAD_ATTACH && wide_stack) widen_stack_bounds();
     if (reason == DLL_PROCESS_ATTACH) {
         LARGE_INTEGER f;
         self = inst;
-        DisableThreadLibraryCalls(inst);
+        { char v[8]; wide_stack = GetEnvironmentVariableA("HB_TSSHIM_WIDESTACK", v, sizeof v) == 1 && v[0] == '1'; }
+        if (wide_stack) widen_stack_bounds(); else DisableThreadLibraryCalls(inst);
         InitializeCriticalSection(&ring_lock);
         QueryPerformanceFrequency(&f); qpc_freq = (UINT64)f.QuadPart;
         dbg = GetEnvironmentVariableA("HB_TSSHIM_DEBUG", NULL, 0) > 0;
@@ -510,7 +526,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         RESOLVE(D3D12CreateRootSignatureDeserializer); RESOLVE(D3D12CreateVersionedRootSignatureDeserializer);
         RESOLVE(D3D12EnableExperimentalFeatures); RESOLVE(D3D12GetDebugInterface); RESOLVE(D3D12SerializeRootSignature);
         RESOLVE(D3D12SerializeVersionedRootSignature); RESOLVE(GetBehaviorValue);
-        LOG("loaded in front of the real d3d12.dll%s", sm_override ? " with a shader model override" : "");
+        LOG("loaded in front of the real d3d12.dll%s%s", sm_override ? " with a shader model override" : "", wide_stack ? ", stack bounds widened" : "");
         if (sm_override) LOG("HB_TSSHIM_SHADER_MODEL: the shader model query will answer up to 0x%x", sm_override);
     }
     return TRUE;
