@@ -1324,6 +1324,10 @@ final class AppState {
         return bottle
     }
 
+    func steamLauncherTitle(in bottle: Bottle) -> String {
+        steamClients.contains(bottle.name) ? L("Show Steam") : L("Open Steam")
+    }
+
     /// Steam counts as installed when its steam.exe is a Windows executable, not merely a file: an
     /// empty or truncated one, the leftover of an interrupted self-update, showed Open Steam and
     /// then a crash alert proposing another graphics mode (highball#245). Now the row offers the

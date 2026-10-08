@@ -38,7 +38,7 @@ struct HighballApp: App {
         .commands {
             CommandGroup(after: .newItem) {
                 if let bottle = state.defaultSteamBottle {
-                    Button(L("Open Steam")) { state.showSteam(in: bottle) }
+                    Button(state.steamLauncherTitle(in: bottle)) { state.showSteam(in: bottle) }
                         .keyboardShortcut("s", modifiers: [.command, .shift])
                         .disabled(state.busy)
                 }
@@ -327,10 +327,9 @@ struct ContentView: View {
                         ToolbarItemGroup(placement: .primaryAction) {
                             if !showAddGames {
                                 if let bottle = state.defaultSteamBottle {
-                                    Button("Steam") { state.showSteam(in: bottle) }
+                                    Button(state.steamLauncherTitle(in: bottle)) { state.showSteam(in: bottle) }
                                         .disabled(state.busy)
-                                        .accessibilityLabel(L("Open Steam"))
-                                        .help(L("Open Steam"))
+                                        .help(state.steamLauncherTitle(in: bottle))
                                 }
                                 Button { showAddGames = true } label: {
                                     Label(L("Add games"), systemImage: "plus")
