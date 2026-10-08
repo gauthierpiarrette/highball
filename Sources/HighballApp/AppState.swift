@@ -1854,10 +1854,12 @@ final class AppState {
         }
     }
 
+    /// Discord's own apps, or any other client serving Discord's local socket (Vesktop with
+    /// arRPC on), which is all the bridge needs.
     private var discordIsOpen: Bool {
         NSWorkspace.shared.runningApplications.contains {
             ["com.hnc.Discord", "com.hnc.DiscordPTB", "com.hnc.DiscordCanary"].contains($0.bundleIdentifier ?? "")
-        }
+        } || DiscordPresence.shared.clientSocketPresent
     }
 
     private func stopDiscordWatch() {

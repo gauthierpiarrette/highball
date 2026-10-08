@@ -122,6 +122,14 @@ final class DiscordPresenceTests: XCTestCase {
         XCTAssertThrowsError(try reader2.readFrame(timeout: 1))
     }
 
+    /// Any client serving Discord's socket counts, not only Discord's own app (Vesktop, 2026-10-08).
+    func testAClientSocketCountsAsDiscordOpen() throws {
+        XCTAssertFalse(DiscordPresence(socketPaths: { ["/nonexistent/discord-ipc-0"] }).clientSocketPresent)
+        let fake = try FakeDiscord()
+        defer { fake.stop() }
+        XCTAssertTrue(DiscordPresence(socketPaths: { ["/nonexistent/discord-ipc-0", fake.path] }).clientSocketPresent)
+    }
+
     func testPassiveUsesGameIDClearsOnRichPresenceAndResumes() throws {
         let fake = try FakeDiscord()
         defer { fake.stop() }

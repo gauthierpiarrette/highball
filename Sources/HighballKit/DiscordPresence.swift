@@ -20,6 +20,11 @@ public final class DiscordPresence: @unchecked Sendable {
     private var helpers: [String: Process] = [:]
     private var message = "Waiting for a game"
     public var status: String { isEnabled ? lock.withLock { message } : "Discord sharing is off" }
+    /// Whether a Discord client serves its local socket: Discord's own app, or another client that
+    /// speaks its IPC, such as Vesktop with its Rich Presence (arRPC) setting on. The bridge needs
+    /// nothing more, and a player on Vesktop got no game activity while Highball looked for
+    /// Discord's app by its bundle id alone (Discord, 2026-10-08).
+    public var clientSocketPresent: Bool { socketPaths().contains { FileManager.default.fileExists(atPath: $0) } }
     public var isEnabled: Bool { permissionLock.withLock { enabled } }
     public init() {
         let store = DiscordCatalogStore()
