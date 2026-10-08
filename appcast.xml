@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.10.14</title>
+      <description><![CDATA[Portal and Portal 2 get their HDR back, The Sims' lot thumbnails and portraits are fixed, and a game's fixes reach it in another Steam library]]></description>
+      <pubDate>Thu, 08 Oct 2026 03:24:14 +0200</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.10.14/Highball-0.10.14.zip" sparkle:version="0.10.14" sparkle:shortVersionString="0.10.14" sparkle:edSignature="WeI0hvdlYsfuMgK8Hum6Dv6zNQAff9Kn/yXdUobZ+4TwsiOgUbwmfqk+MP+lCmcT7ZWNv2j5ZVtsB6ZDYBmsAw==" length="4796727" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.10.13</title>
       <description><![CDATA[External drives get their own drive letters, Add games and environment settings become pages, and Age of Empires II HD's launcher draws its buttons]]></description>
       <pubDate>Wed, 07 Oct 2026 19:14:38 +0200</pubDate>
