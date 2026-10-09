@@ -71,6 +71,22 @@ final class MacSteamBuildTests: XCTestCase {
                        "Cuphead is still downloading; redistributables aren't a game; one Balatro")
     }
 
+    /// A library folder both clients use shows Steam for Mac the Windows client's manifests. Those
+    /// are the environment's games, not Mac installs: Forza Horizon 6 got "Play on Mac" (2026-10-09).
+    func testAManifestTheWindowsClientWroteIsNoMacInstall() throws {
+        let root = try macSteam(["root": [(2379780, "Balatro", 4)]])
+        let dir = root.appending(path: "steamapps")
+        try #""AppState" { "appid" "2483190" "name" "Forza Horizon 6" "StateFlags" "4" "installdir" "ForzaHorizon6" "LauncherPath" "C:\\Program Files (x86)\\Steam\\steam.exe" }"#
+            .write(to: dir.appending(path: "appmanifest_2483190.acf"), atomically: true, encoding: .utf8)
+        try #""AppState" { "appid" "588650" "name" "Dead Cells" "StateFlags" "4" "installdir" "Dead Cells" "LauncherPath" "/Users/me/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/steam_osx" }"#
+            .write(to: dir.appending(path: "appmanifest_588650.acf"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(MacSteam.installedGames(root: root).map(\.appid), [2379780, 588650],
+                       "the Windows client's Forza is left out, a Mac path or no path counts as before")
+        let forza = try XCTUnwrap(SteamLibrary.parseManifest(dir.appending(path: "appmanifest_2483190.acf")))
+        XCTAssertTrue(forza.installedByWindowsSteam)
+        XCTAssertFalse(try XCTUnwrap(SteamLibrary.parseManifest(dir.appending(path: "appmanifest_588650.acf"))).installedByWindowsSteam)
+    }
+
     func testNoSteamForMacIsNothingInstalled() {
         let nowhere = FileManager.default.temporaryDirectory.appending(path: "hb-nosteam-\(UUID())")
         XCTAssertEqual(MacSteam.installedGames(root: nowhere), [])

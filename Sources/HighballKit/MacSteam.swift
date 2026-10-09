@@ -47,7 +47,9 @@ public enum MacSteam {
                     .filter { $0.lastPathComponent.hasPrefix("appmanifest_") && $0.pathExtension == "acf" }
             }
             .compactMap { SteamLibrary.parseManifest($0) }
-            .filter { $0.isReady && $0.appid != 228980 && seen.insert($0.appid).inserted }
+            // A manifest the Windows client wrote is that client's game, not a Mac install (a shared
+            // library folder lists both).
+            .filter { $0.isReady && !$0.installedByWindowsSteam && $0.appid != 228980 && seen.insert($0.appid).inserted }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }

@@ -15,11 +15,25 @@ public struct SteamGame: Identifiable, Sendable, Hashable {
     /// Steam keeps more than one, the second often on an external disk, so the install path
     /// cannot be derived from the bottle alone. nil for a game built without one.
     public let libraryRoot: URL?
+    /// The Steam client that installed the game, as the ACF's LauncherPath records it: a Windows
+    /// path for Steam in an environment (`C:\\Program Files (x86)\\Steam\\steam.exe`), a Mac
+    /// path for Steam for Mac. nil when the manifest has none.
+    public let launcherPath: String?
 
     public init(appid: Int, name: String, installdir: String, sizeOnDisk: Int64, stateFlags: Int, lastPlayed: Date?,
-                libraryRoot: URL? = nil) {
+                libraryRoot: URL? = nil, launcherPath: String? = nil) {
         self.appid = appid; self.name = name; self.installdir = installdir; self.sizeOnDisk = sizeOnDisk
         self.stateFlags = stateFlags; self.lastPlayed = lastPlayed; self.libraryRoot = libraryRoot
+        self.launcherPath = launcherPath
+    }
+
+    /// Installed by a Windows Steam, the one in an environment. A library folder both clients use
+    /// (an external drive, say) shows Steam for Mac the Windows client's manifests too, and a
+    /// Windows-only game then read as installed in Steam for Mac and played there: Forza Horizon 6
+    /// got "Play on Mac" and never its own fix (Discord, 2026-10-09).
+    public var installedByWindowsSteam: Bool {
+        guard let path = launcherPath else { return false }
+        return path.lowercased().hasSuffix(".exe") || path.range(of: #"^[A-Za-z]:\\"#, options: .regularExpression) != nil
     }
 
     public var id: Int { appid }
@@ -135,7 +149,8 @@ public enum SteamLibrary {
             sizeOnDisk: Int64(fields["SizeOnDisk"] ?? "") ?? 0,
             stateFlags: Int(fields["StateFlags"] ?? "") ?? 0,
             lastPlayed: played > 0 ? Date(timeIntervalSince1970: played) : nil,
-            libraryRoot: libraryRoot
+            libraryRoot: libraryRoot,
+            launcherPath: fields["LauncherPath"]
         )
     }
 }
