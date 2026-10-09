@@ -336,11 +336,35 @@ static UINT parse_shader_model(const char *v)
 // (Microsoft Flight Simulator 2024's fiber system) sees whatever the host keeps there (gin-msfs, 2026-10-09).
 static void log_gs_slots(const char *where)
 {
+    // Every TEB field a fiber system is known to touch, read through %gs directly and through the TEB
+    // pointer: a difference means the program wrote the %gs slot itself (gs:0x30 = TEB on this tree).
+    static const struct { unsigned off; const char *name; } f[] = {
+        { 0x00, "ExceptionList" }, { 0x08, "StackBase" }, { 0x10, "StackLimit" }, { 0x18, "SubSystemTib" },
+        { 0x20, "FiberData" }, { 0x28, "ArbitraryUserPointer" }, { 0x2c8, "ActivationContextStackPointer" },
+        { 0x1478, "DeallocationStack" }, { 0x1748, "GuaranteedStackBytes" }, { 0x1780, "TlsExpansionSlots" },
+        { 0x17c8, "FlsSlots" }, { 0x1788, "DeallocationBStore" } };
     static LONG logged;
-    ULONG_PTR s08, s10, s20; NT_TIB *tib = (NT_TIB *)NtCurrentTeb();
-    if (InterlockedIncrement(&logged) > 40) return;
-    __asm__ volatile("movq %%gs:8,%0" : "=r"(s08)); __asm__ volatile("movq %%gs:0x10,%0" : "=r"(s10)); __asm__ volatile("movq %%gs:0x20,%0" : "=r"(s20));
-    LOG("%s: gs:8=%p gs:0x10=%p gs:0x20=%p | TEB StackBase=%p StackLimit=%p FiberData=%p", where, (void *)s08, (void *)s10, (void *)s20, tib->StackBase, tib->StackLimit, tib->FiberData);
+    char *teb = (char *)NtCurrentTeb(); char line[1024]; int n = 0; unsigned i;
+    if (InterlockedIncrement(&logged) > 300) return;
+    for (i = 0; i < sizeof f / sizeof f[0]; i++) {
+        ULONG_PTR g, t = *(ULONG_PTR *)(teb + f[i].off);
+        switch (f[i].off) {
+        case 0x00: __asm__ volatile("movq %%gs:0x00,%0" : "=r"(g)); break;
+        case 0x08: __asm__ volatile("movq %%gs:0x08,%0" : "=r"(g)); break;
+        case 0x10: __asm__ volatile("movq %%gs:0x10,%0" : "=r"(g)); break;
+        case 0x18: __asm__ volatile("movq %%gs:0x18,%0" : "=r"(g)); break;
+        case 0x20: __asm__ volatile("movq %%gs:0x20,%0" : "=r"(g)); break;
+        case 0x28: __asm__ volatile("movq %%gs:0x28,%0" : "=r"(g)); break;
+        case 0x2c8: __asm__ volatile("movq %%gs:0x2c8,%0" : "=r"(g)); break;
+        case 0x1478: __asm__ volatile("movq %%gs:0x1478,%0" : "=r"(g)); break;
+        case 0x1748: __asm__ volatile("movq %%gs:0x1748,%0" : "=r"(g)); break;
+        case 0x1780: __asm__ volatile("movq %%gs:0x1780,%0" : "=r"(g)); break;
+        case 0x17c8: __asm__ volatile("movq %%gs:0x17c8,%0" : "=r"(g)); break;
+        default:     __asm__ volatile("movq %%gs:0x1788,%0" : "=r"(g)); break;
+        }
+        if (g != t) n += snprintf(line + n, sizeof line - n, " %s gs=%p teb=%p", f[i].name, (void *)g, (void *)t);
+    }
+    LOG("%s: rsp~%p%s%s", where, (void *)&teb, n ? " differs:" : " all slots equal the TEB", line);
 }
 
 static HRESULT STDMETHODCALLTYPE hook_CheckFeatureSupport(ID3D12Device *dev, D3D12_FEATURE feature, void *data, UINT size)
@@ -532,7 +556,8 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         if (wide_stack) widen_stack_bounds(); else DisableThreadLibraryCalls(inst);
         InitializeCriticalSection(&ring_lock);
         QueryPerformanceFrequency(&f); qpc_freq = (UINT64)f.QuadPart;
-        dbg = GetEnvironmentVariableA("HB_TSSHIM_DEBUG", NULL, 0) > 0;
+        dbg = GetEnvironmentVariableA("HB_TSSHIM_DEBUG", NULL, 0) > 0
+              || GetFileAttributesA("C:\\highball\\tsshim-debug") != INVALID_FILE_ATTRIBUTES;  /* marker file: for a program started by a launcher that keeps its own environment */
         { char v[8]; idle = GetEnvironmentVariableA("HB_D3D12_TSSHIM", v, sizeof v) == 1 && v[0] == '0'; }   // kill switch
         { char v[8]; pass_depth_resolve = GetEnvironmentVariableA("HB_TSSHIM_DEPTHRESOLVE", v, sizeof v) == 1 && v[0] == '1'; }
         { char v[16]; DWORD n = GetEnvironmentVariableA("HB_TSSHIM_SHADER_MODEL", v, sizeof v); if (n && n < sizeof v) sm_override = parse_shader_model(v); }
