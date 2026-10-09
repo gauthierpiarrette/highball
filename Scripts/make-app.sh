@@ -152,16 +152,9 @@ for f in "$RECIPES"/launchers/*.json "$RECIPES"/games/*.json "$RECIPES"/tweaks/*
 DBDIR="$(dirname "$RECIPES")/db/games"
 if [ -d "$DBDIR" ]; then mkdir -p "$APP/Contents/Resources/db-games"; cp "$DBDIR"/*.json "$APP/Contents/Resources/db-games/"; fi
 
-# App icon.
-ICONWORK=.build/icon
-mkdir -p "$ICONWORK/AppIcon.iconset"
-swift Scripts/make-icon.swift "$ICONWORK/AppIcon-1024.png" >/dev/null
-for sz in 16 32 128 256 512; do
-  sips -z $sz $sz "$ICONWORK/AppIcon-1024.png" --out "$ICONWORK/AppIcon.iconset/icon_${sz}x${sz}.png" >/dev/null
-  d=$((sz*2)); sips -z $d $d "$ICONWORK/AppIcon-1024.png" --out "$ICONWORK/AppIcon.iconset/icon_${sz}x${sz}@2x.png" >/dev/null
-done
-iconutil -c icns "$ICONWORK/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
-sips -z 512 512 "$ICONWORK/AppIcon-1024.png" --out "$APP/Contents/Resources/AppIcon.png" >/dev/null
+# App icon: the icns is the bundle's icon, the 512 px png the copy the app loads itself
+# (its Dock icon, the empty environment view, launcher shortcuts in ~/Applications/Highball).
+cp Resources/AppIcon.icns Resources/AppIcon.png "$APP/Contents/Resources/"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
