@@ -429,6 +429,62 @@ static void STDMETHODCALLTYPE hook_ResolveSubresource(ID3D12GraphicsCommandList 
     real_ResolveSubresource(list, dst, dst_sub, src, src_sub, format);
 }
 
+
+// Diagnostic (HB_TSSHIM_DEBUG): every failing creation and every device-removed query, with the thread and the time, so a
+// renderer that resets itself can be tied to the D3D12 call that failed (Microsoft Flight Simulator 2024, gin-msfs 2026-10-09).
+static HRESULT (STDMETHODCALLTYPE *real_GetDeviceRemovedReason)(ID3D12Device *);
+static HRESULT STDMETHODCALLTYPE hook_GetDeviceRemovedReason(ID3D12Device *dev)
+{
+    HRESULT hr = real_GetDeviceRemovedReason(dev); LOG("GetDeviceRemovedReason -> 0x%lx", (unsigned long)hr); return hr;
+}
+static HRESULT (STDMETHODCALLTYPE *real_CreateCommandQueue)(ID3D12Device *, const D3D12_COMMAND_QUEUE_DESC *, REFIID, void **);
+static HRESULT STDMETHODCALLTYPE hook_CreateCommandQueue(ID3D12Device *dev, const D3D12_COMMAND_QUEUE_DESC *d, REFIID riid, void **out)
+{
+    HRESULT hr = real_CreateCommandQueue(dev, d, riid, out); LOG("CreateCommandQueue type=%d -> 0x%lx", d ? (int)d->Type : -1, (unsigned long)hr); return hr;
+}
+static HRESULT (STDMETHODCALLTYPE *real_CreateGraphicsPipelineState)(ID3D12Device *, const D3D12_GRAPHICS_PIPELINE_STATE_DESC *, REFIID, void **);
+static HRESULT STDMETHODCALLTYPE hook_CreateGraphicsPipelineState(ID3D12Device *dev, const D3D12_GRAPHICS_PIPELINE_STATE_DESC *d, REFIID riid, void **out)
+{
+    static LONG n; HRESULT hr = real_CreateGraphicsPipelineState(dev, d, riid, out);
+    if (FAILED(hr) || InterlockedIncrement(&n) <= 3) LOG("CreateGraphicsPipelineState #%ld -> 0x%lx", (long)n, (unsigned long)hr); return hr;
+}
+static HRESULT (STDMETHODCALLTYPE *real_CreateComputePipelineState)(ID3D12Device *, const D3D12_COMPUTE_PIPELINE_STATE_DESC *, REFIID, void **);
+static HRESULT STDMETHODCALLTYPE hook_CreateComputePipelineState(ID3D12Device *dev, const D3D12_COMPUTE_PIPELINE_STATE_DESC *d, REFIID riid, void **out)
+{
+    static LONG n; HRESULT hr = real_CreateComputePipelineState(dev, d, riid, out);
+    if (FAILED(hr) || InterlockedIncrement(&n) <= 3) LOG("CreateComputePipelineState #%ld -> 0x%lx", (long)n, (unsigned long)hr); return hr;
+}
+static HRESULT (STDMETHODCALLTYPE *real_CreateCommandList)(ID3D12Device *, UINT, D3D12_COMMAND_LIST_TYPE, ID3D12CommandAllocator *, ID3D12PipelineState *, REFIID, void **);
+static HRESULT STDMETHODCALLTYPE hook_CreateCommandList(ID3D12Device *dev, UINT node, D3D12_COMMAND_LIST_TYPE type, ID3D12CommandAllocator *a, ID3D12PipelineState *ps, REFIID riid, void **out)
+{
+    HRESULT hr = real_CreateCommandList(dev, node, type, a, ps, riid, out); if (FAILED(hr)) LOG("CreateCommandList type=%d -> 0x%lx", (int)type, (unsigned long)hr); return hr;
+}
+static HRESULT (STDMETHODCALLTYPE *real_CreateCommandAllocator)(ID3D12Device *, D3D12_COMMAND_LIST_TYPE, REFIID, void **);
+static HRESULT STDMETHODCALLTYPE hook_CreateCommandAllocator(ID3D12Device *dev, D3D12_COMMAND_LIST_TYPE type, REFIID riid, void **out)
+{
+    HRESULT hr = real_CreateCommandAllocator(dev, type, riid, out); if (FAILED(hr)) LOG("CreateCommandAllocator type=%d -> 0x%lx", (int)type, (unsigned long)hr); return hr;
+}
+static HRESULT (STDMETHODCALLTYPE *real_CreateFence)(ID3D12Device *, UINT64, D3D12_FENCE_FLAGS, REFIID, void **);
+static HRESULT STDMETHODCALLTYPE hook_CreateFence(ID3D12Device *dev, UINT64 v, D3D12_FENCE_FLAGS f, REFIID riid, void **out)
+{
+    HRESULT hr = real_CreateFence(dev, v, f, riid, out); if (FAILED(hr)) LOG("CreateFence flags=0x%x -> 0x%lx", (unsigned)f, (unsigned long)hr); return hr;
+}
+static HRESULT (STDMETHODCALLTYPE *real_CreateDescriptorHeap)(ID3D12Device *, const D3D12_DESCRIPTOR_HEAP_DESC *, REFIID, void **);
+static HRESULT STDMETHODCALLTYPE hook_CreateDescriptorHeap(ID3D12Device *dev, const D3D12_DESCRIPTOR_HEAP_DESC *d, REFIID riid, void **out)
+{
+    HRESULT hr = real_CreateDescriptorHeap(dev, d, riid, out); if (FAILED(hr)) LOG("CreateDescriptorHeap type=%d n=%u -> 0x%lx", d ? (int)d->Type : -1, d ? (unsigned)d->NumDescriptors : 0, (unsigned long)hr); return hr;
+}
+static HRESULT (STDMETHODCALLTYPE *real_CreateHeap)(ID3D12Device *, const D3D12_HEAP_DESC *, REFIID, void **);
+static HRESULT STDMETHODCALLTYPE hook_CreateHeap(ID3D12Device *dev, const D3D12_HEAP_DESC *d, REFIID riid, void **out)
+{
+    HRESULT hr = real_CreateHeap(dev, d, riid, out); if (FAILED(hr)) LOG("CreateHeap size=%llu -> 0x%lx", d ? (unsigned long long)d->SizeInBytes : 0, (unsigned long)hr); return hr;
+}
+static HRESULT (STDMETHODCALLTYPE *real_CreateRootSignature)(ID3D12Device *, UINT, const void *, SIZE_T, REFIID, void **);
+static HRESULT STDMETHODCALLTYPE hook_CreateRootSignature(ID3D12Device *dev, UINT node, const void *blob, SIZE_T len, REFIID riid, void **out)
+{
+    HRESULT hr = real_CreateRootSignature(dev, node, blob, len, riid, out); if (FAILED(hr)) LOG("CreateRootSignature len=%llu -> 0x%lx", (unsigned long long)len, (unsigned long)hr); return hr;
+}
+
 static void patch_device_vtbl(void *iface)
 {
     ID3D12DeviceVtbl *vt = *(ID3D12DeviceVtbl **)iface;
@@ -442,6 +498,16 @@ static void patch_device_vtbl(void *iface)
         patch_slot((void **)&vt->CreateUnorderedAccessView, (void *)hook_CreateUnorderedAccessView, (void **)&real_CreateUnorderedAccessView);
         patch_slot((void **)&vt->CreateRenderTargetView, (void *)hook_CreateRenderTargetView, (void **)&real_CreateRenderTargetView);
         patch_slot((void **)&vt->CreateDepthStencilView, (void *)hook_CreateDepthStencilView, (void **)&real_CreateDepthStencilView);
+        patch_slot((void **)&vt->GetDeviceRemovedReason, (void *)hook_GetDeviceRemovedReason, (void **)&real_GetDeviceRemovedReason);
+        patch_slot((void **)&vt->CreateCommandQueue, (void *)hook_CreateCommandQueue, (void **)&real_CreateCommandQueue);
+        patch_slot((void **)&vt->CreateGraphicsPipelineState, (void *)hook_CreateGraphicsPipelineState, (void **)&real_CreateGraphicsPipelineState);
+        patch_slot((void **)&vt->CreateComputePipelineState, (void *)hook_CreateComputePipelineState, (void **)&real_CreateComputePipelineState);
+        patch_slot((void **)&vt->CreateCommandList, (void *)hook_CreateCommandList, (void **)&real_CreateCommandList);
+        patch_slot((void **)&vt->CreateCommandAllocator, (void *)hook_CreateCommandAllocator, (void **)&real_CreateCommandAllocator);
+        patch_slot((void **)&vt->CreateFence, (void *)hook_CreateFence, (void **)&real_CreateFence);
+        patch_slot((void **)&vt->CreateDescriptorHeap, (void *)hook_CreateDescriptorHeap, (void **)&real_CreateDescriptorHeap);
+        patch_slot((void **)&vt->CreateHeap, (void *)hook_CreateHeap, (void **)&real_CreateHeap);
+        patch_slot((void **)&vt->CreateRootSignature, (void *)hook_CreateRootSignature, (void **)&real_CreateRootSignature);
     }
 }
 static void patch_list_vtbl(void *iface)
