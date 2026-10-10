@@ -1,0 +1,120 @@
+Wine 11.0 mmdevapi: fold a spatial audio static bed down to stereo when the device has fewer channels.
+
+Forza Horizon 6 plays its mix through ISpatialAudioClient as a 7.1.4 static bed (12 channels).
+Wine's spatialaudio.c opens the device stream with the bed's full channel mask, and on a Mac with
+a two-channel output winecoreaudio's ca_setup_audiounit can't set that layout:
+
+  warn:coreaudio:ca_setup_audiounit Couldn't set channel layout: -10851
+
+The stream still runs, but only the front left and right objects are heard. Everything the game
+puts in the centre and surround objects is lost: the navigator's voice (Anna), story dialogue and
+most of the car's engine in the chase camera (highball#290, "no audio of the cars").
+
+With this change activate_stream asks the client for its mix format. When the device has two or
+more channels but fewer than the bed, the stream opens as plain stereo and mix_static_object
+adds each static object into left and right with fixed gains: front centre and anything unmapped
+at -3 dB to both, side, back and height channels at -3 dB to their own side, LFE and back centre
+at 0.5 to both. Because objects are now summed into the stream buffer, BeginUpdatingAudioObjects
+clears it each period. Dynamic objects and devices with enough channels go the old way.
+
+Built against wine-11.0 (db11d0f) as the PE mmdevapi.dll and laid into the environment's
+.highball-dlss/wine/x86_64-windows on engine x64-crossover26.3-r21 with D3DMetal 4. Measured on an
+M5 Max (Mac17,6), macOS 27.0.1, built-in speakers: dialogue, Anna and the chase-camera engine
+play again. Not yet tried on other games that use spatial audio or on a multichannel device.
+
+Limits: a 5.1 or 7.1 device also gets the stereo fold rather than a matching downmix, and the
+gains are a plain fixed matrix, not a loudness-matched one. A first attempt that answered
+GetNativeStaticObjectTypeMask with a stereo mask instead made the game crash at start, so the
+fold happens inside the stream.
+
+diff --git a/dlls/mmdevapi/spatialaudio.c b/dlls/mmdevapi/spatialaudio.c
+index 8ae37cb..0eb6dc0 100644
+--- a/dlls/mmdevapi/spatialaudio.c
++++ b/dlls/mmdevapi/spatialaudio.c
+@@ -114,6 +114,9 @@ struct SpatialAudioStreamImpl {
+ 
+     UINT32 static_object_map[17];
+ 
++    /* fold the static bed down to the device's channels (e.g. 7.1.4 -> stereo) */
++    BOOL fold_down;
++
+     struct list objects;
+ };
+ 
+@@ -411,6 +414,8 @@ static HRESULT WINAPI SAORS_BeginUpdatingAudioObjects(ISpatialAudioObjectRenderS
+             return hr;
+         }
+ 
++        memset(This->buf, 0, This->update_frames * This->stream_fmtex.Format.nBlockAlign);
++
+         LIST_FOR_EACH_ENTRY(object, &This->objects, SpatialAudioObjectImpl, entry){
+             memset(object->buf, 0, This->update_frames * This->sa_client->object_fmtex.Format.nBlockAlign);
+         }
+@@ -427,10 +432,43 @@ static HRESULT WINAPI SAORS_BeginUpdatingAudioObjects(ISpatialAudioObjectRenderS
+     return S_OK;
+ }
+ 
++static void fold_down_gains(AudioObjectType type, float *l, float *r)
++{
++    static const float m3db = 0.70710678f;
++    switch(type){
++    case AudioObjectType_FrontLeft: *l = 1.0f; *r = 0.0f; break;
++    case AudioObjectType_FrontRight: *l = 0.0f; *r = 1.0f; break;
++    case AudioObjectType_LowFrequency: *l = *r = 0.5f; break;
++    case AudioObjectType_SideLeft:
++    case AudioObjectType_BackLeft:
++    case AudioObjectType_TopFrontLeft:
++    case AudioObjectType_TopBackLeft: *l = m3db; *r = 0.0f; break;
++    case AudioObjectType_SideRight:
++    case AudioObjectType_BackRight:
++    case AudioObjectType_TopFrontRight:
++    case AudioObjectType_TopBackRight: *l = 0.0f; *r = m3db; break;
++    case AudioObjectType_BackCenter: *l = *r = 0.5f; break;
++    default: *l = *r = m3db; break; /* FrontCenter, None */
++    }
++}
++
+ static void mix_static_object(SpatialAudioStreamImpl *stream, SpatialAudioObjectImpl *object)
+ {
+     float *in = object->buf, *out;
+     UINT32 i;
++
++    if(stream->fold_down){
++        float gl, gr;
++        fold_down_gains(object->type, &gl, &gr);
++        out = stream->buf;
++        for(i = 0; i < stream->update_frames; ++i){
++            out[0] += *in * gl;
++            out[1] += *in * gr;
++            ++in;
++            out += stream->stream_fmtex.Format.nChannels;
++        }
++        return;
++    }
+     if(object->static_idx == ~0 ||
+             stream->static_object_map[object->static_idx] == ~0){
+         WARN("Got unmapped static object?! Not mixing. Type: 0x%x\n", object->type);
+@@ -736,6 +774,23 @@ static HRESULT activate_stream(SpatialAudioStreamImpl *stream)
+     stream->stream_fmtex.Format.nBlockAlign = (stream->stream_fmtex.Format.nChannels * stream->stream_fmtex.Format.wBitsPerSample) / 8;
+     stream->stream_fmtex.Format.nAvgBytesPerSec = stream->stream_fmtex.Format.nSamplesPerSec * stream->stream_fmtex.Format.nBlockAlign;
+     stream->stream_fmtex.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
++
++    {
++        WAVEFORMATEX *mix = NULL;
++        stream->fold_down = FALSE;
++        if(SUCCEEDED(IAudioClient_GetMixFormat(stream->client, &mix)) && mix){
++            if(mix->nChannels >= 2 && mix->nChannels < stream->stream_fmtex.Format.nChannels){
++                TRACE("folding %u static channels down to stereo for a %u channel device\n",
++                        stream->stream_fmtex.Format.nChannels, mix->nChannels);
++                stream->fold_down = TRUE;
++                stream->stream_fmtex.Format.nChannels = 2;
++                stream->stream_fmtex.dwChannelMask = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
++                stream->stream_fmtex.Format.nBlockAlign = (2 * stream->stream_fmtex.Format.wBitsPerSample) / 8;
++                stream->stream_fmtex.Format.nAvgBytesPerSec = stream->stream_fmtex.Format.nSamplesPerSec * stream->stream_fmtex.Format.nBlockAlign;
++            }
++            CoTaskMemFree(mix);
++        }
++    }
+     stream->stream_fmtex.Samples.wValidBitsPerSample = stream->stream_fmtex.Format.wBitsPerSample;
+     stream->stream_fmtex.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
+ 
