@@ -198,6 +198,10 @@ public enum BugReport {
         "winemetal",                // DXMT
         "D3DMetal",
         "wined3d_adapter_create",
+        "gl.renderer:",
+        "gl.version:",
+        "gl.vendor:",
+        "OpenGL renderer",
     ]
 
     /// Kept in the digest for context, but deliberately NOT used to choose a log: every wine
@@ -205,7 +209,7 @@ public enum BugReport {
     /// any log "informative" and collapse selection back to newest-wins.
     static let contextMarkers = ["init_peb starting"]
 
-    static let errorMarkers = ["err:", "[mvk-error]", "Assertion Failed", "Backtrace:"]
+    static let errorMarkers = ["err:", "[mvk-error]", "Assertion Failed", "Backtrace:", "OpenGL error"]
     /// Wine shouts these on every single launch and they have never explained a failure. Left in
     /// the budget they crowd the real errors out: one issue #21 log carries 24 HID lines and 740
     /// identical font-handle lines before anything diagnostic.

@@ -108,10 +108,11 @@ public struct WineRunner: Sendable {
     /// cannot separate "the config was never delivered" from "the config was delivered and did
     /// not help", which is exactly where issue #21 stalled for two rounds.
     static let headerSwitchPrefixes = ["DXMT_", "D3DM_", "SDL_", "MVK_", "HB_", "WINE_NO_DELAYED_FORK"]
+    static let headerSwitchNames: Set<String> = ["GALLIUM_DRIVER", "LIBGL_ALWAYS_SOFTWARE", "MESA_LOADER_DRIVER_OVERRIDE"]
 
     /// The header lines for those switches, in name order, short values only.
     static func headerSwitchLines(_ env: [String: String]) -> String {
-        env.keys.sorted().filter { key in headerSwitchPrefixes.contains { key.hasPrefix($0) } }
+        env.keys.sorted().filter { key in headerSwitchNames.contains(key) || headerSwitchPrefixes.contains { key.hasPrefix($0) } }
             .compactMap { key in env[key].flatMap { $0.count <= 200 ? "# \(key)=\($0)\n" : nil } }
             .joined()
     }

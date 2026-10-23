@@ -129,6 +129,8 @@ final class AppState {
         /// The library item this launch belongs to, when it is a game: accepting then changes the
         /// mode for that game alone, never the whole environment.
         var itemID: String? = nil
+        /// A detected OpenGL failure needs its own advice, not a Direct3D mode trial.
+        var openGLRecovery: Recovery? = nil
     }
 
     /// A game that ran, badly by the player's account, with another mode to try next time (the
@@ -200,6 +202,12 @@ final class AppState {
             return
         }
         let current = record.renderer.flatMap(Renderer.init(rawValue:)) ?? rendererOverride(for: item) ?? bottle.settings.renderer
+        if current != .wined3d, let log = lastLaunchLog(for: item), let recovery = Recovery.openGL(log: log) {
+            fail(HighballError.failed(recovery.headline), bottle: bottle)
+            errorRecovery = recovery
+            errorDetailsText = recovery.headline + "\n" + recovery.meaning + "\n" + log.path
+            return
+        }
         let next = Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil,
                                        vkd3dAvailable: engine.rendererDir("vkd3d") != nil)
         rendererTrial = RendererTrial(itemID: item.id, title: item.title, current: current, next: next)
@@ -2640,7 +2648,7 @@ final class AppState {
                 self.crashSuggestion = CrashSuggestion(program: pin.name, bottleName: bottle.name,
                                                        renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil, vkd3dAvailable: engine.rendererDir("vkd3d") != nil),
                                                        logPath: result.log.path, current: current, seconds: Int(result.duration),
-                                                       alternateEngine: self.alternateEngine(for: bottle))
+                                                       alternateEngine: self.alternateEngine(for: bottle), openGLRecovery: Recovery.openGL(log: result.log))
             }
             guard handedOff else { return }
             if steamUI {
@@ -2824,7 +2832,8 @@ final class AppState {
                 self.crashSuggestion = CrashSuggestion(program: game.name, bottleName: bottle.name,
                                                        renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil, vkd3dAvailable: engine.rendererDir("vkd3d") != nil),
                                                        logPath: result.log.path, current: current, seconds: Int(result.duration),
-                                                       alternateEngine: self.alternateEngine(for: bottle), itemID: "steam:\(game.appid)")
+                                                       alternateEngine: self.alternateEngine(for: bottle), itemID: "steam:\(game.appid)",
+                                                       openGLRecovery: Recovery.openGL(log: result.log))
             }
             guard handedOff else { return }
             beginSession(GameSession(title: game.name, bottleName: bottle.name, appid: game.appid, markers: markers,
@@ -3120,7 +3129,7 @@ final class AppState {
                 self.crashSuggestion = CrashSuggestion(program: game.app_title, bottleName: bottle.name,
                                                        renderer: Renderer.suggestion(after: current, d3dmetalAvailable: engine.rendererDir("d3dmetal") != nil, vkd3dAvailable: engine.rendererDir("vkd3d") != nil),
                                                        logPath: result.log.path, current: current, seconds: Int(result.duration),
-                                                       alternateEngine: self.alternateEngine(for: bottle))
+                                                       alternateEngine: self.alternateEngine(for: bottle), openGLRecovery: Recovery.openGL(log: result.log))
             }
             guard handedOff else { return }
             beginSession(GameSession(title: game.app_title, bottleName: bottle.name, appid: nil, markers: markers,

@@ -582,13 +582,16 @@ private extension View {
     @MainActor func crashAlert(_ state: AppState, title: String) -> some View {
         self.alert(title, isPresented: Binding(get: { state.crashSuggestion != nil }, set: { if !$0 { state.crashSuggestion = nil } }),
                presenting: state.crashSuggestion) { s in
-            Button(s.itemID == nil ? "Use \(s.renderer.rawValue.uppercased())" : String(format: L("Use %@ for this game"), s.renderer.rawValue.uppercased())) {
-                if let itemID = s.itemID {
-                    state.setRendererOverride(s.renderer, for: itemID)   // this game only; the environment keeps its mode
-                } else if var bottle = state.bottles.first(where: { $0.name == s.bottleName }) {
-                    bottle.settings.renderer = s.renderer
-                    bottle.settings.rendererExplicit = true   // the user picked it; recipes must not clobber it (#29)
-                    state.update(bottle)
+            // WineD3D itself may be the OpenGL caller, so another Direct3D mode can help it.
+            if s.openGLRecovery == nil || s.current == .wined3d {
+                Button(s.itemID == nil ? "Use \(s.renderer.rawValue.uppercased())" : String(format: L("Use %@ for this game"), s.renderer.rawValue.uppercased())) {
+                    if let itemID = s.itemID {
+                        state.setRendererOverride(s.renderer, for: itemID)   // this game only; the environment keeps its mode
+                    } else if var bottle = state.bottles.first(where: { $0.name == s.bottleName }) {
+                        bottle.settings.renderer = s.renderer
+                        bottle.settings.rendererExplicit = true   // the user picked it; recipes must not clobber it (#29)
+                        state.update(bottle)
+                    }
                 }
             }
             if let alt = s.alternateEngine {
@@ -608,7 +611,11 @@ private extension View {
                        s.renderer.rawValue.uppercased(), alt.id)
             } ?? String(format: L("That usually means the graphics mode doesn't suit it on this Mac. Highball can switch this bottle to %@."),
                         s.renderer.rawValue.uppercased())
-            Text(seen + " " + next)
+            if let recovery = s.openGLRecovery {
+                Text(recovery.headline + " " + recovery.meaning)
+            } else {
+                Text(seen + " " + next)
+            }
         }
     }
 }

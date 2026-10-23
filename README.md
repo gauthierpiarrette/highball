@@ -154,6 +154,9 @@ this repository.
   macOS, chip) so stale data is visible, not silently wrong.
 - **Engines**: manifest PRs bumping pinned versions, with a verification note.
 
+For OpenGL startup failures, slow motion or missing textures, see the
+[OpenGL troubleshooting notes](docs/opengl.md).
+
 ## Licensing
 
 App + CLI + HighballKit: **GPL-3.0** ([LICENSE](LICENSE)). Recipes and database:
