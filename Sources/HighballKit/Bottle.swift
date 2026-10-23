@@ -282,6 +282,22 @@ public struct Pin: Codable, Sendable, Identifiable, Hashable {
         return pin
     }
 
+    /// This pin as a launch from outside the app runs it (`highball run`, a launcher driving the
+    /// CLI): the mode asked for, then the one chosen on its game page, then its own, then the
+    /// environment's, weighed by Renderer.choose as Play weighs them. Before, the CLI skipped the
+    /// game page's choice, so a program set to DXMT there ran in the environment's mode.
+    public func launching(requested: Renderer?, gameOverride: Renderer?, in settings: BottleSettings) -> Pin {
+        var pin = self
+        pin.renderer = Renderer.choose(requested: requested, gameOverride: gameOverride, row: nil,
+                                       environmentExplicit: settings.rendererExplicit, pin: renderer,
+                                       environment: settings.renderer)
+        return pin
+    }
+
+    /// The program's id in the library ("pin:<bottle>:<uuid>"), which play history, the game
+    /// page's choices, its cover and its name are kept under.
+    public func libraryID(in bottle: String) -> String { "pin:\(bottle):\(id.uuidString)" }
+
     /// Where the pin's executable actually lives for a given bottle.
     public func executableURL(driveC: URL) -> URL {
         let named = launchURL(driveC: driveC)

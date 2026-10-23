@@ -339,8 +339,10 @@ struct PinCommand: AsyncParsableCommand {
         func run() async throws {
             let b = try BottleStore().get(bottle)
             if b.settings.pins.isEmpty { print("no pins in \(b.name)"); return }
+            let modes = LibraryStore().rendererOverrides()
             for p in b.settings.pins {
                 var extras = ["id=\(p.id.uuidString)"]
+                if let m = modes[p.libraryID(in: b.name)] { extras.append("mode=\(m.rawValue)") }
                 if !p.arguments.isEmpty { extras.append("args=\(ArgumentLine.join(p.arguments))") }
                 if !p.environment.isEmpty { extras.append("env=" + p.environment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ";")) }
                 if let r = p.renderer { extras.append("renderer=\(r.rawValue)") }
@@ -350,7 +352,7 @@ struct PinCommand: AsyncParsableCommand {
     }
 
     struct Set: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Change a pin setting: args (rest of line), renderer (name or default), env KEY=VALUE (VALUE empty removes), cover (image file or default), title (rest of line, or default).")
+        static let configuration = CommandConfiguration(abstract: "Change a pin setting: args (rest of line), renderer (name or default), env KEY=VALUE (VALUE empty removes), mode (the game page's mode: name or default), cover (image file or default), title (rest of line, or default).")
         @Argument var bottle: String
         @Argument var pin: String
         @Argument var setting: String
@@ -375,26 +377,32 @@ struct PinCommand: AsyncParsableCommand {
             case "cover":
                 // The same store and normalisation as a cover chosen or dropped in the app.
                 guard let v = value.first else { fail("cover expects an image file or 'default'") }
-                let covers = CoverStore(paths: bs.paths), id = libraryID(b.settings.pins[i], in: b)
+                let covers = CoverStore(paths: bs.paths), id = b.settings.pins[i].libraryID(in: b.name)
                 if v == "default" { covers.clearCover(for: id) }
                 else { try covers.setCover(for: id, from: URL(fileURLWithPath: (v as NSString).expandingTildeInPath)) }
                 print("ok — \(b.settings.pins[i].name): cover \(v == "default" ? "reset" : "set")")
                 return
+            case "mode":
+                // The game page's "Mode for this game", which Play and `highball run` use before the
+                // program's own renderer; default goes back to the environment's mode.
+                guard let v = value.first else { fail("mode expects a renderer or 'default'") }
+                let mode: HighballKit.Renderer? = v == "default" ? nil : HighballKit.Renderer(rawValue: v)
+                if v != "default", mode == nil { fail("bad mode \(v)") }
+                LibraryStore(paths: bs.paths).setRendererOverride(mode, for: b.settings.pins[i].libraryID(in: b.name))
+                print("ok — \(b.settings.pins[i].name): mode \(mode?.rawValue ?? "default")")
+                return
             case "title":
                 guard !value.isEmpty else { fail("title expects a name or 'default'") }
                 let title = value.joined(separator: " ")
-                try NameStore(paths: bs.paths).setName(title == "default" ? nil : title, for: libraryID(b.settings.pins[i], in: b))
+                try NameStore(paths: bs.paths).setName(title == "default" ? nil : title, for: b.settings.pins[i].libraryID(in: b.name))
                 print("ok — \(b.settings.pins[i].name): title \(title == "default" ? "reset" : "set to \(title)")")
                 return
-            default: fail("unknown setting \(setting) (args, renderer, env, cover, title)")
+            default: fail("unknown setting \(setting) (args, renderer, env, mode, cover, title)")
             }
             try bs.update(b)
             let p = b.settings.pins[i]
             print("ok — \(p.name): args=[\(ArgumentLine.join(p.arguments))] renderer=\(p.renderer?.rawValue ?? "default") env=\(p.environment.count) vars")
         }
-
-        /// The program's library id, which its cover and title are kept under.
-        func libraryID(_ pin: Pin, in b: HighballKit.Bottle) -> String { "pin:\(b.name):\(pin.id.uuidString)" }
     }
 
     struct Remove: AsyncParsableCommand {
@@ -455,8 +463,11 @@ struct Run: AsyncParsableCommand {
         if !scoped.isEmpty { print("with the game's own variables: " + scoped.keys.sorted().joined(separator: ", ")) }
         let result: LaunchResult
         if let pin = b.settings.pins.first(where: { $0.name.lowercased() == program.lowercased() }) {
-            var p = pin
-            if let renderer { p.renderer = renderer }
+            // The mode Play would give it, and the play on the library's shelf as from Play.
+            let library = LibraryStore()
+            var p = pin.launching(requested: renderer, gameOverride: library.rendererOverrides()[pin.libraryID(in: b.name)],
+                                  in: b.settings)
+            library.recordPlay(id: pin.libraryID(in: b.name), bottle: b.name)
             p.arguments += arguments
             p.environment.merge(scoped) { _, new in new }
             if p.path.lowercased().hasSuffix("steam/steam.exe") {
