@@ -973,6 +973,18 @@ final class AppState {
     /// finishing in an open Steam window), so the library follows without a relaunch.
     @ObservationIgnored private var installWatcher: DirectoryWatcher?
 
+    /// Re-reads the bottles when one's settings file is written outside the app (the CLI adding
+    /// a program while it is open), so the program shows up and a later edit here, which saves
+    /// the whole bottle, doesn't write over it. Wine's registry writes in the same folders change
+    /// no stamp and cost one stat per bottle.
+    @ObservationIgnored private var settingsWatcher: DirectoryWatcher?
+    @ObservationIgnored private var settingsStamps: [String: BottleStore.SettingsStamp] = [:]
+
+    private func reloadIfSettingsChanged() {
+        guard BottleStore.settingsStamps(of: bottles) != settingsStamps else { return }
+        refresh()
+    }
+
     /// The directories whose entries change when a game is installed or removed: the steamapps
     /// of each Steam library folder (appmanifest files) and the folder Epic installs land in.
     private func installDirectories(of bottle: Bottle) -> [URL] {
@@ -1031,6 +1043,9 @@ final class AppState {
         lsfgShimDirs = Dictionary(engines.compactMap { e in e.resolveLsfgShimDir().map { (e.id, $0) } }, uniquingKeysWith: { a, _ in a })
         bottles = (try? bottleStore.list()) ?? []
         damagedBottles = (try? bottleStore.damaged()) ?? []
+        settingsStamps = BottleStore.settingsStamps(of: bottles)
+        if settingsWatcher == nil { settingsWatcher = DirectoryWatcher { [weak self] in self?.reloadIfSettingsChanged() } }
+        settingsWatcher?.watch(bottles.map(\.url))
         needsOnboarding = engines.isEmpty && homeUnavailable == nil   // an unplugged drive is not a first run
         rosettaInstalled = Self.rosettaWorks()
         // An existing install can lose Rosetta (two Macs did after the macOS 27 update, #101 and

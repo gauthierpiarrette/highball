@@ -393,6 +393,26 @@ public struct BottleStore: Sendable {
     }
 
     public func update(_ bottle: Bottle) throws { try bottle.save() }
+
+    /// Which version of each bottle's settings file is on disk, by bottle name: the file's inode
+    /// and modification date, both of which change on every atomic save. The app compares these
+    /// to notice a `bottle.json` written outside it (the CLI adding a program while it is open)
+    /// without reloading for Wine, which writes its registry files in the same folder while a
+    /// game runs. A bottle without a settings file has no stamp.
+    public static func settingsStamps(of bottles: [Bottle]) -> [String: SettingsStamp] {
+        var stamps: [String: SettingsStamp] = [:]
+        for b in bottles {
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: b.settingsURL.path) else { continue }
+            stamps[b.name] = SettingsStamp(inode: (attrs[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0,
+                                           modified: attrs[.modificationDate] as? Date ?? .distantPast)
+        }
+        return stamps
+    }
+
+    public struct SettingsStamp: Equatable, Sendable {
+        public let inode: UInt64
+        public let modified: Date
+    }
 }
 
 /// A directory under `bottles/` that isn't a loadable bottle. Surfaced so the user can act on

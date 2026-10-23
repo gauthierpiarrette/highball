@@ -303,8 +303,8 @@ struct Bottle: AsyncParsableCommand {
 struct PinCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "pin",
-        abstract: "Per-program settings: persistent launch arguments, environment, renderer.",
-        subcommands: [List.self, Add.self, Set.self])
+        abstract: "Per-program settings: persistent launch arguments, environment, renderer, cover and title.",
+        subcommands: [List.self, Add.self, Set.self, Remove.self])
 
     struct Add: AsyncParsableCommand {
         static let configuration = CommandConfiguration(abstract: "Pin a program: a Windows path, a unix path (preinstalled games anywhere on disk), or a drive_c-relative path.")
@@ -330,7 +330,7 @@ struct PinCommand: AsyncParsableCommand {
             let pin = Pin(name: name, path: Pin.storagePath(for: url, driveC: b.driveC))
             b.settings.pins.append(pin)
             try bs.update(b)
-            print("pinned \(name) -> \(pin.path)")
+            print("pinned \(name) -> \(pin.path)\tid=\(pin.id.uuidString)")
         }
     }
 
@@ -340,7 +340,7 @@ struct PinCommand: AsyncParsableCommand {
             let b = try BottleStore().get(bottle)
             if b.settings.pins.isEmpty { print("no pins in \(b.name)"); return }
             for p in b.settings.pins {
-                var extras: [String] = []
+                var extras = ["id=\(p.id.uuidString)"]
                 if !p.arguments.isEmpty { extras.append("args=\(ArgumentLine.join(p.arguments))") }
                 if !p.environment.isEmpty { extras.append("env=" + p.environment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ";")) }
                 if let r = p.renderer { extras.append("renderer=\(r.rawValue)") }
@@ -350,7 +350,7 @@ struct PinCommand: AsyncParsableCommand {
     }
 
     struct Set: AsyncParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Change a pin setting: args (rest of line), renderer (name or default), env KEY=VALUE (VALUE empty removes).")
+        static let configuration = CommandConfiguration(abstract: "Change a pin setting: args (rest of line), renderer (name or default), env KEY=VALUE (VALUE empty removes), cover (image file or default), title (rest of line, or default).")
         @Argument var bottle: String
         @Argument var pin: String
         @Argument var setting: String
@@ -372,11 +372,45 @@ struct PinCommand: AsyncParsableCommand {
                 else { fail("bad renderer \(v)") }
             case "env":
                 guard let v = value.first, EnvAssignment.apply(v, to: &b.settings.pins[i].environment) else { fail("env expects KEY=VALUE (empty VALUE removes)") }
-            default: fail("unknown setting \(setting) (args, renderer, env)")
+            case "cover":
+                // The same store and normalisation as a cover chosen or dropped in the app.
+                guard let v = value.first else { fail("cover expects an image file or 'default'") }
+                let covers = CoverStore(paths: bs.paths), id = libraryID(b.settings.pins[i], in: b)
+                if v == "default" { covers.clearCover(for: id) }
+                else { try covers.setCover(for: id, from: URL(fileURLWithPath: (v as NSString).expandingTildeInPath)) }
+                print("ok — \(b.settings.pins[i].name): cover \(v == "default" ? "reset" : "set")")
+                return
+            case "title":
+                guard !value.isEmpty else { fail("title expects a name or 'default'") }
+                let title = value.joined(separator: " ")
+                try NameStore(paths: bs.paths).setName(title == "default" ? nil : title, for: libraryID(b.settings.pins[i], in: b))
+                print("ok — \(b.settings.pins[i].name): title \(title == "default" ? "reset" : "set to \(title)")")
+                return
+            default: fail("unknown setting \(setting) (args, renderer, env, cover, title)")
             }
             try bs.update(b)
             let p = b.settings.pins[i]
             print("ok — \(p.name): args=[\(ArgumentLine.join(p.arguments))] renderer=\(p.renderer?.rawValue ?? "default") env=\(p.environment.count) vars")
+        }
+
+        /// The program's library id, which its cover and title are kept under.
+        func libraryID(_ pin: Pin, in b: HighballKit.Bottle) -> String { "pin:\(b.name):\(pin.id.uuidString)" }
+    }
+
+    struct Remove: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Remove a pinned program from a bottle (its files stay where they are).")
+        @Argument var bottle: String
+        @Argument var name: String
+
+        func run() async throws {
+            let bs = BottleStore()
+            var b = try bs.get(bottle)
+            guard let pin = b.settings.pins.first(where: { $0.name.lowercased() == name.lowercased() }) else {
+                fail("no pin '\(name)' in \(b.name) (pins: \(b.settings.pins.map(\.name).joined(separator: ", ")))")
+            }
+            b.settings.pins.removeAll { $0.id == pin.id }
+            try bs.update(b)
+            print("removed \(pin.name) from \(b.name)")
         }
     }
 }
