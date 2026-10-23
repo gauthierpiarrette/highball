@@ -34,6 +34,7 @@ PY
 # 2026-10-01). App resources go through Bundle.main, from the files this script copies.
 if grep -rq "Bundle\.module" Sources/HighballApp; then echo "error: Sources/HighballApp reads Bundle.module; use Bundle.main and copy the file here" >&2; exit 1; fi
 swift build -c "$CONFIG" --product HighballApp
+swift build -c "$CONFIG" --product highball
 APP=dist/Highball.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp ".build/$CONFIG/HighballApp" "$APP/Contents/MacOS/Highball"
@@ -123,6 +124,10 @@ cp spike/tools/cabextract.LICENSE "$APP/Contents/Resources/tools/cabextract.LICE
 # Xcode's tools and an accepted Xcode licence, and without them the core fonts step failed
 # (highball#135, #183). A shell script reading the Mach-O header; the bundle's seal covers it.
 cp spike/tools/lipo "$APP/Contents/Resources/tools/lipo"
+# The highball command line from the same build as the app, so a tool that drives it (a launcher
+# adding the games it installs, a frontend starting them, #266) reads and writes this home with the
+# app's own version instead of a copy of its own that may be older or newer. Signed with the tools.
+cp ".build/$CONFIG/highball" "$APP/Contents/Resources/tools/highball"
 # The EpicGamesLauncher.exe stand-in for Rockstar games bought on Epic (highball#93), built from
 # spike/epic-stub/EpicGamesLauncher.c with mingw. A release must carry it; a debug build without
 # mingw goes on without it and the Epic launch path says so in the log.
