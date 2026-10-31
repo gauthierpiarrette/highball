@@ -227,10 +227,15 @@ enum L10n {
         "Use GOG's cloud saves": "Utiliser les sauvegardes du cloud GOG",
         "Keep this Mac's saves": "Garder les sauvegardes de ce Mac",
         "Decide later": "Décider plus tard",
-        "The saves on this Mac and the ones in GOG's cloud have both changed since they were last in step, so neither was copied. The copy you don't pick is replaced. Decide later plays with this Mac's saves and leaves the cloud alone.":
-            "Les sauvegardes de ce Mac et celles du cloud GOG ont toutes deux changé depuis leur dernière synchronisation, donc aucune n'a été copiée. La copie que vous ne choisissez pas est remplacée. Décider plus tard lance le jeu avec les sauvegardes de ce Mac sans toucher au cloud.",
-        "The saves on this Mac and the ones in GOG's cloud have both changed since they were last in step, so neither was copied. The copy you don't pick is replaced. Decide later leaves both as they are until the next time you play.":
-            "Les sauvegardes de ce Mac et celles du cloud GOG ont toutes deux changé depuis leur dernière synchronisation, donc aucune n'a été copiée. La copie que vous ne choisissez pas est remplacée. Décider plus tard laisse les deux telles quelles jusqu'à votre prochaine partie.",
+        "The saves on this Mac and the ones in GOG's cloud are not the same, and Highball cannot tell which is newer, so neither was copied.":
+            "Les sauvegardes de ce Mac et celles du cloud GOG diffèrent, et Highball ne peut pas savoir lesquelles sont les plus récentes : aucune n’a été copiée.",
+        "Use GOG's cloud saves replaces this Mac's; Keep this Mac's saves replaces the cloud's. Either way, a copy of what gets replaced is kept first, in %@.":
+            "Utiliser les sauvegardes du cloud GOG remplace celles de ce Mac ; Garder les sauvegardes de ce Mac remplace celles du cloud. Dans les deux cas, une copie de ce qui est remplacé est d’abord conservée dans %@.",
+        "Highball could not ask GOG where %@ keeps its saves, so it left the game in place. Try again once GOG can be reached.":
+            "Highball n’a pas pu demander à GOG où %@ garde ses sauvegardes : le jeu est resté en place. Réessayez quand GOG est joignable.",
+        "Keeping a copy of the game's saves": "Copie des sauvegardes du jeu",
+        "Decide later plays with this Mac's saves and leaves the cloud alone.": "Décider plus tard joue avec les sauvegardes de ce Mac et ne touche pas au cloud.",
+        "Decide later leaves both as they are until the next time you play.": "Décider plus tard laisse les deux telles quelles jusqu’à la prochaine partie.",
         "Installing %@": "Installation de %@",
         "Updating %@": "Mise à jour de %@",
         "Starting %@": "Lancement de %@",

@@ -110,9 +110,140 @@ public struct GOGSaves: Sendable {
 
     public enum Outcome: Sendable, Equatable {
         case synced
-        /// Both sides changed since the last sync: nothing moved, the player chooses.
+        /// Both sides changed since the last sync, or neither was synced before and both hold saves:
+        /// nothing moved, the player chooses.
         case conflict
+        /// gogdl refused the one direction asked for (newer files on the other side): nothing moved.
+        case refused
         case failed(String)
+    }
+
+    // MARK: Never losing a save
+
+    /// Copies of saves taken before a sync could replace them, in the Highball folder:
+    /// save-backups/<game id>-<location>-<install>/<date>-<mac|cloud>/. gogdl replaces both ways,
+    /// and deletes what the other side lacks: a download deletes local files the cloud lacks, an
+    /// upload cloud files the Mac lacks. The newest `keep` copies per install and location stay.
+    public var backupsDir: URL { store.dir.deletingLastPathComponent().appending(path: "save-backups", directoryHint: .isDirectory) }
+    static let keep = 10
+
+    /// One install's backups of one location: the install is in the name, as sync history is kept
+    /// per install, so a second copy of the game never rotates out the first one's backups.
+    func backupsFolder(_ game: GOGStore.InstalledGame, _ location: Location) -> URL {
+        // FNV-1a over the install's path: short, and the same from one run to the next.
+        let hash = game.folder.standardizedFileURL.path.utf8.reduce(UInt64(0xcbf2_9ce4_8422_2325)) { ($0 ^ UInt64($1)) &* 0x100_0000_01b3 }
+        return backupsDir.appending(path: "\(game.id)-\(location.name)-\(String(hash, radix: 16).prefix(8))", directoryHint: .isDirectory)
+    }
+
+    private func newBackup(in dir: URL, label: String) -> URL {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let stamp = formatter.string(from: Date()).replacingOccurrences(of: ":", with: "")
+        var name = "\(stamp)-\(label)", n = 1
+        while FileManager.default.fileExists(atPath: dir.appending(path: name).path) { n += 1; name = "\(stamp)-\(label)-\(n)" }
+        return dir.appending(path: name, directoryHint: .isDirectory)
+    }
+
+    /// Every file a sync sees: gogdl lists hidden files and links too, and replaces or deletes them.
+    static func files(in folder: URL) -> [URL] {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey]
+        let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: Array(keys))
+        var files: [URL] = []
+        while let file = walker?.nextObject() as? URL {
+            let values = try? file.resourceValues(forKeys: keys)
+            if values?.isRegularFile == true || values?.isSymbolicLink == true { files.append(file) }
+        }
+        return files
+    }
+
+    /// What a folder holds, in brief (files, bytes, latest change): two equal mean a new copy would
+    /// only repeat the last one.
+    static func fingerprint(_ folder: URL) -> String {
+        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey]
+        let values = files(in: folder).map { try? $0.resourceValues(forKeys: keys) }
+        let bytes = values.reduce(0) { $0 + ($1?.fileSize ?? 0) }
+        let latest = values.compactMap { $0?.contentModificationDate?.timeIntervalSince1970 }.max() ?? 0
+        return "\(values.count) \(bytes) \(latest)"
+    }
+
+
+    /// A copy of the saves on the Mac, before a download could replace them: the newest copy when
+    /// nothing changed since it, nil when there is nothing to copy. Throws when the copy fails, and
+    /// leaves no half copy behind: then nothing may replace them.
+    @discardableResult
+    public func backUpLocal(_ game: GOGStore.InstalledGame, location: Location, folder: URL) throws -> URL? {
+        guard !Self.files(in: folder).isEmpty else { return nil }
+        let dir = backupsFolder(game, location)
+        let fingerprint = Self.fingerprint(folder)
+        if let newest = backups(in: dir).first, (try? String(contentsOf: Self.fingerprintFile(of: newest), encoding: .utf8)) == fingerprint {
+            return newest
+        }
+        let target = try finish(newBackup(in: dir, label: "mac")) { partial in
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: folder, to: partial)
+        }
+        try? fingerprint.write(to: Self.fingerprintFile(of: target), atomically: true, encoding: .utf8)
+        return target
+    }
+
+    /// Beside a copy, not in it: a copy restored by hand never carries it into the game's folder,
+    /// where gogdl would upload it with the saves.
+    static func fingerprintFile(of backup: URL) -> URL {
+        backup.deletingLastPathComponent().appending(path: backup.lastPathComponent + ".fingerprint")
+    }
+
+    /// A copy of GOG's cloud saves, before an upload could replace them: gogdl downloads the cloud
+    /// into a fresh folder of the backups (with nothing there, it only downloads), which touches
+    /// neither the cloud nor the game's folder. A file it fails to fetch fails the whole copy, as
+    /// gogdl itself still exits 0. Throws when it fails: then nothing may replace the cloud's.
+    @discardableResult
+    public func backUpCloud(_ game: GOGStore.InstalledGame, location: Location) throws -> URL {
+        let dir = backupsFolder(game, location)
+        return try finish(newBackup(in: dir, label: "cloud")) { partial in
+            try FileManager.default.createDirectory(at: partial, withIntermediateDirectories: true)
+            let failed = OSAllocatedUnfairLock(initialState: false)
+            let status = try store.withAuthFile {
+                try store.runStreaming(Self.arguments(folder: partial, id: game.id, location: location, timestamp: "0", direction: .forceDownload)) { line in
+                    if Self.isFailure(line) { failed.withLock { $0 = true } }
+                }
+            }
+            guard status == 0, !failed.withLock({ $0 }) else {
+                throw HighballError.failed("gogdl could not copy all of GOG's cloud saves (status \(status))")
+            }
+        }
+    }
+
+    /// gogdl's lines for a file it could not move, or an error it logs and carries on past.
+    static func isFailure(_ line: String) -> Bool { line.contains("Downloading file failed") || line.contains(" ERROR: ") }
+
+    /// Fills a backup under a ".partial" name and gives it its own name only once complete, so a
+    /// failed copy never sits among the real ones; then keeps the newest `keep`, never this one.
+    private func finish(_ target: URL, fill: (URL) throws -> Void) throws -> URL {
+        let partial = target.deletingLastPathComponent().appending(path: target.lastPathComponent + ".partial", directoryHint: .isDirectory)
+        do {
+            try fill(partial)
+            try FileManager.default.moveItem(at: partial, to: target)
+            // A copied folder keeps its source's creation date, often years old: the copy is
+            // dated now, so the newest copies are the ones kept.
+            try FileManager.default.setAttributes([.creationDate: Date()], ofItemAtPath: target.path)
+        } catch {
+            try? FileManager.default.removeItem(at: partial)
+            throw error
+        }
+        // By name: the same folder can be listed under /var and /private/var.
+        for old in backups(in: target.deletingLastPathComponent()).filter({ $0.lastPathComponent != target.lastPathComponent }).dropFirst(Self.keep - 1) {
+            try? FileManager.default.removeItem(at: old)
+            try? FileManager.default.removeItem(at: Self.fingerprintFile(of: old))
+        }
+        return target
+    }
+
+    /// A location's complete backups, newest first by when they were made (not by name: a Mac
+    /// whose clock was wrong once must not prune today's copy as the oldest).
+    func backups(in dir: URL) -> [URL] {
+        let all = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        func made(_ url: URL) -> Date { (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast }
+        return all.filter { !["partial", "fingerprint"].contains($0.pathExtension) }.sorted { made($0) > made($1) }
     }
 
     var timestampsFile: URL { store.dir.appending(path: "saves.json") }
@@ -161,18 +292,40 @@ public struct GOGSaves: Sendable {
     /// gogdl's line for a conflict: it moved nothing.
     static func isConflict(_ line: String) -> Bool { line.contains("Files in conflict") }
 
+    /// gogdl's line for refusing the direction asked for ("Refused to download files, newer files
+    /// locally"): it moved nothing.
+    static func isRefusal(_ line: String) -> Bool { line.contains("Refused to") }
+
     /// Syncs one location. The new timestamp is kept only when something was decided.
+    /// `cloudInStep`: this location's saves came down from the cloud before the session, so an
+    /// upload after it needs no copy of the cloud's first.
     public func sync(_ game: GOGStore.InstalledGame, location: Location, folder: URL, direction: Direction,
-                     onLine: (@Sendable (String) -> Void)? = nil) -> Outcome {
+                     cloudInStep: Bool = false, onLine: (@Sendable (String) -> Void)? = nil) -> Outcome {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let ts = timestamps()[key(game, location)] ?? "0"
+        // Whatever a sync could replace or delete is copied first, and a failed copy stops it. An
+        // upload after a session whose saves came down first needs none: the cloud then held
+        // nothing the Mac did not, so it only takes what the game changed.
+        do {
+            switch direction {
+            case .download, .forceDownload: try backUpLocal(game, location: location, folder: folder)
+            case .forceUpload: try backUpCloud(game, location: location)
+            case .upload: if !cloudInStep { try backUpCloud(game, location: location) }
+            }
+        } catch {
+            return .failed("the saves could not be backed up first (\(error.localizedDescription)), so nothing was synced")
+        }
         let conflict = OSAllocatedUnfairLock(initialState: false)
+        let refused = OSAllocatedUnfairLock(initialState: false)
+        let failed = OSAllocatedUnfairLock(initialState: false)
         let stdout = OSAllocatedUnfairLock<String?>(initialState: nil)
         let status: Int32
         do {
             // save-sync refreshes the game's own token into auth.json.
             status = try store.withAuthFile { try store.runStreaming(Self.arguments(folder: folder, id: game.id, location: location, timestamp: ts, direction: direction)) { line in
                 if Self.isConflict(line) { conflict.withLock { $0 = true } }
+                if Self.isRefusal(line) { refused.withLock { $0 = true } }
+                if Self.isFailure(line) { failed.withLock { $0 = true } }
                 if let (value, rest) = Self.timestamp(in: line) {
                     stdout.withLock { $0 = value }
                     if !rest.isEmpty { onLine?(rest) }
@@ -180,7 +333,11 @@ public struct GOGSaves: Sendable {
             } }
         } catch { return .failed(error.localizedDescription) }
         guard status == 0 else { return .failed("gogdl save-sync exited with \(status)") }
+        // gogdl exits 0 after a file it could not move, and still prints a new timestamp: kept,
+        // that timestamp would hide the file from the next sync, so it is not.
+        if failed.withLock({ $0 }) { return .failed("gogdl could not move every file") }
         if conflict.withLock({ $0 }) { return .conflict }
+        if refused.withLock({ $0 }) { return .refused }
         if let new = stdout.withLock({ $0 }) {
             updateTimestamps { $0[key(game, location)] = new }
         }
