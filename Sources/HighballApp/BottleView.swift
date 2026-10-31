@@ -604,15 +604,20 @@ struct EnvironmentSettingsPage: View {
                                     Text(r.title)
                                     Spacer()
                                     let live = state.bottles.first { $0.name == bottle.name } ?? bottle
-                                    if live.settings.recipes.contains(r.id) || state.tweakIsInstalled(r, in: live) {
+                                    if state.isApplying(r, in: live) {
+                                        // A component reads as installed once every step has run, not when its files first appear.
+                                        HStack(spacing: 6) {
+                                            ProgressView().controlSize(.small)
+                                            Text(L("Installing…")).foregroundStyle(.secondary)
+                                        }
+                                    } else if live.settings.recipes.contains(r.id) || state.tweakIsInstalled(r, in: live) {
                                         Label(L("Installed"), systemImage: "checkmark.circle.fill").foregroundStyle(.green).labelStyle(.titleAndIcon)
                                         if r.isRemovable {
                                             Button(L("Remove")) { state.removeTweak(r, from: live) }.controlSize(.small).disabled(state.busy)
                                         }
                                     } else {
-                                        Button(L("Install")) {
-                                            state.applyRecipe(r.id, to: state.bottles.first { $0.name == bottle.name } ?? bottle)
-                                        }.controlSize(.small)
+                                        Button(L("Install")) { state.applyRecipe(r.id, to: live) }
+                                            .controlSize(.small).disabled(state.busy)
                                     }
                                 }
                             }
