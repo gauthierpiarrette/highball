@@ -12,11 +12,14 @@ public struct OwnedSteamGame: Sendable, Hashable {
     public var listsMac = false
     /// What appinfo says about the Mac build: 64-bit, 32-bit only, or none (MacAppInfoBuild).
     public var macBuild: MacAppInfoBuild = .absent
+    /// When the game first appeared in this Steam's library: when the client made its
+    /// librarycache folder (SteamAccounts.earlyArrivals).
+    public var cachedAt: Date? = nil
 
     public init(appid: Int, name: String, localCapsule: URL? = nil, localHeader: URL? = nil, listsMac: Bool = false,
-                macBuild: MacAppInfoBuild = .absent) {
+                macBuild: MacAppInfoBuild = .absent, cachedAt: Date? = nil) {
         self.appid = appid; self.name = name; self.localCapsule = localCapsule; self.localHeader = localHeader
-        self.listsMac = listsMac; self.macBuild = macBuild
+        self.listsMac = listsMac; self.macBuild = macBuild; self.cachedAt = cachedAt
     }
 
     /// Local art first: newer apps keep theirs at hashed store paths, so the fixed CDN name
@@ -57,11 +60,13 @@ public enum SteamOwnedLibrary {
               let apps = try? SteamAppInfo.read(steamRoot.appending(path: "appcache/appinfo.vdf"), only: owned) else { return [] }
         return owned.compactMap { appid in
             guard let app = apps[appid], app.type?.lowercased() == "game", let name = app.name else { return nil }
-            let art = artwork(in: cache.appending(path: String(appid)))
+            let folder = cache.appending(path: String(appid))
+            let art = artwork(in: folder)
             return OwnedSteamGame(appid: appid, name: name, localCapsule: art["library_600x900.jpg"],
                                   localHeader: art["library_header.jpg"] ?? art["header.jpg"],
                                   listsMac: app.oslist?.lowercased().contains("macos") ?? false,
-                                  macBuild: app.macBuild)
+                                  macBuild: app.macBuild,
+                                  cachedAt: try? folder.resourceValues(forKeys: [.creationDateKey]).creationDate)
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
