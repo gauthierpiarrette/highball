@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Graphics backend applied to a bottle (or overridden per program).
 public enum Renderer: String, Codable, CaseIterable, Sendable {
@@ -808,6 +809,16 @@ public struct Bottle: Sendable {
                 env["D3DM_MAX_FPS"] = String(settings.fpsCap)
             default: break
             }
+            // A limiter alone reaches the panel unevenly: it sleeps to the period but nothing aligns
+            // the present to vsync, so a frame that finishes past a boundary shows after 3 vsyncs and
+            // the next after 1. Measured on a GPU-bound game capped at 30 on a 60 Hz panel: 74% of the
+            // displayed intervals were 2 vsyncs and the interval changed 36% of the time; with Metal
+            // holding each frame for the cap's slot (the arm64 engines' MoltenVK patch 0017, the same
+            // change in Mesa's Metal WSI) it is 98% and 1.5%. Only a cap that divides the refresh rate
+            // has a slot: Metal rounds the minimum up to the next vsync, so 45 on 60 Hz would become 30.
+            if r == .dxvk || r == .vkd3d, Self.displayRefreshRate() % settings.fpsCap == 0 {
+                env["HB_PRESENT_PACE_FPS"] = String(settings.fpsCap)
+            }
         }
         // Wine's menu builder writes .lnk shortcuts and app bundles onto the macOS Desktop and
         // into ~/Applications for every installer that asks. Sikarugir's engines leave the
@@ -964,6 +975,12 @@ public struct Bottle: Sendable {
         for old in (try? fm.contentsOfDirectory(atPath: vkd3dCacheRoot.path)) ?? [] where old != key {
             try? fm.removeItem(at: vkd3dCacheRoot.appending(path: old))
         }
+    }
+    /// Frames per second of the main display, for the frame cap's pacing; CoreGraphics reports 0 for
+    /// some built-in panels, taken as 60. Tests replace it.
+    nonisolated(unsafe) public static var displayRefreshRate: () -> Int = {
+        let rate = CGDisplayCopyDisplayMode(CGMainDisplayID())?.refreshRate ?? 0
+        return rate > 0 ? Int(rate.rounded()) : 60
     }
     /// Windows path DXVK writes its per-process logs to, and its Unix location.
     public static let dxvkLogWindowsPath = #"C:\highball\logs"#
