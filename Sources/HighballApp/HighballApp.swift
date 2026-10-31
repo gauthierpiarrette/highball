@@ -549,10 +549,18 @@ private extension View {
             Button(L("Keep this Mac's saves")) { state.resolveGOGSaveConflict(.keepMac) }
             Button(L("Decide later"), role: .cancel) { state.resolveGOGSaveConflict(.skip) }
         } message: { conflict in
-            Text(conflict.beforePlay
-                 ? L("The saves on this Mac and the ones in GOG's cloud have both changed since they were last in step, so neither was copied. The copy you don't pick is replaced. Decide later plays with this Mac's saves and leaves the cloud alone.")
-                 : L("The saves on this Mac and the ones in GOG's cloud have both changed since they were last in step, so neither was copied. The copy you don't pick is replaced. Decide later leaves both as they are until the next time you play."))
+            Text(Self.saveConflictMessage(beforePlay: conflict.beforePlay, backups: GOGSaves(store: state.gogStore).backupsDir))
         }
+    }
+
+    /// Each answer says what it replaces, and that a copy of it is kept first (GOGSaves' backups).
+    static func saveConflictMessage(beforePlay: Bool, backups: URL) -> String {
+        let decideLater = beforePlay ? L("Decide later plays with this Mac's saves and leaves the cloud alone.")
+                                     : L("Decide later leaves both as they are until the next time you play.")
+        return [L("The saves on this Mac and the ones in GOG's cloud are not the same, and Highball cannot tell which is newer, so neither was copied."),
+                String(format: L("Use GOG's cloud saves replaces this Mac's; Keep this Mac's saves replaces the cloud's. Either way, a copy of what gets replaced is kept first, in %@."),
+                       (backups.path as NSString).abbreviatingWithTildeInPath),
+                decideLater].joined(separator: " ")
     }
 
     @MainActor func rendererTrialAsk(_ state: AppState) -> some View {

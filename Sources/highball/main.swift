@@ -837,9 +837,14 @@ struct GOG: AsyncParsableCommand {
             let saves = GOGSaves(store: store)
             let settings = GOGSettings.load(store)   // the game page's choices hold here too
             var folders: [(GOGSaves.Location, URL)] = []
+            var inStep = Set<String>()   // locations whose saves came down: their upload needs no copy of the cloud's first
             if !noSaves, !settings.cloudSavesOff.contains(id), store.isAuthenticated, let client = saves.clientID(for: game), let locations = try? saves.locations(clientID: client) {
                 folders = locations.compactMap { l in GOGSaves.resolve(l.template, game: game, driveC: b.driveC).map { (l, $0) } }
-                for (l, f) in folders { print("saves \(l.name) down: \(Self.describe(saves.sync(game, location: l, folder: f, direction: .download)))") }
+                for (l, f) in folders {
+                    let outcome = saves.sync(game, location: l, folder: f, direction: .download)
+                    if outcome == .synced { inStep.insert(l.name) }
+                    print("saves \(l.name) down: \(Self.describe(outcome))")
+                }
             }
             var comet: Process?
             if !noComet, settings.cometOff[id] == nil, store.isAuthenticated {
@@ -873,13 +878,17 @@ struct GOG: AsyncParsableCommand {
                 }
             }
             GOGComet(store: store).stop(comet)
-            for (l, f) in folders { print("saves \(l.name) up: \(Self.describe(saves.sync(game, location: l, folder: f, direction: .upload)))") }
+            for (l, f) in folders {
+                let outcome = saves.sync(game, location: l, folder: f, direction: .upload, cloudInStep: inStep.contains(l.name))
+                print("saves \(l.name) up: \(Self.describe(outcome))")
+            }
         }
 
         static func describe(_ outcome: GOGSaves.Outcome) -> String {
             switch outcome {
             case .synced: return "synced"
             case .conflict: return "both copies changed, nothing moved; play from the app to choose which to keep"
+            case .refused: return "newer saves on the other side, nothing moved"
             case .failed(let why): return "failed (\(why))"
             }
         }
