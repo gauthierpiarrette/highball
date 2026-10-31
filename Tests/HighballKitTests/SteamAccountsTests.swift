@@ -154,6 +154,25 @@ final class SteamAccountsTests: XCTestCase {
                        SteamAccounts.Owners(accounts: [alder], reason: .installed), "an empty choice is no choice")
     }
 
+    /// Each account's first sign-in is when Steam made its userdata folder, named by the 32-bit
+    /// account ID; other folders there are no account's.
+    func testFirstSignInsComeFromTheUserdataFolders() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "hb-accounts-\(UUID())/Steam")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+        let userdata = root.appending(path: "userdata")
+        let first = Date(timeIntervalSince1970: 1_600_000_000), second = Date(timeIntervalSince1970: 1_600_086_400)
+        for (folder, made) in [("39734273", first), ("39734274", second), ("anonymous", first)] {
+            let url = userdata.appending(path: folder)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            try FileManager.default.setAttributes([.creationDate: made], ofItemAtPath: url.path)
+        }
+        let signIns = SteamAccounts.firstSignIns(steamRoot: root)
+        XCTAssertEqual(Set(signIns.keys), [SteamAccounts.steamIDBase + 39734273, SteamAccounts.steamIDBase + 39734274])
+        XCTAssertEqual(signIns[SteamAccounts.steamIDBase + 39734273]?.timeIntervalSince1970 ?? 0, first.timeIntervalSince1970, accuracy: 1)
+        XCTAssertEqual(signIns[SteamAccounts.steamIDBase + 39734274]?.timeIntervalSince1970 ?? 0, second.timeIntervalSince1970, accuracy: 1)
+        XCTAssertEqual(SteamAccounts.firstSignIns(steamRoot: root.appending(path: "nowhere")), [:], "no userdata: nobody")
+    }
+
     /// Games that appeared while only the first account had ever signed in are its; later ones
     /// are nobody's here until seen arriving.
     func testGamesFromBeforeASecondAccountAreTheFirstOnes() {
