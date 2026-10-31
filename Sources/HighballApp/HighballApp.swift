@@ -551,11 +551,12 @@ private extension View {
         self.alert(state.gogSaveConflict.map { String(format: L("Which %@ saves should win?"), $0.title) } ?? "",
                    isPresented: .init(get: { state.gogSaveConflict != nil }, set: { if !$0 { state.resolveGOGSaveConflict(.skip) } }),
                    presenting: state.gogSaveConflict) { _ in
-            Button(L("Use GOG's cloud saves")) { state.resolveGOGSaveConflict(.useCloud) }
+            Button(state.gogSaveConflict?.epic == true ? L("Use Epic's cloud saves") : L("Use GOG's cloud saves")) { state.resolveGOGSaveConflict(.useCloud) }
             Button(L("Keep this Mac's saves")) { state.resolveGOGSaveConflict(.keepMac) }
             Button(L("Decide later"), role: .cancel) { state.resolveGOGSaveConflict(.skip) }
         } message: { conflict in
-            Text(Self.saveConflictMessage(beforePlay: conflict.beforePlay, backups: GOGSaves(store: state.gogStore).backupsDir))
+            Text(conflict.epic ? Self.epicSaveConflictMessage(beforePlay: conflict.beforePlay, backups: EpicSaves(store: state.epicStore).backups.root)
+                               : Self.saveConflictMessage(beforePlay: conflict.beforePlay, backups: GOGSaves(store: state.gogStore).backupsDir))
         }
     }
 
@@ -587,6 +588,17 @@ private extension View {
                  ? String(format: L("Highball couldn't reach GOG to find out where %@ keeps its saves, so the save folders GOG names inside the game's folder are deleted with it. Files the game changed in its folder since you first played it are still copied to save-backups first, and saves already in GOG's cloud are not affected. To keep every save, cancel and try again once GOG can be reached."), pending.title)
                  : String(format: L("GOG says %@ keeps some of its saves directly in the game's folder, which Highball can't copy as one save folder. Files the game changed in its folder since you first played it are still copied to save-backups first, along with its other save folders, and saves already in GOG's cloud are not affected."), pending.title))
         }
+    }
+
+    /// Epic's: the Mac's saves changed since the last sync and the cloud has newer ones. Epic's cloud
+    /// keeps its earlier saves when the Mac's go up, so only the Mac's need a copy (EpicSaves).
+    static func epicSaveConflictMessage(beforePlay: Bool, backups: URL) -> String {
+        let decideLater = beforePlay ? L("Decide later plays with this Mac's saves and leaves the cloud alone.")
+                                     : L("Decide later leaves both as they are until the next time you play.")
+        return [L("The saves on this Mac changed since they were last synced, and Epic's cloud has newer ones, so neither was copied."),
+                String(format: L("Use Epic's cloud saves replaces this Mac's, after a copy of them is kept in %@; Keep this Mac's saves adds them to Epic's cloud, which keeps its earlier saves."),
+                       (backups.path as NSString).abbreviatingWithTildeInPath),
+                decideLater].joined(separator: " ")
     }
 
     /// Each choice says what it replaces and that a backup is made first (GOGSaves backups).

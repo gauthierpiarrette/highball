@@ -61,14 +61,15 @@ public struct EpicStore: Sendable {
     }
 
     /// Runs legendary streaming each output line (installs are long and progress matters).
-    /// `control` lets the caller stop it the way Ctrl-C in a terminal does.
+    /// `control` lets the caller stop it the way Ctrl-C in a terminal does; `extra` adds to its
+    /// environment (WINEPREFIX, for a save folder legendary resolves inside an environment).
     @discardableResult
-    public func runStreaming(_ args: [String], control: LegendaryControl? = nil,
+    public func runStreaming(_ args: [String], control: LegendaryControl? = nil, environment extra: [String: String] = [:],
                              onLine: (@Sendable (String) -> Void)? = nil) throws -> Int32 {
         let p = Process()
         p.executableURL = binary
         p.arguments = args
-        p.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
+        p.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }.merging(extra) { $1 }
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = pipe
@@ -153,6 +154,8 @@ public struct EpicStore: Sendable {
     public struct InstalledGame: Codable, Sendable {
         public let app_name: String
         public let install_path: String?
+        /// Where the game keeps the saves legendary syncs, once it has resolved it (EpicSaves).
+        public var save_path: String? = nil
     }
 
     /// Everything legendary has installed, with where. Legendary's install state is global

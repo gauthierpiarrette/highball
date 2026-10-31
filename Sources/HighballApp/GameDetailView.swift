@@ -14,6 +14,8 @@ struct GameDetailView: View {
     /// The launch arguments being typed; saved on Return, on Play and when the page closes, so a
     /// space typed between two arguments is not normalised away mid-word.
     @State private var argsText = ""
+    /// The game keeps saves in Epic's cloud (EpicSaves.supportsCloudSaves): read once per page.
+    @State private var epicCloudSaves = false
     @State private var argsLoaded = false
     /// Saves a line still being typed, so the Play that follows launches with it. Skipped until the
     /// field has loaded, or its empty text would clear the stored arguments.
@@ -86,6 +88,9 @@ struct GameDetailView: View {
         }
         .background(BottleBackdrop())
         .navigationTitle(state.displayTitle(item))
+        .task(id: item.id) {
+            epicCloudSaves = item.epicAppName.map { EpicSaves(store: state.epicStore).supportsCloudSaves($0) } ?? false
+        }
         .task(id: storeAppID) {
             storeDetails = nil
             expandedDescription = false
@@ -135,6 +140,20 @@ struct GameDetailView: View {
 
     /// A GOG game's own settings, one row each like the rest of the page: comet (achievements and
     /// stats), cloud saves, which launch task Play runs, and an update for a game gogdl installed.
+
+    private func epicSettings(_ app: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(L("Cloud saves")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(L("Sync saves with Epic"), isOn: Binding(
+                    get: { !state.epicCloudSavesOff.contains(app) }, set: { state.epicSetCloudSaves($0, for: app) }))
+                    .toggleStyle(.checkbox).disabled(!state.epicSignedIn)
+                Text(L("Saves come down from Epic's cloud before Play, after a copy of this Mac's is kept, and go back up when the game ends. If both changed, Highball asks which one wins."))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     @ViewBuilder private func gogSettings(_ game: GOGStore.InstalledGame) -> some View {
         let cometOff = state.gogSettings.cometOff[game.id]
         HStack(alignment: .top, spacing: 12) {
@@ -582,6 +601,9 @@ struct GameDetailView: View {
                         }
                         if item.source == .gog, let game = state.gogInstalled(item, in: bottle) {
                             gogSettings(game)
+                        }
+                        if item.source == .epic, let app = item.epicAppName, epicCloudSaves {
+                            epicSettings(app)
                         }
                         // The engine is the environment's, so the page says so and can change it
                         // through the same switch page as the environment's settings, which lists

@@ -7,14 +7,16 @@ import os
 /// The three Settings tabs, so a deep link can select one.
 enum SettingsTab: Hashable { case environments, engine, troubleshooting }
 
-/// A GOG cloud-save conflict: this Mac's saves and GOG's both changed since the last sync, so
-/// gogdl moved nothing and the player picks which copy wins (GOGSaves).
+/// A cloud-save conflict: this Mac's saves and the cloud's both changed since the last sync, so
+/// nothing moved and the player picks which copy wins (GOGSaves, EpicSaves).
 struct GOGSaveConflict: Identifiable {
     enum Choice { case useCloud, keepMac, skip }
     let id = UUID()
     let title: String
     /// Asked before Play (the launch waits) or after the game ended.
     let beforePlay: Bool
+    /// An Epic game's: Epic's cloud keeps its earlier saves when the Mac's go up.
+    var epic = false
     let resolve: (Choice) -> Void
 }
 
@@ -2675,11 +2677,16 @@ final class AppState {
     /// Work a launch leaves for the end of its session (a GOG game's comet and save upload).
     @ObservationIgnored private var sessionEndActions: [UUID: (SessionRecord) -> Void] = [:]
 
+    /// An Epic game's save upload, for the end of its session: apart from sessionEndActions, which
+    /// gogStartComet reads as GOG sessions with a comet.
+    @ObservationIgnored private var epicSessionEnds: [UUID: () -> Void] = [:]
+
     private func endSession(_ session: GameSession, reason: String) {
         guard runningSessions.contains(session) else { return }
         runningSessions.removeAll { $0.id == session.id }
         defer {
             if let action = sessionEndActions.removeValue(forKey: session.id), let record = lastEndedSession { action(record) }
+            epicSessionEnds.removeValue(forKey: session.id)?()
         }
         discordEnvironments[session.id] = nil
         if runningSessions.isEmpty { stopDiscordWatch() }
@@ -3396,6 +3403,15 @@ final class AppState {
             await removeMacMetadataFiles(from: folder, of: game.app_title)
             // Fresh single-use token, fetched off the main thread right before launch.
             let info = try await Task.detached { try store.launchInfo(game.app_name) }.value
+            // Saves down from Epic's cloud first, where the game keeps them there and the player
+            // has not turned it off (EpicSaves).
+            let syncSaves = epicSignedIn && !epicCloudSavesOff.contains(game.app_name) && folder != nil
+                && EpicSaves(store: store).supportsCloudSaves(game.app_name)
+            if syncSaves, let folder {
+                stage = L("Bringing your saves down from Epic")
+                try await epicSync(game, install: folder, in: bottle, direction: .download, beforePlay: true)
+            }
+            try Task.checkCancellation()
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             let box = LaunchOutcome()
             let log = logLine(box)
@@ -3434,9 +3450,68 @@ final class AppState {
                                                        alternateEngine: self.alternateEngine(for: bottle))
             }
             guard handedOff else { return }
-            beginSession(GameSession(title: game.app_title, bottleName: bottle.name, appid: nil, markers: markers,
-                                     renderer: (renderer ?? bottle.settings.renderer).rawValue, libraryID: "epic:\(game.app_name)",
-                                     startNotice: row?.startNotice, startNoticeMinutes: row?.startNoticeMinutes), processList: box.processList)
+            let session = GameSession(title: game.app_title, bottleName: bottle.name, appid: nil, markers: markers,
+                                      renderer: (renderer ?? bottle.settings.renderer).rawValue, libraryID: "epic:\(game.app_name)",
+                                      startNotice: row?.startNotice, startNoticeMinutes: row?.startNoticeMinutes)
+            if syncSaves, let folder {
+                epicSessionEnds[session.id] = { [weak self] in
+                    Task { @MainActor in _ = try? await self?.epicSync(game, install: folder, in: bottle, direction: .upload, beforePlay: false) }
+                }
+            }
+            beginSession(session, processList: box.processList)
+        }
+    }
+
+    // MARK: Epic cloud saves
+
+    static let epicCloudSavesOffKey = "epicCloudSavesOff"
+    /// Epic games the player turned cloud saves off for, by app name.
+    var epicCloudSavesOff = Set(UserDefaults.standard.stringArray(forKey: epicCloudSavesOffKey) ?? []) {
+        didSet { UserDefaults.standard.set(epicCloudSavesOff.sorted(), forKey: Self.epicCloudSavesOffKey) }
+    }
+
+    func epicSetCloudSaves(_ on: Bool, for app: String) {
+        if on { epicCloudSavesOff.remove(app) } else { epicCloudSavesOff.insert(app) }
+    }
+
+    /// One Epic sync, asking the player on a conflict, as gogSync does. Whether the Mac's saves and
+    /// the cloud's ended up in step.
+    @discardableResult
+    private func epicSync(_ game: EpicStore.Game, install: URL, in bottle: Bottle, direction: EpicSaves.Direction,
+                          beforePlay: Bool) async throws -> Bool {
+        let saves = EpicSaves(store: epicStore)
+        let title = game.app_title, app = game.app_name, prefix = bottle.url
+        let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
+        let outcome = await Task.detached { saves.sync(app, install: install, prefix: prefix, direction: direction, onLine: log) }.value
+        switch outcome {
+        case .synced:
+            return true
+        case let .failed(why):
+            appendLog("\(title): Epic cloud saves did not sync (\(why)); \(beforePlay ? "playing with the saves on this Mac" : "they stay on this Mac until the next sync")")
+            return false
+        case .conflict:
+            let choice: GOGSaveConflict.Choice = await withCheckedContinuation { continuation in
+                if let pending = gogSaveConflict {
+                    appendLog("\(pending.title): cloud saves left as they are this time (\(title) needed the question)")
+                    resolveGOGSaveConflict(.skip)
+                }
+                gogSaveConflict = GOGSaveConflict(title: title, beforePlay: beforePlay, epic: true) { continuation.resume(returning: $0) }
+            }
+            let forced: EpicSaves.Direction
+            switch choice {
+            case .useCloud: forced = .forceDownload
+            case .keepMac: forced = .forceUpload
+            case .skip:
+                appendLog("\(title): Epic cloud saves left as they are this time")
+                return false
+            }
+            let again = await Task.detached { saves.sync(app, install: install, prefix: prefix, direction: forced, onLine: log) }.value
+            switch again {
+            case .synced: appendLog("\(title): Epic cloud saves \(choice == .useCloud ? "replaced this Mac's, a copy of them kept first" : "now hold this Mac's, beside their earlier saves")")
+            case let .failed(why): appendLog("\(title): Epic cloud saves did not sync (\(why))")
+            case .conflict: appendLog("\(title): Epic cloud saves did not sync")
+            }
+            return again == .synced
         }
     }
 
