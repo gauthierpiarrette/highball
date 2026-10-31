@@ -100,9 +100,12 @@ extension SteamAccounts {
 
     /// Whose a Steam game is, as far as this Mac can tell, and why: what the player chose, else
     /// every account with a sign of it (installed it, or was the one signed in when it first
-    /// appeared in the library). Ownership itself is not readable (the license list is encrypted).
+    /// appeared in the library), else, with no sign, any account here. Ownership itself is not
+    /// readable (the license list is encrypted).
     public struct Owners: Sendable, Equatable {
-        public enum Reason: Sendable, Equatable { case chosen, installed, added }
+        /// `unknown`: no sign of any account here, so `accounts` is every one of them: the game
+        /// stays under each account's filter until the player says whose it is.
+        public enum Reason: Sendable, Equatable { case chosen, installed, added, unknown }
         public let accounts: Set<UInt64>
         /// The strongest sign among them.
         public let reason: Reason
@@ -123,14 +126,18 @@ extension SteamAccounts {
         return true
     }
 
+    /// Whose a game is among `present`, the accounts in loginusers.vdf now. An account that has
+    /// left it counts for nothing: a choice of only such accounts gives way to the signs, and a
+    /// game with no sign of a present account is `unknown`, so it never drops out of every
+    /// account's filter, and its page still offers to set it.
     public static func owners(appID: Int, installedBy: UInt64?, added: [Int: UInt64],
-                              chosen: [Int: Set<UInt64>]) -> Owners? {
-        if let picked = chosen[appID], !picked.isEmpty { return Owners(accounts: picked, reason: .chosen) }
+                              chosen: [Int: Set<UInt64>], present: Set<UInt64>) -> Owners {
+        if let picked = chosen[appID]?.intersection(present), !picked.isEmpty { return Owners(accounts: picked, reason: .chosen) }
         var accounts = Set<UInt64>()
         var reason: Owners.Reason?
-        if let installedBy { accounts.insert(installedBy); reason = .installed }
-        if let adder = added[appID] { accounts.insert(adder); reason = reason ?? .added }
-        return reason.map { Owners(accounts: accounts, reason: $0) }
+        if let installedBy, present.contains(installedBy) { accounts.insert(installedBy); reason = .installed }
+        if let adder = added[appID], present.contains(adder) { accounts.insert(adder); reason = reason ?? .added }
+        return reason.map { Owners(accounts: accounts, reason: $0) } ?? Owners(accounts: present, reason: .unknown)
     }
 }
 

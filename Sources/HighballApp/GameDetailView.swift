@@ -740,13 +740,16 @@ struct GameDetailView: View {
     }
 
     /// Whose Steam game this is, by profile name, and why Highball thinks so; the menu sets it.
-    /// Shown only when Highball knows (SteamAccounts.Owners).
+    /// Shown with more than one account, also when Highball has no sign of whose it is
+    /// (SteamAccounts.Owners), so the player can say.
     private func steamAccountRow(_ owners: SteamAccounts.Owners) -> some View {
-        let names = owners.accounts.compactMap { state.steamAccountName($0) }.sorted()
+        let names = owners.reason == .unknown ? [L("Any account")]
+            : owners.accounts.compactMap { state.steamAccountName($0) }.sorted()
         let why: String = switch owners.reason {
         case .chosen: L("set by you")
         case .installed: L("installed it")
         case .added: L("signed in when it was added")
+        case .unknown: L("no sign of whose it is")
         }
         return HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(L("Account")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)

@@ -320,13 +320,26 @@ final class AppState {
     @ObservationIgnored private var steamAccountIDs: Set<UInt64> = []
     /// Games that appeared while only one account had signed in to their Steam: that account's
     /// (SteamAccounts.earlyArrivals).
-    var steamEarlyArrivals: [Int: UInt64] = [:]
+    var steamEarlyArrivals: [Int: UInt64] = [:] {
+        didSet { mergeSteamArrivals() }
+    }
+    /// Which account each game is put down to arriving with: what Highball saw arrive, else what
+    /// the first sign-ins imply. Merged when either changes, not for every tile the account
+    /// filter looks at.
+    private var steamAddedBy: [Int: UInt64] = [:]
     /// Who installed each Steam game, per environment, from the install records' LastOwner:
     /// built with the library, so the account filter looks it up rather than scanning.
     @ObservationIgnored private var steamInstallers: [String: [Int: UInt64]] = [:]
     /// Kept on disk (steam-accounts.json): which account was signed in when a game first
     /// appeared, the owners the player chose, and the games already seen.
-    private var steamBook = SteamBook()
+    private var steamBook = SteamBook() {
+        didSet { mergeSteamArrivals() }   // rare: loaded, a game noted, a choice set
+    }
+
+    private func mergeSteamArrivals() {
+        // What Highball saw arrive wins over what the first sign-ins imply.
+        steamAddedBy = steamBook.added.merging(steamEarlyArrivals) { seen, _ in seen }
+    }
 
     private struct SteamBook: Codable {
         var added: [Int: UInt64] = [:]
@@ -364,18 +377,15 @@ final class AppState {
     }
 
     /// Whose a Steam game is, as far as this Mac can tell (SteamAccounts.owners), among the
-    /// accounts known here; nil with one account, or no sign of a known one.
+    /// accounts known here; every one of them when there is no sign (`.unknown`). nil only with
+    /// one account, or for a game that is not Steam's.
     func steamOwners(for item: LibraryItem) -> SteamAccounts.Owners? {
         guard item.source == .steam, steamAccountIDs.count > 1, let appID = item.steamAppID else { return nil }
         // The game's own environment first: a second copy elsewhere may have another installer.
         let installer = item.bottleName.flatMap { steamInstallers[$0]?[appID] }
             ?? steamInstallers.values.lazy.compactMap { $0[appID] }.first
-        // What Highball saw arrive wins over what the first sign-ins imply.
-        let added = steamBook.added.merging(steamEarlyArrivals) { seen, _ in seen }
-        guard let owners = SteamAccounts.owners(appID: appID, installedBy: installer, added: added,
-                                                chosen: steamBook.chosen) else { return nil }
-        let present = owners.accounts.intersection(steamAccountIDs)
-        return present.isEmpty ? nil : SteamAccounts.Owners(accounts: present, reason: owners.reason)
+        return SteamAccounts.owners(appID: appID, installedBy: installer, added: steamAddedBy,
+                                    chosen: steamBook.chosen, present: steamAccountIDs)
     }
 
     /// The player's own answer to whose a game is; nil goes back to Highball's guess.

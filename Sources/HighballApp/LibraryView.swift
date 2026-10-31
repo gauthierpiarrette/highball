@@ -45,6 +45,7 @@ struct LibraryView: View {
         return shown.filter { item in
             if let sourceFilter, item.source != sourceFilter { return false }
             if installedOnly && !item.installedAnywhere { return false }
+            // A game with no sign of whose it is is every account's (`.unknown`), so it stays.
             if let account {
                 let owners = state.steamOwners(for: item)?.accounts
                 if !(owners?.contains(account) ?? false) { return false }
@@ -279,7 +280,7 @@ extension LibraryView {
             .foregroundStyle(activeSteamAccount == nil ? .secondary : Color(red: 0.13, green: 0.08, blue: 0.01))
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-        .help(L("Steam games of one account on this Mac: the one that installed or played them, or was signed in when they appeared."))
+        .help(L("Steam games of one account on this Mac: the one that installed or played them, or was signed in when they appeared. A game with no sign of whose it is shows under every account."))
     }
 }
 

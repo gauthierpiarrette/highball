@@ -91,13 +91,40 @@ final class SteamAccountsTests: XCTestCase {
     /// The player's choice wins; otherwise every account with a sign, the strongest named.
     func testOwnersComeFromTheChoiceElseEverySign() {
         let alder: UInt64 = 76561198000000001, birch: UInt64 = 76561198000000002
-        XCTAssertEqual(SteamAccounts.owners(appID: 7, installedBy: alder, added: [7: birch], chosen: [:]),
+        let both: Set<UInt64> = [alder, birch]
+        XCTAssertEqual(SteamAccounts.owners(appID: 7, installedBy: alder, added: [7: birch], chosen: [:], present: both),
                        SteamAccounts.Owners(accounts: [alder, birch], reason: .installed))
-        XCTAssertEqual(SteamAccounts.owners(appID: 9, installedBy: nil, added: [9: alder], chosen: [:]),
+        XCTAssertEqual(SteamAccounts.owners(appID: 9, installedBy: nil, added: [9: alder], chosen: [:], present: both),
                        SteamAccounts.Owners(accounts: [alder], reason: .added))
-        XCTAssertEqual(SteamAccounts.owners(appID: 7, installedBy: alder, added: [:], chosen: [7: [birch]]),
+        XCTAssertEqual(SteamAccounts.owners(appID: 7, installedBy: alder, added: [:], chosen: [7: [birch]], present: both),
                        SteamAccounts.Owners(accounts: [birch], reason: .chosen))
-        XCTAssertNil(SteamAccounts.owners(appID: 10, installedBy: nil, added: [:], chosen: [:]))
+    }
+
+    /// No sign of whose a game is (it arrived before Highball first looked, or its install record
+    /// says LastOwner 0): every account's, so no account's filter drops it and its page can set it.
+    func testAGameWithNoSignIsAnyAccounts() {
+        let alder: UInt64 = 76561198000000001, birch: UInt64 = 76561198000000002
+        XCTAssertEqual(SteamAccounts.owners(appID: 10, installedBy: nil, added: [:], chosen: [:], present: [alder, birch]),
+                       SteamAccounts.Owners(accounts: [alder, birch], reason: .unknown))
+        XCTAssertEqual(SteamAccounts.owners(appID: 10, installedBy: nil, added: [11: alder], chosen: [11: [birch]], present: [alder, birch]),
+                       SteamAccounts.Owners(accounts: [alder, birch], reason: .unknown), "another game's signs are not this one's")
+    }
+
+    /// An account that has left loginusers.vdf counts for nothing: a choice of it gives way to the
+    /// signs, a sign of it to the others, and a game left with none is any account's.
+    func testAnAccountThatLeftTrapsNoGame() {
+        let alder: UInt64 = 76561198000000001, birch: UInt64 = 76561198000000002, gone: UInt64 = 76561198000000009
+        let present: Set<UInt64> = [alder, birch]
+        XCTAssertEqual(SteamAccounts.owners(appID: 7, installedBy: alder, added: [:], chosen: [7: [gone]], present: present),
+                       SteamAccounts.Owners(accounts: [alder], reason: .installed), "the choice gives way to the signs")
+        XCTAssertEqual(SteamAccounts.owners(appID: 7, installedBy: nil, added: [:], chosen: [7: [gone, birch]], present: present),
+                       SteamAccounts.Owners(accounts: [birch], reason: .chosen), "what is left of the choice stands")
+        XCTAssertEqual(SteamAccounts.owners(appID: 7, installedBy: gone, added: [7: birch], chosen: [:], present: present),
+                       SteamAccounts.Owners(accounts: [birch], reason: .added), "the reason is a present account's")
+        XCTAssertEqual(SteamAccounts.owners(appID: 7, installedBy: gone, added: [7: gone], chosen: [7: [gone]], present: present),
+                       SteamAccounts.Owners(accounts: present, reason: .unknown))
+        XCTAssertEqual(SteamAccounts.owners(appID: 7, installedBy: alder, added: [:], chosen: [7: []], present: present),
+                       SteamAccounts.Owners(accounts: [alder], reason: .installed), "an empty choice is no choice")
     }
 
     /// Games that appeared while only the first account had ever signed in are its; later ones
