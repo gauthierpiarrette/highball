@@ -7,7 +7,8 @@ struct GameDetailView: View {
     let passedItem: LibraryItem
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var storeDetails: SteamGameDetails?
-    @State private var accountNote: SteamAccounts.GameNote?
+    /// The registry's ActiveUser for the game's environment, as last read (accountNote).
+    @State private var activeUserRead: ActiveUserRead?
     @State private var loadingDetails = true
     @State private var expandedDescription = false
     @State private var selectedGalleryURL: URL?
@@ -55,6 +56,38 @@ struct GameDetailView: View {
 
     private var storeAppID: Int? { item.steamAppID }
 
+    private struct ActiveUserRead: Equatable {
+        let bottle: String
+        let user: UInt64?
+    }
+
+    /// What the ActiveUser task depends on: the Steam game's environment, whether its Steam runs,
+    /// and whether more than one account uses it.
+    private struct AccountWatch: Equatable {
+        let bottle: String?
+        let running: Bool
+        let severalAccounts: Bool
+    }
+
+    private var accountWatch: AccountWatch {
+        let name = item.source == .steam && item.steamAppID != nil ? item.bottleName : nil
+        return AccountWatch(bottle: name, running: name.map { state.steamClients.contains($0) } ?? false,
+                            severalAccounts: name.map { (state.steamAccountsByBottle[$0]?.count ?? 0) > 1 } ?? false)
+    }
+
+    /// Who installed this Steam game, and whether Steam is signed in, or signed in last, to an
+    /// account that may not have it: "is signed in" only while that Steam runs, and an account the
+    /// player said has the game is never warned about.
+    private var accountNote: SteamAccounts.GameNote? {
+        guard item.source == .steam, let appID = item.steamAppID, let name = item.bottleName,
+              let read = activeUserRead, read.bottle == name else { return nil }
+        let owners = state.steamOwners(for: item)
+        return SteamAccounts.note(installedBy: state.gamesByBottle[name]?.first { $0.appid == appID }?.lastOwner,
+                                  accounts: state.steamAccountsByBottle[name] ?? [], activeUser: read.user,
+                                  steamRunning: state.steamClients.contains(name),
+                                  chosen: owners?.reason == .chosen ? owners?.accounts : nil)
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ScrollViewReader { scroll in
@@ -98,18 +131,19 @@ struct GameDetailView: View {
             storeDetails = details
             loadingDetails = false
         }
-        // Who installed the game, and whether Steam is signed in to another account that may not
-        // have it. Only the signed-in account is read again, every few seconds: switching accounts
-        // happens in Steam, and the install records and accounts are already in the app's state.
-        .task(id: item.id) {
-            accountNote = nil
-            guard item.source == .steam, let appID = item.steamAppID,
-                  let bottle = state.bottles.first(where: { $0.name == item.bottleName }) else { return }
+        // Which account Steam is signed in to, for accountNote. Only that is read here: the install
+        // records and accounts are already in the app's state. Read with more than one account
+        // only, again every few seconds while Steam runs (switching accounts happens in Steam),
+        // and once more when it starts or quits.
+        .task(id: accountWatch) {
+            let watch = accountWatch
+            guard let name = watch.bottle, watch.severalAccounts,
+                  let bottle = state.bottles.first(where: { $0.name == name }) else { return }
             while !Task.isCancelled {
-                let signedIn = await Task.detached { SteamAccounts.signedIn(bottleURL: bottle.url) }.value
-                let note = SteamAccounts.note(installedBy: state.gamesByBottle[bottle.name]?.first { $0.appid == appID }?.lastOwner,
-                                              accounts: state.steamAccountsByBottle[bottle.name] ?? [], signedIn: signedIn)
-                if note != accountNote { accountNote = note }
+                let user = await Task.detached { SteamAccounts.signedIn(bottleURL: bottle.url) }.value
+                let read = ActiveUserRead(bottle: name, user: user)
+                if read != activeUserRead { activeUserRead = read }
+                guard watch.running else { return }
                 try? await Task.sleep(for: .seconds(5))
             }
         }
@@ -215,7 +249,7 @@ struct GameDetailView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     row(L("Installed by"), note.installedBy.displayName)
                     if let other = note.otherAccount {
-                        Label(String(format: note.steamRunning
+                        Label(String(format: note.signedInNow
                                      ? L("Steam is signed in as %@. That account may not have access to this game.")
                                      : L("Steam last signed in as %@. That account may not have access to this game."),
                                      other.displayName),

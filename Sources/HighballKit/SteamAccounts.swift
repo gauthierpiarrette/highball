@@ -43,8 +43,10 @@ public enum SteamAccounts {
         return accounts.sorted { ($0.lastSignIn ?? .distantPast) > ($1.lastSignIn ?? .distantPast) }
     }
 
-    /// The account Steam is signed in to while it runs: the registry's ActiveUser (an account
-    /// ID, 0 once Steam has quit), in the environment's user.reg.
+    /// The registry's ActiveUser, in the environment's user.reg: the account Steam is signed in
+    /// to while it runs. Steam can leave it set after quitting, so with Steam closed it is the
+    /// account signed in last; only a running Steam (AppState.steamClients) makes it the one
+    /// signed in now. nil when it is 0 (no account) or missing.
     public static func signedIn(bottleURL: URL) -> UInt64? {
         guard let text = try? String(contentsOf: bottleURL.appending(path: "user.reg"), encoding: .utf8) else { return nil }
         return activeUser(inRegistry: text)
@@ -60,17 +62,27 @@ public enum SteamAccounts {
     /// one account on this Steam, or no record of who installed the game.
     public struct GameNote: Sendable, Equatable {
         public let installedBy: SteamAccount
-        /// The account Steam is signed in to, or signed in to last when it is not running, when
-        /// that is another one.
+        /// The account Steam is signed in to, or signed in to last when it is not, when that one
+        /// may not have the game.
         public let otherAccount: SteamAccount?
-        /// Whether Steam runs now; when not, `otherAccount` is the one it signed in to last.
-        public let steamRunning: Bool
+        /// Whether Steam runs now, signed in to `otherAccount`; when not, that is the account it
+        /// signed in to last.
+        public let signedInNow: Bool
     }
 
-    public static func note(installedBy owner: UInt64?, accounts: [SteamAccount], signedIn: UInt64?) -> GameNote? {
+    /// `activeUser` is the registry's (signedIn(bottleURL:)), `steamRunning` whether this Steam
+    /// runs now: ActiveUser can outlive Steam, so only then is it who is signed in. Without it,
+    /// the account signed in last is loginusers.vdf's newest. The accounts that have the game are
+    /// the player's choice when there is one (`chosen`, Every account included), else the
+    /// installer; the warning names the current account only when it is not among them.
+    public static func note(installedBy owner: UInt64?, accounts: [SteamAccount], activeUser: UInt64?,
+                            steamRunning: Bool, chosen: Set<UInt64>? = nil) -> GameNote? {
         guard accounts.count > 1, let owner, let installer = accounts.first(where: { $0.id == owner }) else { return nil }
-        let current = signedIn.flatMap { id in accounts.first { $0.id == id } } ?? (signedIn == nil ? accounts.first : nil)
-        return GameNote(installedBy: installer, otherAccount: current.flatMap { $0.id == owner ? nil : $0 }, steamRunning: signedIn != nil)
+        let active = activeUser.flatMap { id in accounts.first { $0.id == id } }
+        let current = active ?? (activeUser == nil ? accounts.first : nil)
+        let haveIt: Set<UInt64> = chosen.flatMap { $0.isEmpty ? nil : $0 } ?? [owner]
+        return GameNote(installedBy: installer, otherAccount: current.flatMap { haveIt.contains($0.id) ? nil : $0 },
+                        signedInNow: steamRunning && active != nil)
     }
 }
 

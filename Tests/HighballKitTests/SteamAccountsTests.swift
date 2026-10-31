@@ -44,10 +44,10 @@ final class SteamAccountsTests: XCTestCase {
         XCTAssertEqual(SteamAccounts.parse(loginUsers: text).map(\.displayName), [#"a {"b"} c"#])
     }
 
-    func testSignedInAccountComesFromTheRegistryWhileSteamRuns() {
+    func testActiveUserComesFromTheRegistry() {
         XCTAssertEqual(SteamAccounts.activeUser(inRegistry: "[Software\\\\Valve\\\\Steam\\\\ActiveProcess]\n\"ActiveUser\"=dword:023c3462\n"),
                        76561197960265728 + 0x023c3462)
-        XCTAssertNil(SteamAccounts.activeUser(inRegistry: "\"ActiveUser\"=dword:00000000\n"), "0 once Steam has quit")
+        XCTAssertNil(SteamAccounts.activeUser(inRegistry: "\"ActiveUser\"=dword:00000000\n"), "0: no account")
         XCTAssertNil(SteamAccounts.activeUser(inRegistry: ""))
     }
 
@@ -72,20 +72,47 @@ final class SteamAccountsTests: XCTestCase {
         let accounts = SteamAccounts.parse(loginUsers: loginUsers)
         let alder: UInt64 = 76561198000000001, birch: UInt64 = 76561198000000002
         // Another account signed in now.
-        let other = SteamAccounts.note(installedBy: alder, accounts: accounts, signedIn: birch)
+        let other = SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: birch, steamRunning: true)
         XCTAssertEqual(other?.installedBy.displayName, "Alder")
         XCTAssertEqual(other?.otherAccount?.displayName, "Birch")
-        XCTAssertEqual(other?.steamRunning, true)
+        XCTAssertEqual(other?.signedInNow, true)
         // The installer is signed in: the row, no warning.
-        XCTAssertNil(SteamAccounts.note(installedBy: alder, accounts: accounts, signedIn: alder)?.otherAccount)
-        // Steam not running: the account it signed in to last.
-        let closed = SteamAccounts.note(installedBy: alder, accounts: accounts, signedIn: nil)
+        XCTAssertNil(SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: alder, steamRunning: true)?.otherAccount)
+        // Steam not running, ActiveUser 0: the account it signed in to last, loginusers.vdf's newest.
+        let closed = SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: nil, steamRunning: false)
         XCTAssertEqual(closed?.otherAccount?.displayName, "Birch")
-        XCTAssertEqual(closed?.steamRunning, false)
+        XCTAssertEqual(closed?.signedInNow, false)
         // Nothing to say: one account on this Steam, or no record of who installed it.
-        XCTAssertNil(SteamAccounts.note(installedBy: alder, accounts: [accounts[1]], signedIn: nil))
-        XCTAssertNil(SteamAccounts.note(installedBy: nil, accounts: accounts, signedIn: birch))
-        XCTAssertNil(SteamAccounts.note(installedBy: 76561198000000009, accounts: accounts, signedIn: birch))
+        XCTAssertNil(SteamAccounts.note(installedBy: alder, accounts: [accounts[1]], activeUser: nil, steamRunning: false))
+        XCTAssertNil(SteamAccounts.note(installedBy: nil, accounts: accounts, activeUser: birch, steamRunning: true))
+        XCTAssertNil(SteamAccounts.note(installedBy: 76561198000000009, accounts: accounts, activeUser: birch, steamRunning: true))
+    }
+
+    /// ActiveUser can stay set after Steam quits: with Steam closed it is who signed in last,
+    /// never "is signed in".
+    func testActiveUserLeftBehindIsTheLastSignInOnly() {
+        let accounts = SteamAccounts.parse(loginUsers: loginUsers)
+        let alder: UInt64 = 76561198000000001, birch: UInt64 = 76561198000000002
+        let left = SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: birch, steamRunning: false)
+        XCTAssertEqual(left?.otherAccount?.displayName, "Birch")
+        XCTAssertEqual(left?.signedInNow, false)
+        // Running at the sign-in screen, nobody active yet: still only the last sign-in.
+        XCTAssertEqual(SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: nil, steamRunning: true)?.signedInNow, false)
+    }
+
+    /// The player's own answer to whose a game is decides whom the warning is about.
+    func testGameNoteGoesByThePlayersChoice() {
+        let accounts = SteamAccounts.parse(loginUsers: loginUsers)
+        let alder: UInt64 = 76561198000000001, birch: UInt64 = 76561198000000002
+        XCTAssertNil(SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: birch, steamRunning: true,
+                                        chosen: [birch])?.otherAccount, "the player says the signed-in account has it")
+        XCTAssertNil(SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: birch, steamRunning: true,
+                                        chosen: [alder, birch])?.otherAccount, "Every account here")
+        XCTAssertEqual(SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: alder, steamRunning: true,
+                                          chosen: [birch])?.otherAccount?.displayName, "Alder",
+                       "the player says only the other account has it")
+        XCTAssertEqual(SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: birch, steamRunning: true,
+                                          chosen: [])?.otherAccount?.displayName, "Birch", "an empty choice is no choice")
     }
 
     /// The player's choice wins; otherwise every account with a sign, the strongest named.
