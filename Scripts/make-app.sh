@@ -34,9 +34,14 @@ PY
 # 2026-10-01). App resources go through Bundle.main, from the files this script copies.
 if grep -rq "Bundle\.module" Sources/HighballApp; then echo "error: Sources/HighballApp reads Bundle.module; use Bundle.main and copy the file here" >&2; exit 1; fi
 swift build -c "$CONFIG" --product HighballApp
+# The command-line tool rides along, so a frontend that starts games (ES-DE, highball#432) can call
+# `highball play <id> --wait` from an installed app, not only from a build from source. It lives in
+# Helpers: Contents/MacOS/highball would be the app's own Highball on a case-insensitive volume.
+swift build -c "$CONFIG" --product highball
 APP=dist/Highball.app
-rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
+rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks" "$APP/Contents/Helpers"
 cp ".build/$CONFIG/HighballApp" "$APP/Contents/MacOS/Highball"
+cp ".build/$CONFIG/highball" "$APP/Contents/Helpers/highball"
 
 # Sparkle framework (SwiftPM artifact) — embedded, rpath is baked into the binary.
 SPARKLE_FW=$(ls -d .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-*/Sparkle.framework | head -1)
@@ -255,6 +260,7 @@ if [ -n "$IDENTITY" ]; then
   for tool in "$APP"/Contents/Resources/tools/*; do
     case "$tool" in *.LICENSE|*/lipo) ;; *) codesign --force --options runtime --timestamp -s "$IDENTITY" "$tool" ;; esac
   done
+  codesign --force --options runtime --timestamp -s "$IDENTITY" "$APP/Contents/Helpers/highball"
   # The Wine loader helper: its restricted entitlement is only honoured next to the profile, and a
   # binary claiming it without one is killed at exec, so without the profile it is signed plain.
   if [ ! -d "$HELPER" ]; then
