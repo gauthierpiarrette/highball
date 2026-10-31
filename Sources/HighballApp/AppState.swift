@@ -295,6 +295,8 @@ final class AppState {
                                           steamOwnedByBottle: steamOwnedByBottle, macInstalled: includeMacSteam ? macSteamGames : [],
                                           epicOwned: epicOwned, epicInstalls: epicInstalls,
                                           gogGames: gogGames, gogInstalledByBottle: gogInstalledByBottle, gogLaunchChoice: gogSettings.launchChoice,
+                                          gogMacInstalled: Set(gogMacInstalled.keys),
+                                          epicMacInstalled: Set(epicMacInstalls.keys),
                                           battleNetByBottle: battleNetByBottle,
                                           plays: libraryPlays, defaultBottle: defaultBottle?.name,
                                           pinExists: { bottle, pin in
@@ -304,6 +306,7 @@ final class AppState {
         sortLibraryByDisplayTitle()
         if let deferred = deferredPlayLink { resolvePlayLink(deferred.request) }
         refreshMacFlags()
+        if sizePrefetch == nil, libraryItems.contains(where: { $0.source == .gog || $0.source == .epic }) { prefetchDownloadSizes() }
     }
 
     // MARK: Games kept out of the library (highball#445)
@@ -385,6 +388,8 @@ final class AppState {
 
     /// Starts the native build through Steam for Mac.
     func playOnMac(_ item: LibraryItem) {
+        if item.source == .gog { gogPlayMac(item); return }
+        if item.source == .epic { epicPlayMac(item); return }
         guard let appid = item.steamAppID else { return }
         recordPlay(item)
         _ = openInSteamForMac(URL(string: "steam://run/\(appid)")!)
@@ -393,6 +398,8 @@ final class AppState {
     /// Hands the game to Steam for Mac, whose own dialog asks where to put it; without it, the
     /// download page for Steam for Mac.
     func installOnMac(_ item: LibraryItem) {
+        if item.source == .gog { gogInstallMac(item); return }
+        if item.source == .epic { epicInstallMac(item); return }
         guard let appid = item.steamAppID else { return }
         if !openInSteamForMac(URL(string: "steam://install/\(appid)")!) {
             NSWorkspace.shared.open(URL(string: "https://store.steampowered.com/about/")!)
@@ -425,7 +432,14 @@ final class AppState {
 
     /// Play on Mac leads for this item (see MacSteamBuild.leads).
     func prefersMacBuild(_ item: LibraryItem) -> Bool {
-        MacSteamBuild.leads(entry: gameDB.entry(for: item), installedOnMac: item.installedOnMac,
+        // A GOG Mac build leads once installed, unless it is one macOS no longer runs.
+        if item.source == .gog {
+            return item.installedOnMac && item.gogID.flatMap { gogMacInstalled[$0] }?.arch != .only32Bit
+        }
+        if item.source == .epic {
+            return item.installedOnMac && item.epicAppName.flatMap { epicMacArch[$0] } != .only32Bit
+        }
+        return MacSteamBuild.leads(entry: gameDB.entry(for: item), installedOnMac: item.installedOnMac,
                             appInfo: item.steamAppID.flatMap { macAppInfoByAppID[$0] })
     }
 
@@ -719,6 +733,7 @@ final class AppState {
             await MainActor.run {
                 guard let self, owned != self.steamOwnedByBottle else { return }
                 self.steamOwnedByBottle = owned
+                self.steamCloudAppIDs = Set(owned.values.joined().filter(\.steamCloud).map(\.appid))
                 self.macAppInfoByAppID = Dictionary(owned.values.joined().map { ($0.appid, $0.macBuild) },
                                                     uniquingKeysWith: { a, _ in a })
                 self.rebuildLibrary()
@@ -867,6 +882,8 @@ final class AppState {
     var gogGames: [GOGStore.Game] = []
     /// What each environment holds, read from the goggame-<id>.info files on disk.
     var gogInstalledByBottle: [String: [GOGStore.InstalledGame]] = [:]
+    /// GOG Mac builds in the Mac games folder, by GOG id (GOGMac).
+    var gogMacInstalled: [String: GOGStore.MacInstalledGame] = [:]
     var gogLoading = false
     private var gogFetchInFlight = false
     var showGOGSignIn = false
@@ -1046,7 +1063,8 @@ final class AppState {
     }
 
     /// The cheap part of `refresh`: installed games only. Runs on every install-record change,
-    /// so it must not spawn per call beyond legendary's install list, and never touches the
+    /// so it must not spawn per call beyond legendary's install list and one off-main scan for
+    /// GOG Mac builds (of which only the newest result counts), and never touches the
     /// directories it watches.
     func refreshInstalledGames() {
         refreshSteamInstalls()
@@ -1097,13 +1115,15 @@ final class AppState {
         guard epicSignedIn, !epicFetchInFlight else { return }
         epicFetchInFlight = true
         Task.detached { [store = epicStore] in
-            let installed = (try? store.installedGames()) ?? []
+            guard let installed = try? store.installedGames() else {
+                await MainActor.run { self.epicFetchInFlight = false }
+                return
+            }
+            let archs = Self.macArchs(installed)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.epicFetchInFlight = false
-                let installs = EpicStore.installMap(installed)
-                guard installs != self.epicInstalls else { return }
-                self.epicInstalls = installs
+                guard self.applyEpicInstalls(installed, archs: archs) else { return }
                 self.forgetProgramExecutables()
                 self.rebuildLibrary()
             }
@@ -1144,12 +1164,14 @@ final class AppState {
         readBattleNetInstalls()
         startSteamClientWatch()
         startDiscordWatch()
+        startMacLaunchWatch()
         libraryPlays = libraryStore.load()
         libraryOverrides = libraryStore.rendererOverrides()
         libraryLaunchArgs = libraryStore.launchArguments()
         libraryDisplays = libraryStore.displayChoices()
         hiddenItems = libraryStore.hiddenIDs()
         includeMacSteam = libraryStore.includesMacSteam
+        loadLibraryCache()
         rebuildLibrary()
         steamOwnedRefresh()
         epicRefresh()
@@ -2102,6 +2124,18 @@ final class AppState {
             return launch.executable
         case .pin:
             return item.pinID.flatMap { id in bottle.settings.pins.first { $0.id == id } }.map { $0.executableURL(driveC: bottle.driveC) }
+        }
+    }
+
+    /// The native build's place on disk: a GOG Mac build's app, the folder legendary put an Epic
+    /// Mac build in, or Steam for Mac's install folder. Nil when no Mac build is installed.
+    func macFolder(for item: LibraryItem) -> URL? {
+        guard item.installedOnMac else { return nil }
+        switch item.source {
+        case .gog: return item.gogID.flatMap { gogMacInstalled[$0] }.map { $0.app ?? $0.folder }
+        case .epic: return item.epicAppName.flatMap { epicMacInstalls[$0] }.map { URL(fileURLWithPath: $0) }
+        case .steam: return macSteamGames.first { $0.appid == item.steamAppID }?.installFolder
+        default: return nil
         }
     }
 
@@ -3281,19 +3315,24 @@ final class AppState {
 
     func epicRefresh() {
         epicSignedIn = epicStore.isAuthenticated
-        guard epicSignedIn else { epicOwned = []; epicInstalls = [:]; return }
+        guard epicSignedIn else { epicOwned = []; epicInstalls = [:]; epicMacInstalls = [:]; epicInstallRecords = [:]; epicMacArch = [:]; return }
         guard !epicFetchInFlight else { return }
         epicFetchInFlight = true
         epicLoading = epicOwned.isEmpty
         Task.detached { [store = epicStore] in
-            let owned = (try? store.ownedGames()) ?? []
-            let installed = (try? store.installedGames()) ?? []
+            // nil when legendary could not answer (offline, Epic down): the list shown, the one
+            // saved last time, stays, rather than the library emptying.
+            let owned = try? store.ownedGames()
+            let installed = try? store.installedGames()
+            let archs = installed.map(Self.macArchs)
             await MainActor.run { [weak self] in
-                self?.epicOwned = owned.sorted { $0.app_title < $1.app_title }
-                self?.epicInstalls = EpicStore.installMap(installed)
-                self?.epicLoading = false
-                self?.epicFetchInFlight = false
-                self?.rebuildLibrary()   // Epic results arrive after refresh(); fold them in
+                guard let self else { return }
+                if let owned { self.epicOwned = owned.sorted { $0.app_title < $1.app_title } }
+                if let installed, let archs { _ = self.applyEpicInstalls(installed, archs: archs) }
+                self.epicLoading = false
+                self.epicFetchInFlight = false
+                self.rebuildLibrary()   // Epic results arrive after refresh(); fold them in
+                if owned != nil { self.saveLibraryCache() }
             }
         }
     }
@@ -3339,9 +3378,20 @@ final class AppState {
     @ObservationIgnored private var epicInstallControl: LegendaryControl?
 
     func epicInstall(_ game: EpicStore.Game, in bottle: Bottle) {
+        epicDownload(title: "Installing \(game.app_title)") { store, control, onLine in
+            try store.install(game.app_name, into: bottle, control: control, onLine: onLine)
+        }
+    }
+
+    /// One legendary download under the strip (an install of either build): progress, Stop as a
+    /// Ctrl-C that keeps the progress, and legendary's refusals turned into sentences. `before`
+    /// runs first inside the same task (the Windows build's removal when switching to the Mac one).
+    private func epicDownload(title: String, before: (@MainActor () async throws -> Void)? = nil,
+                              install: @escaping @Sendable (EpicStore, LegendaryControl, @escaping @Sendable (String) -> Void) throws -> Int32) {
         let control = LegendaryControl()
-        runBusy("Installing \(game.app_title)", expected: L("a large download; you can leave it running"),
+        runBusy(title, expected: L("a large download; you can leave it running"),
                 stop: .cancelTask(label: L("Stop")), cleanup: { [weak self] in self?.epicInstallControl = nil }) { [self] in
+            try await before?()
             epicInstallControl = control
             let store = epicStore
             epicDownloadTotal = nil
@@ -3351,7 +3401,7 @@ final class AppState {
             // keeps the download's progress for the next Install.
             let status = try await withTaskCancellationHandler {
                 try await Task.detached {
-                    try store.install(game.app_name, into: bottle, control: control) { line in
+                    try install(store, control) { line in
                         if EpicStore.refusedForLock(line) { refused.withLock { $0 = true } }
                         if let why = EpicStore.installFailure(line) { failure.withLock { if $0 == nil { $0 = why } } }
                         Task { @MainActor in self.appendLog(line); self.reportEpicDownload(line) }
@@ -3366,6 +3416,186 @@ final class AppState {
                 if let why = failure.withLock({ $0 }) { throw HighballError.failed(why) }
                 throw HighballError.processFailed(command: "epic install", status: status, output: "see the log above")
             }
+            await MainActor.run { self.epicRefresh() }
+        }
+    }
+
+    /// Epic games whose Mac build legendary installed, by app name, with where (one build per
+    /// game in legendary: such a game has no Windows install).
+    var epicMacInstalls: [String: String] = [:]
+    /// legendary's install records by app name (installed size, save folder), for the game page.
+    @ObservationIgnored var epicInstallRecords: [String: EpicStore.InstalledGame] = [:]
+    /// What each installed Epic Mac build is built for, read once per refresh, not per render.
+    var epicMacArch: [String: MacBinaryArch] = [:]
+
+    /// Splits legendary's records into the Windows and Mac builds (one per game). Whether the
+    /// library changed.
+    private func applyEpicInstalls(_ installed: [EpicStore.InstalledGame], archs: [String: MacBinaryArch]) -> Bool {
+        let windows = EpicStore.installMap(installed.filter { !$0.isMac }), mac = EpicStore.installMap(installed.filter(\.isMac))
+        epicInstallRecords = Dictionary(installed.map { ($0.app_name, $0) }, uniquingKeysWith: { a, _ in a })
+        guard windows != epicInstalls || mac != epicMacInstalls || archs != epicMacArch else { return false }
+        epicInstalls = windows; epicMacInstalls = mac; epicMacArch = archs
+        return true
+    }
+
+    nonisolated private static func macArchs(_ installed: [EpicStore.InstalledGame]) -> [String: MacBinaryArch] {
+        Dictionary(installed.filter(\.isMac).compactMap { record in
+            record.install_path.map { (record.app_name, MacBinaryArch.ofApp(at: URL(fileURLWithPath: $0))) }
+        }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The Windows build is installed and legendary keeps one build per game: switching asks
+    /// first (the Windows copy is removed, its settings stay).
+    var pendingEpicMacSwitch: LibraryItem?
+    /// An Epic Mac build the player asked to remove: asked first, it is a long download back.
+    var pendingEpicMacUninstall: LibraryItem?
+    /// An Epic game whose installed Mac build does not run (32-bit), switching to the Windows one:
+    /// asked first, as the Mac build is removed.
+    var pendingEpicWindowsSwitch: LibraryItem?
+
+    /// Removes an Epic game's Mac build through legendary, then installs the Windows one in the
+    /// default environment: legendary keeps one build per game.
+    func epicSwitchToWindows(_ item: LibraryItem) {
+        guard let app = item.epicAppName, let game = epicOwned.first(where: { $0.app_name == app }) else { return }
+        guard let bottle = defaultBottle else {
+            fail(HighballError.failed(L("Make an environment first: the Windows version installs into one.")))
+            return
+        }
+        let store = epicStore
+        let removeMac: @MainActor () async throws -> Void = { [self] in
+            stage = String(format: L("Removing the Mac version of %@"), item.title)
+            let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
+            let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
+            guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall", status: status, output: "see the log above") }
+        }
+        epicDownload(title: "Installing \(game.app_title)", before: removeMac) { store, control, onLine in
+            try store.install(app, into: bottle, control: control, onLine: onLine)
+        }
+    }
+
+    /// Installs an Epic game's Mac build. With the Windows build installed, that one is removed
+    /// first through legendary, once the player has said yes (pendingEpicMacSwitch).
+    func epicInstallMac(_ item: LibraryItem, replacingWindows: Bool = false) {
+        guard let app = item.epicAppName else { return }
+        if item.installed && !replacingWindows { pendingEpicMacSwitch = item; return }
+        let store = epicStore
+        var removeWindows: (@MainActor () async throws -> Void)?
+        if replacingWindows {
+            removeWindows = { [self] in
+                stage = String(format: L("Removing the Windows version of %@"), item.title)
+                let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
+                let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
+                guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall", status: status, output: "see the log above") }
+            }
+        }
+        epicDownload(title: String(format: L("Installing the Mac version of %@"), item.title), before: removeWindows) { store, control, onLine in
+            try store.installMac(app, control: control, onLine: onLine)
+        }
+    }
+
+    /// Starts an Epic game's Mac build the way legendary launches it, with the sign-in arguments
+    /// Epic's own launcher passes (single use, fetched right before).
+    func epicPlayMac(_ item: LibraryItem) {
+        guard let app = item.epicAppName else { return }
+        if macGameProcesses[item.id]?.isRunning == true {
+            fail(HighballError.failed("\(item.title) is already running."))
+            return
+        }
+        recordPlay(item)
+        macLaunchedAt[item.id] = Date()
+        appendLog("\(item.title): opening the Mac version")
+        let store = epicStore
+        Task.detached { [weak self] in
+            do {
+                let info = try store.launchInfo(app)
+                let p = Process()
+                p.executableURL = info.executable
+                p.arguments = info.arguments
+                p.currentDirectoryURL = info.workingDirectory
+                p.environment = ProcessInfo.processInfo.environment.merging(info.environment) { $1 }
+                p.terminationHandler = { _ in Task { @MainActor in self?.macGameProcesses[item.id] = nil } }
+                try p.run()
+                await MainActor.run { self?.macGameProcesses[item.id] = p }
+            } catch {
+                await MainActor.run { self?.appendLog("\(item.title): the Mac version did not start: \(error.localizedDescription)") }
+            }
+        }
+    }
+
+    // MARK: Mac games opened outside Highball
+
+    static let relaunchDefaultsKey = "openMacGamesThroughHighball"
+    /// Off unless turned on in Settings: closing an app the player opened is a surprise otherwise.
+    static var relaunchEnabled: Bool { UserDefaults.standard.bool(forKey: relaunchDefaultsKey) }
+    @ObservationIgnored private var macLaunchObserver: NSObjectProtocol?
+    @ObservationIgnored private var relaunching: Set<String> = []
+    /// When Highball last started each Mac game, and last closed one to start it again: a launch
+    /// near either is Highball's own (a game whose app hands over to another process) and is left
+    /// alone, so the watcher can never loop.
+    @ObservationIgnored private var macLaunchedAt: [String: Date] = [:]
+    @ObservationIgnored private var macRelaunchedAt: [String: Date] = [:]
+
+    /// A GOG or Epic Mac game opened from Applications, the Dock or Spotlight starts without
+    /// what Highball brings (comet, which a game looks for only at startup, the save sync and its
+    /// backups, Epic's sign-in). With the setting on, such a launch is closed within its first
+    /// seconds and started again through Highball. Never one Highball started, and never one
+    /// running for longer than a few seconds.
+    private func startMacLaunchWatch() {
+        guard macLaunchObserver == nil else { return }
+        macLaunchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            MainActor.assumeIsolated { self?.macAppLaunched(app) }
+        }
+    }
+
+    private func macAppLaunched(_ app: NSRunningApplication) {
+        guard Self.relaunchEnabled, let bundle = app.bundleURL?.standardizedFileURL.path else { return }
+        guard let item = libraryItems.first(where: { item in
+            guard (item.source == .gog || item.source == .epic), let folder = macFolder(for: item)?.standardizedFileURL.path else { return false }
+            return bundle == folder || bundle.hasPrefix(folder + "/")
+        }), !relaunching.contains(item.id) else { return }
+        relaunching.insert(item.id)
+        // A moment for Highball's own launch to be recorded (Epic's is, once legendary answers).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            defer { self.relaunching.remove(item.id) }
+            guard self.relaunchShouldTakeOver(app, item: item) else { return }
+            self.macRelaunchedAt[item.id] = Date()
+            self.appendLog("\(item.title) was opened outside Highball; starting it again through Highball")
+            app.terminate()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                if !app.isTerminated { app.forceTerminate() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.playOnMac(item) }
+            }
+        }
+    }
+
+    /// Whether to close a game just opened outside Highball: only when it is not Highball's own
+    /// launch (its process, or within 15 seconds of Highball starting it), opened in the last few
+    /// seconds, not closed already in the last minute, and only when Highball can start it again
+    /// right now. A busy Highball (a download holding the strip) would close it and start nothing.
+    private func relaunchShouldTakeOver(_ app: NSRunningApplication, item: LibraryItem) -> Bool {
+        let now = Date()
+        if macGameProcesses[item.id]?.processIdentifier == app.processIdentifier { return false }
+        if let started = macLaunchedAt[item.id], now.timeIntervalSince(started) < 15 { return false }
+        if let closed = macRelaunchedAt[item.id], now.timeIntervalSince(closed) < 60 { return false }
+        guard !app.isTerminated, let launched = app.launchDate, now.timeIntervalSince(launched) < 8, !busy else { return false }
+        switch item.source {
+        case .gog: return item.gogID.flatMap { gogMacInstalled[$0]?.app } != nil
+        case .epic: return item.epicAppName.flatMap { epicMacInstalls[$0] } != nil
+        default: return false
+        }
+    }
+
+    /// Removes an Epic game's Mac build through legendary, so its library stays right.
+    func epicUninstallMac(_ item: LibraryItem) {
+        guard let app = item.epicAppName else { return }
+        let store = epicStore
+        runBusy(String(format: L("Removing the Mac version of %@"), item.title), expected: nil) { [self] in
+            let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
+            let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
+            guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall", status: status, output: "see the log above") }
             await MainActor.run { self.epicRefresh() }
         }
     }
@@ -3479,7 +3709,7 @@ final class AppState {
                 guard let self else { return }
                 self.gogFetchInFlight = false
                 self.gogLoading = false
-                if found != self.gogGames { self.gogGames = found; self.rebuildLibrary() }
+                if found != self.gogGames { self.gogGames = found; self.rebuildLibrary(); self.saveLibraryCache() }
             }
         }
     }
@@ -3490,12 +3720,28 @@ final class AppState {
         let found = Dictionary(bottles.map { ($0.name, GOGStore.installedGames(driveC: $0.driveC)) }, uniquingKeysWith: { a, _ in a })
         let store = gogStore
         for game in found.values.joined() { store.adoptManifest(for: game) }
+        Task { await refreshGOGMacInstalls() }
         guard found != gogInstalledByBottle else { return }
         let newIDs = Set(found.values.joined().map(\.id)).subtracting(gogGames.map(\.id))
         gogInstalledByBottle = found
         forgetProgramExecutables()
         rebuildLibrary()
         if !newIDs.isEmpty, !gogFetchInFlight { gogRefresh() }
+    }
+
+    @ObservationIgnored private var macScanGeneration = 0
+
+    /// GOG Mac builds in the Mac games folder and the Applications folders, scanned off the main
+    /// actor: /Applications holds every app on the Mac.
+    private func refreshGOGMacInstalls() async {
+        macScanGeneration += 1
+        let generation = macScanGeneration
+        let mac = await Task.detached { Dictionary(GOGStore.macInstalledGames().map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }.value
+        // Scans overlap (the install watcher fires many times during a download): an older one
+        // landing last must not bring back a game moved to the Trash since.
+        guard generation == macScanGeneration, mac != gogMacInstalled else { return }
+        gogMacInstalled = mac
+        rebuildLibrary()
     }
 
     /// The GOG tile a program added by hand plays as (LibraryIndex.gogCoveredPins), if any, with
@@ -3554,7 +3800,62 @@ final class AppState {
     func gogSignOut() {
         gogStore.logout()
         gogGames = []
+        saveLibraryCache()
         gogRefresh()
+    }
+
+    // MARK: The library as last seen
+
+    /// Epic's and GOG's lists from the last refresh, kept on disk (library-cache.json) so the
+    /// library is whole the moment Highball opens: asking legendary and GOG takes seconds (Epic's
+    /// two calls about 6), and the refresh that follows only changes what changed. A store signed
+    /// out since is not read back. Steam needs none: its lists are read off disk at once.
+    private var libraryCacheFile: URL { paths.home.appending(path: "library-cache.json") }
+
+    private struct LibraryCache: Codable {
+        struct EpicGame: Codable {
+            var appName: String, title: String, artworkWide: URL?, artworkTall: URL?, listsMac: Bool
+            var cloudSaves: Bool?
+        }
+        var epicOwned: [EpicGame] = []
+        var epicInstalls: [String: String] = [:]
+        var epicMacInstalls: [String: String] = [:]
+        var gogGames: [GOGStore.Game] = []
+
+        init(epicOwned: [EpicGame], epicInstalls: [String: String], epicMacInstalls: [String: String], gogGames: [GOGStore.Game]) {
+            self.epicOwned = epicOwned; self.epicInstalls = epicInstalls; self.epicMacInstalls = epicMacInstalls; self.gogGames = gogGames
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            epicOwned = try c.decodeIfPresent([EpicGame].self, forKey: .epicOwned) ?? []
+            epicInstalls = try c.decodeIfPresent([String: String].self, forKey: .epicInstalls) ?? [:]
+            epicMacInstalls = try c.decodeIfPresent([String: String].self, forKey: .epicMacInstalls) ?? [:]
+            gogGames = try c.decodeIfPresent([GOGStore.Game].self, forKey: .gogGames) ?? []
+        }
+    }
+
+    private func loadLibraryCache() {
+        guard epicOwned.isEmpty, gogGames.isEmpty,
+              let cache = try? JSONDecoder().decode(LibraryCache.self, from: Data(contentsOf: libraryCacheFile)) else { return }
+        if epicStore.isAuthenticated {
+            epicOwned = cache.epicOwned.map {
+                var game = EpicStore.Game(app_name: $0.appName, app_title: $0.title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall, listsMac: $0.listsMac)
+                game.cloudSaves = $0.cloudSaves ?? false
+                return game
+            }
+            epicInstalls = cache.epicInstalls
+            epicMacInstalls = cache.epicMacInstalls
+        }
+        if gogStore.isAuthenticated { gogGames = cache.gogGames }
+    }
+
+    private func saveLibraryCache() {
+        let cache = LibraryCache(
+            epicOwned: epicOwned.map { .init(appName: $0.app_name, title: $0.app_title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall,
+                                             listsMac: $0.listsMac, cloudSaves: $0.cloudSaves) },
+            epicInstalls: epicInstalls, epicMacInstalls: epicMacInstalls, gogGames: gogGames)
+        try? JSONEncoder().encode(cache).write(to: libraryCacheFile, options: .atomic)
     }
 
     /// The GOG download running now, for the strip's Stop and for quitting the app.
@@ -3588,6 +3889,153 @@ final class AppState {
                 try await gogRunSetup(game, title: item.title, in: bottle, language: language)
             }
             await MainActor.run { self.gogRefresh() }
+        }
+    }
+
+    /// Downloads a GOG game's Mac build into the Mac games folder (GOGMac): no environment, no
+    /// runtimes, no setup to run. The Windows install, if any, stays as it is.
+    func gogInstallMac(_ item: LibraryItem) {
+        guard let id = item.gogID else { return }
+        runBusy(String(format: L("Installing the Mac version of %@"), item.title), expected: L("a large download; you can leave it running"),
+                stop: .cancelTask(label: L("Stop")), cleanup: { [weak self] in self?.gogInstallControl = nil }) { [self] in
+            let store = gogStore
+            try await store.ensureInstalled()
+            stage = L("Asking GOG about the download")
+            let info = try await Task.detached { try store.info(id, platform: "osx") }.value
+            let language = GOGStore.language(for: info.languages)
+            appendLog("\(item.title): GOG Mac build \(info.buildID ?? "?"), language \(language), \(info.diskSize.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "size unknown") on disk")
+            stage = String(format: L("Downloading %@"), item.title)
+            try await gogDownload(title: item.title, command: "gogdl download --platform osx", completed: { store.downloadCompleted(id) }) { control, onLine in
+                try store.installMac(id, language: language, control: control, onLine: onLine)
+            }
+            busyProgress = nil; transferRate = nil
+            await refreshGOGMacInstalls()
+            guard let game = gogMacInstalled[id] else {
+                throw HighballError.failed(L("The download finished, but Highball could not find the Mac version in it."))
+            }
+            appendLog("\(item.title): Mac version installed in \(game.folder.path), built for \(game.arch)")
+        }
+    }
+
+    /// Mac builds running now, by library id: their process, for the achievement card's
+    /// placement and so Play cannot start a second copy.
+    var macGameProcesses: [String: Process] = [:]
+
+    /// Plays a GOG game's Mac build as the Windows one plays: saves down from GOG's cloud first
+    /// (GOG's Mac locations, or the Windows ones a Mac folder shares, GOGSaves.macLocations), comet
+    /// beside it for achievements and the unlock card, and saves back up once it quits. The app
+    /// runs as itself, no Wine; Highball starts its executable so it knows when it has quit.
+    func gogPlayMac(_ item: LibraryItem) {
+        guard let id = item.gogID, let mac = gogMacInstalled[id], let app = mac.app,
+              let executable = Bundle(url: app)?.executableURL else {
+            fail(HighballError.failed(String(format: L("Highball could not find the Mac version of %@ to open."), item.title)))
+            return
+        }
+        if macGameProcesses[item.id]?.isRunning == true {
+            fail(HighballError.failed("\(item.title) is already running."))
+            return
+        }
+        let game = mac.asInstalledGame
+        let store = gogStore
+        let useComet = gogSignedIn && gogSettings.cometOff[id] == nil
+        let useSaves = gogSignedIn && !gogSettings.cloudSavesOff.contains(id)
+        runBusy(String(format: L("Starting %@"), item.title), done: .handedOff) { [self] in
+            let saveFolders = useSaves ? await gogMacSaveLocations(game) : []
+            for (location, folder) in saveFolders {
+                stage = L("Bringing your saves down from GOG")
+                try await gogSync(game, title: item.title, location: location, folder: folder, direction: .download, beforePlay: true)
+            }
+            try Task.checkCancellation()
+
+            var comet: Process?
+            let cometLog = paths.logs.appending(path: "\(ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: ""))-comet-\(id).log")
+            if useComet {
+                stage = L("Starting comet for achievements")
+                comet = await gogStartComet(for: game, in: nil, log: cometLog)
+                if let comet { watchAchievements(of: game, item: item, bottleName: "", comet: comet, log: cometLog) }
+            }
+
+            let process = Process()
+            process.executableURL = executable
+            process.currentDirectoryURL = app.deletingLastPathComponent()
+            do { try process.run() } catch {
+                GOGComet(store: store).stop(comet)
+                throw HighballError.failed(String(format: L("The Mac version of %@ did not start: %@"), item.title, error.localizedDescription))
+            }
+            macGameProcesses[item.id] = process
+            macLaunchedAt[item.id] = Date()
+            recordPlay(item)
+            appendLog("\(item.title): the Mac version is running\(comet != nil ? ", with comet for achievements" : "")")
+            watchMacGame(process, item: item, game: game, comet: comet, cometLog: cometLog, saveFolders: saveFolders)
+        }
+    }
+
+    /// Once the Mac build quits: comet stops, and the saves go back up.
+    private func watchMacGame(_ process: Process, item: LibraryItem, game: GOGStore.InstalledGame, comet: Process?,
+                              cometLog: URL, saveFolders: [(GOGSaves.Location, URL)]) {
+        let store = gogStore
+        Task.detached { [weak self] in
+            process.waitUntilExit()
+            GOGComet(store: store).stop(comet)
+            await self?.macGameEnded(item: item, game: game, cometRan: comet != nil, cometLog: cometLog, saveFolders: saveFolders)
+        }
+    }
+
+    private func macGameEnded(item: LibraryItem, game: GOGStore.InstalledGame, cometRan: Bool, cometLog: URL,
+                              saveFolders: [(GOGSaves.Location, URL)]) async {
+        macGameProcesses[item.id] = nil
+        if cometRan, !GOGComet.gameConnected(log: cometLog) {
+            appendLog("\(item.title): the Mac version never reached comet, so no achievements this time")
+        }
+        for (location, folder) in saveFolders {
+            try? await gogSync(game, title: item.title, location: location, folder: folder, direction: .upload, beforePlay: false)
+        }
+    }
+
+    /// Steam games Steam Cloud keeps saves for (OwnedSteamGame.steamCloud).
+    var steamCloudAppIDs: Set<Int> = []
+
+    /// How GOG syncs each GOG game's saves (GOGSaves.CloudSetup), asked once a session per game.
+    @ObservationIgnored private var gogCloudSetups: [String: GOGSaves.CloudSetup] = [:]
+
+    /// How an installed GOG game's saves sync, for its page; nil when GOG could not be asked.
+    func gogCloudSetup(for item: LibraryItem) async -> GOGSaves.CloudSetup? {
+        guard let id = item.gogID else { return nil }
+        if let known = gogCloudSetups[id] { return known }
+        let windows = bottles.first { $0.name == item.bottleName }.flatMap { gogInstalled(item, in: $0) }
+        guard let game = windows ?? gogMacInstalled[id]?.asInstalledGame else { return nil }
+        let saves = GOGSaves(store: gogStore)
+        let setup = await Task.detached { saves.clientID(for: game).flatMap { try? saves.cloudSetup(clientID: $0) } }.value
+        if let setup { gogCloudSetups[id] = setup }
+        return setup
+    }
+
+    /// The Mac build's cloud-save folders, empty when it has none or GOG cannot say.
+    private func gogMacSaveLocations(_ game: GOGStore.InstalledGame) async -> [(GOGSaves.Location, URL)] {
+        let saves = GOGSaves(store: gogStore)
+        let locations = await Task.detached { () -> [GOGSaves.Location]? in
+            guard let client = saves.clientID(for: game) else { return nil }
+            return (try? saves.macLocations(clientID: client)) ?? nil
+        }.value
+        return (locations ?? []).compactMap { location in
+            guard let folder = GOGSaves.resolveMac(location.template, installFolder: game.folder) else {
+                appendLog("\(game.title): cloud saves at \(location.template) have no folder on this Mac, skipping that one")
+                return nil
+            }
+            appendLog("\(game.title): cloud saves for the Mac version in \(folder.path)")
+            return (location, folder)
+        }
+    }
+
+
+    /// Moves a GOG game's Mac build to the Trash, where it can still be put back.
+    func gogTrashMac(_ item: LibraryItem) {
+        guard let id = item.gogID, let game = gogMacInstalled[id] else { return }
+        NSWorkspace.shared.recycle([game.folder]) { [weak self] _, error in
+            Task { @MainActor in
+                if let error { self?.appendLog("\(item.title): could not move the Mac version to the Trash: \(error.localizedDescription)") }
+                await self?.refreshGOGMacInstalls()
+            }
         }
     }
 
@@ -3743,7 +4191,7 @@ final class AppState {
             let cometLog = paths.logs.appending(path: "\(ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: ""))-comet-\(game.id).log")
             if useComet {
                 stage = L("Starting comet for achievements")
-                comet = await gogStartComet(for: game, in: bottle, engine: engine, log: cometLog)
+                comet = await gogStartComet(for: game, in: (bottle, engine), log: cometLog)
                 if let comet { watchAchievements(of: game, item: item, bottleName: bottle.name, comet: comet, log: cometLog) }
             }
             if Task.isCancelled {
@@ -3823,18 +4271,21 @@ final class AppState {
         }
     }
 
-    /// comet up and listening, or nil: never an error. The placeholder service it needs is set up
-    /// once per environment.
-    private func gogStartComet(for game: GOGStore.InstalledGame, in bottle: Bottle, engine: InstalledEngine, log: URL) async -> Process? {
+    /// comet up and listening, or nil: never an error. For a Windows build, the placeholder service
+    /// it needs is set up once per environment; a Mac build (`environment` nil) needs none.
+    private func gogStartComet(for game: GOGStore.InstalledGame, in environment: (bottle: Bottle, engine: InstalledEngine)?,
+                               log: URL) async -> Process? {
         let store = gogStore
         let comet = GOGComet(store: store)
         do {
             let tools = try await store.ensureComet()
-            if try await GOGComet.installService(from: tools.service, runner: WineRunner(paths: paths, engine: engine, bottle: bottle)) {
-                appendLog("\(bottle.name): registered the GalaxyCommunication placeholder comet uses")
+            if let environment,
+               try await GOGComet.installService(from: tools.service, runner: WineRunner(paths: paths, engine: environment.engine, bottle: environment.bottle)) {
+                appendLog("\(environment.bottle.name): registered the GalaxyCommunication placeholder comet uses")
             }
-            // Only GOG sessions leave an end action, so none means no game of ours uses a comet.
-            let noOtherGame = sessionEndActions.isEmpty
+            // Only when no game of ours uses a comet: a Windows GOG session leaves an end action, a
+            // Mac one a running process.
+            let noOtherGame = sessionEndActions.isEmpty && !macGameProcesses.values.contains { $0.isRunning }
             let process = try await Task.detached {
                 if noOtherGame { comet.stopStrays() }
                 return try comet.start(log: log)
@@ -3888,9 +4339,12 @@ final class AppState {
         // The game's window, so the card lands on it: windowed, full screen or borderless.
         let session = runningSessions.first { $0.libraryID == item.id && $0.bottleName == bottleName }
         let prefix = bottles.first { $0.name == bottleName }?.url
+        let macPID = macGameProcesses[item.id].flatMap { $0.isRunning ? $0.processIdentifier : nil }
         Task {
             var window: CGRect?
-            if let session, let prefix {
+            if let macPID {
+                window = await Task.detached { Self.largestWindow(of: [macPID]) }.value
+            } else if let session, let prefix {
                 window = await Task.detached { Self.largestWindow(of: SessionWatch.pids(ofPrefix: prefix, markers: session.markers)) }.value
             }
             AchievementToast.shared.show(achievement, gameWindow: window)
@@ -3917,6 +4371,164 @@ final class AppState {
         sample.rarity = 31
         sample.rarityLevel = "Common"
         AchievementToast.shared.show(sample)
+    }
+
+    // MARK: Sizes
+
+    /// What the store said a download takes, by item id and platform, kept on disk for a week
+    /// (download-sizes.json): asking gogdl or legendary takes seconds, and a page opened again
+    /// shows the size at once.
+    private var downloadEstimates: [String: DownloadEstimate] = [:]
+    private var downloadEstimatesFetched: [String: Date] = [:]
+    private var downloadEstimatesLoaded = false
+    private var downloadSizesFile: URL { paths.home.appending(path: "download-sizes.json") }
+    private struct SavedEstimate: Codable { var download: Int64?; var disk: Int64?; var fetched: Date }
+
+    private func loadDownloadEstimates() {
+        guard !downloadEstimatesLoaded else { return }
+        downloadEstimatesLoaded = true
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        let saved = (try? decoder.decode([String: SavedEstimate].self, from: Data(contentsOf: downloadSizesFile))) ?? [:]
+        let fresh = Date().addingTimeInterval(-7 * 86_400)
+        for (key, value) in saved where value.fetched > fresh {
+            downloadEstimates[key] = DownloadEstimate(download: value.download, disk: value.disk)
+            downloadEstimatesFetched[key] = value.fetched
+        }
+    }
+
+    private func saveDownloadEstimates() {
+        let saved = Dictionary(uniqueKeysWithValues: downloadEstimates.map { key, value in
+            (key, SavedEstimate(download: value.download, disk: value.disk, fetched: downloadEstimatesFetched[key] ?? Date()))
+        })
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
+        try? encoder.encode(saved).write(to: downloadSizesFile, options: .atomic)
+    }
+
+    /// The download and installed size of a game's Windows or Mac build before it is installed:
+    /// GOG's and Epic's tools ask the store, Steam's comes from its client's data on the Mac.
+    /// nil when there is no saying (signed out, offline, no such build, Steam not set up).
+    func downloadEstimate(for item: LibraryItem, mac: Bool, refresh: Bool = false) async -> DownloadEstimate? {
+        let key = Self.estimateKey(item, mac: mac)
+        loadDownloadEstimates()
+        if !refresh, let cached = downloadEstimates[key] { return cached }
+        let estimate: DownloadEstimate?
+        switch item.source {
+        case .gog:
+            guard let id = item.gogID else { return nil }
+            let store = gogStore
+            estimate = await Task.detached {
+                (try? store.info(id, platform: mac ? "osx" : "windows")).map { DownloadEstimate(download: $0.downloadSize, disk: $0.diskSize) }
+            }.value
+        case .epic:
+            guard let app = item.epicAppName else { return nil }
+            let store = epicStore
+            estimate = await Task.detached { try? store.downloadEstimate(app, platform: mac ? "Mac" : "Windows") }.value
+        case .steam:
+            // Steam's own data in the environment's client: no request, no Steam window.
+            guard let appID = item.steamAppID,
+                  let root = (bottles.first { $0.name == item.bottleName } ?? defaultBottle).flatMap(SteamLibrary.steamRoot(of:)) else { return nil }
+            estimate = await Task.detached { () -> DownloadEstimate? in
+                guard let app = (try? SteamAppInfo.read(root.appending(path: "appcache/appinfo.vdf"), only: [appID]))?[appID] else { return nil }
+                return SteamDownloadSize.estimate(appID: appID, app: app, packages: SteamPackageInfo.read(steamRoot: root), mac: mac)
+            }.value
+        default:
+            return nil
+        }
+        if let estimate { downloadEstimates[key] = estimate; downloadEstimatesFetched[key] = Date(); saveDownloadEstimates() }
+        return estimate ?? (refresh ? downloadEstimates[key] : nil)
+    }
+
+    private static func estimateKey(_ item: LibraryItem, mac: Bool) -> String { "\(item.id)|\(mac ? "mac" : "windows")" }
+
+    /// The size saved from an earlier check, at once, with no store asked.
+    func savedEstimate(for item: LibraryItem, mac: Bool) -> DownloadEstimate? {
+        loadDownloadEstimates()
+        return downloadEstimates[Self.estimateKey(item, mac: mac)]
+    }
+
+    /// A saved size older than a day: worth a quiet second look when its page opens (an update
+    /// can change it).
+    func estimateIsStale(for item: LibraryItem, mac: Bool) -> Bool {
+        (downloadEstimatesFetched[Self.estimateKey(item, mac: mac)] ?? .distantPast) < Date().addingTimeInterval(-86_400)
+    }
+
+    /// A native Mac version the store offers: Steam's (MacSteamBuild), or one GOG or Epic lists.
+    func offersMacVersion(_ item: LibraryItem) -> Bool {
+        item.installedOnMac || (item.source == .steam ? macSteamBuild(for: item) != nil : item.macListed)
+    }
+
+    private var sizePrefetch: Task<Void, Never>?
+
+    /// Once a session, in the background: the sizes of GOG and Epic games not installed yet, so a
+    /// page has them before it is opened. One store question at a time (each takes seconds and
+    /// holds the GOG sign-in file), none while a game runs or a task holds the progress bar, and
+    /// none for sizes saved this week. Steam needs none: its sizes are read from disk at once.
+    private func prefetchDownloadSizes() {
+        sizePrefetch = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))   // after the libraries have come in
+            guard let self else { return }
+            for item in libraryItems where !item.installed && (item.source == .gog || item.source == .epic) {
+                for mac in [false] + (offersMacVersion(item) && !item.installedOnMac ? [true] : []) where savedEstimate(for: item, mac: mac) == nil {
+                    while busy || !runningSessions.isEmpty || macGameProcesses.values.contains(where: \.isRunning) {
+                        try? await Task.sleep(for: .seconds(30))
+                        if Task.isCancelled { return }
+                    }
+                    if Task.isCancelled { return }
+                    _ = await downloadEstimate(for: item, mac: mac)
+                }
+            }
+        }
+    }
+
+    /// An installed game's folder and saves as they are on disk now.
+    struct InstalledSizes: Equatable {
+        /// The Windows build's folder (or a program's); nil for Steam, whose own record the page shows.
+        var game: Int64?
+        /// The Mac build's size: a GOG Mac build's app, legendary's record of an Epic one, Steam
+        /// for Mac's record.
+        var macGame: Int64?
+        /// The saves Highball knows the place of: GOG's and Epic's cloud-save folders, Steam
+        /// Cloud's own copy for Steam. nil when there is no such place or nothing in it yet.
+        var saves: Int64?
+    }
+
+    func installedSizes(for item: LibraryItem) async -> InstalledSizes {
+        let bottle = bottles.first { $0.name == item.bottleName }
+        switch item.source {
+        case .steam:
+            // The Windows build's size is Steam's own record (LibraryItem.sizeOnDisk); Steam for
+            // Mac's install has its own record too.
+            let mac = macSteamGames.first { $0.appid == item.steamAppID }.map(\.sizeOnDisk).flatMap { $0 > 0 ? $0 : nil }
+            guard let appID = item.steamAppID, let root = bottle.flatMap(SteamLibrary.steamRoot(of:)) else { return InstalledSizes(macGame: mac) }
+            return await Task.detached {
+                InstalledSizes(macGame: mac, saves: DiskUsage.bytes(at: SteamLibrary.cloudSaveFolders(steamRoot: root, appID: appID)))
+            }.value
+        case .gog:
+            let windows = bottle.flatMap { gogInstalled(item, in: $0) }
+            let mac = item.gogID.flatMap { gogMacInstalled[$0] }
+            let saves = GOGSaves(store: gogStore)
+            return await Task.detached {
+                var sizes = InstalledSizes(game: windows.flatMap { DiskUsage.bytes(at: $0.folder) }, macGame: mac.flatMap { DiskUsage.bytes(at: $0.folder) })
+                if let windows, let bottle, let client = saves.clientID(for: windows),
+                   let locations = (try? saves.locations(clientID: client)) ?? nil {
+                    sizes.saves = DiskUsage.bytes(at: locations.compactMap { GOGSaves.resolve($0.template, game: windows, driveC: bottle.driveC) })
+                }
+                return sizes
+            }.value
+        case .epic:
+            guard let app = item.epicAppName else { return InstalledSizes() }
+            let known = epicInstallRecords[app], store = epicStore
+            return await Task.detached {
+                guard let record = known ?? (try? store.installedGames())?.first(where: { $0.app_name == app }) else { return InstalledSizes() }
+                let size = record.install_size ?? record.install_path.flatMap { DiskUsage.bytes(at: URL(fileURLWithPath: $0)) }
+                return InstalledSizes(game: record.isMac ? nil : size, macGame: record.isMac ? size : nil,
+                                      saves: record.save_path.flatMap { DiskUsage.bytes(at: URL(fileURLWithPath: $0)) })
+            }.value
+        default:
+            // A program added by hand, a Battle.net game: the folder it lives in.
+            let folder = programFolder(for: item)
+            return await Task.detached { InstalledSizes(game: folder.flatMap { DiskUsage.bytes(at: $0) }) }.value
+        }
     }
 
     /// The game's cloud-save folders in this environment, empty when it has none or GOG cannot say.

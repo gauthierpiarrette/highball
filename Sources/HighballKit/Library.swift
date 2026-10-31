@@ -22,7 +22,9 @@ public struct LibraryItem: Identifiable, Sendable, Hashable {
     /// Where it lives. nil only for an Epic or GOG title owned but not installed in any bottle.
     public let bottleName: String?
     public let installed: Bool
-    /// Steam for Mac has its native build installed (MacSteam); Play goes there first.
+    /// The native build is installed: Steam for Mac's (MacSteam), or for GOG the Mac build gogdl
+    /// put in the Mac games folder (GOGStore.macInstalledGames), or for Epic the Mac build
+    /// legendary installed. Play goes there first.
     public let installedOnMac: Bool
     public let steamAppID: Int?
     public let epicAppName: String?
@@ -40,18 +42,23 @@ public struct LibraryItem: Identifiable, Sendable, Hashable {
     public let otherBottles: [String]
     public let sizeOnDisk: Int64
     public let lastPlayed: Date?
+    /// GOG's or Epic's catalog lists a Mac version of the game, which the same purchase includes.
+    /// Listed, not proven to run: neither catalog tells a 32-bit build macOS stopped running from
+    /// a current one (Steam's builds have MacSteamBuild instead).
+    public let macListed: Bool
 
     public init(source: LibrarySource, id: String, title: String, bottleName: String?,
                 installed: Bool, installedOnMac: Bool = false, steamAppID: Int? = nil, epicAppName: String? = nil,
                 gogID: String? = nil, gogSteamAppID: Int? = nil, battleNetProduct: String? = nil,
                 pinID: UUID? = nil, artworkTall: URL? = nil, artworkWide: URL? = nil,
-                otherBottles: [String] = [], sizeOnDisk: Int64 = 0, lastPlayed: Date? = nil) {
+                otherBottles: [String] = [], sizeOnDisk: Int64 = 0, lastPlayed: Date? = nil, macListed: Bool = false) {
         self.source = source; self.id = id; self.title = title; self.bottleName = bottleName
         self.installed = installed; self.installedOnMac = installedOnMac
         self.steamAppID = steamAppID; self.epicAppName = epicAppName
         self.gogID = gogID; self.gogSteamAppID = gogSteamAppID; self.battleNetProduct = battleNetProduct
         self.pinID = pinID; self.artworkTall = artworkTall; self.artworkWide = artworkWide
         self.otherBottles = otherBottles; self.sizeOnDisk = sizeOnDisk; self.lastPlayed = lastPlayed
+        self.macListed = macListed
     }
 
     /// Playable here in either build: the Windows one in a bottle or the Mac one in Steam for Mac.
@@ -69,7 +76,7 @@ public struct LibraryItem: Identifiable, Sendable, Hashable {
                            installedOnMac: installedOnMac, steamAppID: steamAppID, epicAppName: epicAppName,
                            gogID: gogID, gogSteamAppID: gogSteamAppID, battleNetProduct: battleNetProduct,
                            pinID: pinID, artworkTall: artworkTall, artworkWide: artworkWide,
-                           otherBottles: others, sizeOnDisk: holds ? 0 : sizeOnDisk, lastPlayed: lastPlayed)
+                           otherBottles: others, sizeOnDisk: holds ? 0 : sizeOnDisk, lastPlayed: lastPlayed, macListed: macListed)
     }
 }
 
@@ -255,6 +262,8 @@ public enum LibraryIndex {
                              gogGames: [GOGStore.Game] = [],
                              gogInstalledByBottle: [String: [GOGStore.InstalledGame]] = [:],
                              gogLaunchChoice: [String: Int] = [:],
+                             gogMacInstalled: Set<String> = [],
+                             epicMacInstalled: Set<String> = [],
                              battleNetByBottle: [String: [BattleNetGame]] = [:],
                              plays: [String: LibraryStore.PlayRecord] = [:],
                              defaultBottle: String? = nil,
@@ -334,9 +343,9 @@ public enum LibraryIndex {
             }
             items.append(LibraryItem(
                 source: .epic, id: id, title: game.app_title, bottleName: home,
-                installed: home != nil, epicAppName: game.app_name,
+                installed: home != nil, installedOnMac: epicMacInstalled.contains(game.app_name), epicAppName: game.app_name,
                 artworkTall: game.artworkTall, artworkWide: game.artworkWide,
-                lastPlayed: plays[id]?.lastPlayedAt))
+                lastPlayed: plays[id]?.lastPlayedAt, macListed: game.listsMac))
         }
 
         // GOG: one tile per game. Installs are read from disk (GOGStore.installedGames), so a game
@@ -364,10 +373,11 @@ public enum LibraryIndex {
             let meta = gogKnown[id]
             items.append(LibraryItem(
                 source: .gog, id: itemID, title: meta?.title ?? primary?.game.title ?? id, bottleName: primary?.bottle,
-                installed: primary != nil, gogID: id, gogSteamAppID: meta?.steamAppID,
+                installed: primary != nil, installedOnMac: gogMacInstalled.contains(id), gogID: id, gogSteamAppID: meta?.steamAppID,
                 artworkTall: meta?.artworkTall, artworkWide: meta?.artworkWide,
                 otherBottles: copies.map(\.bottle).filter { $0 != primary?.bottle }.sorted(),
-                lastPlayed: ([itemID] + standing.filter { $0.gogItemID == itemID }.map(\.pinItemID)).compactMap { plays[$0]?.lastPlayedAt }.max()))
+                lastPlayed: ([itemID] + standing.filter { $0.gogItemID == itemID }.map(\.pinItemID)).compactMap { plays[$0]?.lastPlayedAt }.max(),
+                macListed: meta?.listsMac == true))
         }
 
         // Battle.net: one tile per game like Steam's, homed where it was last played, then in the
