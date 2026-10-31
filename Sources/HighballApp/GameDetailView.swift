@@ -7,6 +7,7 @@ struct GameDetailView: View {
     let passedItem: LibraryItem
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var storeDetails: SteamGameDetails?
+    @State private var accountNote: SteamAccounts.GameNote?
     @State private var loadingDetails = true
     @State private var expandedDescription = false
     @State private var selectedGalleryURL: URL?
@@ -96,6 +97,21 @@ struct GameDetailView: View {
             guard !Task.isCancelled else { return }
             storeDetails = details
             loadingDetails = false
+        }
+        // Who installed the game, and whether Steam is signed in to another account that may not
+        // have it. Only the signed-in account is read again, every few seconds: switching accounts
+        // happens in Steam, and the install records and accounts are already in the app's state.
+        .task(id: item.id) {
+            accountNote = nil
+            guard item.source == .steam, let appID = item.steamAppID,
+                  let bottle = state.bottles.first(where: { $0.name == item.bottleName }) else { return }
+            while !Task.isCancelled {
+                let signedIn = await Task.detached { SteamAccounts.signedIn(bottleURL: bottle.url) }.value
+                let note = SteamAccounts.note(installedBy: state.gamesByBottle[bottle.name]?.first { $0.appid == appID }?.lastOwner,
+                                              accounts: state.steamAccountsByBottle[bottle.name] ?? [], signedIn: signedIn)
+                if note != accountNote { accountNote = note }
+                try? await Task.sleep(for: .seconds(5))
+            }
         }
     }
 
@@ -194,6 +210,22 @@ struct GameDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             row(L("Source"), item.source == .steam ? "Steam" : item.source == .epic ? "Epic Games"
                 : item.source == .gog ? "GOG" : item.source == .battlenet ? "Battle.net" : L("Windows program"))
+            if item.source == .steam, let owners = state.steamOwners(for: item) { steamAccountRow(owners) }
+            if let note = accountNote {
+                VStack(alignment: .leading, spacing: 6) {
+                    row(L("Installed by"), note.installedBy.displayName)
+                    if let other = note.otherAccount {
+                        Label(String(format: note.steamRunning
+                                     ? L("Steam is signed in as %@. That account may not have access to this game.")
+                                     : L("Steam last signed in as %@. That account may not have access to this game."),
+                                     other.displayName),
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(HB.amber)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.leading, Self.rowLabelWidth + 12)   // under the row's value
+                    }
+                }
+            }
             if item.sizeOnDisk > 0 {
                 row(L("Size on disk"), ByteCountFormatter.string(fromByteCount: item.sizeOnDisk, countStyle: .file))
             }
@@ -707,9 +739,38 @@ struct GameDetailView: View {
         .padding(.top, 6)
     }
 
+    /// Whose Steam game this is, by profile name, and why Highball thinks so; the menu sets it.
+    /// Shown only when Highball knows (SteamAccounts.Owners).
+    private func steamAccountRow(_ owners: SteamAccounts.Owners) -> some View {
+        let names = owners.accounts.compactMap { state.steamAccountName($0) }.sorted()
+        let why: String = switch owners.reason {
+        case .chosen: L("set by you")
+        case .installed: L("installed it")
+        case .added: L("signed in when it was added")
+        }
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(L("Account")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+            Menu {
+                ForEach(state.steamAccounts, id: \.id) { account in
+                    Button(account.displayName) { state.setSteamOwners([account.id], for: item) }
+                }
+                Button(L("Every account here")) { state.setSteamOwners(Set(state.steamAccounts.map(\.id)), for: item) }
+                Divider()
+                Button(L("Let Highball guess")) { state.setSteamOwners(nil, for: item) }
+            } label: {
+                Text(names.joined(separator: ", ")).font(.callout)
+            }
+            .menuStyle(.button).buttonStyle(.plain).fixedSize()
+            .help(L("Whose Steam game this is. Highball goes by who installed it and who was signed in when it appeared; pick one to set it."))
+            Text(why).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    static let rowLabelWidth: CGFloat = 110
+
     private func row(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+            Text(label).font(.caption).foregroundStyle(.secondary).frame(width: Self.rowLabelWidth, alignment: .leading)
             Text(value).font(.callout).textSelection(.enabled)
         }
     }

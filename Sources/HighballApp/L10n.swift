@@ -396,6 +396,22 @@ enum L10n {
         "Also installed in %@": "Aussi installé dans %@",
         "Source": "Source",
         "Size on disk": "Taille sur le disque",
+        "Installed by": "Installé par",
+        "All Steam accounts": "Tous les comptes Steam",
+        "Steam games of one account on this Mac: the one that installed or played them, or was signed in when they appeared.":
+            "Les jeux Steam d’un seul compte sur ce Mac : celui qui les a installés ou y a joué, ou qui était connecté quand ils sont apparus.",
+        "Account": "Compte",
+        "set by you": "choisi par vous",
+        "installed it": "l’a installé",
+        "signed in when it was added": "connecté quand il a été ajouté",
+        "Whose Steam game this is. Highball goes by who installed it and who was signed in when it appeared; pick one to set it.":
+            "À qui est ce jeu Steam. Highball se fie à qui l’a installé et à qui était connecté quand il est apparu ; choisissez un compte pour le fixer.",
+        "Every account here": "Tous les comptes de ce Mac",
+        "Let Highball guess": "Laisser Highball deviner",
+        "Steam is signed in as %@. That account may not have access to this game.":
+            "Steam est connecté au compte %@. Ce compte n’a peut-être pas accès à ce jeu.",
+        "Steam last signed in as %@. That account may not have access to this game.":
+            "Steam s’est connecté en dernier au compte %@. Ce compte n’a peut-être pas accès à ce jeu.",
         "Last played": "Dernière partie",
         "Windows program": "Programme Windows",
         "Choose cover image…": "Choisir une image de couverture…",
