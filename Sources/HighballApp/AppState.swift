@@ -1983,6 +1983,28 @@ final class AppState {
         }
     }
 
+    /// The recipe being applied now, and where, from its first step to its last. A component's
+    /// Installed check can pass long before the run ends: winetricks puts .NET Framework 4.8's
+    /// clr.dll in place early, then runs Microsoft's compiler services for many minutes.
+    var applyingRecipe: (id: String, bottle: String)?
+
+    /// Whether `component` is being installed in `bottle` now: applied itself, or pulled in by the
+    /// recipe being applied (a game's fix that requires .NET Framework 4.8) and not yet done. A new
+    /// environment's setup runs its recipes without this, so it is not covered.
+    func isApplying(_ component: HighballKit.Recipe, in bottle: Bottle) -> Bool {
+        guard let applying = applyingRecipe, applying.bottle == bottle.name else { return false }
+        if applying.id == component.id { return true }
+        guard !bottle.settings.recipes.contains(component.id) else { return false }
+        // Through `requires` at any depth, as RecipeRunner applies them.
+        var pending = [applying.id], seen = Set<String>()
+        while let id = pending.popLast() {
+            guard seen.insert(id).inserted, let requires = Self.recipe(id)?.requires else { continue }
+            if requires.contains(component.id) { return true }
+            pending += requires
+        }
+        return false
+    }
+
     func applyRecipe(_ id: String, to bottle: Bottle, then done: DoneState? = nil) {
         guard let engine = engine(for: bottle), let recipe = Self.recipe(id) else { return }
         if let wanted = recipe.engineToOffer(current: engine.manifest, known: Self.knownManifests) {
@@ -1993,7 +2015,9 @@ final class AppState {
         }
         runBusy("Installing \(recipe.title)",
                 done: done ?? DoneState(title: String(format: L("%@ installed"), recipe.title), ctaTitle: nil, cta: nil),
-                stop: .killBottleThenRepair(bottle, label: L("Stop and repair"))) { [self] in
+                stop: .killBottleThenRepair(bottle, label: L("Stop and repair")),
+                cleanup: { [weak self] in self?.applyingRecipe = nil }) { [self] in
+            applyingRecipe = (recipe.id, bottle.name)
             var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
             let notes = try await runner.apply(recipe, resolve: { Self.recipe($0) }) { line in Task { @MainActor in self.appendLog(line) } }
             for n in notes { await MainActor.run { self.appendLog("note: \(n)") } }
