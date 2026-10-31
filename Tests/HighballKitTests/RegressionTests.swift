@@ -1091,6 +1091,30 @@ extension RegressionTests {
         XCTAssertEqual(withMissing.last?.label, "x64-gone-r0", "a missing engine has no manifest, so its row is the id")
     }
 
+    // Hayden's picker of 48 rows (Discord, 2026-10-29): only the newest of each line and macOS floor is offered
+    // to download, unless the player asks for the older revisions.
+    func testPickersOfferOnlyTheNewestOfEachFlavourToDownload() throws {
+        func manifest(_ id: String, floor: String = "14.0") throws -> EngineManifest {
+            let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"\#(floor)","components":{}}"#
+            return try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8))
+        }
+        let known = [try manifest("x64-a-r2"), try manifest("x64-a-r9"), try manifest("x64-a-r10"),
+                     try manifest("x64-a-r8", floor: "27.0"), try manifest("x64-a-r11", floor: "27.0"),
+                     try manifest("x64-b-r3")]
+        func ids(installed: [InstalledEngine] = [], current: String? = nil, macOS: String = "27.0", all: Bool = false) -> [String] {
+            EngineStore.offeredEngines(installed: installed, known: known, current: current, macOS: macOS, allRevisions: all).map(\.id)
+        }
+        XCTAssertEqual(ids(), ["x64-b-r3", "x64-a-r11", "x64-a-r10"])
+        XCTAssertEqual(ids(macOS: "26.6"), ["x64-b-r3", "x64-a-r10"], "a revision this Mac cannot run does not hide the one it can")
+        XCTAssertEqual(ids(all: true), ["x64-b-r3", "x64-a-r11", "x64-a-r10", "x64-a-r9", "x64-a-r8", "x64-a-r2"])
+        // An old engine a bottle runs stays listed, and the newest of its flavour already installed offers nothing older.
+        let r2 = InstalledEngine(manifest: try manifest("x64-a-r2"), root: URL(fileURLWithPath: "/tmp/r2"))
+        XCTAssertEqual(ids(installed: [r2], current: "x64-a-r2"), ["x64-a-r2", "x64-b-r3", "x64-a-r11", "x64-a-r10"])
+        let r10 = InstalledEngine(manifest: try manifest("x64-a-r10"), root: URL(fileURLWithPath: "/tmp/r10"))
+        XCTAssertEqual(ids(installed: [r10]), ["x64-a-r10", "x64-b-r3", "x64-a-r11"])
+        XCTAssertEqual(ids(installed: [], current: "x64-gone-r1"), ["x64-b-r3", "x64-a-r11", "x64-a-r10", "x64-gone-r1"])
+    }
+
     func testEnginesAboveTheMacOSFloorAreNotOffered() throws {
         func manifest(_ id: String, floor: String) throws -> EngineManifest {
             let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"\#(floor)","components":{}}"#

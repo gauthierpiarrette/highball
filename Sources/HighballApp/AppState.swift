@@ -4222,7 +4222,8 @@ final class AppState {
     }
 
     func offeredEngines(for bottle: Bottle) -> [EngineStore.OfferedEngine] {
-        EngineStore.offeredEngines(installed: engines, known: Self.knownManifests, current: bottle.settings.engineID)
+        EngineStore.offeredEngines(installed: engines, known: Self.knownManifests, current: bottle.settings.engineID,
+                                   allRevisions: UserDefaults.standard.bool(forKey: EngineStore.showOlderRevisionsKey))
     }
 
     /// Moves a bottle to an engine by id, installing it first when it is only known from a

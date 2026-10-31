@@ -311,6 +311,7 @@ struct EnvironmentSettingsPage: View {
     // Settings' TabView owns the window toolbar; its generated navigation arrow does not pop.
     var showsInlineBack = false
     @State private var selectedSection: EnvironmentSettingsSection = .graphics
+    @AppStorage(EngineStore.showOlderRevisionsKey) private var showOlderRevisions = false
     @State private var confirmDelete = false
     @State private var showFrameGenInfo = false
 
@@ -576,6 +577,7 @@ struct EnvironmentSettingsPage: View {
                                 }
                             }
                             .disabled(state.busy)
+                            Toggle(L("Show older engine revisions"), isOn: $showOlderRevisions)
                             Text(L("Environments never change engine on their own. Switching re-runs the Windows setup when the Wine build differs; switching back is the same step. An engine marked download is fetched first."))
                                 .font(.caption).foregroundStyle(.secondary)
                         }

@@ -191,6 +191,9 @@ public struct EngineStore: Sendable {
     /// gone) keeps every engine offered, as before.
     public static func sameArch(current: String?, target: String) -> Bool { current == nil || current == target }
 
+    /// The UserDefaults key behind Show older engine revisions in an environment's Advanced settings.
+    public static let showOlderRevisionsKey = "showOlderEngineRevisions"
+
     /// One row per engine the app can put a bottle on: every installed engine, then every
     /// bundled manifest that is not installed yet (it downloads when chosen). Newest first
     /// within each group, by numeric-aware id order. When the bottle's own engine is in
@@ -211,8 +214,14 @@ public struct EngineStore: Sendable {
         /// "name · id" the game page shows when only one engine is offered.
         public var label: String { displayName.map { "\($0) · \(id)" } ?? id }
     }
+    ///
+    /// A download row is only worth offering when it is the newest of its kind: every revision of a line is
+    /// cumulative, so r3 under r29 is noise, and the pickers had grown to 48 rows on macOS 27 (Hayden on Discord,
+    /// 2026-10-29). `allRevisions` false keeps, per line and macOS floor, the newest revision among those installed
+    /// and offered, the floor being what sets a line's flavours apart (a D3DMetal 4 revision needs macOS 27, the
+    /// plain one beside it does not). Installed engines and the bottle's own always stay listed.
     public static func offeredEngines(installed: [InstalledEngine], known: [EngineManifest], current: String? = nil,
-                                      macOS: String = EngineManifest.currentMacOS) -> [OfferedEngine] {
+                                      macOS: String = EngineManifest.currentMacOS, allRevisions: Bool = true) -> [OfferedEngine] {
         let newestFirst: (String, String) -> Bool = { $0.compare($1, options: .numeric) == .orderedDescending }
         let ids = Set(installed.map(\.id))
         let arch = installed.first { $0.id == current }?.manifest.arch ?? known.first { $0.id == current }?.arch
@@ -220,7 +229,14 @@ public struct EngineStore: Sendable {
             .sorted { newestFirst($0.id, $1.id) }.map { OfferedEngine(id: $0.id, installed: true, displayName: $0.manifest.displayName) }
         // A manifest with a macOS floor above this Mac is not offered: it would download and
         // then run untested (r6's D3DMetal was measured on 27 only). Installed engines stay listed.
+        let flavour: (EngineManifest) -> String = { "\(EngineManifest.line(of: $0.id) ?? $0.id)|\($0.minMacOS)" }
+        var newestOfFlavour: [String: String] = [:]
+        for m in installed.map(\.manifest) + known where m.runs(onMacOS: macOS) {
+            if let seen = newestOfFlavour[flavour(m)], !newestFirst(m.id, seen) { continue }
+            newestOfFlavour[flavour(m)] = m.id
+        }
         let more = known.filter { !ids.contains($0.id) && $0.runs(onMacOS: macOS) && sameArch(current: arch, target: $0.arch) }
+            .filter { allRevisions || newestOfFlavour[flavour($0)] == $0.id }
             .sorted { newestFirst($0.id, $1.id) }
             .map { OfferedEngine(id: $0.id, installed: false, displayName: $0.displayName) }
         var rows = have + more

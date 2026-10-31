@@ -683,6 +683,7 @@ enum L10n {
         "Remove %@?": "Supprimer %@ ?",
         "Remove": "Supprimer",
         "Engines no environment uses": "Moteurs qu'aucun environnement n'utilise",
+        "Show older engine revisions": "Afficher les anciennes révisions des moteurs",
         "Remove…": "Supprimer…",
         "Removing one frees its disk space. If a game asks for it again later, Highball downloads it then.": "En supprimer un libère son espace disque. Si un jeu le demande plus tard, Highball le télécharge à nouveau.",
         "Removing engine %@": "Suppression du moteur %@",
