@@ -922,8 +922,9 @@ public struct Bottle: Sendable {
             let inserted = (env["DYLD_INSERT_LIBRARIES"] ?? "").split(separator: ":").map(String.init)
             env["DYLD_INSERT_LIBRARIES"] = ([lib.path] + inserted.filter { $0 != lib.path }).joined(separator: ":")
         }
-        // A recipe's value can depend on this Mac (a video memory budget from its memory).
-        return env.mapValues { MacVariables.expand($0) }
+        // A recipe's value can depend on this Mac (a video memory budget from its memory), and an engine's or a recipe's
+        // on this environment (a driver's shader cache kept inside it, and gone with it).
+        return env.mapValues { MacVariables.expand($0).replacingOccurrences(of: "${environment}", with: url.path) }
     }
 
     /// The renderer-specific bridge files that make the DLSS switch actionable in this engine.

@@ -45,6 +45,9 @@ public struct Recipe: Codable, Sendable, Identifiable {
         /// so it also reaches a game launched by an already-running Steam. This is how a game's
         /// need to avoid a vendor library ships as data instead of app code.
         case dllOverride(String)
+        /// The environment's frame cap, the same setting as in its Graphics settings, set only where the player has
+        /// none: a game whose even pacing depends on a cap gets it on its first start and keeps the player's choice.
+        case frameCap(Int)
         /// Per-app DXVK options ("csgo.exe" → dxvk.enableAsync=False…), stored on the bottle
         /// and rendered into its dxvk.conf at every DXVK launch. This is how game-specific
         /// DXVK knowledge ships as data instead of app code.
@@ -77,6 +80,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case "pin": self = .pin(try c.decode(Pin.self, forKey: .pin))
             case "note": self = .note(try c.decode(String.self, forKey: .text))
             case "dlloverride": self = .dllOverride(try c.decode(String.self, forKey: .value))
+            case "framecap": self = .frameCap(try c.decode(Int.self, forKey: .value))
             case "dxvkconfig": self = .dxvkConfig(exe: try c.decode(String.self, forKey: .exe),
                                                   options: try c.decode([String: String].self, forKey: .options))
             case let other: throw HighballError.invalid("unknown recipe step type '\(other)'")
@@ -108,6 +112,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case let .pin(p): try c.encode("pin", forKey: .type); try c.encode(p, forKey: .pin)
             case let .note(t): try c.encode("note", forKey: .type); try c.encode(t, forKey: .text)
             case let .dllOverride(v): try c.encode("dlloverride", forKey: .type); try c.encode(v, forKey: .value)
+            case let .frameCap(n): try c.encode("framecap", forKey: .type); try c.encode(n, forKey: .value)
             case let .dxvkConfig(exe, options):
                 try c.encode("dxvkconfig", forKey: .type); try c.encode(exe, forKey: .exe)
                 try c.encode(options, forKey: .options)
@@ -120,7 +125,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
             case let .installer(_, _, _, label, _, _): return label
             case let .winetricks(verbs, _): return verbs.joined(separator: " ")
             case .registry: return nil
-            case .environment, .renderer, .sync, .winver, .file, .copy, .pin, .note, .dxvkConfig, .dllOverride: return nil
+            case .environment, .renderer, .sync, .winver, .file, .copy, .pin, .note, .dxvkConfig, .dllOverride, .frameCap: return nil
             }
         }
 
@@ -156,7 +161,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
         /// takes no meaningful time (installer/winetricks can take 20-40 minutes).
         public var isAutoApplicable: Bool {
             switch self {
-            case .file, .copy, .renderer, .sync, .environment, .pin, .note, .dxvkConfig, .dllOverride: return true
+            case .file, .copy, .renderer, .sync, .environment, .pin, .note, .dxvkConfig, .dllOverride, .frameCap: return true
             case .installer, .winetricks, .registry, .winver: return false
             }
         }
@@ -192,6 +197,9 @@ public struct Recipe: Codable, Sendable, Identifiable {
     /// behaviour left one behind for every game it missed. Every other path, and every game in
     /// the environment's own library, lands where the step says, as before.
     public static func target(of path: String, driveC: URL, steamGames: [SteamGame]) -> URL {
+        // ${user} is the Mac's short user name, the name Wine gives the folder under drive_c/users: a game's
+        // settings live in there (Forza Horizon 6's, in AppData/Local).
+        let path = path.replacingOccurrences(of: "${user}", with: NSUserName())
         let standard = driveC.appending(path: path)
         let steam = "Program Files (x86)/Steam", common = "\(steam)/steamapps/common/"
         guard path.hasPrefix(common) else { return standard }
@@ -212,7 +220,7 @@ public struct Recipe: Codable, Sendable, Identifiable {
     public var changesLaunchEnvironment: Bool {
         steps.contains { step in
             switch step {
-            case .renderer, .sync, .environment: return true
+            case .renderer, .sync, .environment, .frameCap: return true
             default: return false
             }
         }
@@ -319,6 +327,53 @@ public struct Recipe: Codable, Sendable, Identifiable {
     /// for the page's wording and for artifact checks once applied.
     public var optIn: Bool?
     public var isOptIn: Bool { optIn ?? false }
+
+    /// A second way to run this game, on a preview engine the player takes by choice, beside the recipe's own: Forza
+    /// Horizon 6 plays on D3DMetal 4 with its copy protection's hitch and on the native arm64 line without it, at a
+    /// lower frame rate, and neither is the better one for everybody. An environment on the route's line goes by the
+    /// route (`routed(onEngine:)`), every other by the recipe as before, so nothing changes for a player who stays.
+    public struct PreviewRoute: Codable, Sendable {
+        public var engine: String
+        public var renderer: Renderer?
+        public var minMemoryGB: Int?
+        public var steps: [Step]
+        public var knownIssues: [KnownIssue]?
+        public var lastVerified: Verification?
+        /// What the route changes for the player, added to Play's ask.
+        public var note: String?
+        /// What the game page's verdict says for this route, the row's own fields being its other route's.
+        public var verified: GameDBEntry.VerifiedOn?
+    }
+    public var previewRoute: PreviewRoute?
+    /// Set on the recipe `route` makes: `note` is the route's, and applying it makes the mode the environment's own.
+    public var previewRouteNote: String?
+    public var isPreviewRoute: Bool { previewRouteNote != nil }
+    /// The route's `verified`, on the recipe `route` makes.
+    public var previewRouteVerified: GameDBEntry.VerifiedOn?
+
+    /// This recipe as its preview route: the same game and id, so what an environment records for it (the applied list,
+    /// the variables scoped to the game) stays where everything looks for it, with the route's engine, mode and steps.
+    public var route: Recipe? {
+        guard let r = previewRoute else { return nil }
+        var copy = self
+        copy.engine = r.engine
+        copy.renderer = r.renderer ?? renderer
+        copy.minMemoryGB = r.minMemoryGB
+        copy.steps = r.steps
+        copy.knownIssues = r.knownIssues ?? knownIssues
+        copy.lastVerified = r.lastVerified ?? lastVerified
+        copy.previewRoute = nil
+        copy.previewRouteNote = r.note ?? ""
+        copy.previewRouteVerified = r.verified
+        return copy
+    }
+
+    /// The recipe an environment on `engineID` goes by: the route on the route's line, the recipe itself on any other.
+    public func routed(onEngine engineID: String?) -> Recipe {
+        guard let route, let pin = route.engine, let engineID, let line = EngineManifest.line(of: engineID),
+              line == EngineManifest.line(of: pin) else { return self }
+        return route
+    }
     /// What an installed runtime leaves behind, so the Dependencies panel can tell "installed"
     /// from "our recipe ran": a file under drive_c, or a registry value in system.reg (exact
     /// match or a minimum for dword values). Any one marker satisfied means installed. Data, so
@@ -491,6 +546,9 @@ public struct RecipeRunner: Sendable {
                 notes.append("Kept this bottle's renderer (\(bottle.settings.renderer.rawValue)); the recipe suggests \(r.rawValue).")
             }
         }
+        // A route's mode is the environment's own, or the row's mode for the game's other route would replace it at
+        // every launch (D3DMetal, which the native arm64 line does not have).
+        if recipe.isPreviewRoute { bottle.settings.rendererExplicit = true }
         // Read once, for the file and copy steps of a game installed in another Steam library.
         let steamGames = recipe.steps.contains {
             switch $0 { case .file, .copy: return true; default: return false }
@@ -646,7 +704,7 @@ public struct RecipeRunner: Sendable {
                 let url = Recipe.target(of: path, driveC: bottle.driveC, steamGames: steamGames)
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try contents.write(to: url, atomically: true, encoding: .utf8)
-                if url != bottle.driveC.appending(path: path) { log?("[\(recipe.id)] wrote \(url.path), the game's folder in another Steam library") }
+                if url != Recipe.target(of: path, driveC: bottle.driveC, steamGames: []) { log?("[\(recipe.id)] wrote \(url.path), the game's folder in another Steam library") }
             case let .copy(from, to, asNative):
                 guard let source = Self.copySource(engineRoot: engine.root, from) else {
                     throw HighballError.invalid("copy step: '\(from)' is not a file inside the engine")
@@ -677,6 +735,8 @@ public struct RecipeRunner: Sendable {
                 bottle.settings.dllOverrides = parts.joined(separator: ";")
             case let .dxvkConfig(exe, options):
                 bottle.settings.dxvkAppConfig[exe] = options
+            case let .frameCap(n):
+                if bottle.settings.fpsCap == 0 { bottle.settings.fpsCap = n }
             }
         }
         if !bottle.settings.recipes.contains(recipe.id) { bottle.settings.recipes.append(recipe.id) }
