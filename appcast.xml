@@ -7,9 +7,9 @@
     <item>
       <title>Highball 0.10.23</title>
       <description><![CDATA[GOG and Battle.net in the library, Forza Horizon 6 trees and liveries, and many fixes]]></description>
-      <pubDate>Sat, 31 Oct 2026 20:25:52 +0100</pubDate>
+      <pubDate>Sat, 31 Oct 2026 21:54:04 +0100</pubDate>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
       <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.10.23/Highball-0.10.23.zip" sparkle:version="0.10.23" sparkle:shortVersionString="0.10.23" sparkle:edSignature="RPmfZVcpY4oC9RONOp3+TwR0Xx7YmeOc6ui8kE5XAOTd/P3BVXM0G2sDet5W2xZrFUxqcjC3mitbkuROqJNlAA==" length="8460752" type="application/octet-stream"/>
     </item>
     <item>
