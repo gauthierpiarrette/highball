@@ -7,6 +7,15 @@ struct GameDetailView: View {
     let passedItem: LibraryItem
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var storeDetails: SteamGameDetails?
+    @State private var sizes: AppState.InstalledSizes?
+    @State private var windowsEstimate: DownloadEstimate?
+    @State private var macEstimate: DownloadEstimate?
+    /// The estimates have been asked for and answered (or not): "Checking…" until then, "Unknown" after.
+    @State private var estimatesDone = false
+    /// How this GOG game's saves sync, per version; asked when the page opens.
+    @State private var cloudSetup: GOGSaves.CloudSetup?
+    @State private var cloudSetupAsked = false
+    @State private var showCloudHelp = false
     @State private var loadingDetails = true
     @State private var expandedDescription = false
     @State private var selectedGalleryURL: URL?
@@ -97,6 +106,41 @@ struct GameDetailView: View {
             storeDetails = details
             loadingDetails = false
         }
+        .task(id: "\(item.id)|\(item.installed)|\(item.installedOnMac)|cloud") {
+            cloudSetup = nil; cloudSetupAsked = false
+            guard item.source == .gog, item.installedAnywhere else { return }
+            cloudSetup = await state.gogCloudSetup(for: item)
+            cloudSetupAsked = true
+        }
+        // How much room it takes: the store's estimate before an install, the folders after.
+        // All three at once, each shown as it comes: a store's answer takes seconds.
+        .task(id: "\(item.id)|\(item.installed)|\(item.installedOnMac)") {
+            sizes = nil; windowsEstimate = nil; macEstimate = nil; estimatesDone = false
+            let item = item
+            let wantsWindows = !item.installed && [.gog, .epic, .steam].contains(item.source)
+            let wantsMac = hasMacVersion && !item.installedOnMac
+            // A size saved earlier shows at once; one older than a day is checked again quietly.
+            if wantsWindows { windowsEstimate = state.savedEstimate(for: item, mac: false) }
+            if wantsMac { macEstimate = state.savedEstimate(for: item, mac: true) }
+            await withTaskGroup(of: Void.self) { group in
+                if item.installedAnywhere {
+                    group.addTask { @MainActor in sizes = await state.installedSizes(for: item) }
+                }
+                if wantsWindows, windowsEstimate == nil || state.estimateIsStale(for: item, mac: false) {
+                    let refresh = windowsEstimate != nil
+                    group.addTask { @MainActor in
+                        if let fresh = await state.downloadEstimate(for: item, mac: false, refresh: refresh) { windowsEstimate = fresh }
+                    }
+                }
+                if wantsMac, macEstimate == nil || state.estimateIsStale(for: item, mac: true) {
+                    let refresh = macEstimate != nil
+                    group.addTask { @MainActor in
+                        if let fresh = await state.downloadEstimate(for: item, mac: true, refresh: refresh) { macEstimate = fresh }
+                    }
+                }
+            }
+            estimatesDone = true
+        }
     }
 
     private func overview(scroll: ScrollViewProxy) -> some View {
@@ -107,6 +151,8 @@ struct GameDetailView: View {
                 .textSelection(.enabled)
             if let macBuild {
                 macBlock(macBuild)
+            } else if item.macListed, item.source == .gog || item.source == .epic {
+                storeMacBlock
             } else if let outdated = GamePageCopy.outdatedMacBuild(appInfo: item.steamAppID.flatMap { state.macAppInfoByAppID[$0] }, entry: entry) {
                 Label(L(outdated), systemImage: "apple.logo").font(.callout).foregroundStyle(.secondary)
             }
@@ -194,8 +240,16 @@ struct GameDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             row(L("Source"), item.source == .steam ? "Steam" : item.source == .epic ? "Epic Games"
                 : item.source == .gog ? "GOG" : item.source == .battlenet ? "Battle.net" : L("Windows program"))
-            if item.sizeOnDisk > 0 {
-                row(L("Size on disk"), ByteCountFormatter.string(fromByteCount: item.sizeOnDisk, countStyle: .file))
+            // Every game says how much room it takes: what an install needs before, what is on disk after.
+            if item.source != .pin || item.installed {
+                row(hasMacVersion ? L("Size (Windows)") : L("Size"), windowsSize)
+            }
+            if hasMacVersion {
+                row(L("Size (Mac)"), macSize)
+            }
+            if item.source == .steam || item.source == .epic || (item.source == .gog && item.installedAnywhere) { cloudSavesRow }
+            if let saves = sizes?.saves {
+                row(item.source == .steam ? L("Steam Cloud saves") : L("Saves"), Self.bytes(saves))
             }
             if let played = item.lastPlayed {
                 row(L("Last played"), played.formatted(date: .abbreviated, time: .shortened))
@@ -343,6 +397,200 @@ struct GameDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.35)))
     }
 
+    /// A Mac version GOG's or Epic's catalog lists (LibraryItem.macListed): the purchase includes
+    /// it, and the store's own app or site hands it out. Listed is not proven: an old 32-bit Mac
+    /// build no longer runs, and neither catalog says which.
+    private var storeMacBlock: some View {
+        let gog = item.source == .gog
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "apple.logo").foregroundStyle(.secondary).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(gog ? L("Your GOG purchase includes a Mac version") : L("Your Epic purchase includes a Mac version"))
+                    .font(.callout.weight(.semibold))
+                Text(gog ? L("GOG lists a Mac build of this game. It runs without Windows or Wine, though some older Mac versions no longer start on current macOS.")
+                         : L("Epic lists a Mac build of this game. It runs without Windows or Wine, though some older Mac versions no longer start on current macOS."))
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if gog, let game = item.gogID.flatMap({ state.gogMacInstalled[$0] }) {
+                    if let note = Self.archNote(game.arch) {
+                        Text(note).font(.callout).foregroundStyle(game.arch == .only32Bit ? HB.warn : .secondary)
+                    }
+                    HStack(spacing: 10) {
+                        Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([game.app ?? game.folder]) }
+                        Button(L("Move the Mac version to the Trash")) { state.gogTrashMac(item) }.disabled(state.busy)
+                    }
+                    .controlSize(.small).padding(.top, 2)
+                } else if gog {
+                    // With the Windows build installed the play row offers that one; the Mac one is here.
+                    if item.installed {
+                        HStack(spacing: 8) {
+                            Button(L("Install the Mac version")) { state.installOnMac(item) }.controlSize(.small).disabled(state.busy)
+                            estimateText(macEstimate)
+                        }
+                        .padding(.top, 2)
+                    }
+                } else if let folder = state.macFolder(for: item) {
+                    // Epic's Mac build, installed through legendary.
+                    if let note = Self.archNote(MacBinaryArch.ofApp(at: folder)) {
+                        Text(note).font(.callout).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 10) {
+                        Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([folder]) }
+                        Button(L("Remove the Mac version…")) { state.pendingEpicMacUninstall = item }.disabled(state.busy)
+                    }
+                    .controlSize(.small).padding(.top, 2)
+                } else if item.installed {
+                    // Epic keeps one build per game: from the Windows one, a switch.
+                    HStack(spacing: 8) {
+                        Button(L("Switch to the Mac version…")) { state.installOnMac(item) }.controlSize(.small).disabled(state.busy)
+                        estimateText(macEstimate)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(HB.card, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.35)))
+    }
+
+    static func bytes(_ count: Int64) -> String { ByteCountFormatter.string(fromByteCount: count, countStyle: .file) }
+
+    /// How the game saves, said as what it does, with an explanation a click away: Steam Cloud's
+    /// and Epic's cloud from their own data, GOG's per installed version from its settings.
+    private var cloudSavesRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(L("Cloud saves")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(cloudSaveLines, id: \.self) { Text($0).font(.callout).fixedSize(horizontal: false, vertical: true) }
+            }
+            Button { showCloudHelp = true } label: { Image(systemName: "info.circle") }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help(L("How this game's saves sync"))
+                .popover(isPresented: $showCloudHelp, arrowEdge: .trailing) { cloudSavesHelp }
+        }
+    }
+
+    private var cloudSaveLines: [String] {
+        switch item.source {
+        case .steam:
+            return [item.steamAppID.map(state.steamCloudAppIDs.contains) == true
+                    ? L("Steam syncs this game's saves with Steam Cloud, for whichever account plays it.")
+                    : L("This game keeps its saves on this Mac.")]
+        case .epic:
+            return [state.epicOwned.first { $0.app_name == item.epicAppName }?.cloudSaves == true
+                    ? L("Epic's cloud keeps this game's saves when Epic's own launcher plays it. Played from Highball, they stay on this Mac.")
+                    : L("This game keeps its saves on this Mac.")]
+        default: break
+        }
+        guard cloudSetupAsked else { return [L("Checking…")] }
+        guard let setup = cloudSetup, let id = item.gogID else { return [L("Highball could not reach GOG to see how this game saves.")] }
+        let syncing = !state.gogSettings.cloudSavesOff.contains(id)
+        func line(_ folders: [GOGSaves.Location], synced: String, own: String) -> String {
+            folders.isEmpty ? own : syncing ? synced : L("Kept on this Mac: Sync saves with GOG, under Game settings, syncs them.")
+        }
+        var lines: [String] = []
+        if item.installed {
+            lines.append(line(setup.windows, synced: L("The Windows version's saves sync with GOG's cloud before and after you play."),
+                              own: L("The game handles the Windows version's saves; some games sync them with GOG's cloud themselves while comet runs.")))
+        }
+        if item.installedOnMac {
+            lines.append(line(setup.mac, synced: L("The Mac version's saves sync with GOG's cloud before and after you play."),
+                              own: L("The game handles the Mac version's saves; some games sync them with GOG's cloud themselves while comet runs.")))
+        }
+        return lines
+    }
+
+    /// How the game's store syncs saves; for GOG, the two ways and the folders this game's covers.
+    @ViewBuilder private var cloudSavesHelp: some View {
+        switch item.source {
+        case .steam:
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L("How Steam Cloud works")).font(.headline)
+                Text(L("Steam syncs a game's saves with Steam Cloud itself, before and after you play, for the account signed in to Steam. Highball starts the game through Steam, so nothing changes. The Steam Cloud saves row is Steam's copy on this Mac."))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            .padding(16).frame(width: 380, alignment: .leading)
+        case .epic:
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L("How Epic's cloud saves work")).font(.headline)
+                Text(L("Epic's launcher syncs a game's saves with Epic's cloud when the game sets a cloud save folder. Highball plays Epic games through legendary, and their saves stay on this Mac."))
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            .padding(16).frame(width: 380, alignment: .leading)
+        default:
+            gogCloudSavesHelp
+        }
+    }
+
+    /// The two ways GOG syncs saves, and the folders this game's file sync covers.
+    private var gogCloudSavesHelp: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L("How saves sync with GOG")).font(.headline)
+            Text(L("GOG syncs saves in one of two ways, chosen per game and per version.")).font(.callout)
+            Text(L("Folder sync: GOG names the folders a game saves in, and Highball copies them to and from GOG's cloud before and after you play, as GOG Galaxy does. When both copies changed, Highball asks which one to keep."))
+                .font(.callout).foregroundStyle(.secondary)
+            Text(L("The game's own sync: some games send their saves to GOG's cloud themselves, through GOG's game kit. With Highball that works while comet runs beside the game, and the game says so when it syncs, as Cyberpunk 2077 does."))
+                .font(.callout).foregroundStyle(.secondary)
+            let folders = (cloudSetup.map { (item.installed ? $0.windows : []) + (item.installedOnMac ? $0.mac : []) } ?? []).map(\.template)
+            if !folders.isEmpty {
+                Text(L("Folders this game syncs")).font(.caption.weight(.semibold)).padding(.top, 2)
+                ForEach(folders, id: \.self) { Text(verbatim: $0).font(.caption.monospaced()).textSelection(.enabled) }
+            }
+        }
+        .padding(16).frame(width: 380, alignment: .leading)
+    }
+
+    /// A native Mac version exists: Steam's (MacSteamBuild), or one GOG or Epic lists.
+    private var hasMacVersion: Bool { state.offersMacVersion(item) }
+
+    /// The Windows build (or the program): on disk when installed, the store's figure before.
+    private var windowsSize: String {
+        if item.installed {
+            if item.sizeOnDisk > 0 { return String(format: L("Uses %@ of space"), Self.bytes(item.sizeOnDisk)) }
+            if let game = sizes?.game { return String(format: L("Uses %@ of space"), Self.bytes(game)) }
+            return sizes == nil ? L("Measuring…") : L("Unknown")
+        }
+        return Self.beforeInstall(windowsEstimate, done: estimatesDone)
+    }
+
+    private var macSize: String {
+        if item.installedOnMac {
+            if let mac = sizes?.macGame { return String(format: L("Uses %@ of space"), Self.bytes(mac)) }
+            return sizes == nil ? L("Measuring…") : L("Unknown")
+        }
+        return Self.beforeInstall(macEstimate, done: estimatesDone)
+    }
+
+    /// "Takes 2.18 GB of space (301.8 MB to download)" before an install: the room on the Mac
+    /// first, the compressed transfer second. "Checking…" while the store is
+    /// asked, "Unknown" when it could not say, never a blank.
+    static func beforeInstall(_ estimate: DownloadEstimate?, done: Bool) -> String {
+        guard let estimate, estimate.disk != nil || estimate.download != nil else { return done ? L("Unknown") : L("Checking…") }
+        switch (estimate.disk, estimate.download) {
+        case let (disk?, download?): return String(format: L("Takes %@ of space (%@ to download)"), bytes(disk), bytes(download))
+        case let (disk?, nil): return String(format: L("Takes %@ of space"), bytes(disk))
+        case let (nil, download?): return String(format: L("%@ to download"), bytes(download))
+        default: return L("Unknown")
+        }
+    }
+
+    /// The same figure beside an install button, so the choice is made knowing the room it takes.
+    @ViewBuilder private func estimateText(_ estimate: DownloadEstimate?) -> some View {
+        if let estimate, estimate.download != nil || estimate.disk != nil {
+            Text(Self.beforeInstall(estimate, done: true)).font(.callout).foregroundStyle(.secondary)
+        }
+    }
+
+    /// What an installed Mac build's executable says about running here (MacBinaryArch).
+    static func archNote(_ arch: MacBinaryArch) -> String? {
+        switch arch {
+        case .native: L("Built for Apple silicon: runs natively.")
+        case .intelOnly: L("Built for Intel Macs: runs through Rosetta.")
+        case .only32Bit: L("A 32-bit build, which current macOS can't run. Play the Windows version instead.")
+        case .unknown: nil
+        }
+    }
+
     /// Only when the Windows build is the installed one: otherwise the play row already offers
     /// the Mac build (Play on Mac, Install on Mac).
     @ViewBuilder private var macButton: some View {
@@ -376,7 +624,8 @@ struct GameDetailView: View {
                     Button(L("Play the Windows version")) { commitTypedArguments(); state.play(item, windowsBuild: true) }
                         .controlSize(.large).disabled(state.busy || blocked)
                 } else {
-                    Text(L("Starts through Steam for Mac.")).font(.callout).foregroundStyle(.secondary)
+                    Text(item.source == .steam ? L("Starts through Steam for Mac.") : L("Opens the Mac version, without Wine."))
+                        .font(.callout).foregroundStyle(.secondary)
                 }
             } else if item.installed {
                 Button { commitTypedArguments(); state.play(item) } label: {
@@ -393,10 +642,33 @@ struct GameDetailView: View {
                          : L("Its anti-cheat does not run on macOS."))
                         .font(.callout).foregroundStyle(.secondary)
                 }
+            } else if item.source == .gog || item.source == .epic, item.macListed, !item.installedOnMac {
+                // A Mac version is listed: that's the install on offer, the Windows one a click away.
+                VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Button { state.installOnMac(item) } label: { primaryActionLabel(L("Install the Mac version"), symbol: "apple.logo") }
+                            .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber).disabled(state.busy)
+                        Text(String(format: L("Goes into %@, outside every environment."), "~/Applications/Highball Games"))
+                            .font(.callout).foregroundStyle(.secondary)
+                        estimateText(macEstimate)
+                    }
+                    HStack(spacing: 6) {
+                        Button(L("Install the Windows version instead")) { state.install(item) }
+                            .buttonStyle(.link).font(.callout).disabled(state.busy)
+                        estimateText(windowsEstimate)
+                    }
+                }
+            } else if item.source == .epic, item.installedOnMac {
+                // Epic keeps one build per game, and this Mac one does not run (32-bit): the way
+                // out is the Windows build, which takes its place.
+                Text(L("This Mac version is 32-bit, which current macOS can't run.")).font(.callout).foregroundStyle(HB.warn)
+                Button(L("Switch to the Windows version…")) { state.pendingEpicWindowsSwitch = item }
+                    .controlSize(.large).disabled(state.busy)
             } else if item.source == .epic || item.source == .gog {
                 Button { state.install(item) } label: { primaryActionLabel(L("Install"), symbol: "arrow.down") }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                     .disabled(state.busy)
                 Text(String(format: L("Installs into %@."), state.defaultBottle?.name ?? L("your environment"))).font(.callout).foregroundStyle(.secondary)
+                estimateText(windowsEstimate)
             } else if item.source == .steam, !steamHasManifest, state.macSteamBuild(for: item) != nil {
                 // A native build exists: that's the install on offer; the Windows one is the
                 // way around it, not the default.
@@ -409,16 +681,21 @@ struct GameDetailView: View {
                         Text(state.steamForMacInstalled ? L("Steam for Mac asks where to put it.")
                                                         : L("The Mac build installs through Steam for Mac."))
                             .font(.callout).foregroundStyle(.secondary)
+                        estimateText(macEstimate)
                     }
-                    Button(L("Install the Windows version instead")) { state.install(item) }
-                        .buttonStyle(.link).font(.callout).disabled(state.busy || blocked)
-                        .help(L("For when the Mac build lags behind or a mod needs the Windows one."))
+                    HStack(spacing: 6) {
+                        Button(L("Install the Windows version instead")) { state.install(item) }
+                            .buttonStyle(.link).font(.callout).disabled(state.busy || blocked)
+                            .help(L("For when the Mac build lags behind or a mod needs the Windows one."))
+                        estimateText(windowsEstimate)
+                    }
                 }
             } else if item.source == .steam, !steamHasManifest {
                 // Owned, never installed here (highball#199): Steam's own dialog takes it from here.
                 Button { state.install(item) } label: { primaryActionLabel(L("Install"), symbol: "arrow.down") }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                     .disabled(state.busy)
                 Text(L("Steam asks where to put it.")).font(.callout).foregroundStyle(.secondary)
+                estimateText(windowsEstimate)
             } else if item.source == .steam {
                 Text(L("Not downloaded yet. Install it from the Steam window.")).font(.callout).foregroundStyle(.secondary)
                 if let b = bottle ?? state.defaultBottle { Button(L("Open Steam")) { state.showSteam(in: b) }.controlSize(.large) }

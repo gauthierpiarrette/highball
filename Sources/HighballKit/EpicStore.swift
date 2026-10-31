@@ -108,24 +108,37 @@ public struct EpicStore: Sendable {
         /// 2:3 cover for the future unified library. Same type mapping Heroic uses.
         public let artworkWide: URL?
         public let artworkTall: URL?
+        /// The catalog item lists a Mac release beside the Windows one (metadata.releaseInfo's
+        /// platforms), which the same purchase includes.
+        public let listsMac: Bool
+        /// The catalog item names a cloud save folder (metadata.customAttributes.CloudSaveFolder):
+        /// Epic's cloud keeps its saves when Epic's own launcher syncs them.
+        public var cloudSaves = false
 
-        public init(app_name: String, app_title: String, artworkWide: URL? = nil, artworkTall: URL? = nil) {
+        public init(app_name: String, app_title: String, artworkWide: URL? = nil, artworkTall: URL? = nil, listsMac: Bool = false) {
             self.app_name = app_name; self.app_title = app_title
-            self.artworkWide = artworkWide; self.artworkTall = artworkTall
+            self.artworkWide = artworkWide; self.artworkTall = artworkTall; self.listsMac = listsMac
         }
 
         private enum CodingKeys: String, CodingKey { case app_name, app_title, metadata }
-        private enum MetadataKeys: String, CodingKey { case keyImages }
+        private enum MetadataKeys: String, CodingKey { case keyImages, releaseInfo, customAttributes }
         private struct KeyImage: Codable { let type: String?; let url: String? }
+        private struct ReleaseInfo: Codable { let platform: [String]? }
+        private struct CustomAttribute: Codable { let value: String? }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             app_name = try c.decode(String.self, forKey: .app_name)
             app_title = try c.decode(String.self, forKey: .app_title)
             var images: [KeyImage] = []
+            var releases: [ReleaseInfo] = []
             if let md = try? c.nestedContainer(keyedBy: MetadataKeys.self, forKey: .metadata) {
                 images = (try? md.decode([KeyImage].self, forKey: .keyImages)) ?? []
+                releases = (try? md.decode([ReleaseInfo].self, forKey: .releaseInfo)) ?? []
+                let attributes = (try? md.decode([String: CustomAttribute].self, forKey: .customAttributes)) ?? [:]
+                cloudSaves = !(attributes["CloudSaveFolder"]?.value ?? "").isEmpty
             }
+            listsMac = releases.contains { $0.platform?.contains("Mac") == true }
             func first(_ types: [String]) -> URL? {
                 for t in types {
                     if let u = images.first(where: { $0.type == t })?.url, let url = URL(string: u) { return url }
@@ -137,7 +150,8 @@ public struct EpicStore: Sendable {
         }
 
         public func encode(to encoder: Encoder) throws {
-            // Artwork is derived from legendary's metadata on every decode; only identity persists.
+            // Artwork and platforms are derived from legendary's metadata on every decode; only
+            // identity persists.
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(app_name, forKey: .app_name)
             try c.encode(app_title, forKey: .app_title)
@@ -153,6 +167,14 @@ public struct EpicStore: Sendable {
     public struct InstalledGame: Codable, Sendable {
         public let app_name: String
         public let install_path: String?
+        /// legendary's record of the installed size, in bytes.
+        public var install_size: Int64? = nil
+        /// Where the game keeps the saves legendary syncs, once it has synced them.
+        public var save_path: String? = nil
+        /// "Windows" or "Mac": which build legendary installed (one per game).
+        public var platform: String? = nil
+
+        public var isMac: Bool { platform?.lowercased() == "mac" }
     }
 
     /// Everything legendary has installed, with where. Legendary's install state is global
@@ -185,8 +207,18 @@ public struct EpicStore: Sendable {
     /// selective-download prompt (optional language packs), which `-y` does not cover and which
     /// otherwise dies with EOFError the moment it reads stdin (Hogwarts Legacy on Epic, #110).
     /// The defaults install the required data only; language packs can be added later.
-    static func installArguments(appName: String, basePath: String) -> [String] {
-        ["install", appName, "--platform", "Windows", "--base-path", basePath, "-y", "--skip-sdl"]
+    static func installArguments(appName: String, basePath: String, platform: String = "Windows") -> [String] {
+        ["install", appName, "--platform", platform, "--base-path", basePath, "-y", "--skip-sdl"]
+    }
+
+    /// Installs a game's Mac build into the Mac games folder, beside GOG's (GOGStore.macGamesDir).
+    /// legendary keeps one install per game, so the Windows one must be removed first.
+    @discardableResult
+    public func installMac(_ appName: String, control: LegendaryControl? = nil,
+                           onLine: (@Sendable (String) -> Void)? = nil) throws -> Int32 {
+        let base = GOGStore.macGamesDir
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return try runStreaming(Self.installArguments(appName: appName, basePath: base.path, platform: "Mac"), control: control, onLine: onLine)
     }
 
     /// Installs a game's Windows build into the bottle at drive_c/Games/<folder>.

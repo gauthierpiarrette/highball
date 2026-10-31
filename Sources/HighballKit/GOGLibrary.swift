@@ -15,10 +15,14 @@ extension GOGStore {
         public let steamAppID: Int?
         public let gogVerticalCover: URL?
         public let gogWide: URL?
+        /// gamesdb lists macOS among the release's systems; every GOG purchase includes each
+        /// system's build. nil in an entry cached before this was read: looked up again.
+        public let listsMac: Bool?
 
-        public init(id: String, title: String, steamAppID: Int? = nil, gogVerticalCover: URL? = nil, gogWide: URL? = nil) {
+        public init(id: String, title: String, steamAppID: Int? = nil, gogVerticalCover: URL? = nil, gogWide: URL? = nil,
+                    listsMac: Bool? = nil) {
             self.id = id; self.title = title; self.steamAppID = steamAppID
-            self.gogVerticalCover = gogVerticalCover; self.gogWide = gogWide
+            self.gogVerticalCover = gogVerticalCover; self.gogWide = gogWide; self.listsMac = listsMac
         }
 
         public var artworkTall: URL? {
@@ -62,7 +66,8 @@ extension GOGStore {
 
         var cache = (try? JSONDecoder.highball.decode([String: CachedRelease].self, from: Data(contentsOf: libraryCacheFile))) ?? [:]
         let stale = Date().addingTimeInterval(-7 * 86_400)
-        let missing = releases.filter { (cache[$0.id]?.fetched ?? .distantPast) < stale }
+        // Entries from before the systems were read are looked up again, once.
+        let missing = releases.filter { (cache[$0.id]?.fetched ?? .distantPast) < stale || cache[$0.id]?.game.map { $0.listsMac == nil } == true }
         try await withThrowingTaskGroup(of: (String, CachedRelease?).self) { group in
             var next = missing.makeIterator()
             func add() -> Bool {
@@ -110,8 +115,10 @@ extension GOGStore {
         let steam = (game["releases"] as? [[String: Any]] ?? [])
             .first { $0["platform_id"] as? String == "steam" }
             .flatMap { ($0["external_id"] as? String).flatMap(Int.init) }
+        let systems = (obj["supported_operating_systems"] as? [[String: Any]] ?? []).compactMap { $0["slug"] as? String }
         return Game(id: id, title: title, steamAppID: steam,
-                    gogVerticalCover: image("vertical_cover"), gogWide: image("horizontal_artwork") ?? image("background"))
+                    gogVerticalCover: image("vertical_cover"), gogWide: image("horizontal_artwork") ?? image("background"),
+                    listsMac: systems.contains("osx"))
     }
 
     /// Looks up games the account may not list (an installed game from an offline installer while
@@ -289,19 +296,31 @@ extension GOGStore {
         public let dependencies: [String]
     }
 
-    public func info(_ id: String) throws -> DownloadInfo {
-        let out = try capture(["info", id, "--os", "windows"])
+    /// `platform` is gogdl's: "windows", or "osx" for a Mac build (GOGMac).
+    public func info(_ id: String, platform: String = "windows") throws -> DownloadInfo {
+        let out = try capture(["info", id, "--os", platform])
         guard let start = out.firstIndex(of: "{"),
               let obj = try JSONSerialization.jsonObject(with: Data(out[start...].utf8)) as? [String: Any] else {
-            throw HighballError.failed("GOG has no Windows download for this game that gogdl can read.")
+            throw HighballError.failed(platform == "osx" ? "GOG has no Mac download for this game that gogdl can read."
+                                       : "GOG has no Windows download for this game that gogdl can read.")
         }
-        let size = (obj["size"] as? [String: Any])?["*"] as? [String: Any]
-        return DownloadInfo(folderName: obj["folder_name"] as? String,
-                            languages: obj["languages"] as? [String] ?? [],
-                            downloadSize: (size?["download_size"] as? NSNumber)?.int64Value,
-                            diskSize: (size?["disk_size"] as? NSNumber)?.int64Value,
-                            buildID: obj["buildId"] as? String,
-                            dependencies: obj["dependencies"] as? [String] ?? [])
+        return Self.parseInfo(obj)
+    }
+
+    /// gogdl's `size` holds the files every language shares under "*" and each language's own
+    /// beside it ("en-US"); a download is "*" plus the language installed. Samorost 1's Mac build:
+    /// 44 bytes shared, 68 MB in English.
+    static func parseInfo(_ obj: [String: Any], preferred: [String] = Locale.preferredLanguages) -> DownloadInfo {
+        let languages = obj["languages"] as? [String] ?? []
+        let sizes = obj["size"] as? [String: Any] ?? [:]
+        let parts = ["*", language(for: languages, preferred: preferred)].compactMap { sizes[$0] as? [String: Any] }
+        func total(_ key: String) -> Int64? {
+            let values = parts.compactMap { ($0[key] as? NSNumber)?.int64Value }
+            return values.isEmpty ? nil : values.reduce(0, +)
+        }
+        return DownloadInfo(folderName: obj["folder_name"] as? String, languages: languages,
+                            downloadSize: total("download_size"), diskSize: total("disk_size"),
+                            buildID: obj["buildId"] as? String, dependencies: obj["dependencies"] as? [String] ?? [])
     }
 
     /// The language to install: the first of the Mac's preferred languages the game has, else
@@ -317,8 +336,9 @@ extension GOGStore {
 
     /// gogdl appends the game's own folder name to `--path` for a download, and takes the game's
     /// folder itself for an update. DLC comes along: what the account owns installs with the game.
-    static func downloadArguments(id: String, into base: String, support: String, language: String, update: Bool) -> [String] {
-        [update ? "update" : "download", id, "--platform", "windows", "--path", base,
+    static func downloadArguments(id: String, into base: String, support: String, language: String, update: Bool,
+                                  platform: String = "windows") -> [String] {
+        [update ? "update" : "download", id, "--platform", platform, "--path", base,
          "--support", support, "--with-dlcs", "--lang", language]
     }
 

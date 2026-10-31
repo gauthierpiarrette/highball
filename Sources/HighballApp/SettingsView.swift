@@ -240,6 +240,7 @@ struct EnginePane: View {
     /// The updater delegate reads the same key: AppStorage so the switch redraws when flipped.
     @AppStorage(UpdateChannels.betaDefaultsKey) private var betaUpdates = false
     @AppStorage(AchievementToast.enabledDefaultsKey) private var achievementPopups = true
+    @AppStorage(AppState.relaunchDefaultsKey) private var openMacGamesThroughHighball = false
     @State private var showLicense = false
     @State private var pendingRemove: String?
     @State private var engineSizes: [String: String] = [:]
@@ -290,6 +291,13 @@ struct EnginePane: View {
                         Button(L("Preview")) { state.previewAchievementPopup() }.controlSize(.small)
                     }
                     Text(L("When a GOG game unlocks an achievement, its badge shows in the corner of the screen for a few seconds, with a sound. The game keeps focus."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle(L("Open GOG and Epic Mac games through Highball"), isOn: $openMacGamesThroughHighball)
+                    Text(L("A Mac game opened from Applications, the Dock or Spotlight is closed within its first seconds and started again through Highball, which brings GOG's achievements and cloud saves and Epic's sign-in. Only while Highball is open, and never while it is busy with another task."))
                         .font(.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
