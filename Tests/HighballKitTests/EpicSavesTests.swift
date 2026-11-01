@@ -37,6 +37,19 @@ final class EpicSavesTests: XCTestCase {
 
     /// Always -y and --accept-path (legendary would otherwise stop at a question no one can
     /// answer), and -v for the cloud save's date.
+    /// A Mac build resolves its save folder again when legendary still has the Windows build's,
+    /// from before a switch, inside an environment; a Windows build only when the game moved.
+    func testASaveFolderFromTheOtherBuildIsWorkedOutAgain() {
+        let home = URL(fileURLWithPath: "/Users/someone")
+        let env = home.appending(path: "Library/Application Support/Highball/Bottles/Main")
+        let windowsSaves = env.appending(path: "drive_c/users/someone/AppData/Local/Game/Saved")
+        let macSaves = home.appending(path: "Library/Application Support/Game/Saved")
+        XCTAssertTrue(EpicSaves.resolvesAgain(windowsSaves, prefix: nil, home: home), "a Windows path for the Mac build")
+        XCTAssertFalse(EpicSaves.resolvesAgain(macSaves, prefix: nil, home: home))
+        XCTAssertFalse(EpicSaves.resolvesAgain(windowsSaves, prefix: env, home: home))
+        XCTAssertTrue(EpicSaves.resolvesAgain(macSaves, prefix: env, home: home), "outside the environment")
+    }
+
     func testArguments() {
         XCTAssertEqual(EpicSaves.arguments(app: "Garlic", direction: nil),
                        ["-v", "sync-saves", "Garlic", "-y", "--accept-path", "--skip-upload", "--skip-download"])

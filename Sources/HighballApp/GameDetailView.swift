@@ -151,10 +151,14 @@ struct GameDetailView: View {
         }
         .background(BottleBackdrop())
         .navigationTitle(state.displayTitle(item))
-        .task(id: item.id) {
+        .task(id: "\(item.id)|\(item.installed)|\(item.installedOnMac)|epic") {
             // Read off the main thread: legendary's metadata and install records are JSON files.
+            // Epic names a cloud save folder per build, so it's the installed build's that counts.
             let saves = EpicSaves(store: state.epicStore), app = item.epicAppName
-            let found = await Task.detached { app.map { (saves.supportsCloudSaves($0), saves.savePath($0)) } }.value
+            let windows = item.installed, mac = item.installedOnMac
+            let found = await Task.detached {
+                app.map { ((windows && saves.supportsCloudSaves($0)) || (mac && saves.supportsCloudSaves($0, mac: true)), saves.savePath($0)) }
+            }.value
             epicCloudSaves = found?.0 ?? false
             epicSaveFolder = found?.1
         }
@@ -292,7 +296,7 @@ struct GameDetailView: View {
             let saves = GOGSaves(store: state.gogStore)
             return await Task.detached { saves.lastSynced(game) }.value
         case .epic:
-            guard let app = item.epicAppName, let path = state.epicInstalls[app] else { return nil }
+            guard let app = item.epicAppName, let path = state.epicInstalls[app] ?? state.epicMacInstalls[app] else { return nil }
             let saves = EpicSaves(store: state.epicStore), install = URL(fileURLWithPath: path, isDirectory: true)
             return await Task.detached { saves.lastSynced(app, install: install) }.value
         default:
@@ -300,23 +304,17 @@ struct GameDetailView: View {
         }
     }
 
-    /// An Epic game's cloud-save setting, in the game settings like GOG's.
-    private func epicSettings(_ app: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(L("Cloud saves")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 2)
-            VStack(alignment: .leading, spacing: 4) {
-                Toggle(L("Sync saves with Epic"), isOn: Binding(
-                    get: { !state.epicCloudSavesOff.contains(app) }, set: { state.epicSetCloudSaves($0, for: app) }))
-                    .toggleStyle(.checkbox).disabled(!state.epicSignedIn)
-                Text(L("Before Play, newer saves come down from Epic's cloud, after this Mac's are backed up; when the game ends, this Mac's go back up. If both changed since the last sync, Highball asks which to keep."))
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                if let epicSaveFolder {
-                    Text(String(format: L("Saves sync from %@."), (epicSaveFolder.path as NSString).abbreviatingWithTildeInPath))
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                }
-                lastSyncedLine(on: !state.epicCloudSavesOff.contains(app))
-            }
+    /// An Epic game's cloud-save setting, in its Cloud saves row: the one place it shows, for a
+    /// Windows build and a Mac-only install alike (a Mac build's page has no game settings).
+    @ViewBuilder private func epicCloudControls(_ app: String) -> some View {
+        Toggle(L("Sync saves with Epic"), isOn: Binding(
+            get: { !state.epicCloudSavesOff.contains(app) }, set: { state.epicSetCloudSaves($0, for: app) }))
+            .toggleStyle(.checkbox).controlSize(.small).disabled(!state.epicSignedIn)
+        if let epicSaveFolder {
+            Text(String(format: L("Saves sync from %@."), (epicSaveFolder.path as NSString).abbreviatingWithTildeInPath))
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
         }
+        lastSyncedLine(on: !state.epicCloudSavesOff.contains(app))
     }
 
     /// A GOG game's own settings, one row each like the rest of the page: comet (achievements and
@@ -626,6 +624,7 @@ struct GameDetailView: View {
             Text(L("Cloud saves")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(cloudSaveLines, id: \.self) { Text($0).font(.callout).fixedSize(horizontal: false, vertical: true) }
+                if item.source == .epic, epicCloudSaves, let app = item.epicAppName { epicCloudControls(app) }
             }
             Button { showCloudHelp = true } label: { Image(systemName: "info.circle") }
                 .buttonStyle(.plain).foregroundStyle(.secondary).help(L("How this game's saves sync"))
@@ -645,8 +644,10 @@ struct GameDetailView: View {
             // Nothing until Epic's library lists the game, as for Steam.
             guard let game = state.epicOwned.first(where: { $0.app_name == item.epicAppName }) else { return [] }
             guard game.cloudSaves else { return [L("This game keeps its own saves, on this Mac or with its publisher's service.")] }
-            // Highball syncs a Windows build's saves (EpicSaves); the toggle and sign-in decide.
-            let syncing = !item.installedOnMac && state.epicSignedIn && !state.epicCloudSavesOff.contains(game.app_name)
+            // Highball syncs whichever build is installed when that build names a cloud save folder
+            // (epicCloudSaves); before an install, the toggle and sign-in decide.
+            let installed = item.installed || item.installedOnMac
+            let syncing = (!installed || epicCloudSaves) && state.epicSignedIn && !state.epicCloudSavesOff.contains(game.app_name)
             return [syncing ? L("This game's saves sync with Epic's cloud before and after you play.")
                             : L("Epic's cloud keeps this game's saves when Epic's own launcher plays it. Played from Highball, they stay on this Mac.")]
         default: break
@@ -691,9 +692,9 @@ struct GameDetailView: View {
         case .epic:
             VStack(alignment: .leading, spacing: 10) {
                 Text(L("How Epic's cloud saves work")).font(.headline)
-                Text(L("Epic's launcher syncs a game's saves with Epic's cloud when the game sets a cloud save folder."))
+                Text(L("Epic's launcher syncs a game's saves with Epic's cloud when the game sets a cloud save folder for that version."))
                     .font(.callout).foregroundStyle(.secondary)
-                Text(L("Highball does the same for a Windows version: before Play, newer saves come down, after this Mac's are backed up; when the game ends, this Mac's go back up. If both changed since the last sync, Highball asks which to keep."))
+                Text(L("Before Play, newer saves come down from Epic's cloud, after this Mac's are backed up; when the game ends, this Mac's go back up. If both changed since the last sync, Highball asks which to keep."))
                     .font(.callout).foregroundStyle(.secondary)
             }
             .padding(16).frame(width: 380, alignment: .leading)
@@ -1046,9 +1047,6 @@ struct GameDetailView: View {
                         }
                         if item.source == .gog, let game = state.gogInstalled(item, in: bottle) {
                             gogSettings(game)
-                        }
-                        if item.source == .epic, let app = item.epicAppName, epicCloudSaves {
-                            epicSettings(app)
                         }
                         // A second route on a preview engine: Play asks once, and here it can be asked again.
                         if let offer = state.routeOffer(for: item) {

@@ -4005,9 +4005,21 @@ final class AppState {
             return
         }
         let store = epicStore
+        let game = epicOwned.first { $0.app_name == app }
+        let installFolder = epicMacInstalls[app].map { URL(fileURLWithPath: $0, isDirectory: true) }
         runBusy(String(format: L("Starting %@"), item.title), done: .handedOff) { [self] in
+            // Saves come down from Epic's cloud first, as for the Windows build (epicPlay), and go
+            // back up once the game has ended, only when this check left both sides safe to.
+            var uploadAfter = false
+            if let game, let installFolder, epicSignedIn, !epicCloudSavesOff.contains(app),
+               await Task.detached(operation: { EpicSaves(store: store).supportsCloudSaves(app, mac: true) }).value {
+                stage = L("Bringing your saves down from Epic")
+                uploadAfter = try await epicSync(game, install: installFolder, in: nil, direction: .download, beforePlay: true)
+            }
+            try Task.checkCancellation()
             macLaunchedAt[item.id] = Date()
             appendLog("\(item.title): opening the Mac version")
+            // A fresh single-use token, after the sync (which may wait on a question).
             let info = try await Task.detached { try store.launchInfo(app) }.value
             try Task.checkCancellation()
             let p = Process()
@@ -4021,10 +4033,13 @@ final class AppState {
             macGameProcesses[item.id] = p
             recordPlay(item)
             // The install's folder, else the app legendary's launch runs from.
-            let folder = epicMacInstalls[app].map { URL(fileURLWithPath: $0, isDirectory: true) }
+            let folder = installFolder
                 ?? sequence(first: info.executable, next: { $0.pathComponents.count > 1 ? $0.deletingLastPathComponent() : nil })
                     .first { $0.pathExtension == "app" }
-            watchEpicMacGame(p, item: item, folder: folder)
+            watchEpicMacGame(p, item: item, folder: folder) { [weak self] in
+                guard uploadAfter, let game, let installFolder else { return }
+                _ = try? await self?.epicSync(game, install: installFolder, in: nil, direction: .upload, beforePlay: false)
+            }
         }
     }
 
@@ -4033,13 +4048,15 @@ final class AppState {
     /// macGameProcesses, which keeps a second Play from starting another copy, stays until
     /// nothing runs from the game's folder (MacGameWatch). Never the Mac games folder itself,
     /// which holds every other game.
-    private func watchEpicMacGame(_ process: Process, item: LibraryItem, folder: URL?) {
+    private func watchEpicMacGame(_ process: Process, item: LibraryItem, folder: URL?,
+                                  then afterward: @escaping @MainActor () async -> Void) {
         let watched = folder.flatMap { $0.standardizedFileURL.path == GOGStore.macGamesDir.standardizedFileURL.path ? nil : $0 }
         Task.detached { [weak self] in
             if await Self.macGameEnd(of: process, watching: watched) {
                 await self?.appendLog("\(item.title): the Mac version handed over to another app, which has now quit too")
             }
             await self?.epicMacGameEnded(item)
+            await afterward()   // the saves going back up
         }
     }
 

@@ -211,6 +211,14 @@ public struct EpicSaves: Sendable {
         return (existing.resolvingSymlinksInPath().pathComponents + rest).map { $0.lowercased() }
     }
 
+    /// Whether a save folder legendary kept belongs to another place and is worked out again: one
+    /// outside the environment (the game moved), or, for a Mac build (no prefix), one inside any
+    /// environment (a Windows build's, left from before a switch).
+    static func resolvesAgain(_ stored: URL, prefix: URL?, home: URL) -> Bool {
+        !isInside(stored, roots: allowedRoots(prefix: prefix, home: home))
+            || (prefix == nil && components(stored).contains("drive_c"))
+    }
+
     public static func isInside(_ path: URL, roots: [URL]) -> Bool {
         let parts = components(path)
         return roots.contains { parts.starts(with: components($0)) }
@@ -437,7 +445,9 @@ public struct EpicSaves: Sendable {
         }
 
         // A save folder resolved for another environment (the game moved) is resolved again.
-        if let stored = savePath(app), !Self.isInside(stored, roots: Self.allowedRoots(prefix: prefix, home: home)) {
+        // A Mac build's folder is never inside an environment (a Windows build's path, left from
+        // before a switch).
+        if let stored = savePath(app), Self.resolvesAgain(stored, prefix: prefix, home: home) {
             do { try forgetSavePath(app) } catch { return .failed(error.localizedDescription) }
             onLine?("Highball: the save folder legendary had for this game is outside its environment, so it is worked out again")
         }
