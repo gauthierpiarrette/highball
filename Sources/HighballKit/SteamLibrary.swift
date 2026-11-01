@@ -19,12 +19,16 @@ public struct SteamGame: Identifiable, Sendable, Hashable {
     /// path for Steam in an environment (`C:\\Program Files (x86)\\Steam\\steam.exe`), a Mac
     /// path for Steam for Mac. nil when the manifest has none.
     public let launcherPath: String?
+    /// The 64-bit Steam ID of the account that installed the game (or updated it last), as the
+    /// ACF's LastOwner records it; nil when it has none. Who installed it, not who owns it: two
+    /// accounts on one Steam may both own a game (SteamAccounts).
+    public let lastOwner: UInt64?
 
     public init(appid: Int, name: String, installdir: String, sizeOnDisk: Int64, stateFlags: Int, lastPlayed: Date?,
-                libraryRoot: URL? = nil, launcherPath: String? = nil) {
+                libraryRoot: URL? = nil, launcherPath: String? = nil, lastOwner: UInt64? = nil) {
         self.appid = appid; self.name = name; self.installdir = installdir; self.sizeOnDisk = sizeOnDisk
         self.stateFlags = stateFlags; self.lastPlayed = lastPlayed; self.libraryRoot = libraryRoot
-        self.launcherPath = launcherPath
+        self.launcherPath = launcherPath; self.lastOwner = lastOwner
     }
 
     /// Installed by a Windows Steam, the one in an environment. A library folder both clients use
@@ -191,7 +195,8 @@ public enum SteamLibrary {
             stateFlags: Int(fields["StateFlags"] ?? "") ?? 0,
             lastPlayed: played > 0 ? Date(timeIntervalSince1970: played) : nil,
             libraryRoot: libraryRoot,
-            launcherPath: fields["LauncherPath"]
+            launcherPath: fields["LauncherPath"],
+            lastOwner: UInt64(fields["LastOwner"] ?? "").flatMap { $0 == 0 ? nil : $0 }
         )
     }
 }
