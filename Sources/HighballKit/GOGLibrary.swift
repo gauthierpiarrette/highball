@@ -416,6 +416,14 @@ extension GOGStore {
     /// returns "cancelled" on a fatal error), so a finished install is one whose manifest exists.
     public func downloadCompleted(_ id: String) -> Bool { FileManager.default.fileExists(atPath: manifest(id).path) }
 
+    /// Whether another copy of a game still needs what gogdl kept about it once the copy in
+    /// `bottleName` is removed: a copy in another environment, or the Mac build, which gogdl
+    /// downloaded with the same support folder.
+    public static func otherInstallsRemain(_ id: String, removingFrom bottleName: String,
+                                           installedByBottle: [String: [InstalledGame]], macInstalls: Set<String>) -> Bool {
+        macInstalls.contains(id) || installedByBottle.contains { $0.key != bottleName && $0.value.contains { $0.id == id } }
+    }
+
     /// Forgets what gogdl kept about a game once no environment holds it any more, so it never
     /// tries to patch a game that is not there. While another install remains, its state stays.
     public func forget(_ id: String, otherInstallsRemain: Bool) {

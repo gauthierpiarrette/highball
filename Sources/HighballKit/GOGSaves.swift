@@ -114,11 +114,10 @@ public struct GOGSaves: Sendable {
         Self.parseLocations(try Self.remoteConfig(clientID), clientID: clientID, platform: "MacOS")
     }
 
-    /// A Mac location as a folder, from GOG's Mac variables.
-    /// Never a whole known folder (gogdl deletes local files the cloud lacks): not the variable's
-    /// own folder, and not one a variable reaches into either (`<?LIBRARY?>/Preferences` is all
-    /// of ~/Library/Preferences), see `isSharedFolder`.
-    public static func resolveMac(_ template: String, installFolder: URL,
+    /// A Mac location as a folder, from GOG's Mac variables. gogdl deletes local files the cloud
+    /// lacks, so only a folder that is clearly the game's own is synced (isOwnFolder), and never
+    /// one in an install folder that also holds another game's app (`gameID`, the game asking).
+    public static func resolveMac(_ template: String, installFolder: URL, gameID: String? = nil,
                                   home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL? {
         let values: [String: URL] = [
             "INSTALL": installFolder,
@@ -136,37 +135,42 @@ public struct GOGSaves: Sendable {
         let parts = path.split(separator: "/").map(String.init)
         guard !parts.isEmpty, !parts.contains(where: { $0 == "." || $0 == ".." }) else { return nil }
         let folder = parts.reduce(base) { $0.appending(path: $1) }
-        return isSharedFolder(folder, home: home) ? nil : folder
+        if template.hasPrefix("<?INSTALL?>"), let gameID, GOGStore.holdsOtherGames(installFolder, besides: gameID) { return nil }
+        return isOwnFolder(folder, home: home) ? folder : nil
     }
 
-    /// A folder of the home that holds more than one game's files, which a save sync must never
-    /// be given whole: the home itself, every folder straight inside it (Documents, Library,
-    /// Desktop and the rest), every folder straight inside its Library (Preferences, Application
-    /// Support, Caches, Containers, Group Containers, Saved Application State and the rest), and
-    /// the top of a synced drive or a container there (iCloud Drive's com~apple~CloudDocs, a
-    /// CloudStorage provider's folder, an app's container). Also the few folders many games share
-    /// one level deeper: ~/Documents/My Games, and a launcher's or porting house's folder in
-    /// Application Support (sharedVendorFolders). A game's own folder sits deeper, as in
-    /// ~/Library/Application Support/<studio>/<game>. Compared without case, as the Mac's disks
-    /// are.
+    /// Whether a folder is clearly one game's: at least two levels below every folder that holds
+    /// many games' files (isSharedFolder), so ~/Library/Application Support/<studio>/<game> and
+    /// ~/Documents/My Games/<game> pass, and a studio's or a launcher's folder, which may hold its
+    /// other games, does not. Both the path as written and with its links resolved must pass, so
+    /// a link to a shared folder counts as that folder.
+    static func isOwnFolder(_ folder: URL, home: URL) -> Bool {
+        let written = folder.standardizedFileURL
+        return [written, written.resolvingSymlinksInPath()].allSatisfy { path in
+            !isSharedFolder(path, home: home) && !isSharedFolder(path.deletingLastPathComponent(), home: home)
+        }
+    }
+
+    /// A folder that holds more than one game's files, which a save sync must never be given
+    /// whole: the home itself, every folder straight inside it (Documents, Library, Desktop and
+    /// the rest), every folder straight inside its Library (Preferences, Application Support,
+    /// Caches, Containers, Group Containers, Saved Application State and the rest), the top of a
+    /// synced drive or a container there (iCloud Drive's com~apple~CloudDocs, a CloudStorage
+    /// provider's folder, an app's container), and the folders Mac builds are looked for in.
+    /// Compared without case, as the Mac's disks are, against the home as written and resolved.
     static func isSharedFolder(_ folder: URL, home: URL) -> Bool {
-        let homeParts = home.standardizedFileURL.pathComponents.map { $0.lowercased() }
-        let parts = folder.standardizedFileURL.pathComponents.map { $0.lowercased() }
-        guard parts.count >= homeParts.count, Array(parts.prefix(homeParts.count)) == homeParts else { return false }
-        let inside = Array(parts.dropFirst(homeParts.count))
-        if inside.count <= 1 { return true }
-        if inside == ["documents", "my games"] { return true }
-        guard inside[0] == "library" else { return false }
-        if inside.count == 2 { return true }
-        guard inside.count == 3 else { return false }
-        return ["mobile documents", "cloudstorage", "containers", "group containers"].contains(inside[1])
-            || (inside[1] == "application support" && sharedVendorFolders.contains(inside[2]))
+        func parts(_ url: URL) -> [String] { url.standardizedFileURL.pathComponents.map { $0.lowercased() } }
+        let path = parts(folder)
+        if GOGStore.macSearchFolders.contains(where: { parts($0) == path }) { return true }
+        return Set([parts(home), parts(home.resolvingSymlinksInPath())]).contains { homeParts in
+            guard path.count >= homeParts.count, Array(path.prefix(homeParts.count)) == homeParts else { return false }
+            let inside = Array(path.dropFirst(homeParts.count))
+            if inside.count <= 1 { return true }
+            guard inside[0] == "library" else { return false }
+            if inside.count == 2 { return true }
+            return inside.count == 3 && ["mobile documents", "cloudstorage", "containers", "group containers"].contains(inside[1])
+        }
     }
-
-    /// Folders in ~/Library/Application Support that hold many games' files, each game in its own
-    /// folder below: the stores' launchers and the porting houses whose Mac versions keep their
-    /// saves there. Lowercased.
-    static let sharedVendorFolders: Set<String> = ["gog.com", "steam", "epic", "epic games", "feral interactive", "aspyr"]
 
     /// A location as a folder on the Mac, inside the environment. GOG's variables are the Windows
     /// known folders; Wine keeps them under drive_c/users/<Mac user name>. A Documents folder the

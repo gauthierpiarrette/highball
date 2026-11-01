@@ -461,7 +461,7 @@ struct LibraryTile: View {
             // once the player has seen what goes.
             if item.source == .gog, item.installedOnMac {
                 Button(L("Move the Mac version to the Trash…"), role: .destructive) { state.pendingGOGMacTrash = item }
-                    .disabled(state.busy)
+                    .disabled(state.busy || state.isRunningNow(item))
             }
             // Epic's goes through legendary, so its library stays right.
             if item.source == .epic, item.installedOnMac {

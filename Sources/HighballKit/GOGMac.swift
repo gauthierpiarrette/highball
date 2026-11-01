@@ -66,6 +66,9 @@ extension GOGStore {
         /// The DLC installed with it: the other info files beside the game's own whose root game is
         /// this one.
         public var dlcIDs: [String] = []
+        /// What Move to the Trash takes (GOGStore.macTrashTarget), worked out when the install is
+        /// found, off the main actor, since it reads other apps' info files. Nil: nothing is moved.
+        public var trashTarget: URL? = nil
 
         /// The same game as the installed-game record the Windows paths take, so the save sync,
         /// comet's achievement lookup and the rest run unchanged. Its folder keeps the Mac build's
@@ -120,7 +123,9 @@ extension GOGStore {
                 guard !searched.contains(folder.standardizedFileURL.path),
                       (try? folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
                       !fm.fileExists(atPath: folder.appending(path: ".gogdl-resume").path) else { return nil }
-                return macInstalledGame(in: folder)
+                guard var game = macInstalledGame(in: folder) else { return nil }
+                game.trashTarget = macTrashTarget(for: game, searched: bases)
+                return game
             }
         }
         .filter { seen.insert($0.id).inserted }
@@ -160,12 +165,28 @@ extension GOGStore {
 
     /// What the Trash takes for a Mac build: the game's own folder (MacInstalledGame.folder), its
     /// app or the folder holding its info. Never a folder Mac builds are looked for in, nor one
-    /// holding such a folder, nor the root: those hold other apps. Nil then.
+    /// holding such a folder, nor the root, nor a folder holding another game's app (Galaxy's
+    /// layout with a second game put beside the first): those hold other games. Nil then.
     public static func macTrashTarget(for game: MacInstalledGame, searched: [URL] = macSearchFolders) -> URL? {
         let folder = game.folder.standardizedFileURL.path
         guard folder != "/" else { return nil }
         let held = searched.map { $0.standardizedFileURL.path }
-        return held.contains { $0 == folder || $0.hasPrefix(folder + "/") } ? nil : game.folder
+        guard !held.contains(where: { $0 == folder || $0.hasPrefix(folder + "/") }) else { return nil }
+        return holdsOtherGames(game.folder, besides: game.id) ? nil : game.folder
+    }
+
+    /// Whether a folder holds another game's app: an app straight inside it whose goggame info
+    /// names a different game. The game's own DLC, whose info names it as root, does not count.
+    public static func holdsOtherGames(_ folder: URL, besides gameID: String) -> Bool {
+        let fm = FileManager.default
+        let apps = ((try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [])
+            .filter { $0.pathExtension == "app" }
+        return apps.contains { app in
+            ((try? fm.contentsOfDirectory(at: app.appending(path: "Contents/Resources"), includingPropertiesForKeys: nil)) ?? [])
+                .filter { $0.lastPathComponent.hasPrefix("goggame-") && $0.pathExtension == "info" }
+                .compactMap { try? JSONDecoder().decode(InfoFile.self, from: Data(contentsOf: $0)) }
+                .contains { ($0.rootGameId ?? $0.gameId) != gameID }
+        }
     }
 
     /// The app among `apps` that the primary play task (else the first file task) points at or
@@ -193,13 +214,26 @@ public enum MacGameWatch {
         return executable.hasPrefix(root)
     }
 
-    /// The processes running an executable from inside the folder, never Highball itself.
+    /// The processes running an executable from inside the folder, never Highball itself. The
+    /// kernel reports where an executable really is, so the folder counts as written, with its
+    /// links resolved, and through each link straight inside it (an app linked into the folder
+    /// runs from where the link points).
     public static func processes(runningFrom folder: URL) -> [pid_t] {
-        let root = ProcessTable.canonical(folder.path)
+        let written = folder.standardizedFileURL.path
+        let roots = Set([written, ProcessTable.canonical(written)] + linkTargets(in: folder))
         let own = getpid()
         return ProcessTable.allPIDs().filter { pid in
-            pid != own && executablePath(of: pid).map { runs(executable: $0, from: root) } == true
+            pid != own && executablePath(of: pid).map { path in roots.contains { runs(executable: path, from: $0) } } == true
         }
+    }
+
+    /// Where the apps linked straight inside a folder are, resolved. Only apps: a link to a
+    /// folder of other things would count everything in it as the game.
+    static func linkTargets(in folder: URL) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isSymbolicLinkKey])) ?? [])
+            .filter { (try? $0.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true }
+            .map { ProcessTable.canonical($0.path) }
+            .filter { $0.hasSuffix(".app") }
     }
 
     /// The executable a process runs, or nil when it cannot be read (not ours, gone).

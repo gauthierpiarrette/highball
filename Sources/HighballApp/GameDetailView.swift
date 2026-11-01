@@ -416,7 +416,7 @@ struct GameDetailView: View {
                     }
                     HStack(spacing: 10) {
                         Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([game.app ?? game.folder]) }
-                        Button(L("Move the Mac version to the Trash…")) { state.pendingGOGMacTrash = item }.disabled(state.busy)
+                        Button(L("Move the Mac version to the Trash…")) { state.pendingGOGMacTrash = item }.disabled(state.busy || state.isRunningNow(item))
                     }
                     .controlSize(.small).padding(.top, 2)
                 } else if gog {
@@ -621,6 +621,7 @@ struct GameDetailView: View {
                     primaryActionLabel(L("Play on Mac"), symbol: "play.fill")
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
+                .disabled(state.macPlayUnavailable(item))
                 if item.installed {
                     Button(L("Play the Windows version")) { commitTypedArguments(); state.play(item, windowsBuild: true) }
                         .controlSize(.large).disabled(state.busy || blocked)
@@ -637,6 +638,7 @@ struct GameDetailView: View {
                 if item.installedOnMac {
                     // The row put the Windows build first (a Mac build missing content); the Mac one stays a click away.
                     Button(L("Play on Mac")) { commitTypedArguments(); state.playOnMac(item) }.controlSize(.large)
+                        .disabled(state.macPlayUnavailable(item))
                 } else {
                     Text(!blocked ? L("Highball will ask how it went when you finish.")
                          : entry?.status == "blocked-publisher" ? L("Its publisher stops it on macOS on purpose.")
