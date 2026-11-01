@@ -17,6 +17,12 @@ public struct GOGSaves: Sendable {
         public let name: String
         /// GOG's template, e.g. "<?SAVED_GAMES?>/Remedy/Control".
         public let template: String
+        /// The system gogdl syncs it as: "windows" for GOG's Windows locations, "osx" for its Mac ones.
+        public var os = "windows"
+
+        public init(name: String, template: String, os: String = "windows") {
+            self.name = name; self.template = template; self.os = os
+        }
     }
 
     /// The client id cloud storage is keyed by: the info file's, else the manifest gogdl kept
@@ -60,36 +66,95 @@ public struct GOGSaves: Sendable {
         return Self.parseLocations(data, clientID: clientID)
     }
 
-    static func parseLocations(_ data: Data, clientID: String) -> [Location]? {
+    /// `platform` is GOG's: "Windows", or "MacOS" for the Mac build's own locations.
+    static func parseLocations(_ data: Data, clientID: String, platform: String = "Windows") -> [Location]? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let windows = (obj["content"] as? [String: Any])?["Windows"] as? [String: Any],
-              let cloud = windows["cloudStorage"] as? [String: Any], cloud["enabled"] as? Bool == true else { return nil }
+              let config = (obj["content"] as? [String: Any])?[platform] as? [String: Any],
+              let cloud = config["cloudStorage"] as? [String: Any], cloud["enabled"] as? Bool == true else { return nil }
+        let os = platform == "MacOS" ? "osx" : "windows"
         let list = (cloud["locations"] as? [[String: Any]] ?? []).compactMap { l -> Location? in
             guard let name = l["name"] as? String, let location = l["location"] as? String else { return nil }
-            return Location(name: name, template: location)
+            return Location(name: name, template: location, os: os)
         }
-        return list.isEmpty
-            ? [Location(name: "__default", template: "<?APPLICATION_DATA_LOCAL?>/GOG.com/Galaxy/Applications/\(clientID)/Storage/Shared/Files")]
-            : list
+        guard list.isEmpty else { return list }
+        return platform == "MacOS"
+            ? [Location(name: "__default", template: "<?APPLICATION_SUPPORT?>/GOG.com/Galaxy/Applications/\(clientID)/Storage/Shared/Files", os: os)]
+            : [Location(name: "__default", template: "<?APPLICATION_DATA_LOCAL?>/GOG.com/Galaxy/Applications/\(clientID)/Storage/Shared/Files")]
     }
 
     // MARK: How a game saves
 
-    /// How GOG syncs a game's saves: the folders GOG's file sync copies, empty when it copies
-    /// none. Such a game saves through the game itself, which may sync its own saves with GOG's
-    /// cloud through GOG's SDK, unseen here.
+    /// How GOG syncs a game's saves, per version: the folders GOG's file sync copies, empty for a
+    /// version it copies none of. Such a version saves through the game itself, which may sync
+    /// its own saves with GOG's cloud through GOG's SDK (Cyberpunk 2077 on Mac), unseen here.
     public struct CloudSetup: Sendable, Equatable {
         public let windows: [Location]
+        public let mac: [Location]
     }
 
-    /// The setup, from the remote config GOG publishes per client id.
+    /// Both versions' setups, from the one remote config GOG publishes per client id.
     public func cloudSetup(clientID: String) throws -> CloudSetup {
         let url = URL(string: "https://remote-config.gog.com/components/galaxy_client/clients/\(clientID)?component_version=2.0.45")!
         return Self.parseCloudSetup(try GOGStore.fetch(URLRequest(url: url)), clientID: clientID)
     }
 
     static func parseCloudSetup(_ data: Data, clientID: String) -> CloudSetup {
-        CloudSetup(windows: parseLocations(data, clientID: clientID) ?? [])
+        CloudSetup(windows: parseLocations(data, clientID: clientID) ?? [],
+                   mac: parseLocations(data, clientID: clientID, platform: "MacOS") ?? [])
+    }
+
+    // MARK: The Mac build's saves
+
+    /// Where a Mac build's saves sync: GOG's Mac locations, nil when GOG syncs none for the Mac
+    /// build. A game that syncs its own saves through GOG's SDK (Cyberpunk 2077 on Mac, through
+    /// comet) needs none from Highball, and a file sync beside it would fight it.
+    public func macLocations(clientID: String) throws -> [Location]? {
+        let url = URL(string: "https://remote-config.gog.com/components/galaxy_client/clients/\(clientID)?component_version=2.0.45")!
+        return Self.parseLocations(try GOGStore.fetch(URLRequest(url: url)), clientID: clientID, platform: "MacOS")
+    }
+
+    /// A Mac location as a folder, from GOG's Mac variables.
+    /// Never a whole known folder (gogdl deletes local files the cloud lacks): not the variable's
+    /// own folder, and not one a variable reaches into either (`<?LIBRARY?>/Preferences` is all
+    /// of ~/Library/Preferences), see `isSharedFolder`.
+    public static func resolveMac(_ template: String, installFolder: URL,
+                                  home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL? {
+        let values: [String: URL] = [
+            "INSTALL": installFolder,
+            "DOCUMENTS": home.appending(path: "Documents"),
+            "APPLICATION_SUPPORT": home.appending(path: "Library/Application Support"),
+            "LIBRARY": home.appending(path: "Library"),
+            "PREFERENCES": home.appending(path: "Library/Preferences"),
+            "CACHES": home.appending(path: "Library/Caches"),
+        ]
+        var path = template.replacingOccurrences(of: "\\", with: "/")
+        guard let open = path.range(of: "<?"), let close = path.range(of: "?>", range: open.upperBound..<path.endIndex),
+              open.lowerBound == path.startIndex, let base = values[String(path[open.upperBound..<close.lowerBound])] else { return nil }
+        path.removeSubrange(path.startIndex..<close.upperBound)
+        guard !path.contains("%"), !path.contains("<?") else { return nil }
+        let parts = path.split(separator: "/").map(String.init)
+        guard !parts.isEmpty, !parts.contains(where: { $0 == "." || $0 == ".." }) else { return nil }
+        let folder = parts.reduce(base) { $0.appending(path: $1) }
+        return isSharedFolder(folder, home: home) ? nil : folder
+    }
+
+    /// A folder of the home that holds more than one game's files, which a save sync must never
+    /// be given whole: the home itself, every folder straight inside it (Documents, Library,
+    /// Desktop and the rest), every folder straight inside its Library (Preferences, Application
+    /// Support, Caches, Containers, Group Containers, Saved Application State and the rest), and
+    /// the top of a synced drive or a container there (iCloud Drive's com~apple~CloudDocs, a
+    /// CloudStorage provider's folder, an app's container). A game's own folder sits deeper, as
+    /// in ~/Library/Application Support/<studio>/<game>. Compared without case, as the Mac's
+    /// disks are.
+    static func isSharedFolder(_ folder: URL, home: URL) -> Bool {
+        let homeParts = home.standardizedFileURL.pathComponents.map { $0.lowercased() }
+        let parts = folder.standardizedFileURL.pathComponents.map { $0.lowercased() }
+        guard parts.count >= homeParts.count, Array(parts.prefix(homeParts.count)) == homeParts else { return false }
+        let inside = Array(parts.dropFirst(homeParts.count))
+        if inside.count <= 1 { return true }
+        guard inside[0] == "library" else { return false }
+        if inside.count == 2 { return true }
+        return inside.count == 3 && ["mobile documents", "cloudstorage", "containers", "group containers"].contains(inside[1])
     }
 
     /// A location as a folder on the Mac, inside the environment. GOG's variables are the Windows
@@ -165,7 +230,7 @@ public struct GOGSaves: Sendable {
         case .forceDownload: flag = "--force-download"
         case .forceUpload: flag = "--force-upload"
         }
-        return ["save-sync", folder.path, id, "--os", "windows", "--ts", timestamp, "--name", location.name, flag]
+        return ["save-sync", folder.path, id, "--os", location.os, "--ts", timestamp, "--name", location.name, flag]
     }
 
     /// gogdl's only stdout is the new timestamp, a bare number written without a newline, so on

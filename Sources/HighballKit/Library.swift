@@ -22,7 +22,8 @@ public struct LibraryItem: Identifiable, Sendable, Hashable {
     /// Where it lives. nil only for an Epic or GOG title owned but not installed in any bottle.
     public let bottleName: String?
     public let installed: Bool
-    /// Steam for Mac has its native build installed (MacSteam); Play goes there first.
+    /// The native build is installed: Steam for Mac's (MacSteam), or for GOG the Mac build gogdl
+    /// put in the Mac games folder (GOGStore.macInstalledGames). Play goes there first.
     public let installedOnMac: Bool
     public let steamAppID: Int?
     public let epicAppName: String?
@@ -260,6 +261,7 @@ public enum LibraryIndex {
                              gogGames: [GOGStore.Game] = [],
                              gogInstalledByBottle: [String: [GOGStore.InstalledGame]] = [:],
                              gogLaunchChoice: [String: Int] = [:],
+                             gogMacInstalled: Set<String> = [],
                              battleNetByBottle: [String: [BattleNetGame]] = [:],
                              plays: [String: LibraryStore.PlayRecord] = [:],
                              defaultBottle: String? = nil,
@@ -369,7 +371,7 @@ public enum LibraryIndex {
             let meta = gogKnown[id]
             items.append(LibraryItem(
                 source: .gog, id: itemID, title: meta?.title ?? primary?.game.title ?? id, bottleName: primary?.bottle,
-                installed: primary != nil, gogID: id, gogSteamAppID: meta?.steamAppID,
+                installed: primary != nil, installedOnMac: gogMacInstalled.contains(id), gogID: id, gogSteamAppID: meta?.steamAppID,
                 artworkTall: meta?.artworkTall, artworkWide: meta?.artworkWide,
                 otherBottles: copies.map(\.bottle).filter { $0 != primary?.bottle }.sorted(),
                 lastPlayed: ([itemID] + standing.filter { $0.gogItemID == itemID }.map(\.pinItemID)).compactMap { plays[$0]?.lastPlayedAt }.max(),

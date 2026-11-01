@@ -296,7 +296,7 @@ extension GOGStore {
         public let dependencies: [String]
     }
 
-    /// `platform` is gogdl's: "windows", or "osx" for a Mac build.
+    /// `platform` is gogdl's: "windows", or "osx" for a Mac build (GOGMac).
     public func info(_ id: String, platform: String = "windows") throws -> DownloadInfo {
         let out = try capture(["info", id, "--os", platform])
         guard let start = out.firstIndex(of: "{"),
@@ -336,8 +336,9 @@ extension GOGStore {
 
     /// gogdl appends the game's own folder name to `--path` for a download, and takes the game's
     /// folder itself for an update. DLC comes along: what the account owns installs with the game.
-    static func downloadArguments(id: String, into base: String, support: String, language: String, update: Bool) -> [String] {
-        [update ? "update" : "download", id, "--platform", "windows", "--path", base,
+    static func downloadArguments(id: String, into base: String, support: String, language: String, update: Bool,
+                                  platform: String = "windows") -> [String] {
+        [update ? "update" : "download", id, "--platform", platform, "--path", base,
          "--support", support, "--with-dlcs", "--lang", language]
     }
 
