@@ -4057,13 +4057,11 @@ final class AppState {
     /// A GOG Mac build the player asked to move to the Trash: asked first, with what goes.
     var pendingGOGMacTrash: LibraryItem?
 
-    /// What the Trash takes for a GOG game's Mac build: its app, or the folder holding its info
-    /// (GOGStore.MacInstalledGame.folder). Nil when there is none, or when it would be a folder
-    /// Mac builds are looked for in, which holds other apps.
+    /// What the Trash takes for a GOG game's Mac build (GOGStore.macTrashTarget). Nil when there
+    /// is none, or when it would be a folder holding other apps.
     func gogMacTrashTarget(for item: LibraryItem) -> URL? {
-        guard let id = item.gogID, let folder = gogMacInstalled[id]?.folder else { return nil }
-        let searched = Set(GOGStore.macSearchFolders.map { $0.standardizedFileURL.path })
-        return searched.contains(folder.standardizedFileURL.path) ? nil : folder
+        guard let id = item.gogID, let game = gogMacInstalled[id] else { return nil }
+        return GOGStore.macTrashTarget(for: game)
     }
 
     /// Moves a GOG game's Mac build to the Trash, where it can still be put back. Only once the

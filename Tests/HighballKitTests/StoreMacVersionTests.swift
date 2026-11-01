@@ -118,6 +118,23 @@ final class GOGMacBuildTests: XCTestCase {
         XCTAssertEqual(game.dlcIDs, ["2"])
     }
 
+    /// The Trash takes the game's own app or folder, never a searched folder, one holding it, or
+    /// the root.
+    func testTheTrashNeverTakesAFolderHoldingOtherApps() {
+        let own = URL(fileURLWithPath: "/Users/someone/Applications/Highball Games")
+        let searched = [own, URL(fileURLWithPath: "/Applications")]
+        func game(_ path: String) -> GOGStore.MacInstalledGame {
+            GOGStore.MacInstalledGame(id: "1", title: "Game", folder: URL(fileURLWithPath: path), app: nil, buildID: nil, arch: .unknown)
+        }
+        XCTAssertEqual(GOGStore.macTrashTarget(for: game("/Applications/Games/Foo.app"), searched: searched)?.path, "/Applications/Games/Foo.app")
+        XCTAssertEqual(GOGStore.macTrashTarget(for: game("/Users/someone/Applications/Highball Games/Samorost 1.app"), searched: searched)?.path,
+                       "/Users/someone/Applications/Highball Games/Samorost 1.app")
+        for whole in ["/Applications", "/Applications/", "/Users/someone/Applications/Highball Games", "/Users/someone/Applications",
+                      "/Users/someone", "/"] {
+            XCTAssertNil(GOGStore.macTrashTarget(for: game(whole), searched: searched), whole)
+        }
+    }
+
     /// An app among others in a folder of /Applications (/Applications/Games/Foo.app): the game,
     /// and so its Trash, is that app alone, never the folder with the other apps in it.
     func testAppInAFolderOfOtherAppsIsTheGamesFolderAlone() throws {
