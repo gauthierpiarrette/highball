@@ -172,12 +172,14 @@ extension GOGStore {
     }
 
     /// The app among `apps` that the primary play task (else the first file task) points at or
-    /// into, its path read from `folder` as gogdl and Galaxy read it.
+    /// into, its path read from `folder` as gogdl and Galaxy read it. Compared with links resolved
+    /// on both sides (/var is /private/var, a games folder can be a link), from the folder down,
+    /// since the task's own file may not exist yet.
     static func taskApp(_ tasks: [PlayTask], in folder: URL, among apps: [URL]) -> URL? {
         guard let path = (tasks.first { $0.isPrimary == true && $0.isFile } ?? tasks.first { $0.isFile })?.path else { return nil }
-        let target = resolve(path, in: folder).standardizedFileURL.path
+        let target = resolve(path, in: folder.resolvingSymlinksInPath()).standardizedFileURL.path
         return apps.first { app in
-            let root = app.standardizedFileURL.path
+            let root = app.resolvingSymlinksInPath().standardizedFileURL.path
             return target == root || target.hasPrefix(root + "/")
         }
     }
