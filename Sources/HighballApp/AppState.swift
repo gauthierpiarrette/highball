@@ -3588,12 +3588,14 @@ final class AppState {
     }
 
     /// Whether to close a game just opened outside Highball: only when it is not Highball's own
-    /// launch (its process, or within 15 seconds of Highball starting it), opened in the last few
-    /// seconds, not closed already in the last minute, and only when Highball can start it again
-    /// right now. A busy Highball (a download holding the strip) would close it and start nothing.
+    /// launch (within 15 seconds of Highball starting it, or while the game Highball started has
+    /// not ended: an app from its folder then is its own, a launcher's hand-over or a helper,
+    /// however late it opens), opened in the last few seconds, not closed already in the last
+    /// minute, and only when Highball can start it again right now. A busy Highball (a download
+    /// holding the strip) would close it and start nothing.
     private func relaunchShouldTakeOver(_ app: NSRunningApplication, item: LibraryItem) -> Bool {
         let now = Date()
-        if macGameProcesses[item.id]?.processIdentifier == app.processIdentifier { return false }
+        if macGameProcesses[item.id] != nil { return false }
         if let started = macLaunchedAt[item.id], now.timeIntervalSince(started) < 15 { return false }
         if let closed = macRelaunchedAt[item.id], now.timeIntervalSince(closed) < 60 { return false }
         guard !app.isTerminated, let launched = app.launchDate, now.timeIntervalSince(launched) < 8, !busy else { return false }
