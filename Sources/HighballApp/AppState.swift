@@ -3508,7 +3508,8 @@ final class AppState {
     /// Epic's own launcher passes (single use, fetched right before). On the strip, as the GOG
     /// Mac build and the Windows build start: legendary takes seconds to answer, and a second
     /// Play meanwhile finds Highball busy and starts nothing, where it used to start a second
-    /// copy. A failure reaches the alert, not only the log.
+    /// copy. A failure reaches the alert, not only the log. The game runs until nothing runs from
+    /// its folder (watchEpicMacGame), a launcher's hand-over included.
     func epicPlayMac(_ item: LibraryItem) {
         guard let app = item.epicAppName else { return }
         if macGameProcesses[item.id] != nil {
@@ -3525,16 +3526,33 @@ final class AppState {
             p.arguments = info.arguments
             p.currentDirectoryURL = info.workingDirectory
             p.environment = ProcessInfo.processInfo.environment.merging(info.environment) { $1 }
-            p.terminationHandler = { [weak self] _ in Task { @MainActor in self?.macGameProcesses[item.id] = nil } }
             do { try p.run() } catch {
                 throw HighballError.failed(String(format: L("The Mac version of %@ did not start: %@"), item.title, error.localizedDescription))
             }
-            // Set before the termination handler's hop to the main actor can run, so an early
-            // exit never leaves a stale entry.
             macGameProcesses[item.id] = p
             recordPlay(item)
+            watchEpicMacGame(p, item: item, folder: epicMacInstalls[app].map { URL(fileURLWithPath: $0, isDirectory: true) })
         }
     }
+
+    /// Once an Epic Mac build quits, as for a GOG one (watchMacGame): the process Highball started
+    /// may be a launcher that hands over to the game and exits at once, so its entry in
+    /// macGameProcesses, which keeps a second Play from starting another copy, stays until
+    /// nothing runs from the game's folder (MacGameWatch). Never the Mac games folder itself,
+    /// which holds every other game.
+    private func watchEpicMacGame(_ process: Process, item: LibraryItem, folder: URL?) {
+        let started = Date()
+        let watched = folder.flatMap { $0.standardizedFileURL.path == GOGStore.macGamesDir.standardizedFileURL.path ? nil : $0 }
+        Task.detached { [weak self] in
+            process.waitUntilExit()
+            if let watched, await MacGameWatch.waitForHandover(from: watched, ranFor: Date().timeIntervalSince(started)) {
+                await self?.appendLog("\(item.title): the Mac version handed over to another process, which has now quit too")
+            }
+            await self?.epicMacGameEnded(item)
+        }
+    }
+
+    private func epicMacGameEnded(_ item: LibraryItem) { macGameProcesses[item.id] = nil }
 
     /// Removes an Epic game's Mac build through legendary, so its library stays right.
     func epicUninstallMac(_ item: LibraryItem) {
