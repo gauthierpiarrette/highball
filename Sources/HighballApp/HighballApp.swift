@@ -555,7 +555,7 @@ private extension View {
             Button(L("Keep this Mac's saves")) { state.resolveGOGSaveConflict(.keepMac) }
             Button(L("Decide later"), role: .cancel) { state.resolveGOGSaveConflict(.skip) }
         } message: { conflict in
-            Text(conflict.epic ? Self.epicSaveConflictMessage(beforePlay: conflict.beforePlay, backups: EpicSaves(store: state.epicStore).backups.root)
+            Text(conflict.epic ? Self.epicSaveConflictMessage(beforePlay: conflict.beforePlay, firstSync: conflict.firstSync, backups: EpicSaves(store: state.epicStore).backups.root)
                                : Self.saveConflictMessage(beforePlay: conflict.beforePlay, backups: GOGSaves(store: state.gogStore).backupsDir))
         }
     }
@@ -590,13 +590,16 @@ private extension View {
         }
     }
 
-    /// Epic's: the Mac's saves changed since the last sync and the cloud has newer ones. Epic's cloud
-    /// keeps its earlier saves when the Mac's go up, so only the Mac's need a copy (EpicSaves).
-    static func epicSaveConflictMessage(beforePlay: Bool, backups: URL) -> String {
-        let decideLater = beforePlay ? L("Decide later plays with this Mac's saves and leaves the cloud alone.")
-                                     : L("Decide later leaves both as they are until the next time you play.")
-        return [L("The saves on this Mac changed since they were last synced, and Epic's cloud has newer ones, so neither was copied."),
-                String(format: L("Use Epic's cloud saves replaces this Mac's, after a copy of them is kept in %@; Keep this Mac's saves adds them to Epic's cloud, which keeps its earlier saves."),
+    /// For an Epic game (EpicSaves). Each choice says what it replaces; the Mac's saves are
+    /// backed up before Epic's replace them.
+    static func epicSaveConflictMessage(beforePlay: Bool, firstSync: Bool, backups: URL) -> String {
+        let situation = firstSync
+            ? L("This Mac and Epic's cloud both have saves for this game, and Highball hasn't synced them before, so it can't tell which to keep. Nothing was copied or replaced.")
+            : L("The saves on this Mac and the ones in Epic's cloud have both changed since they were last synced. Nothing was copied or replaced.")
+        let decideLater = beforePlay ? L("Decide later plays with this Mac's saves and doesn't upload them afterwards; Highball asks again next time.")
+                                     : L("Decide later leaves both as they are; Highball asks again next time you play.")
+        return [situation,
+                String(format: L("Use Epic's cloud saves replaces this Mac's, after backing them up to %@. Keep this Mac's saves uploads them as Epic's newest save, which your other devices then download."),
                        (backups.path as NSString).abbreviatingWithTildeInPath),
                 decideLater].joined(separator: " ")
     }

@@ -230,14 +230,25 @@ enum L10n {
         "The saves on this Mac and the ones in GOG's cloud have both changed since they were last synced, or haven't been synced from this install yet, so neither was copied.":
             "Les sauvegardes de ce Mac et celles du cloud GOG ont toutes deux changé depuis leur dernière synchronisation, ou n’ont pas encore été synchronisées depuis cette installation : aucune n’a été copiée.",
         "Use Epic's cloud saves": "Utiliser les sauvegardes du cloud Epic",
-        "The saves on this Mac changed since they were last synced, and Epic's cloud has newer ones, so neither was copied.":
-            "Les sauvegardes de ce Mac ont changé depuis leur dernière synchronisation, et le cloud Epic en a de plus récentes : aucune n’a été copiée.",
-        "Use Epic's cloud saves replaces this Mac's, after a copy of them is kept in %@; Keep this Mac's saves adds them to Epic's cloud, which keeps its earlier saves.":
-            "Utiliser les sauvegardes du cloud Epic remplace celles de ce Mac, après en avoir gardé une copie dans %@ ; Garder les sauvegardes de ce Mac les ajoute au cloud Epic, qui garde ses sauvegardes précédentes.",
+        "This Mac and Epic's cloud both have saves for this game, and Highball hasn't synced them before, so it can't tell which to keep. Nothing was copied or replaced.":
+            "Ce Mac et le cloud Epic ont tous deux des sauvegardes de ce jeu, et Highball ne les a encore jamais synchronisées : il ne peut pas savoir lesquelles garder. Rien n’a été copié ni remplacé.",
+        "The saves on this Mac and the ones in Epic's cloud have both changed since they were last synced. Nothing was copied or replaced.":
+            "Les sauvegardes de ce Mac et celles du cloud Epic ont toutes changé depuis leur dernière synchronisation. Rien n’a été copié ni remplacé.",
+        "Decide later plays with this Mac's saves and doesn't upload them afterwards; Highball asks again next time.":
+            "Décider plus tard joue avec les sauvegardes de ce Mac sans les envoyer ensuite ; Highball redemandera la prochaine fois.",
+        "Decide later leaves both as they are; Highball asks again next time you play.":
+            "Décider plus tard laisse les deux telles quelles ; Highball redemandera à la prochaine partie.",
+        "Use Epic's cloud saves replaces this Mac's, after backing them up to %@. Keep this Mac's saves uploads them as Epic's newest save, which your other devices then download.":
+            "Utiliser les sauvegardes du cloud Epic remplace celles de ce Mac, après les avoir sauvegardées dans %@. Garder les sauvegardes de ce Mac les envoie comme sauvegarde la plus récente d’Epic, que vos autres appareils téléchargeront ensuite.",
+        "Highball couldn't bring %@'s saves down from Epic (%@), so it put this Mac's saves back as they were.":
+            "Highball n’a pas pu récupérer les sauvegardes de %@ depuis Epic (%@) : il a remis celles de ce Mac telles qu’elles étaient.",
+        "The game didn't start. Try again, or turn off Sync saves with Epic on the game's page to play with this Mac's saves.":
+            "Le jeu n’a pas été lancé. Réessayez, ou désactivez Synchroniser avec Epic sur la page du jeu pour jouer avec les sauvegardes de ce Mac.",
+        "Saves sync from %@.": "Les sauvegardes se synchronisent depuis %@.",
         "Bringing your saves down from Epic": "Récupération de vos sauvegardes depuis Epic",
         "Sync saves with Epic": "Synchroniser avec Epic",
-        "Saves come down from Epic's cloud before Play, after a copy of this Mac's is kept, and go back up when the game ends. If both changed, Highball asks which one wins.":
-            "Les sauvegardes arrivent du cloud Epic avant de jouer, après une copie de celles de ce Mac, et y repartent quand le jeu se termine. Si les deux ont changé, Highball demande laquelle garder.",
+        "Before Play, newer saves come down from Epic's cloud, after this Mac's are backed up; when the game ends, this Mac's go back up. If both changed since the last sync, Highball asks which to keep.":
+            "Avant de jouer, les sauvegardes plus récentes arrivent du cloud Epic, après une copie de celles de ce Mac ; quand le jeu se termine, celles de ce Mac y repartent. Si les deux ont changé depuis la dernière synchronisation, Highball demande lesquelles garder.",
         "Use GOG's cloud saves replaces this Mac's; Keep this Mac's saves replaces the cloud's. Either way, a copy of what gets replaced is kept first, in %@.":
             "Utiliser les sauvegardes du cloud GOG remplace celles de ce Mac ; Garder les sauvegardes de ce Mac remplace celles du cloud. Dans les deux cas, une copie de ce qui est remplacé est d’abord conservée dans %@.",
         "Remove %@ without a copy of every save?": "Supprimer %@ sans copie de toutes ses sauvegardes ?",

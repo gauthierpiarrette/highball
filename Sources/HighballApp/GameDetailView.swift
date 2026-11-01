@@ -16,6 +16,8 @@ struct GameDetailView: View {
     @State private var argsText = ""
     /// The game keeps saves in Epic's cloud (EpicSaves.supportsCloudSaves): read once per page.
     @State private var epicCloudSaves = false
+    /// Where legendary keeps the game's saves, once a sync has worked it out.
+    @State private var epicSaveFolder: URL?
     @State private var argsLoaded = false
     /// Saves a line still being typed, so the Play that follows launches with it. Skipped until the
     /// field has loaded, or its empty text would clear the stored arguments.
@@ -89,7 +91,11 @@ struct GameDetailView: View {
         .background(BottleBackdrop())
         .navigationTitle(state.displayTitle(item))
         .task(id: item.id) {
-            epicCloudSaves = item.epicAppName.map { EpicSaves(store: state.epicStore).supportsCloudSaves($0) } ?? false
+            // Read off the main thread: legendary's metadata and install records are JSON files.
+            let saves = EpicSaves(store: state.epicStore), app = item.epicAppName
+            let found = await Task.detached { app.map { (saves.supportsCloudSaves($0), saves.savePath($0)) } }.value
+            epicCloudSaves = found?.0 ?? false
+            epicSaveFolder = found?.1
         }
         .task(id: storeAppID) {
             storeDetails = nil
@@ -138,9 +144,7 @@ struct GameDetailView: View {
         }
     }
 
-    /// A GOG game's own settings, one row each like the rest of the page: comet (achievements and
-    /// stats), cloud saves, which launch task Play runs, and an update for a game gogdl installed.
-
+    /// An Epic game's cloud-save setting, in the game settings like GOG's.
     private func epicSettings(_ app: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Text(L("Cloud saves")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 2)
@@ -148,12 +152,18 @@ struct GameDetailView: View {
                 Toggle(L("Sync saves with Epic"), isOn: Binding(
                     get: { !state.epicCloudSavesOff.contains(app) }, set: { state.epicSetCloudSaves($0, for: app) }))
                     .toggleStyle(.checkbox).disabled(!state.epicSignedIn)
-                Text(L("Saves come down from Epic's cloud before Play, after a copy of this Mac's is kept, and go back up when the game ends. If both changed, Highball asks which one wins."))
+                Text(L("Before Play, newer saves come down from Epic's cloud, after this Mac's are backed up; when the game ends, this Mac's go back up. If both changed since the last sync, Highball asks which to keep."))
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let epicSaveFolder {
+                    Text(String(format: L("Saves sync from %@."), (epicSaveFolder.path as NSString).abbreviatingWithTildeInPath))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
             }
         }
     }
 
+    /// A GOG game's own settings, one row each like the rest of the page: comet (achievements and
+    /// stats), cloud saves, which launch task Play runs, and an update for a game gogdl installed.
     @ViewBuilder private func gogSettings(_ game: GOGStore.InstalledGame) -> some View {
         let cometOff = state.gogSettings.cometOff[game.id]
         HStack(alignment: .top, spacing: 12) {

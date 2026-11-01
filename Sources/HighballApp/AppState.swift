@@ -15,8 +15,9 @@ struct GOGSaveConflict: Identifiable {
     let title: String
     /// Asked before Play (the launch waits) or after the game ended.
     let beforePlay: Bool
-    /// An Epic game's: Epic's cloud keeps its earlier saves when the Mac's go up.
+    /// An Epic game's (EpicSaves), and whether it is the first sync of saves on both sides.
     var epic = false
+    var firstSync = false
     let resolve: (Choice) -> Void
 }
 
@@ -3399,19 +3400,21 @@ final class AppState {
         }
         let folder = epicInstalls[game.app_name].map { URL(fileURLWithPath: $0, isDirectory: true) }
         runBusy("Starting \(game.app_title)", done: .handedOff, stop: .killBottle(bottle, label: L("Stop"))) { [self] in
-            let store = epicStore
+            let store = epicStore, app = game.app_name
             await removeMacMetadataFiles(from: folder, of: game.app_title)
-            // Fresh single-use token, fetched off the main thread right before launch.
-            let info = try await Task.detached { try store.launchInfo(game.app_name) }.value
-            // Saves down from Epic's cloud first, where the game keeps them there and the player
-            // has not turned it off (EpicSaves).
-            let syncSaves = epicSignedIn && !epicCloudSavesOff.contains(game.app_name) && folder != nil
-                && EpicSaves(store: store).supportsCloudSaves(game.app_name)
-            if syncSaves, let folder {
+            // Saves come down from Epic's cloud first, where the game keeps them there and the
+            // player hasn't turned it off (EpicSaves). They go back up after the game only when
+            // this check left the two sides safe to upload over.
+            var uploadAfter = false
+            if epicSignedIn, !epicCloudSavesOff.contains(app), let folder,
+               await Task.detached(operation: { EpicSaves(store: store).supportsCloudSaves(app) }).value {
                 stage = L("Bringing your saves down from Epic")
-                try await epicSync(game, install: folder, in: bottle, direction: .download, beforePlay: true)
+                uploadAfter = try await epicSync(game, install: folder, in: bottle, direction: .download, beforePlay: true)
             }
             try Task.checkCancellation()
+            // A fresh single-use token, fetched off the main thread after the sync (which may
+            // wait on a question) and right before launch.
+            let info = try await Task.detached { try store.launchInfo(app) }.value
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             let box = LaunchOutcome()
             let log = logLine(box)
@@ -3453,7 +3456,7 @@ final class AppState {
             let session = GameSession(title: game.app_title, bottleName: bottle.name, appid: nil, markers: markers,
                                       renderer: (renderer ?? bottle.settings.renderer).rawValue, libraryID: "epic:\(game.app_name)",
                                       startNotice: row?.startNotice, startNoticeMinutes: row?.startNoticeMinutes)
-            if syncSaves, let folder {
+            if uploadAfter, let folder {
                 epicSessionEnds[session.id] = { [weak self] in
                     Task { @MainActor in _ = try? await self?.epicSync(game, install: folder, in: bottle, direction: .upload, beforePlay: false) }
                 }
@@ -3474,45 +3477,73 @@ final class AppState {
         if on { epicCloudSavesOff.remove(app) } else { epicCloudSavesOff.insert(app) }
     }
 
-    /// One Epic sync, asking the player on a conflict, as gogSync does. Whether the Mac's saves and
-    /// the cloud's ended up in step.
+    /// One Epic sync, asking the player when both sides changed (EpicSaves). Returns true when the
+    /// saves end up in step, or when only the other direction has work left, so an upload after
+    /// the game may follow; false when the player chose to decide later or the sync failed, so
+    /// nothing goes up afterwards. A download that failed partway has the Mac's saves put back
+    /// from their backup: before Play that throws, so the game never starts on them.
     @discardableResult
-    private func epicSync(_ game: EpicStore.Game, install: URL, in bottle: Bottle, direction: EpicSaves.Direction,
+    private func epicSync(_ game: EpicStore.Game, install: URL, in bottle: Bottle?, direction: EpicSaves.Direction,
                           beforePlay: Bool) async throws -> Bool {
         let saves = EpicSaves(store: epicStore)
-        let title = game.app_title, app = game.app_name, prefix = bottle.url
+        let title = game.app_title, app = game.app_name, prefix = bottle?.url
         let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
         let outcome = await Task.detached { saves.sync(app, install: install, prefix: prefix, direction: direction, onLine: log) }.value
         switch outcome {
         case .synced:
             return true
+        case .left:
+            appendLog(beforePlay ? "\(title): this Mac's saves are newer than Epic's cloud; they go up after you play"
+                                 : "\(title): Epic's cloud has newer saves from elsewhere; they come down before you next play")
+            return true
         case let .failed(why):
-            appendLog("\(title): Epic cloud saves did not sync (\(why)); \(beforePlay ? "playing with the saves on this Mac" : "they stay on this Mac until the next sync")")
+            appendLog("\(title): Epic cloud saves did not sync (\(why)); \(beforePlay ? "playing with this Mac's saves, which won't be uploaded afterwards" : "they stay on this Mac until the next sync")")
             return false
-        case .conflict:
+        case let .restored(why):
+            try epicRestored(title, why: why, beforePlay: beforePlay)
+            return false
+        case let .conflict(firstSync):
             let choice: GOGSaveConflict.Choice = await withCheckedContinuation { continuation in
                 if let pending = gogSaveConflict {
                     appendLog("\(pending.title): cloud saves left as they are this time (\(title) needed the question)")
                     resolveGOGSaveConflict(.skip)
                 }
-                gogSaveConflict = GOGSaveConflict(title: title, beforePlay: beforePlay, epic: true) { continuation.resume(returning: $0) }
+                gogSaveConflict = GOGSaveConflict(title: title, beforePlay: beforePlay, epic: true, firstSync: firstSync) { continuation.resume(returning: $0) }
             }
             let forced: EpicSaves.Direction
             switch choice {
             case .useCloud: forced = .forceDownload
             case .keepMac: forced = .forceUpload
             case .skip:
-                appendLog("\(title): Epic cloud saves left as they are this time")
+                appendLog("\(title): Epic cloud saves left as they are; \(beforePlay ? "this Mac's saves won't be uploaded after this session, and " : "")Highball asks again next time")
                 return false
             }
             let again = await Task.detached { saves.sync(app, install: install, prefix: prefix, direction: forced, onLine: log) }.value
             switch again {
-            case .synced: appendLog("\(title): Epic cloud saves \(choice == .useCloud ? "replaced this Mac's, a copy of them kept first" : "now hold this Mac's, beside their earlier saves")")
-            case let .failed(why): appendLog("\(title): Epic cloud saves did not sync (\(why))")
-            case .conflict: appendLog("\(title): Epic cloud saves did not sync")
+            case .synced:
+                appendLog("\(title): \(choice == .useCloud ? "Epic's cloud saves replaced this Mac's, after a backup of them" : "Epic's cloud now has this Mac's saves as its newest")")
+                return true
+            case let .restored(why):
+                try epicRestored(title, why: why, beforePlay: beforePlay)
+                return false
+            case let .failed(why):
+                appendLog("\(title): Epic cloud saves did not sync (\(why))")
+                return false
+            case .left, .conflict:
+                appendLog("\(title): Epic cloud saves did not sync")
+                return false
             }
-            return again == .synced
         }
+    }
+
+    /// A download that failed partway, with the Mac's saves put back: before Play it stops the
+    /// launch, after the game the player hears about it.
+    private func epicRestored(_ title: String, why: String, beforePlay: Bool) throws {
+        let message = String(format: L("Highball couldn't bring %@'s saves down from Epic (%@), so it put this Mac's saves back as they were."), title, why)
+        if beforePlay {
+            throw HighballError.failed(message + " " + L("The game didn't start. Try again, or turn off Sync saves with Epic on the game's page to play with this Mac's saves."))
+        }
+        fail(HighballError.failed(message))
     }
 
     /// Copies the bundled EpicGamesLauncher.exe stand-in into the game folder when it is missing

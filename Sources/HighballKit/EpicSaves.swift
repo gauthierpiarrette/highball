@@ -1,19 +1,31 @@
+import Darwin
 import Foundation
 import os
 
-/// Epic cloud saves, through legendary's `sync-saves`, before and after a Windows Epic game plays.
+/// Epic cloud saves, through legendary's `sync-saves`, before and after an Epic game plays.
 ///
-/// legendary decides by age alone: whichever of the newest local file and the newest cloud save is
-/// newer wins, with no notion of both having changed (legendary/cli.py `sync_saves`). A download
-/// empties the save folder first (`download_saves(clean_dir=True)`); an upload adds a save to
-/// Epic's cloud, which keeps the earlier ones. So here:
-/// - the folder legendary resolves (from the game's CloudSaveFolder, inside the environment's
-///   registry) is copied before any download (SaveBackups), and a failed copy stops it;
-/// - a download over saves changed since Highball last synced them is a conflict, asked, never
-///   decided by age;
-/// - an upload needs no copy: the cloud keeps what it had.
-/// legendary runs with `-y` (it would otherwise stop at a question with no terminal to answer)
-/// and `--accept-path` (to take the path it resolved).
+/// legendary 0.21.0 decides by age alone: it compares the newest local file with the newest cloud
+/// save and lets the newer side win, with no notion of both sides having changed (cli.py
+/// `sync_saves`, core.py `check_savegame_state`). A download first deletes the save folder's files
+/// (`download_saves(clean_dir=True)`), and carries on and exits 0 when a manifest or chunk then
+/// fails to download. An upload adds a new cloud save and ignores the status of each file it puts.
+/// So Highball works around it:
+/// - It records, per install, when the saves were last in step and which cloud save they matched.
+///   A sync then knows which side changed since, and asks when both did, in either direction, or
+///   when a first sync finds saves on both sides. Age alone never decides.
+/// - Before a download, the files it would delete are backed up (SaveBackups), and a failed backup
+///   stops it. A download that reports any failure, or after which legendary does not see the two
+///   sides in step, is undone from that backup. A marker kept during the download undoes one that
+///   was interrupted.
+/// - After an upload, legendary must see a new cloud save in step with the Mac, or the upload
+///   counts as failed.
+/// - A save folder that holds more than one game's saves (the home folder, Documents, Application
+///   Support, a whole install folder) is never synced: a download would empty it.
+/// - A save folder legendary resolved for another environment is resolved again.
+/// - Syncs of one game never overlap.
+/// legendary runs with `-y` (it would otherwise stop at a question with no terminal to answer),
+/// `--accept-path` (to take the save folder it resolves) and `-v` (its debug line carries the
+/// cloud save's date in every case).
 public struct EpicSaves: Sendable {
     public let store: EpicStore
     public init(store: EpicStore) { self.store = store }
@@ -21,16 +33,30 @@ public struct EpicSaves: Sendable {
     public enum Direction: Sendable { case download, upload, forceDownload, forceUpload }
 
     public enum Outcome: Sendable, Equatable {
+        /// The two sides are in step, or one was copied to the other and checked.
         case synced
-        /// Saves changed on the Mac since the last sync, and the cloud has newer ones: nothing
-        /// moved, the player chooses.
-        case conflict
+        /// Only the other side's direction has anything to do (newer saves on the Mac before Play,
+        /// or newer saves in the cloud after it). Nothing moved.
+        case left
+        /// Both sides changed since the last sync, or a first sync found saves on both. Nothing
+        /// moved; the player chooses.
+        case conflict(firstSync: Bool)
+        /// Nothing moved.
         case failed(String)
+        /// A download failed partway, and the Mac's saves were put back from the backup.
+        case restored(String)
     }
 
-    /// What legendary found, from its log; nil when it said nothing about this game (no cloud
-    /// saves, or no save folder it could resolve).
+    /// What legendary found, from its log.
     public enum State: Sendable, Equatable { case nothing, inStep, cloudNewer, localNewer }
+
+    /// One comparison: the state, and the date of the newest cloud save (as legendary names it,
+    /// "yyyy-MM-dd HH:mm:ss" in UTC), nil when the cloud has none.
+    public struct Check: Sendable, Equatable {
+        public let state: State
+        public let cloud: String?
+        public init(state: State, cloud: String?) { self.state = state; self.cloud = cloud }
+    }
 
     static func state(in lines: [String]) -> State? {
         for line in lines {
@@ -42,8 +68,50 @@ public struct EpicSaves: Sendable {
         return nil
     }
 
-    /// legendary's lines for something it could not do and carried on past.
-    static func isFailure(_ line: String) -> Bool { line.contains(" ERROR: ") || line.contains(" CRITICAL: ") }
+    /// The newest cloud save's date. The debug line ("Remote save date: 2026-11-01 01:36:04+00:00")
+    /// appears whenever both sides have saves; the info line ("- Cloud save date: …") covers the
+    /// rest.
+    static func cloudDate(in lines: [String]) -> String? {
+        for line in lines {
+            if let range = line.range(of: "Remote save date: ") {
+                return String(line[range.upperBound...].prefix(19))
+            }
+        }
+        for line in lines {
+            if let range = line.range(of: "- Cloud save date: ") {
+                let value = String(line[range.upperBound...].prefix(19))
+                return value.hasPrefix("N/A") ? nil : value
+            }
+        }
+        return nil
+    }
+
+    static func check(in lines: [String]) -> Check? {
+        state(in: lines).map { Check(state: $0, cloud: $0 == .nothing ? nil : cloudDate(in: lines)) }
+    }
+
+    static func isDebug(_ line: String) -> Bool { line.contains("] DEBUG: ") }
+
+    /// legendary's lines for something it could not do and carried on past. A download that
+    /// skips a chunk or a file part only warns or errors and still "completes".
+    static func isFailure(_ line: String) -> Bool {
+        line.contains(" ERROR: ") || line.contains(" CRITICAL: ")
+            || line.contains("may be incomplete") || line.contains("may have been corrupted")
+    }
+
+    /// Why a run told nothing about the game, in the player's terms, from legendary's log.
+    static func explanation(_ lines: [String]) -> String {
+        let all = lines.joined(separator: "\n")
+        if all.contains("Login failed") { return "Highball's Epic sign-in has expired; sign in to Epic again" }
+        if all.contains("Unable to lock install data") { return "legendary was busy with another task" }
+        if all.contains("unprocessed variables") { return "legendary couldn't work out where this game keeps its saves on this Mac" }
+        if all.contains("Game not installed") { return "legendary doesn't list this game as installed" }
+        if all.contains("does not support cloud saves") { return "Epic lists no cloud saves for this game" }
+        if let error = lines.first(where: isFailure) {
+            return "legendary reported: " + (error.components(separatedBy: ": ").dropFirst().joined(separator: ": "))
+        }
+        return "legendary said nothing about this game's saves"
+    }
 
     static func arguments(app: String, direction: Direction?) -> [String] {
         let flags: [String]
@@ -54,112 +122,398 @@ public struct EpicSaves: Sendable {
         case .forceDownload?: flags = ["--force-download"]
         case .forceUpload?: flags = ["--force-upload"]
         }
-        return ["sync-saves", app, "-y", "--accept-path"] + flags
+        return ["-v", "sync-saves", app, "-y", "--accept-path"] + flags
     }
 
-    /// Whether the game's catalog item names a cloud save folder for Windows, from the metadata
-    /// legendary keeps (metadata/<app>.json customAttributes.CloudSaveFolder).
-    public func supportsCloudSaves(_ app: String) -> Bool {
+    // MARK: The catalog
+
+    /// What Epic's catalog says about a game's cloud saves, from the metadata legendary keeps
+    /// (metadata/<app>.json customAttributes).
+    public struct Catalog: Sendable, Equatable {
+        public let windowsFolder: String?
+        public let macFolder: String?
+        public let filter: SaveFilter
+    }
+
+    public func catalog(_ app: String) -> Catalog? {
         let file = store.configDir.appending(path: "metadata/\(app).json")
         guard let data = try? Data(contentsOf: file),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let attributes = (obj["metadata"] as? [String: Any])?["customAttributes"] as? [String: Any],
-              let folder = (attributes["CloudSaveFolder"] as? [String: Any])?["value"] as? String else { return false }
-        return !folder.isEmpty
+              let attributes = (obj["metadata"] as? [String: Any])?["customAttributes"] as? [String: Any] else { return nil }
+        func value(_ key: String) -> String? { (attributes[key] as? [String: Any])?["value"] as? String }
+        return Catalog(windowsFolder: value("CloudSaveFolder").flatMap { $0.isEmpty ? nil : $0 },
+                       macFolder: value("CloudSaveFolder_MAC").flatMap { $0.isEmpty ? nil : $0 },
+                       filter: SaveFilter(includeList: value("CloudIncludeList"), excludeList: value("CloudExcludeList")))
+    }
+
+    /// Whether the catalog names a cloud save folder for that build.
+    public func supportsCloudSaves(_ app: String, mac: Bool = false) -> Bool {
+        guard let catalog = catalog(app) else { return false }
+        return (mac ? catalog.macFolder : catalog.windowsFolder) != nil
+    }
+
+    // MARK: Where the saves are
+
+    var installedFile: URL { store.configDir.appending(path: "installed.json") }
+
+    /// The save folder legendary stored for the game, read from its install records directly.
+    public func savePath(_ app: String) -> URL? {
+        guard let data = try? Data(contentsOf: installedFile),
+              let all = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let path = (all[app] as? [String: Any])?["save_path"] as? String, !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+
+    /// Forgets the save folder legendary stored, so its next run resolves it again. Holds
+    /// legendary's own lock on its install records (installed.json.lock, the flock its filelock
+    /// takes) while writing, and gives up when another legendary holds it.
+    func forgetSavePath(_ app: String) throws {
+        let lockPath = installedFile.path + ".lock"
+        let fd = open(lockPath, O_RDWR | O_CREAT, 0o644)
+        guard fd >= 0 else { throw HighballError.failed("couldn't open legendary's lock") }
+        defer { close(fd) }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw HighballError.failed("legendary was busy with another task") }
+        defer { flock(fd, LOCK_UN) }
+        let data = try Data(contentsOf: installedFile)
+        guard var all = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var game = all[app] as? [String: Any] else { return }
+        game["save_path"] = NSNull()
+        all[app] = game
+        try JSONSerialization.data(withJSONObject: all, options: [.prettyPrinted, .sortedKeys]).write(to: installedFile, options: .atomic)
+    }
+
+    /// Where a save folder may be: inside the environment, or in a Mac folder one of its user
+    /// folders links to (Documents, by default, is ~/Documents). For a Mac build, anywhere in the
+    /// home folder.
+    static func allowedRoots(prefix: URL?, home: URL) -> [URL] {
+        guard let prefix else { return [home] }
+        var roots = [prefix]
+        for user in UserFolders.userDirectories(driveC: prefix.appending(path: "drive_c")) {
+            let entries = (try? FileManager.default.contentsOfDirectory(at: user, includingPropertiesForKeys: nil)) ?? []
+            for entry in entries {
+                if let target = try? FileManager.default.destinationOfSymbolicLink(atPath: entry.path) {
+                    roots.append(URL(fileURLWithPath: target, relativeTo: user).standardizedFileURL)
+                }
+            }
+        }
+        return roots
+    }
+
+    /// A path's components with symlinks resolved, lowercased (APFS ignores case). Only an
+    /// existing path resolves, so the nearest existing folder above it is resolved and the rest
+    /// appended.
+    static func components(_ url: URL) -> [String] {
+        var existing = url.standardizedFileURL, rest: [String] = []
+        while !FileManager.default.fileExists(atPath: existing.path), existing.pathComponents.count > 1 {
+            rest.insert(existing.lastPathComponent, at: 0)
+            existing = existing.deletingLastPathComponent()
+        }
+        return (existing.resolvingSymlinksInPath().pathComponents + rest).map { $0.lowercased() }
+    }
+
+    static func isInside(_ path: URL, roots: [URL]) -> Bool {
+        let parts = components(path)
+        return roots.contains { parts.starts(with: components($0)) }
+    }
+
+    /// Why a save folder must not be synced, nil when it may. A download deletes every file in the
+    /// folder that the game's filters pick (all of them, without filters), so a folder that holds
+    /// more than the game's saves never syncs: the home folder and its usual folders, an
+    /// environment's drive and user folders, and the game's install folder or anything above it
+    /// (unless an include list limits the sync to the saves in it).
+    static func refusal(for folder: URL, install: URL, prefix: URL?, home: URL, filter: SaveFilter) -> String? {
+        let parts = components(folder)
+        var shared = [home]
+        shared += ["Documents", "Documents/My Games", "Desktop", "Downloads", "Music", "Pictures", "Movies",
+                   "Library", "Library/Application Support", "Library/Preferences", "Library/Caches",
+                   "Library/Containers", "Library/Group Containers", "Saved Games"].map { home.appending(path: $0) }
+        if let prefix {
+            let driveC = prefix.appending(path: "drive_c")
+            shared += [prefix, driveC, driveC.appending(path: "users"), driveC.appending(path: "users/Public"),
+                       driveC.appending(path: "users/Public/Documents"), driveC.appending(path: "ProgramData"),
+                       driveC.appending(path: "Program Files"), driveC.appending(path: "Program Files (x86)"),
+                       driveC.appending(path: "windows")]
+            for user in UserFolders.userDirectories(driveC: driveC) {
+                shared += [user] + ["AppData", "AppData/Local", "AppData/Roaming", "AppData/LocalLow", "Documents",
+                                    "Documents/My Games", "Saved Games", "Desktop"].map { user.appending(path: $0) }
+            }
+        }
+        let shown = (folder.path as NSString).abbreviatingWithTildeInPath
+        let why = "Epic names \(shown) as this game's save folder, and it holds more than this game's saves, so Highball doesn't sync it: a download from Epic would empty it first"
+        if shared.contains(where: { components($0) == parts }) { return why }
+        // Above the home folder or an environment (/, /Users).
+        if ([home] + (prefix.map { [$0] } ?? [])).contains(where: { components($0).starts(with: parts) }) { return why }
+        let installParts = components(install)
+        if installParts.starts(with: parts), parts != installParts || filter.include?.isEmpty != false { return why }
+        return nil
+    }
+
+    // MARK: Sync history
+
+    /// What Highball knows about an install's saves after its last sync.
+    public struct Record: Codable, Sendable, Equatable {
+        /// When the two sides were last in step.
+        public var synced: Date
+        /// The newest cloud save they matched then; nil in a record from before it was kept.
+        public var cloud: String? = nil
+        /// The save folder they were in.
+        public var path: String? = nil
+        /// A summary of the folder's saves then (SaveBackups.fingerprint): any change to them
+        /// since, however soon after, changes it.
+        public var local: String? = nil
+        /// Set while a download runs: the backup to put back if it never finished ("" when the
+        /// folder held no saves before it).
+        public var restoring: String? = nil
+    }
+
+    /// Backups taken before a download (SaveBackups), next to GOG's.
+    public var backups: SaveBackups { SaveBackups(root: store.configDir.deletingLastPathComponent().appending(path: "save-backups", directoryHint: .isDirectory)) }
+
+    var recordsFile: URL { store.configDir.deletingLastPathComponent().appending(path: "epic-saves.json") }
+
+    public func records() -> [String: Record] {
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        guard let data = try? Data(contentsOf: recordsFile) else { return [:] }
+        if let records = try? decoder.decode([String: Record].self, from: data) { return records }
+        // The first version kept only the date.
+        let dates = (try? decoder.decode([String: Date].self, from: data)) ?? [:]
+        return dates.mapValues { Record(synced: $0) }
+    }
+
+    private static let recordsLock = NSLock()
+    func update(_ key: String, _ change: (inout Record?) -> Void) {
+        Self.recordsLock.withLock {
+            var all = records()
+            var record = all[key]
+            change(&record)
+            all[key] = record
+            let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
+            try? encoder.encode(all).write(to: recordsFile, options: .atomic)
+        }
+    }
+
+    /// Drops a download's marker, and the whole record when the marker was all there was.
+    func clearRestoring(_ key: String) {
+        update(key) { record in
+            record?.restoring = nil
+            if record?.synced == .distantPast { record = nil }
+        }
+    }
+
+    public static func key(app: String, install: URL) -> String { "\(app)@\(install.standardizedFileURL.path)" }
+
+    // MARK: Deciding
+
+    public enum Decision: Sendable, Equatable { case inStep, leave, conflict(firstSync: Bool), transfer(download: Bool) }
+
+    /// What a sync does once legendary has compared the two sides, from what changed on each
+    /// since the record: never the age alone. With no record, a side with saves counts as changed.
+    static func decide(_ check: Check, direction: Direction, record: Record?, lastChange: Date?, hasLocal: Bool,
+                       fingerprint: String? = nil) -> Decision {
+        switch direction {
+        case .forceDownload: return .transfer(download: true)
+        case .forceUpload: return .transfer(download: false)
+        case .download, .upload: break
+        }
+        if check.state == .nothing || check.state == .inStep { return .inStep }
+        let cloudChanged: Bool
+        let localChanged: Bool
+        if let record {
+            if let seen = record.cloud {
+                cloudChanged = check.cloud != seen
+            } else {
+                // A record from before the cloud save was kept: a cloud save newer than the sync
+                // (beyond legendary's 60 seconds) came from elsewhere.
+                cloudChanged = check.cloud.flatMap(Self.date(legendary:)).map { $0 > record.synced.addingTimeInterval(60) } ?? false
+            }
+            if let then = record.local, let now = fingerprint {
+                localChanged = then != now
+            } else {
+                localChanged = lastChange.map { $0 > record.synced.addingTimeInterval(60) } ?? false
+            }
+        } else {
+            cloudChanged = check.cloud != nil
+            localChanged = hasLocal
+        }
+        if cloudChanged && localChanged && hasLocal && check.cloud != nil { return .conflict(firstSync: record == nil) }
+        switch direction {
+        case .download:
+            // Also with nothing here to lose: saves deleted on the Mac come back.
+            return cloudChanged || (!hasLocal && check.cloud != nil) ? .transfer(download: true) : .leave
+        default:
+            return localChanged || (hasLocal && check.cloud == nil) ? .transfer(download: false) : .leave
+        }
+    }
+
+    static func date(legendary: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.date(from: legendary)
+    }
+
+    static func latestChange(of files: [URL]) -> Date? {
+        files.compactMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }.max()
     }
 
     // MARK: Sync
 
-    /// Copies kept before a download (SaveBackups), beside GOG's.
-    public var backups: SaveBackups { SaveBackups(root: store.configDir.deletingLastPathComponent().appending(path: "save-backups", directoryHint: .isDirectory)) }
-
-    var lastSyncsFile: URL { store.configDir.deletingLastPathComponent().appending(path: "epic-saves.json") }
-
-    /// When each install's saves were last in step with the cloud: per install, like GOG's.
-    func lastSyncs() -> [String: Date] {
-        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([String: Date].self, from: Data(contentsOf: lastSyncsFile))) ?? [:]
-    }
-
-    private static let lastSyncsLock = NSLock()
-    private func noteSynced(_ key: String) {
-        Self.lastSyncsLock.withLock {
-            var all = lastSyncs()
-            all[key] = Date()
-            let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
-            try? encoder.encode(all).write(to: lastSyncsFile, options: .atomic)
+    /// One lock per game: a sync that starts while another runs (an upload still going when
+    /// Play is pressed again) waits for it.
+    private static let gameLocks = OSAllocatedUnfairLock(initialState: [String: NSLock]())
+    private static func lock(for app: String) -> NSLock {
+        gameLocks.withLock { locks in
+            if let lock = locks[app] { return lock }
+            let lock = NSLock(); locks[app] = lock
+            return lock
         }
     }
 
-    /// Syncs a Windows Epic game's saves. `prefix` is the environment it is installed in, which
-    /// legendary reads to resolve the save folder; `install` keys the backups and sync history.
-    public func sync(_ app: String, install: URL, prefix: URL, direction: Direction,
-                     onLine: (@Sendable (String) -> Void)? = nil) -> Outcome {
-        let key = "\(app)@\(install.standardizedFileURL.path)"
-        let environment = ["WINEPREFIX": prefix.path]
-        // First, only where the saves are and which side is newer: nothing moves.
+    private struct Run { var status: Int32; var lines: [String] }
+
+    private func run(_ app: String, direction: Direction?, environment: [String: String],
+                     onLine: (@Sendable (String) -> Void)?) throws -> Run {
         let lines = OSAllocatedUnfairLock(initialState: [String]())
-        let checked: Int32
-        do {
-            checked = try store.runStreaming(Self.arguments(app: app, direction: nil), environment: environment) { line in
-                lines.withLock { $0.append(line) }
-                onLine?(line)
-            }
-        } catch { return .failed(error.localizedDescription) }
-        let log = lines.withLock { $0 }
-        guard checked == 0, !log.contains(where: Self.isFailure) else { return .failed("legendary could not compare the saves") }
-        guard let state = Self.state(in: log) else { return .failed("legendary found no save folder for this game") }
-        guard let folder = (try? store.installedGames())?.first(where: { $0.app_name == app })?.save_path.map({ URL(fileURLWithPath: $0) })
-        else { return .failed("legendary kept no save folder for this game") }
-
-        let downloads: Bool
-        switch Self.decide(state, direction: direction, lastChange: Self.latestChange(in: folder), lastSync: lastSyncs()[key]) {
-        case .inStep: noteSynced(key); return .synced
-        case .leave: return .synced
-        case .conflict: return .conflict
-        case .transfer(let download): downloads = download
+        let status = try store.runStreaming(Self.arguments(app: app, direction: direction), environment: environment) { line in
+            lines.withLock { $0.append(line) }
+            if !Self.isDebug(line) { onLine?(line) }
         }
-        if downloads {
-            do { try backups.backUpLocal(folder, into: backups.folder("epic-\(app)", install: install)) } catch {
-                return .failed("the saves could not be backed up first (\(error.localizedDescription)), so nothing was synced")
-            }
-        }
-        let failed = OSAllocatedUnfairLock(initialState: false)
-        let status: Int32
-        do {
-            status = try store.runStreaming(Self.arguments(app: app, direction: direction), environment: environment) { line in
-                if Self.isFailure(line) { failed.withLock { $0 = true } }
-                onLine?(line)
-            }
-        } catch { return .failed(error.localizedDescription) }
-        guard status == 0, !failed.withLock({ $0 }) else { return .failed("legendary sync-saves did not finish (status \(status))") }
-        noteSynced(key)
-        return .synced
+        return Run(status: status, lines: lines.withLock { $0 })
     }
 
-    enum Decision: Equatable { case inStep, leave, conflict, transfer(download: Bool) }
+    private enum Compared { case success(Check), failure(String) }
 
-    /// What a sync does once legendary has compared the two sides. A download over saves changed
-    /// here since the last sync (or never synced) is a conflict: legendary would let the newer
-    /// side win and empty the folder. Newer here before Play, or newer in the cloud after the
-    /// game, is left for the other direction to take.
-    static func decide(_ state: State, direction: Direction, lastChange: Date?, lastSync: Date?) -> Decision {
-        switch direction {
-        case .forceDownload: return .transfer(download: true)
-        case .forceUpload: return .transfer(download: false)
-        case .download:
-            if state == .nothing || state == .inStep { return .inStep }
-            guard state == .cloudNewer else { return .leave }
-            let changedHere = lastChange.map { change in lastSync.map { change > $0.addingTimeInterval(60) } ?? true } ?? false
-            return changedHere ? .conflict : .transfer(download: true)
-        case .upload:
-            if state == .nothing || state == .inStep { return .inStep }
-            return state == .localNewer ? .transfer(download: false) : .leave
+    private func compare(_ app: String, environment: [String: String], onLine: (@Sendable (String) -> Void)?) -> Compared {
+        do {
+            let result = try run(app, direction: nil, environment: environment, onLine: onLine)
+            guard result.status == 0, !result.lines.contains(where: Self.isFailure), let check = Self.check(in: result.lines) else {
+                return .failure(Self.explanation(result.lines))
+            }
+            return .success(check)
+        } catch { return .failure(error.localizedDescription) }
+    }
+
+    /// Syncs an Epic game's saves. `prefix` is the environment a Windows build is installed in,
+    /// which legendary reads to resolve the save folder; nil for a Mac build, whose folder it
+    /// resolves under the home folder. `install` keys the backups and the sync history.
+    public func sync(_ app: String, install: URL, prefix: URL?, direction: Direction,
+                     home: URL = FileManager.default.homeDirectoryForCurrentUser,
+                     onLine: (@Sendable (String) -> Void)? = nil) -> Outcome {
+        let gameLock = Self.lock(for: app)
+        gameLock.lock()
+        defer { gameLock.unlock() }
+
+        let key = Self.key(app: app, install: install)
+        let environment = prefix.map { ["WINEPREFIX": $0.path] } ?? [:]
+        let filter = catalog(app)?.filter ?? .everything
+        let backupDir = backups.folder("epic-\(app)", install: install)
+
+        // A download that never finished: its backup goes back first.
+        if let pending = records()[key]?.restoring, let folder = savePath(app) {
+            do {
+                try SaveBackups.restore(pending.isEmpty ? nil : URL(fileURLWithPath: pending), into: folder, filter: filter)
+                clearRestoring(key)
+                onLine?("Highball: an earlier download of these saves didn't finish, so this Mac's saves were put back from their backup")
+            } catch {
+                return .failed("an earlier download didn't finish, and the saves couldn't be put back from \((pending as NSString).abbreviatingWithTildeInPath) (\(error.localizedDescription))")
+            }
+        }
+
+        // A save folder resolved for another environment (the game moved) is resolved again.
+        if let stored = savePath(app), !Self.isInside(stored, roots: Self.allowedRoots(prefix: prefix, home: home)) {
+            do { try forgetSavePath(app) } catch { return .failed(error.localizedDescription) }
+            onLine?("Highball: the save folder legendary had for this game is outside its environment, so it is worked out again")
+        }
+
+        let before: Check
+        switch compare(app, environment: environment, onLine: onLine) {
+        case .success(let check): before = check
+        case .failure(let why): return .failed(why)
+        }
+        guard let folder = savePath(app) else { return .failed("legendary kept no save folder for this game") }
+        if let why = Self.refusal(for: folder, install: install, prefix: prefix, home: home, filter: filter) { return .failed(why) }
+
+        // History for another folder doesn't describe this one: a first sync.
+        var record = records()[key]
+        if let path = record?.path, path != folder.path { record = nil }
+        if record?.synced == .distantPast { record = nil }   // only a download's marker, never synced
+        let local = SaveBackups.files(in: folder, matching: filter)
+        let decision = Self.decide(before, direction: direction, record: record, lastChange: Self.latestChange(of: local),
+                                   hasLocal: !local.isEmpty, fingerprint: SaveBackups.fingerprint(folder, filter: filter))
+        func noteSynced(_ cloud: String?) {
+            let fingerprint = SaveBackups.fingerprint(folder, filter: filter)
+            update(key) { $0 = Record(synced: Date(), cloud: cloud, path: folder.path, local: fingerprint) }
+        }
+        switch decision {
+        case .inStep:
+            noteSynced(before.cloud)
+            return .synced
+        case .leave:
+            return .left
+        case .conflict(let first):
+            return .conflict(firstSync: first)
+        case .transfer(download: true):
+            return download(app, folder: folder, filter: filter, backupDir: backupDir, key: key,
+                            before: before, environment: environment, onLine: onLine, noteSynced: noteSynced)
+        case .transfer(download: false):
+            let upload: Run
+            // Forced: Highball decided from what changed, and legendary's age check could
+            // otherwise skip it (a Mac clock behind, or legendary's DST slip).
+            do { upload = try run(app, direction: .forceUpload, environment: environment, onLine: onLine) } catch {
+                return .failed(error.localizedDescription)
+            }
+            guard upload.status == 0, !upload.lines.contains(where: Self.isFailure) else {
+                return .failed("the upload to Epic didn't finish (\(Self.explanation(upload.lines)))")
+            }
+            if upload.lines.contains(where: { $0.contains("No files to upload") }) {
+                return .failed("none of the files in the save folder match what Epic syncs for this game")
+            }
+            // legendary ignores whether each file reached Epic: a new cloud save, in step with
+            // the Mac, is what shows it did.
+            guard case .success(let after) = compare(app, environment: environment, onLine: onLine),
+                  after.state == .inStep, let cloud = after.cloud, cloud != before.cloud else {
+                return .failed("Highball couldn't confirm that Epic's cloud received the saves")
+            }
+            noteSynced(cloud)
+            return .synced
         }
     }
 
-    /// The newest change among a folder's files, nil when it holds none.
-    static func latestChange(in folder: URL) -> Date? {
-        SaveBackups.files(in: folder).compactMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }.max()
+    private func download(_ app: String, folder: URL, filter: SaveFilter, backupDir: URL, key: String,
+                          before: Check, environment: [String: String], onLine: (@Sendable (String) -> Void)?,
+                          noteSynced: (String?) -> Void) -> Outcome {
+        let backup: URL?
+        do { backup = try backups.backUpLocal(folder, into: backupDir, filter: filter) } catch {
+            return .failed("the saves couldn't be backed up first (\(error.localizedDescription)), so nothing was synced")
+        }
+        update(key) { record in
+            if record == nil { record = Record(synced: .distantPast, cloud: nil, path: folder.path) }
+            record?.restoring = backup?.path ?? ""
+        }
+        var problem: String?
+        do {
+            let result = try run(app, direction: .forceDownload, environment: environment, onLine: onLine)
+            if result.status != 0 || result.lines.contains(where: Self.isFailure) {
+                problem = Self.explanation(result.lines)
+            } else if case .success(let after) = compare(app, environment: environment, onLine: onLine) {
+                if after.state != .inStep || after.cloud != before.cloud { problem = "legendary doesn't see the saves in step afterwards" }
+                else if SaveBackups.files(in: folder, matching: filter).isEmpty { problem = "no saves came down" }
+            } else {
+                problem = "legendary couldn't compare the saves afterwards"
+            }
+        } catch { problem = error.localizedDescription }
+
+        guard let problem else {
+            noteSynced(before.cloud)
+            return .synced
+        }
+        do {
+            try SaveBackups.restore(backup, into: folder, filter: filter)
+            clearRestoring(key)
+        } catch {
+            return .failed("the download from Epic failed (\(problem)), and the saves couldn't be put back automatically; their backup is in \(((backup?.path ?? backupDir.path) as NSString).abbreviatingWithTildeInPath)")
+        }
+        return .restored(problem)
     }
 }
