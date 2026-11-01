@@ -3588,7 +3588,7 @@ final class AppState {
 
     private struct LibraryCache: Codable {
         struct EpicGame: Codable {
-            var appName: String, title: String, artworkWide: URL?, artworkTall: URL?
+            var appName: String, title: String, artworkWide: URL?, artworkTall: URL?, listsMac: Bool
             var cloudSaves: Bool?
         }
         var epicOwned: [EpicGame] = []
@@ -3612,7 +3612,7 @@ final class AppState {
               let cache = try? JSONDecoder().decode(LibraryCache.self, from: Data(contentsOf: libraryCacheFile)) else { return }
         if epicStore.isAuthenticated {
             epicOwned = cache.epicOwned.map {
-                var game = EpicStore.Game(app_name: $0.appName, app_title: $0.title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall)
+                var game = EpicStore.Game(app_name: $0.appName, app_title: $0.title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall, listsMac: $0.listsMac)
                 game.cloudSaves = $0.cloudSaves ?? false
                 return game
             }
@@ -3624,7 +3624,7 @@ final class AppState {
     private func saveLibraryCache() {
         let cache = LibraryCache(
             epicOwned: epicOwned.map { .init(appName: $0.app_name, title: $0.app_title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall,
-                                             cloudSaves: $0.cloudSaves) },
+                                             listsMac: $0.listsMac, cloudSaves: $0.cloudSaves) },
             epicInstalls: epicInstalls, gogGames: gogGames)
         try? JSONEncoder().encode(cache).write(to: libraryCacheFile, options: .atomic)
     }
@@ -4087,9 +4087,9 @@ final class AppState {
         (downloadEstimatesFetched[Self.estimateKey(item, mac: mac)] ?? .distantPast) < Date().addingTimeInterval(-86_400)
     }
 
-    /// A native Mac version the store offers: Steam's (MacSteamBuild).
+    /// A native Mac version the store offers: Steam's (MacSteamBuild), or one GOG or Epic lists.
     func offersMacVersion(_ item: LibraryItem) -> Bool {
-        item.installedOnMac || (item.source == .steam && macSteamBuild(for: item) != nil)
+        item.installedOnMac || (item.source == .steam ? macSteamBuild(for: item) != nil : item.macListed)
     }
 
     private var sizePrefetch: Task<Void, Never>?

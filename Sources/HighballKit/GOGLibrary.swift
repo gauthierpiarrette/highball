@@ -15,10 +15,14 @@ extension GOGStore {
         public let steamAppID: Int?
         public let gogVerticalCover: URL?
         public let gogWide: URL?
+        /// gamesdb lists macOS among the release's systems; every GOG purchase includes each
+        /// system's build. nil in an entry cached before this was read: looked up again.
+        public let listsMac: Bool?
 
-        public init(id: String, title: String, steamAppID: Int? = nil, gogVerticalCover: URL? = nil, gogWide: URL? = nil) {
+        public init(id: String, title: String, steamAppID: Int? = nil, gogVerticalCover: URL? = nil, gogWide: URL? = nil,
+                    listsMac: Bool? = nil) {
             self.id = id; self.title = title; self.steamAppID = steamAppID
-            self.gogVerticalCover = gogVerticalCover; self.gogWide = gogWide
+            self.gogVerticalCover = gogVerticalCover; self.gogWide = gogWide; self.listsMac = listsMac
         }
 
         public var artworkTall: URL? {
@@ -62,7 +66,8 @@ extension GOGStore {
 
         var cache = (try? JSONDecoder.highball.decode([String: CachedRelease].self, from: Data(contentsOf: libraryCacheFile))) ?? [:]
         let stale = Date().addingTimeInterval(-7 * 86_400)
-        let missing = releases.filter { (cache[$0.id]?.fetched ?? .distantPast) < stale }
+        // Entries from before the systems were read are looked up again, once.
+        let missing = releases.filter { (cache[$0.id]?.fetched ?? .distantPast) < stale || cache[$0.id]?.game.map { $0.listsMac == nil } == true }
         try await withThrowingTaskGroup(of: (String, CachedRelease?).self) { group in
             var next = missing.makeIterator()
             func add() -> Bool {
@@ -110,8 +115,10 @@ extension GOGStore {
         let steam = (game["releases"] as? [[String: Any]] ?? [])
             .first { $0["platform_id"] as? String == "steam" }
             .flatMap { ($0["external_id"] as? String).flatMap(Int.init) }
+        let systems = (obj["supported_operating_systems"] as? [[String: Any]] ?? []).compactMap { $0["slug"] as? String }
         return Game(id: id, title: title, steamAppID: steam,
-                    gogVerticalCover: image("vertical_cover"), gogWide: image("horizontal_artwork") ?? image("background"))
+                    gogVerticalCover: image("vertical_cover"), gogWide: image("horizontal_artwork") ?? image("background"),
+                    listsMac: systems.contains("osx"))
     }
 
     /// Looks up games the account may not list (an installed game from an offline installer while

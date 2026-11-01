@@ -151,6 +151,8 @@ struct GameDetailView: View {
                 .textSelection(.enabled)
             if let macBuild {
                 macBlock(macBuild)
+            } else if item.macListed, item.source == .gog || item.source == .epic {
+                storeMacBlock
             } else if let outdated = GamePageCopy.outdatedMacBuild(appInfo: item.steamAppID.flatMap { state.macAppInfoByAppID[$0] }, entry: entry) {
                 Label(L(outdated), systemImage: "apple.logo").font(.callout).foregroundStyle(.secondary)
             }
@@ -395,6 +397,27 @@ struct GameDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.35)))
     }
 
+    /// A Mac version GOG's or Epic's catalog lists (LibraryItem.macListed): the purchase includes
+    /// it, and the store's own app or site hands it out. Listed is not proven: an old 32-bit Mac
+    /// build no longer runs, and neither catalog says which.
+    private var storeMacBlock: some View {
+        let gog = item.source == .gog
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "apple.logo").foregroundStyle(.secondary).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(gog ? L("Your GOG purchase includes a Mac version") : L("Your Epic purchase includes a Mac version"))
+                    .font(.callout.weight(.semibold))
+                Text(gog ? L("GOG lists a Mac build of this game. It runs without Windows or Wine, though some older Mac versions no longer start on current macOS.")
+                         : L("Epic lists a Mac build of this game. It runs without Windows or Wine, though some older Mac versions no longer start on current macOS."))
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(HB.card, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.35)))
+    }
+
     static func bytes(_ count: Int64) -> String { ByteCountFormatter.string(fromByteCount: count, countStyle: .file) }
 
     /// How the game saves, said as what it does, with an explanation a click away: Steam Cloud's
@@ -477,7 +500,7 @@ struct GameDetailView: View {
         .padding(16).frame(width: 380, alignment: .leading)
     }
 
-    /// A native Mac version exists: Steam's (MacSteamBuild).
+    /// A native Mac version exists: Steam's (MacSteamBuild), or one GOG or Epic lists.
     private var hasMacVersion: Bool { state.offersMacVersion(item) }
 
     /// The Windows build (or the program): on disk when installed, the store's figure before.
