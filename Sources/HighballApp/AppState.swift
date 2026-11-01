@@ -3615,9 +3615,16 @@ final class AppState {
             self.macRelaunchedAt[item.id] = Date()
             self.appendLog("\(item.title) was opened outside Highball; starting it again through Highball")
             app.terminate()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(1.5))
                 if !app.isTerminated { app.forceTerminate() }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.playOnMac(item) }
+                try? await Task.sleep(for: .seconds(0.5))
+                // A task can take the strip in these seconds, and Play then starts nothing: the
+                // game was closed, so it waits for the strip, up to a minute, then says so.
+                for _ in 0..<60 where self?.busy == true { try? await Task.sleep(for: .seconds(1)) }
+                guard let self else { return }
+                if busy { appendLog("\(item.title) was closed to start through Highball, but Highball stayed busy; press Play"); return }
+                playOnMac(item)
             }
         }
     }
