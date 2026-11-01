@@ -161,6 +161,16 @@ extension GOGStore {
                                 clientID: base.clientId, tasks: tasks, dlcIDs: dlcs)
     }
 
+    /// What the Trash takes for a Mac build: the game's own folder (MacInstalledGame.folder), its
+    /// app or the folder holding its info. Never a folder Mac builds are looked for in, nor one
+    /// holding such a folder, nor the root: those hold other apps. Nil then.
+    public static func macTrashTarget(for game: MacInstalledGame, searched: [URL] = macSearchFolders) -> URL? {
+        let folder = game.folder.standardizedFileURL.path
+        guard folder != "/" else { return nil }
+        let held = searched.map { $0.standardizedFileURL.path }
+        return held.contains { $0 == folder || $0.hasPrefix(folder + "/") } ? nil : game.folder
+    }
+
     /// The app among `apps` that the primary play task (else the first file task) points at or
     /// into, its path read from `folder` as gogdl and Galaxy read it.
     static func taskApp(_ tasks: [PlayTask], in folder: URL, among apps: [URL]) -> URL? {
