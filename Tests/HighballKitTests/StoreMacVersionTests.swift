@@ -250,6 +250,16 @@ final class EpicMacBuildTests: XCTestCase {
         XCTAssertFalse(EpicStore.listsBuild(Data("No game information available.".utf8), platform: "Mac"))
     }
 
+    /// The Windows copy goes only once Epic named a Mac build, and only when switching from it.
+    func testTheWindowsCopyGoesOnlyOnceEpicNamedAMacBuild() {
+        typealias Step = EpicStore.MacInstallStep
+        XCTAssertEqual(Step.after(hasMacBuild: nil, replacingWindows: true), .couldNotAsk)
+        XCTAssertEqual(Step.after(hasMacBuild: false, replacingWindows: true), .noMacBuild)
+        XCTAssertEqual(Step.after(hasMacBuild: false, replacingWindows: false), .noMacBuild)
+        XCTAssertEqual(Step.after(hasMacBuild: true, replacingWindows: false), .install)
+        XCTAssertEqual(Step.after(hasMacBuild: true, replacingWindows: true), .removeWindowsThenInstall)
+    }
+
     func testTheFallBackToWindowsIsSeen() {
         XCTAssertTrue(EpicStore.fellBackToWindows(#"[cli] WARNING: App has no asset for platform "Mac", falling back to "Windows"."#))
         XCTAssertFalse(EpicStore.fellBackToWindows(#"[cli] INFO: Preparing download for "Garlic"..."#))
