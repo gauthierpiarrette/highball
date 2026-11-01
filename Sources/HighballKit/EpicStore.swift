@@ -171,6 +171,10 @@ public struct EpicStore: Sendable {
         public var install_size: Int64? = nil
         /// Where the game keeps the saves legendary syncs, once it has synced them.
         public var save_path: String? = nil
+        /// "Windows" or "Mac": which build legendary installed (one per game).
+        public var platform: String? = nil
+
+        public var isMac: Bool { platform?.lowercased() == "mac" }
     }
 
     /// Everything legendary has installed, with where. Legendary's install state is global
@@ -203,8 +207,57 @@ public struct EpicStore: Sendable {
     /// selective-download prompt (optional language packs), which `-y` does not cover and which
     /// otherwise dies with EOFError the moment it reads stdin (Hogwarts Legacy on Epic, #110).
     /// The defaults install the required data only; language packs can be added later.
-    static func installArguments(appName: String, basePath: String) -> [String] {
-        ["install", appName, "--platform", "Windows", "--base-path", basePath, "-y", "--skip-sdl"]
+    static func installArguments(appName: String, basePath: String, platform: String = "Windows") -> [String] {
+        ["install", appName, "--platform", platform, "--base-path", basePath, "-y", "--skip-sdl"]
+    }
+
+    /// Installs a game's Mac build into the Mac games folder, beside GOG's (GOGStore.macGamesDir).
+    /// legendary keeps one install per game, so the Windows one must be removed first, and only
+    /// once `hasMacBuild` said yes. Should legendary still fall back to the Windows build (its
+    /// install_platform_fallback, on by default and with no flag to turn it off, makes a missing
+    /// Mac asset a warning and downloads the Windows build into this folder, outside every
+    /// environment), it is stopped at that line, before the download, and the install fails.
+    @discardableResult
+    public func installMac(_ appName: String, control: LegendaryControl? = nil,
+                           onLine: (@Sendable (String) -> Void)? = nil) throws -> Int32 {
+        let base = GOGStore.macGamesDir
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let control = control ?? LegendaryControl()
+        let fellBack = Collector()
+        let status = try runStreaming(Self.installArguments(appName: appName, basePath: base.path, platform: "Mac"), control: control) { line in
+            if Self.fellBackToWindows(line) { fellBack.append(line); control.stop() }
+            onLine?(line)
+        }
+        guard fellBack.lines.isEmpty else {
+            throw HighballError.failed("Epic has no Mac build of this game to download for your account, so Highball stopped the install before Epic's tool downloaded the Windows build in its place.")
+        }
+        return status
+    }
+
+    /// legendary 0.21.0's warning before it installs the Windows build in place of a missing one:
+    /// `App has no asset for platform "Mac", falling back to "Windows".`
+    static func fellBackToWindows(_ line: String) -> Bool {
+        line.contains("has no asset for platform \"Mac\"") && line.contains("falling back")
+    }
+
+    /// Whether Epic has a Mac build of the game for this account to download: the check
+    /// legendary's install makes before it falls back to Windows (an asset for the platform),
+    /// read from `legendary info --platform Mac`. A catalog listing Mac (Game.listsMac) does not
+    /// promise one.
+    public func hasMacBuild(_ appName: String) throws -> Bool {
+        let out = try capture(["info", appName, "--json", "--platform", "Mac"])
+        return Self.listsBuild(Data(out.utf8), platform: "Mac")
+    }
+
+    /// legendary's `info --json` names a version for each platform the game has an asset for
+    /// (game.platform_versions, from the asset list its install checks). None for the platform,
+    /// or output that cannot be read, is no build.
+    static func listsBuild(_ data: Data, platform: String) -> Bool {
+        guard let start = data.firstIndex(of: UInt8(ascii: "{")),
+              let obj = try? JSONSerialization.jsonObject(with: data[start...]) as? [String: Any],
+              let game = obj["game"] as? [String: Any],
+              let versions = game["platform_versions"] as? [String: Any] else { return false }
+        return versions[platform] != nil
     }
 
     /// Installs a game's Windows build into the bottle at drive_c/Games/<folder>.

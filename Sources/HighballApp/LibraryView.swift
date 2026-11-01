@@ -307,7 +307,7 @@ struct LibraryTile: View {
                         .transition(.opacity)
                     }
                     SourceBadge(source: item.source, mac: state.macSteamBuild(for: item), macListed: item.macListed,
-                                macInstalled: item.source == .gog && item.installedOnMac)
+                                macInstalled: (item.source == .gog || item.source == .epic) && item.installedOnMac)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .padding(6)
                     if let appid = item.steamAppID, state.session(forAppID: appid) != nil {
@@ -452,7 +452,7 @@ struct LibraryTile: View {
             }
             // Removing the game itself, not just the entry: asked for on r/macgaming because
             // there was nowhere to do it (highball#185).
-            if item.installed || (item.source == .gog && item.installedOnMac) { Divider() }
+            if item.installed || ((item.source == .gog || item.source == .epic) && item.installedOnMac) { Divider() }
             if item.installed {
                 Button(item.installedOnMac ? L("Uninstall the Windows version…") : L("Uninstall…"), role: .destructive) { state.askUninstall(item) }
                     .disabled(state.uninstallWaitsFor(item) != nil)
@@ -461,6 +461,11 @@ struct LibraryTile: View {
             // once the player has seen what goes.
             if item.source == .gog, item.installedOnMac {
                 Button(L("Move the Mac version to the Trash…"), role: .destructive) { state.pendingGOGMacTrash = item }
+                    .disabled(state.busy)
+            }
+            // Epic's goes through legendary, so its library stays right.
+            if item.source == .epic, item.installedOnMac {
+                Button(L("Remove the Mac version…"), role: .destructive) { state.pendingEpicMacUninstall = item }
                     .disabled(state.busy)
             }
         }

@@ -193,6 +193,59 @@ final class GOGMacBuildTests: XCTestCase {
     }
 }
 
+/// Epic's Mac builds through legendary: one build per game, the Mac one in the Mac games folder.
+final class EpicMacBuildTests: XCTestCase {
+    func testMacInstallAsksLegendaryForTheMacBuild() {
+        XCTAssertEqual(EpicStore.installArguments(appName: "Garlic", basePath: "/m", platform: "Mac"),
+                       ["install", "Garlic", "--platform", "Mac", "--base-path", "/m", "-y", "--skip-sdl"])
+        XCTAssertEqual(EpicStore.installArguments(appName: "Garlic", basePath: "/w")[3], "Windows")
+    }
+
+    /// Epic's catalog can list Mac with no Mac asset, and legendary's install then falls back to
+    /// Windows: the Windows copy is removed only when `info` names a Mac version.
+    func testAMacBuildIsThereOnlyWhenLegendaryNamesAMacVersion() {
+        let both = #"[cli] INFO: Getting game metadata... {"game": {"app_name": "Garlic", "platform_versions": {"Windows": "1.0-w", "Mac": "1.0-m"}}, "install": null, "manifest": null}"#
+        let windowsOnly = #"{"game": {"app_name": "Duck", "platform_versions": {"Windows": "2.0"}}, "install": {"platform": "Windows"}, "manifest": {"disk_size": 5}}"#
+        XCTAssertTrue(EpicStore.listsBuild(Data(both.utf8), platform: "Mac"))
+        XCTAssertFalse(EpicStore.listsBuild(Data(windowsOnly.utf8), platform: "Mac"), "a Windows manifest from the install is not a Mac build")
+        XCTAssertFalse(EpicStore.listsBuild(Data(#"{"game": null, "install": null, "manifest": null}"#.utf8), platform: "Mac"))
+        XCTAssertFalse(EpicStore.listsBuild(Data("No game information available.".utf8), platform: "Mac"))
+    }
+
+    func testTheFallBackToWindowsIsSeen() {
+        XCTAssertTrue(EpicStore.fellBackToWindows(#"[cli] WARNING: App has no asset for platform "Mac", falling back to "Windows"."#))
+        XCTAssertFalse(EpicStore.fellBackToWindows(#"[cli] INFO: Preparing download for "Garlic"..."#))
+    }
+
+    func testInstallRecordSaysWhichBuild() throws {
+        let json = #"[{"app_name":"Garlic","install_path":"/m/Enter the Gungeon","platform":"Mac"},{"app_name":"Duck","install_path":"/w","platform":"Windows"},{"app_name":"Old","install_path":"/o"}]"#
+        let games = try JSONDecoder().decode([EpicStore.InstalledGame].self, from: Data(json.utf8))
+        XCTAssertEqual(games.map(\.isMac), [true, false, false])
+    }
+
+    func testLibraryMarksTheMacBuildInstalled() {
+        let items = LibraryIndex.build(bottles: [], steamByBottle: [:],
+                                       epicOwned: [EpicStore.Game(app_name: "Garlic", app_title: "Enter the Gungeon", listsMac: true)],
+                                       epicInstalls: [:], epicMacInstalled: ["Garlic"])
+        let item = items.first { $0.id == "epic:Garlic" }
+        XCTAssertEqual(item?.installedOnMac, true)
+        XCTAssertEqual(item?.installed, false, "the Windows build is not")
+    }
+
+    /// legendary's Mac install path is the folder holding the app.
+    func testArchitectureOfAnAppInsideAFolder() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "epicmac-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let macos = folder.appending(path: "Game.app/Contents/MacOS")
+        try FileManager.default.createDirectory(at: macos, withIntermediateDirectories: true)
+        try #"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>Game</string></dict></plist>"#
+            .write(to: folder.appending(path: "Game.app/Contents/Info.plist"), atomically: true, encoding: .utf8)
+        try Data([0xCF, 0xFA, 0xED, 0xFE, 0x0C, 0x00, 0x00, 0x01] + [UInt8](repeating: 0, count: 64)).write(to: macos.appending(path: "Game"))
+        XCTAssertEqual(MacBinaryArch.ofApp(at: folder), .native)
+        XCTAssertEqual(MacBinaryArch.ofApp(at: folder.appending(path: "Game.app")), .native)
+    }
+}
+
 /// A GOG Mac build's saves: GOG's Mac locations, when GOG syncs them for the Mac build.
 final class GOGMacSavesTests: XCTestCase {
     private func config(windows: String, mac: String) -> Data {

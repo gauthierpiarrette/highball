@@ -413,6 +413,7 @@ enum L10n {
         "The Mac version's saves sync with GOG's cloud before and after you play.": "Les sauvegardes de la version Mac se synchronisent avec le cloud GOG avant et après chaque partie.",
         "The game handles the Mac version's saves; some games sync them with GOG's cloud themselves while comet runs.":
             "Le jeu gère les sauvegardes de la version Mac ; certains jeux les synchronisent eux-mêmes avec le cloud GOG quand comet tourne.",
+        "Make an environment first: the Windows version installs into one.": "Créez d’abord un environnement : la version Windows s’y installe.",
         "How saves sync with GOG": "Comment les sauvegardes se synchronisent avec GOG",
         "GOG syncs saves in one of two ways, chosen per game and per version.": "GOG synchronise les sauvegardes de deux façons, selon le jeu et la version.",
         "Folder sync: GOG names the folders a game saves in, and Highball copies them to and from GOG's cloud before and after you play, as GOG Galaxy does. When both copies changed, Highball asks which one to keep.":
@@ -430,8 +431,29 @@ enum L10n {
         "How Epic's cloud saves work": "Comment fonctionnent les sauvegardes en ligne d’Epic",
         "Epic's launcher syncs a game's saves with Epic's cloud when the game sets a cloud save folder. Highball plays Epic games through legendary, and their saves stay on this Mac.":
             "Le lanceur d’Epic synchronise les sauvegardes d’un jeu avec le cloud d’Epic quand le jeu définit un dossier de sauvegarde en ligne. Highball lance les jeux Epic par legendary, et leurs sauvegardes restent sur ce Mac.",
+        "This Mac version is 32-bit, which current macOS can't run.": "Cette version Mac est en 32 bits, que les macOS récents ne lancent plus.",
+        "Switch to the Windows version…": "Passer à la version Windows…",
+        "Switch to the Windows version": "Passer à la version Windows",
+        "Switch %@ to the Windows version?": "Passer %@ à la version Windows ?",
+        "Epic keeps one version of a game installed at a time, so the Mac version is removed first, then the Windows version downloads into your environment.":
+            "Epic n’installe qu’une version d’un jeu à la fois : la version Mac est d’abord supprimée, puis la version Windows est téléchargée dans votre environnement.",
         "Highball could not find the Mac version of %@ to open.": "Highball ne trouve pas la version Mac de %@ à ouvrir.",
         "The Mac version of %@ did not start: %@": "La version Mac de %@ n’a pas démarré : %@",
+        "Removing the Windows version of %@": "Suppression de la version Windows de %@",
+        "Removing the Mac version of %@": "Suppression de la version Mac de %@",
+        "Switch %@ to the Mac version?": "Passer %@ à la version Mac ?",
+        "Switch to the Mac version": "Passer à la version Mac",
+        "Switch to the Mac version…": "Passer à la version Mac…",
+        "Epic keeps one version of a game installed at a time, so the Windows version is removed first, then the Mac version downloads. Your Highball settings for the game stay.":
+            "Epic n’installe qu’une version d’un jeu à la fois : la version Windows est d’abord supprimée, puis la version Mac est téléchargée. Vos réglages Highball pour ce jeu sont conservés.",
+        "Asking Epic about the Mac version": "Demande des informations sur la version Mac à Epic",
+        "Highball could not ask Epic whether a Mac build of this game is there to download, so nothing was changed. Check your connection, then try again.":
+            "Highball n’a pas pu demander à Epic si une version Mac de ce jeu est disponible au téléchargement, donc rien n’a été modifié. Vérifiez votre connexion, puis réessayez.",
+        "Epic lists a Mac version of this game, but has no Mac build to download for your account, so nothing was changed.":
+            "Epic indique une version Mac de ce jeu, mais n’en propose aucune à télécharger pour votre compte, donc rien n’a été modifié.",
+        "Remove the Mac version of %@?": "Supprimer la version Mac de %@ ?",
+        "Remove the Mac version…": "Supprimer la version Mac…",
+        "Epic removes its files. Playing it again means downloading it again.": "Epic supprime ses fichiers. Pour y rejouer, il faudra le télécharger à nouveau.",
         "Show the Windows version in Finder": "Afficher la version Windows dans le Finder",
         "Show the Mac version in Finder": "Afficher la version Mac dans le Finder",
         "Uninstall the Windows version…": "Désinstaller la version Windows…",
