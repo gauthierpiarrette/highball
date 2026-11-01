@@ -59,12 +59,16 @@ extension GOGStore {
         public let buildID: String?
         /// What the app's executable is built for, read once when the install is found.
         public let arch: MacBinaryArch
+        /// The info file's client id, which cloud saves and comet's achievements are keyed by.
+        public var clientID: String? = nil
+        /// The info file's play tasks, what Galaxy's Play button runs.
+        public var tasks: [PlayTask] = []
 
         /// The same game as the installed-game record the Windows paths take, so the save sync,
         /// comet's achievement lookup and the rest run unchanged. Its folder keeps the Mac build's
         /// sync history apart from a Windows copy's.
         public var asInstalledGame: InstalledGame {
-            InstalledGame(id: id, title: title, folder: folder, buildID: buildID, clientID: nil, dlcIDs: [], tasks: [])
+            InstalledGame(id: id, title: title, folder: folder, buildID: buildID, clientID: clientID, dlcIDs: [], tasks: tasks)
         }
 
     }
@@ -137,14 +141,29 @@ extension GOGStore {
             return files.compactMap { file in (try? JSONDecoder().decode(InfoFile.self, from: Data(contentsOf: file))).map { ($0, app) } }
         }
         guard let (base, home) = infos.first(where: { $0.0.rootGameId == nil || $0.0.rootGameId == $0.0.gameId }) else { return nil }
-        let app = home ?? apps.first
         // The info inside an app makes that app the game's folder, as the folder holding it in
         // its own Contents/Resources is in Galaxy's layout: the searched folder around it may hold
         // other apps (/Applications/Games), and the Trash, sizes and save paths go by this one.
         let own = home ?? folder
+        let tasks = base.playTasks ?? []
+        // Beside several apps, the one the game's primary play task names (what Galaxy's Play
+        // opens), not the first by name; none named, the first.
+        let app = home ?? taskApp(tasks, in: own, among: apps) ?? apps.first
         let named = home.map { $0.deletingPathExtension().lastPathComponent } ?? folder.lastPathComponent
         return MacInstalledGame(id: base.gameId, title: base.name ?? named, folder: own,
-                                app: app, buildID: base.buildId, arch: app.map(MacBinaryArch.ofApp(at:)) ?? .unknown)
+                                app: app, buildID: base.buildId, arch: app.map(MacBinaryArch.ofApp(at:)) ?? .unknown,
+                                clientID: base.clientId, tasks: tasks)
+    }
+
+    /// The app among `apps` that the primary play task (else the first file task) points at or
+    /// into, its path read from `folder` as gogdl and Galaxy read it.
+    static func taskApp(_ tasks: [PlayTask], in folder: URL, among apps: [URL]) -> URL? {
+        guard let path = (tasks.first { $0.isPrimary == true && $0.isFile } ?? tasks.first { $0.isFile })?.path else { return nil }
+        let target = resolve(path, in: folder).standardizedFileURL.path
+        return apps.first { app in
+            let root = app.standardizedFileURL.path
+            return target == root || target.hasPrefix(root + "/")
+        }
     }
 }
 

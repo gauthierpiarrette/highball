@@ -153,6 +153,28 @@ final class GOGMacBuildTests: XCTestCase {
         XCTAssertEqual(games.first?.folder.lastPathComponent, "Cyberpunk 2077")
     }
 
+    /// A folder with several apps beside its info opens the one the primary play task names, not
+    /// the first by name, and the record the save sync and comet read keeps the info's client id
+    /// and tasks.
+    func testThePrimaryPlayTaskPicksTheAppAndTheRecordKeepsTheInfo() throws {
+        let applications = FileManager.default.temporaryDirectory.appending(path: "apps-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: applications) }
+        let folder = applications.appending(path: "Some Game")
+        for app in ["A Config Tool.app", "Some Game.app"] {
+            try FileManager.default.createDirectory(at: folder.appending(path: "\(app)/Contents/MacOS"), withIntermediateDirectories: true)
+        }
+        try FileManager.default.createDirectory(at: folder.appending(path: "Contents/Resources"), withIntermediateDirectories: true)
+        try #"{"gameId":"7","rootGameId":"7","name":"Some Game","clientId":"5150","playTasks":[{"category":"tool","type":"FileTask","path":"A Config Tool.app"},{"category":"game","isPrimary":true,"type":"FileTask","path":"Some Game.app/Contents/MacOS/Some Game"}]}"#
+            .write(to: folder.appending(path: "Contents/Resources/goggame-7.info"), atomically: true, encoding: .utf8)
+
+        let game = try XCTUnwrap(GOGStore.macInstalledGames(in: applications).first)
+        XCTAssertEqual(game.app?.lastPathComponent, "Some Game.app")
+        XCTAssertEqual(game.folder.lastPathComponent, "Some Game")
+        XCTAssertEqual(game.asInstalledGame.clientID, "5150")
+        XCTAssertEqual(game.asInstalledGame.tasks.count, 2)
+        XCTAssertNil(GOGStore.taskApp([], in: folder, among: [folder.appending(path: "Some Game.app")]), "no task, no choice")
+    }
+
     /// gogdl's sizes: the shared files under "*" plus the installed language's (Samorost 1's Mac build).
     func testDownloadSizeAddsTheLanguagesFilesToTheSharedOnes() {
         let obj: [String: Any] = ["languages": ["en-US", "fr-FR"],
