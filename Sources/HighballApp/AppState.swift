@@ -4040,10 +4040,23 @@ final class AppState {
     }
 
 
-    /// Moves a GOG game's Mac build to the Trash, where it can still be put back.
+    /// A GOG Mac build the player asked to move to the Trash: asked first, with what goes.
+    var pendingGOGMacTrash: LibraryItem?
+
+    /// What the Trash takes for a GOG game's Mac build: its app, or the folder holding its info
+    /// (GOGStore.MacInstalledGame.folder). Nil when there is none, or when it would be a folder
+    /// Mac builds are looked for in, which holds other apps.
+    func gogMacTrashTarget(for item: LibraryItem) -> URL? {
+        guard let id = item.gogID, let folder = gogMacInstalled[id]?.folder else { return nil }
+        let searched = Set(GOGStore.macSearchFolders.map { $0.standardizedFileURL.path })
+        return searched.contains(folder.standardizedFileURL.path) ? nil : folder
+    }
+
+    /// Moves a GOG game's Mac build to the Trash, where it can still be put back. Only once the
+    /// player said yes (pendingGOGMacTrash).
     func gogTrashMac(_ item: LibraryItem) {
-        guard let id = item.gogID, let game = gogMacInstalled[id] else { return }
-        NSWorkspace.shared.recycle([game.folder]) { [weak self] _, error in
+        guard let target = gogMacTrashTarget(for: item) else { return }
+        NSWorkspace.shared.recycle([target]) { [weak self] _, error in
             Task { @MainActor in
                 if let error { self?.appendLog("\(item.title): could not move the Mac version to the Trash: \(error.localizedDescription)") }
                 await self?.refreshGOGMacInstalls()

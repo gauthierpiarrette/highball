@@ -416,7 +416,7 @@ struct GameDetailView: View {
                     }
                     HStack(spacing: 10) {
                         Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([game.app ?? game.folder]) }
-                        Button(L("Move the Mac version to the Trash")) { state.gogTrashMac(item) }.disabled(state.busy)
+                        Button(L("Move the Mac version to the Trash…")) { state.pendingGOGMacTrash = item }.disabled(state.busy)
                     }
                     .controlSize(.small).padding(.top, 2)
                 } else if gog {

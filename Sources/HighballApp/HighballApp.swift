@@ -250,7 +250,7 @@ struct ContentView: View {
         .previewMoveAsk(state)
         .macOSAsk(state)
         .uninstallAsk(state)
-        .epicMacAsks(state)
+        .macVersionAsks(state)
         .rendererTrialAsk(state)
         .modesetTrialAsk(state)
         .homeMoveAsk(state)
@@ -528,8 +528,9 @@ private extension View {
         }
     }
     /// Epic keeps one build per game: switching to the Mac one removes the Windows one first,
-    /// and removing the Mac one means downloading it again to play it.
-    @MainActor func epicMacAsks(_ state: AppState) -> some View {
+    /// and removing the Mac one means downloading it again to play it. A GOG Mac build goes to
+    /// the Trash only once the player has seen what goes.
+    @MainActor func macVersionAsks(_ state: AppState) -> some View {
         self.alert(state.pendingEpicMacSwitch.map { String(format: L("Switch %@ to the Mac version?"), $0.title) } ?? "",
                    isPresented: .init(get: { state.pendingEpicMacSwitch != nil }, set: { if !$0 { state.pendingEpicMacSwitch = nil } }),
                    presenting: state.pendingEpicMacSwitch) { item in
@@ -553,6 +554,20 @@ private extension View {
             Button(L("Cancel"), role: .cancel) { state.pendingEpicMacUninstall = nil }
         } message: { _ in
             Text(L("Epic removes its files. Playing it again means downloading it again."))
+        }
+        .alert(state.pendingGOGMacTrash.map { String(format: L("Move the Mac version of %@ to the Trash?"), $0.title) } ?? "",
+               isPresented: .init(get: { state.pendingGOGMacTrash != nil }, set: { if !$0 { state.pendingGOGMacTrash = nil } }),
+               presenting: state.pendingGOGMacTrash) { item in
+            if state.gogMacTrashTarget(for: item) != nil {
+                Button(L("Move to the Trash"), role: .destructive) { state.pendingGOGMacTrash = nil; state.gogTrashMac(item) }
+            }
+            Button(L("Cancel"), role: .cancel) { state.pendingGOGMacTrash = nil }
+        } message: { item in
+            if let target = state.gogMacTrashTarget(for: item) {
+                Text(String(format: L("%@ goes to the Trash, where you can still put it back."), target.path))
+            } else {
+                Text(L("Highball could not tell which folder is this game's alone, so it leaves the files where they are."))
+            }
         }
     }
 

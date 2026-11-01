@@ -457,9 +457,10 @@ struct LibraryTile: View {
                 Button(item.installedOnMac ? L("Uninstall the Windows version…") : L("Uninstall…"), role: .destructive) { state.askUninstall(item) }
                     .disabled(state.uninstallWaitsFor(item) != nil)
             }
-            // A GOG Mac build is an app in the Mac games folder: to the Trash, where it can be put back.
+            // A GOG Mac build is an app in the Mac games folder: to the Trash, where it can be put back,
+            // once the player has seen what goes.
             if item.source == .gog, item.installedOnMac {
-                Button(L("Move the Mac version to the Trash"), role: .destructive) { state.gogTrashMac(item) }
+                Button(L("Move the Mac version to the Trash…"), role: .destructive) { state.pendingGOGMacTrash = item }
                     .disabled(state.busy)
             }
             // Epic's goes through legendary, so its library stays right.

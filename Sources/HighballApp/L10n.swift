@@ -480,7 +480,12 @@ enum L10n {
         "Install the Mac version": "Installer la version Mac",
         "Goes into %@, outside every environment.": "Va dans %@, en dehors de tout environnement.",
         "Show in Finder": "Afficher dans le Finder",
-        "Move the Mac version to the Trash": "Mettre la version Mac à la corbeille",
+        "Move the Mac version to the Trash…": "Mettre la version Mac à la corbeille…",
+        "Move the Mac version of %@ to the Trash?": "Mettre la version Mac de %@ à la corbeille ?",
+        "Move to the Trash": "Mettre à la corbeille",
+        "%@ goes to the Trash, where you can still put it back.": "%@ va à la corbeille, d’où vous pouvez encore le récupérer.",
+        "Highball could not tell which folder is this game's alone, so it leaves the files where they are.":
+            "Highball ne sait pas quel dossier appartient à ce seul jeu, donc il laisse les fichiers où ils sont.",
         "Built for Apple silicon: runs natively.": "Conçue pour Apple silicon : tourne en natif.",
         "Built for Intel Macs: runs through Rosetta.": "Conçue pour les Mac Intel : tourne via Rosetta.",
         "A 32-bit build, which current macOS can't run. Play the Windows version instead.":

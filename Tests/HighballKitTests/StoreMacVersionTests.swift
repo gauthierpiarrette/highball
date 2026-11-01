@@ -94,7 +94,28 @@ final class GOGMacBuildTests: XCTestCase {
         let games = GOGStore.macInstalledGames(in: base)
         XCTAssertEqual(games.map(\.id), ["2006298293"])
         XCTAssertEqual(games.first?.app?.lastPathComponent, "Samorost 1.app")
+        XCTAssertEqual(games.first?.folder.lastPathComponent, "Samorost 1.app", "the info sits in the app, so the app is the game's folder")
         XCTAssertEqual(games.first?.buildID, "55")
+    }
+
+    /// An app among others in a folder of /Applications (/Applications/Games/Foo.app): the game,
+    /// and so its Trash, is that app alone, never the folder with the other apps in it.
+    func testAppInAFolderOfOtherAppsIsTheGamesFolderAlone() throws {
+        let applications = FileManager.default.temporaryDirectory.appending(path: "apps-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: applications) }
+        let games = applications.appending(path: "Games")
+        let resources = games.appending(path: "Foo.app/Contents/Resources")
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: games.appending(path: "Another Game.app/Contents/MacOS"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: games.appending(path: "Zed.app/Contents/MacOS"), withIntermediateDirectories: true)
+        try #"{"gameId":"1207658924","rootGameId":"1207658924"}"#
+            .write(to: resources.appending(path: "goggame-1207658924.info"), atomically: true, encoding: .utf8)
+
+        let game = try XCTUnwrap(GOGStore.macInstalledGames(in: applications).first)
+        XCTAssertEqual(game.folder.lastPathComponent, "Foo.app")
+        XCTAssertEqual(game.folder.deletingLastPathComponent().lastPathComponent, "Games")
+        XCTAssertEqual(game.app?.lastPathComponent, "Foo.app")
+        XCTAssertEqual(game.title, "Foo", "with no name in the info, the app's, not the folder's")
     }
 
     /// What gogdl actually made for Samorost 1: the app itself, straight in the Mac games folder.

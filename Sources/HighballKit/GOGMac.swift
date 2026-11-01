@@ -50,6 +50,9 @@ extension GOGStore {
     public struct MacInstalledGame: Sendable, Equatable {
         public let id: String
         public let title: String
+        /// The game's own place on disk, what the Trash takes: its app when goggame-<id>.info
+        /// sits inside one, else the folder holding the info (Galaxy's layout). Never the searched
+        /// folder around an app, which can hold other apps.
         public let folder: URL
         /// The app to open; nil when the folder holds none Highball can find.
         public let app: URL?
@@ -135,7 +138,12 @@ extension GOGStore {
         }
         guard let (base, home) = infos.first(where: { $0.0.rootGameId == nil || $0.0.rootGameId == $0.0.gameId }) else { return nil }
         let app = home ?? apps.first
-        return MacInstalledGame(id: base.gameId, title: base.name ?? folder.lastPathComponent, folder: folder,
+        // The info inside an app makes that app the game's folder, as the folder holding it in
+        // its own Contents/Resources is in Galaxy's layout: the searched folder around it may hold
+        // other apps (/Applications/Games), and the Trash, sizes and save paths go by this one.
+        let own = home ?? folder
+        let named = home.map { $0.deletingPathExtension().lastPathComponent } ?? folder.lastPathComponent
+        return MacInstalledGame(id: base.gameId, title: base.name ?? named, folder: own,
                                 app: app, buildID: base.buildId, arch: app.map(MacBinaryArch.ofApp(at:)) ?? .unknown)
     }
 }
