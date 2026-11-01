@@ -397,7 +397,9 @@ public struct EpicSaves: Sendable {
     /// Syncs an Epic game's saves. `prefix` is the environment a Windows build is installed in,
     /// which legendary reads to resolve the save folder; nil for a Mac build, whose folder it
     /// resolves under the home folder. `install` keys the backups and the sync history.
-    public func sync(_ app: String, install: URL, prefix: URL?, direction: Direction,
+    /// `keepBackups` makes the backup a kept one, never pruned: for the sync the player chose in
+    /// a conflict.
+    public func sync(_ app: String, install: URL, prefix: URL?, direction: Direction, keepBackups: Bool = false,
                      home: URL = FileManager.default.homeDirectoryForCurrentUser,
                      onLine: (@Sendable (String) -> Void)? = nil) -> Outcome {
         let gameLock = Self.lock(for: app)
@@ -412,7 +414,9 @@ public struct EpicSaves: Sendable {
         // A download that never finished: its backup goes back first.
         if let pending = records()[key]?.restoring, let folder = savePath(app) {
             do {
-                try SaveBackups.restore(pending.isEmpty ? nil : URL(fileURLWithPath: pending), into: folder, filter: filter)
+                let backup = pending.isEmpty ? nil : URL(fileURLWithPath: pending)
+                try SaveBackups.restore(backup, into: folder, filter: filter)
+                if let backup { SaveBackups.unpin(backup) }
                 clearRestoring(key)
                 onLine?("Highball: an earlier download of these saves didn't finish, so this Mac's saves were put back from their backup")
             } catch {
@@ -454,7 +458,7 @@ public struct EpicSaves: Sendable {
         case .conflict(let first):
             return .conflict(firstSync: first)
         case .transfer(download: true):
-            return download(app, folder: folder, filter: filter, backupDir: backupDir, key: key,
+            return download(app, folder: folder, filter: filter, backupDir: backupDir, key: key, kept: keepBackups,
                             before: before, environment: environment, onLine: onLine, noteSynced: noteSynced)
         case .transfer(download: false):
             let upload: Run
@@ -480,11 +484,15 @@ public struct EpicSaves: Sendable {
         }
     }
 
-    private func download(_ app: String, folder: URL, filter: SaveFilter, backupDir: URL, key: String,
+    private func download(_ app: String, folder: URL, filter: SaveFilter, backupDir: URL, key: String, kept: Bool,
                           before: Check, environment: [String: String], onLine: (@Sendable (String) -> Void)?,
                           noteSynced: (String?) -> Void) -> Outcome {
         let backup: URL?
-        do { backup = try backups.backUpLocal(folder, into: backupDir, filter: filter) } catch {
+        do {
+            backup = try backups.backUpLocal(folder, into: backupDir, filter: filter, kept: kept)
+            // Pinned until the download is done or undone, so no backup made meanwhile prunes it.
+            if let backup { try SaveBackups.pin(backup) }
+        } catch {
             return .failed("the saves couldn't be backed up first (\(error.localizedDescription)), so nothing was synced")
         }
         update(key) { record in
@@ -505,11 +513,13 @@ public struct EpicSaves: Sendable {
         } catch { problem = error.localizedDescription }
 
         guard let problem else {
+            if let backup { SaveBackups.unpin(backup) }
             noteSynced(before.cloud)
             return .synced
         }
         do {
             try SaveBackups.restore(backup, into: folder, filter: filter)
+            if let backup { SaveBackups.unpin(backup) }
             clearRestoring(key)
         } catch {
             return .failed("the download from Epic failed (\(problem)), and the saves couldn't be put back automatically; their backup is in \(((backup?.path ?? backupDir.path) as NSString).abbreviatingWithTildeInPath)")

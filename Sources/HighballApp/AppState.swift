@@ -3518,7 +3518,8 @@ final class AppState {
                 appendLog("\(title): Epic cloud saves left as they are; \(beforePlay ? "this Mac's saves won't be uploaded after this session, and " : "")Highball asks again next time")
                 return false
             }
-            let again = await Task.detached { saves.sync(app, install: install, prefix: prefix, direction: forced, onLine: log) }.value
+            // The player picked a side: the backup of what it replaces is kept, never pruned.
+            let again = await Task.detached { saves.sync(app, install: install, prefix: prefix, direction: forced, keepBackups: true, onLine: log) }.value
             switch again {
             case .synced:
                 appendLog("\(title): \(choice == .useCloud ? "Epic's cloud saves replaced this Mac's, after a backup of them" : "Epic's cloud now has this Mac's saves as its newest")")

@@ -69,7 +69,7 @@ final class GOGSaveSafetyTests: XCTestCase {
         let folder = root.appending(path: "Hidden")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try Data("x".utf8).write(to: folder.appending(path: ".save"))
-        XCTAssertEqual(try GOGSaves.files(in: folder).map(\.lastPathComponent), [".save"])
+        XCTAssertEqual(GOGSaves.files(in: folder).map(\.lastPathComponent), [".save"])
     }
 
     /// gogdl walks into a linked folder and writes through a linked file, so the copy holds what
@@ -245,7 +245,7 @@ final class GOGSaveSafetyTests: XCTestCase {
         try write("after it", to: game.folder.appending(path: "SAVES/slot2.sav"), dated: setUp.addingTimeInterval(3000))
         try write("cloud", to: game.folder.appending(path: "cloud/a.sav"), dated: setUp.addingTimeInterval(600))
         let copy = try XCTUnwrap(try saves.backUpGameFolder(game, driveC: driveC, skipping: [game.folder.appending(path: "cloud")]))
-        XCTAssertEqual(try GOGSaves.files(in: copy).map { GOGSaves.relativePath(of: $0, in: copy) }, ["SAVES/slot1.sav", "SAVES/slot2.sav"])
+        XCTAssertEqual(GOGSaves.files(in: copy).map { GOGSaves.relativePath(of: $0, in: copy) }, ["SAVES/slot1.sav", "SAVES/slot2.sav"])
         XCTAssertTrue(GOGSaves.isKept(copy))
         XCTAssertEqual(GOGSaves.contents(of: copy).files, 2)
         XCTAssertEqual(GOGSaves.contents(of: copy).bytes, 25)

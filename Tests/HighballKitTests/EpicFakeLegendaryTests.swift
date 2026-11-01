@@ -205,6 +205,22 @@ final class EpicFakeLegendaryTests: XCTestCase {
         XCTAssertNil(saves.records()[EpicSaves.key(app: app, install: install)]?.restoring)
     }
 
+    /// Epic's backups are named like GOG's (<date>-mac), so they rotate per kind; the one made
+    /// for the player's pick in a conflict is kept, never pruned.
+    func testThePlayersPickKeepsItsBackup() throws {
+        try syncedOnce()
+        try cloudSave("from the PC", at: hourAgo)
+        try write("played here", to: folder.appending(path: "slot.sav"), at: Date())
+        XCTAssertEqual(sync(.download), .conflict(firstSync: false))
+        XCTAssertEqual(saves.sync(app, install: install, prefix: prefix, direction: .forceDownload, keepBackups: true, home: userHome), .synced)
+        XCTAssertEqual(read(folder.appending(path: "slot.sav")), "from the PC")
+        let backup = try XCTUnwrap(saves.backups.backups(in: saves.backups.folder("epic-\(app)", install: install)).first)
+        XCTAssertEqual(SaveBackups.kind(of: backup), .mac)
+        XCTAssertTrue(SaveBackups.isKept(backup))
+        XCTAssertEqual(read(backup.appending(path: "slot.sav")), "played here")
+        XCTAssertFalse(SaveBackups.isPinned(backup), "unpinned once the download is done")
+    }
+
     /// Two syncs of one game never run at once: the second waits.
     func testSyncsOfOneGameDoNotOverlap() throws {
         try syncedOnce()
