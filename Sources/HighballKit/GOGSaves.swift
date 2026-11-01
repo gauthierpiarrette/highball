@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import os
 
@@ -17,20 +18,19 @@ public struct GOGSaves: Sendable {
         public let name: String
         /// GOG's template, e.g. "<?SAVED_GAMES?>/Remedy/Control".
         public let template: String
-        /// Another of the game's locations has a name that starts with this one's (saves and
-        /// saves_profiles). gogdl picks a location's cloud files by that prefix alone (saves.py,
-        /// is_in_our_dir), so it also lists the other one's, asks for them under this name, and
-        /// logs "Downloading file failed" for each, naming no file: here that line says nothing
-        /// about this location's own files.
-        public var sharesItsPrefix = false
     }
 
     /// The client id cloud storage is keyed by: the info file's, else the manifest gogdl kept
     /// (Control's info file has none; its manifest does), else GOG's latest build manifest for an
     /// install with neither (an offline installer, a gogdl install from elsewhere), remembered.
-    /// Nil when the game has none: GOG's own manifest names none (Beyond Good & Evil's), and gogdl
-    /// cannot sync such a game either. Throws when GOG could not be asked, which says nothing.
-    public func clientID(for game: GOGStore.InstalledGame) throws -> String? {
+    /// nil when GOG couldn't be reached; lookUpClientID tells that apart from a game without one.
+    public func clientID(for game: GOGStore.InstalledGame) -> String? {
+        (try? lookUpClientID(for: game)) ?? nil
+    }
+
+    /// The client id, or nil when the game has none: then it has no cloud saves. Throws when GOG
+    /// had to be asked and couldn't be reached.
+    public func lookUpClientID(for game: GOGStore.InstalledGame) throws -> String? {
         if let id = game.clientID, !id.isEmpty { return id }
         if let data = try? Data(contentsOf: store.installManifest(game)),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -44,52 +44,32 @@ public struct GOGSaves: Sendable {
         return id
     }
 
-    /// The client id in the newest Windows build's manifest, nil when GOG has none for the game
-    /// (no Windows build, or a manifest that names none). The build list and manifests are public;
-    /// a v2 manifest is zlib-compressed JSON. Throws when either cannot be fetched or read.
+    /// The client id in the newest Windows build's manifest. The build list and manifests are
+    /// public; a v2 manifest is zlib-compressed JSON. nil when GOG has no such build or manifest
+    /// (HTTP 404); throws only when GOG can't be reached or answers with another error.
     static func publishedClientID(productID: String) throws -> String? {
         let list = URL(string: "https://content-system.gog.com/products/\(productID)/os/windows/builds?generation=2")!
-        guard let link = try newestBuild(inBuildList: GOGStore.fetch(URLRequest(url: list))) else { return nil }
-        return try clientID(inPublishedManifest: GOGStore.fetch(URLRequest(url: link)))
+        guard let listing = try GOGStore.fetchIfFound(URLRequest(url: list)),
+              let builds = try? JSONSerialization.jsonObject(with: listing) as? [String: Any],
+              let link = ((builds["items"] as? [[String: Any]])?.first?["link"] as? String).flatMap(URL.init(string:)),
+              let manifest = try GOGStore.fetchIfFound(URLRequest(url: link)) else { return nil }
+        return clientID(inManifest: manifest)
     }
 
-    /// The newest build's manifest address, nil for a game with no build for Windows.
-    static func newestBuild(inBuildList data: Data) throws -> URL? {
-        guard let builds = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let items = builds["items"] as? [[String: Any]] else { throw HighballError.invalid("GOG's build list could not be read") }
-        guard let newest = items.first else { return nil }
-        guard let link = (newest["link"] as? String).flatMap(URL.init(string:)) else { throw HighballError.invalid("GOG's build list names no manifest") }
-        return link
-    }
-
-    /// A manifest GOG served: its client id, nil when it names none. Throws when it cannot be read,
-    /// as that is no answer.
-    static func clientID(inPublishedManifest data: Data) throws -> String? {
-        guard let obj = manifestObject(data) else { throw HighballError.invalid("GOG's build manifest could not be read") }
-        return obj["clientId"] as? String
-    }
-
-    static func clientID(inManifest data: Data) -> String? { manifestObject(data)?["clientId"] as? String }
-
-    private static func manifestObject(_ data: Data) -> [String: Any]? {
+    static func clientID(inManifest data: Data) -> String? {
         // zlib = a 2-byte header, raw DEFLATE, then a checksum; Foundation's .zlib reads raw DEFLATE.
         let json = data.first == 0x78 ? (try? (data.dropFirst(2) as NSData).decompressed(using: .zlib) as Data) : data
         guard let json, let obj = try? JSONSerialization.jsonObject(with: json) as? [String: Any] else { return nil }
-        return obj
+        return obj["clientId"] as? String
     }
 
-    /// Where the game keeps its cloud saves: none for a game with no client id or with cloud saves
-    /// off, both answers from GOG. Throws when GOG could not be asked: then nobody can say.
-    public func cloudLocations(for game: GOGStore.InstalledGame) throws -> [Location] {
-        guard let client = try clientID(for: game) else { return [] }
-        return try locations(clientID: client) ?? []
-    }
-
-    /// Where the game keeps its saves, nil when it has no cloud saves. An empty list from GOG means
-    /// the SDK's own storage folder, which Galaxy names __default.
+    /// Where the game keeps its saves, nil when it has no cloud saves (including when GOG has no
+    /// configuration for the client: HTTP 404). An empty list from GOG means the SDK's own storage
+    /// folder, which Galaxy names __default. Throws only when GOG can't be reached or answers with
+    /// another error.
     public func locations(clientID: String) throws -> [Location]? {
         let url = URL(string: "https://remote-config.gog.com/components/galaxy_client/clients/\(clientID)?component_version=2.0.45")!
-        let data = try GOGStore.fetch(URLRequest(url: url))
+        guard let data = try GOGStore.fetchIfFound(URLRequest(url: url)) else { return nil }
         return Self.parseLocations(data, clientID: clientID)
     }
 
@@ -97,13 +77,9 @@ public struct GOGSaves: Sendable {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let windows = (obj["content"] as? [String: Any])?["Windows"] as? [String: Any],
               let cloud = windows["cloudStorage"] as? [String: Any], cloud["enabled"] as? Bool == true else { return nil }
-        let named = (cloud["locations"] as? [[String: Any]] ?? []).compactMap { l -> Location? in
+        let list = (cloud["locations"] as? [[String: Any]] ?? []).compactMap { l -> Location? in
             guard let name = l["name"] as? String, let location = l["location"] as? String else { return nil }
             return Location(name: name, template: location)
-        }
-        let list = named.map { l in
-            Location(name: l.name, template: l.template,
-                     sharesItsPrefix: named.contains { $0.name != l.name && $0.name.hasPrefix(l.name) })
         }
         return list.isEmpty
             ? [Location(name: "__default", template: "<?APPLICATION_DATA_LOCAL?>/GOG.com/Galaxy/Applications/\(clientID)/Storage/Shared/Files")]
@@ -141,33 +117,73 @@ public struct GOGSaves: Sendable {
         return parts.reduce(base) { $0.appending(path: $1) }
     }
 
+    /// What an uninstall does about a game's cloud-save locations, worked out before anything is
+    /// deleted.
+    public struct UninstallPlan: Sendable {
+        /// Folders inside the game's folder, to back up before it is deleted.
+        public var backUp: [(location: Location, folder: URL)] = []
+        /// Locations inside the game's folder that can't be backed up: the game's folder itself,
+        /// or a path that climbs out of it. Removing the game then needs the player's go-ahead.
+        public var cannotBackUp: [Location] = []
+        public init() {}
+    }
+
+    /// Locations elsewhere in the environment are left alone: they outlive the game's folder. A
+    /// `<?INSTALL?>` location `resolve` turns down (it refuses whole folders and unknown parts,
+    /// which sync could empty) is still backed up for an uninstall, which only copies: up to the
+    /// first part Highball can't resolve, such as a %VARIABLE%.
+    public static func uninstallPlan(_ locations: [Location], game: GOGStore.InstalledGame, driveC: URL,
+                                     userName: String = NSUserName()) -> UninstallPlan {
+        let root = game.folder.standardizedFileURL.path
+        var plan = UninstallPlan()
+        for location in locations {
+            if let folder = resolve(location.template, game: game, driveC: driveC, userName: userName) {
+                if folder.standardizedFileURL.path.hasPrefix(root + "/") { plan.backUp.append((location, folder)) }
+                continue
+            }
+            let template = location.template.replacingOccurrences(of: "\\", with: "/")
+            guard template.hasPrefix("<?INSTALL?>") else { continue }
+            let parts = template.dropFirst("<?INSTALL?>".count).split(separator: "/").map(String.init)
+            let known = parts.prefix { !$0.contains("%") && !$0.contains("<?") && $0 != "." && $0 != ".." }
+            if known.isEmpty || parts.contains("..") {
+                plan.cannotBackUp.append(location)
+            } else {
+                plan.backUp.append((location, known.reduce(game.folder) { $0.appending(path: $1) }))
+            }
+        }
+        return plan
+    }
+
     // MARK: Sync
 
     public enum Direction: Sendable { case download, upload, forceDownload, forceUpload }
 
     public enum Outcome: Sendable, Equatable {
         case synced
-        /// Both sides changed since the last sync, or neither was synced before and both hold saves:
-        /// nothing moved, the player chooses.
+        /// Both sides changed since the last sync, or this is the first sync and both sides have
+        /// saves. Nothing was moved; the player decides.
         case conflict
-        /// gogdl refused the one direction asked for (newer files on the other side): nothing moved.
+        /// gogdl refused the requested direction because the other side has newer files. Nothing
+        /// was moved.
         case refused
         case failed(String)
     }
 
-    // MARK: Never losing a save
+    // MARK: Backups
 
-    /// Copies of saves taken before a sync could replace them, in the Highball folder:
-    /// save-backups/<game id>-<location>-<install>/<date>-<mac|cloud>/. gogdl replaces both ways,
-    /// and deletes what the other side lacks: a download deletes local files the cloud lacks, an
-    /// upload cloud files the Mac lacks. The newest `keep` copies per install and location stay.
+    /// Backups taken before a sync could replace saves, stored at
+    /// save-backups/<game id>-<location>-<install>/<date>-<mac|cloud>/. gogdl syncs both ways and
+    /// deletes whatever the other side lacks: a download deletes local files missing from the
+    /// cloud, and an upload deletes cloud files missing locally. The newest `keep` backups per
+    /// install and location are kept.
     public var backupsDir: URL { store.dir.deletingLastPathComponent().appending(path: "save-backups", directoryHint: .isDirectory) }
     static let keep = 10
 
-    /// One install's backups of one location: the install is in the name, as sync history is kept
-    /// per install, so a second copy of the game never rotates out the first one's backups.
+    /// The backup folder for one install and location. The install is part of the name (sync
+    /// history is per install too), so a second copy of the game never rotates out the first
+    /// one's backups.
     func backupsFolder(_ game: GOGStore.InstalledGame, _ location: Location) -> URL {
-        // FNV-1a over the install's path: short, and the same from one run to the next.
+        // FNV-1a of the install path: short and stable across runs.
         let hash = game.folder.standardizedFileURL.path.utf8.reduce(UInt64(0xcbf2_9ce4_8422_2325)) { ($0 ^ UInt64($1)) &* 0x100_0000_01b3 }
         return backupsDir.appending(path: "\(game.id)-\(location.name)-\(String(hash, radix: 16).prefix(8))", directoryHint: .isDirectory)
     }
@@ -181,113 +197,334 @@ public struct GOGSaves: Sendable {
         return dir.appending(path: name, directoryHint: .isDirectory)
     }
 
-    /// Every file a sync sees: gogdl lists hidden files and links too, and replaces or deletes them.
-    static func files(in folder: URL) -> [URL] {
-        let keys: Set<URLResourceKey> = [.isRegularFileKey, .isSymbolicLinkKey]
-        let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: Array(keys))
-        var files: [URL] = []
-        while let file = walker?.nextObject() as? URL {
-            let values = try? file.resourceValues(forKeys: keys)
-            if values?.isRegularFile == true || values?.isSymbolicLink == true { files.append(file) }
+    /// Every file a sync touches, as gogdl walks a folder (create_directory_map): hidden files
+    /// too, and into a linked folder, since its os.path.isdir follows links. A folder reached
+    /// twice through links is walked once. Throws for a folder inside it that can't be read: its
+    /// saves would go uncopied. A folder that isn't there holds nothing.
+    static func files(in folder: URL) throws -> [URL] {
+        guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
+        var files: [URL] = [], walked = Set<String>()
+        func walk(_ dir: URL) throws {
+            guard walked.insert(dir.resolvingSymlinksInPath().path).inserted else { return }
+            for name in try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted() {
+                let item = dir.appending(path: name)
+                var isFolder: ObjCBool = false
+                if FileManager.default.fileExists(atPath: item.path, isDirectory: &isFolder), isFolder.boolValue { try walk(item) } else { files.append(item) }
+            }
         }
+        try walk(folder)
         return files
     }
 
-    /// What a folder holds, in brief (files, bytes, latest change): two equal mean a new copy would
-    /// only repeat the last one.
-    static func fingerprint(_ folder: URL) -> String {
-        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey]
-        let values = files(in: folder).map { try? $0.resourceValues(forKeys: keys) }
-        let bytes = values.reduce(0) { $0 + ($1?.fileSize ?? 0) }
-        let latest = values.compactMap { $0?.contentModificationDate?.timeIntervalSince1970 }.max() ?? 0
-        return "\(values.count) \(bytes) \(latest)"
+    /// Where a file from files(in:) sits under `folder`, as gogdl names it: by the path walked,
+    /// not where a link leads.
+    static func relativePath(of file: URL, in folder: URL) -> String {
+        String(file.standardizedFileURL.path.dropFirst(folder.standardizedFileURL.path.count + 1))
     }
 
+    /// A digest of a folder's files: each one's path, size and last change. When it matches a
+    /// backup's, a new backup would be a duplicate.
+    static func fingerprint(_ folder: URL) -> String {
+        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey]
+        let lines = ((try? files(in: folder)) ?? []).map { file -> String in
+            let values = try? file.resolvingSymlinksInPath().resourceValues(forKeys: keys)
+            return "\(relativePath(of: file, in: folder))\t\(values?.fileSize ?? 0)\t\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)"
+        }
+        return "mac " + digest(lines)
+    }
 
-    /// A copy of the saves on the Mac, before a download could replace them: the newest copy when
-    /// nothing changed since it, nil when there is nothing to copy. Throws when the copy fails, and
-    /// leaves no half copy behind: then nothing may replace them.
+    /// A digest of a location's files in GOG's cloud: each one's path and hash.
+    static func fingerprint(cloud listing: [CloudFile], location: Location) -> String {
+        let own = listing.filter { $0.hash != deletedMark && $0.name.hasPrefix(location.name + "/") }
+        return "cloud " + digest(own.map { "\($0.name)\t\($0.hash)" })
+    }
+
+    private static func digest(_ lines: [String]) -> String {
+        SHA256.hash(data: Data(lines.sorted().joined(separator: "\n").utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// What a backup holds: the Mac's saves or GOG's cloud's.
+    enum BackupKind: String, Sendable { case mac, cloud }
+
+    /// Backups are named <date>-<kind>[-kept]. Kept backups (made before an uninstall, or before
+    /// the player picked a side in a conflict) are never pruned; the others are pruned per kind.
+    static func kind(of backup: URL) -> BackupKind? {
+        let name = backup.lastPathComponent
+        return name.contains("-cloud") ? .cloud : name.contains("-mac") ? .mac : nil
+    }
+    static func isKept(_ backup: URL) -> Bool { backup.lastPathComponent.contains("-kept") }
+
+    /// The newest backup of that kind when it holds exactly `fingerprint`. A kept backup asked
+    /// for when the match isn't kept yet turns the match into a kept one instead of copying again.
+    private func reuse(in dir: URL, kind: BackupKind, fingerprint: String, kept: Bool) -> URL? {
+        guard let newest = backups(in: dir).first(where: { Self.kind(of: $0) == kind }),
+              (try? String(contentsOf: Self.fingerprintFile(of: newest), encoding: .utf8)) == fingerprint else { return nil }
+        guard kept, !Self.isKept(newest) else { return newest }
+        let promoted = dir.appending(path: newest.lastPathComponent + "-kept", directoryHint: .isDirectory)
+        guard (try? FileManager.default.moveItem(at: newest, to: promoted)) != nil else { return nil }
+        try? FileManager.default.moveItem(at: Self.fingerprintFile(of: newest), to: Self.fingerprintFile(of: promoted))
+        return promoted
+    }
+
+    /// Backs up the local saves before something could replace or delete them. Returns the
+    /// newest Mac backup when nothing has changed since it, or nil when there is nothing to back
+    /// up. `kept` backups are never pruned. Throws if the backup fails, leaving no partial copy
+    /// behind; the caller must then stop.
     @discardableResult
-    public func backUpLocal(_ game: GOGStore.InstalledGame, location: Location, folder: URL) throws -> URL? {
-        guard !Self.files(in: folder).isEmpty else { return nil }
+    public func backUpLocal(_ game: GOGStore.InstalledGame, location: Location, folder: URL, kept: Bool = false) throws -> URL? {
+        let files = try Self.files(in: folder)
+        guard !files.isEmpty else { return nil }
         let dir = backupsFolder(game, location)
         let fingerprint = Self.fingerprint(folder)
-        if let newest = backups(in: dir).first, (try? String(contentsOf: Self.fingerprintFile(of: newest), encoding: .utf8)) == fingerprint {
-            return newest
-        }
-        let target = try finish(newBackup(in: dir, label: "mac")) { partial in
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try FileManager.default.copyItem(at: folder, to: partial)
+        if let same = reuse(in: dir, kind: .mac, fingerprint: fingerprint, kept: kept) { return same }
+        let target = try finish(newBackup(in: dir, label: kept ? "mac-kept" : "mac")) { partial in
+            // What a link points at, not the link: gogdl writes through it, so a download replaces
+            // the file it points to. A link to nothing holds nothing to keep.
+            for file in files {
+                let source = file.resolvingSymlinksInPath()
+                guard FileManager.default.fileExists(atPath: source.path) else { continue }
+                let copy = partial.appending(path: Self.relativePath(of: file, in: folder))
+                try FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try FileManager.default.copyItem(at: source, to: copy)
+            }
         }
         try? fingerprint.write(to: Self.fingerprintFile(of: target), atomically: true, encoding: .utf8)
         return target
     }
 
-    /// Beside a copy, not in it: a copy restored by hand never carries it into the game's folder,
-    /// where gogdl would upload it with the saves.
+    /// Stored next to the backup rather than inside it, so restoring a backup by hand never puts
+    /// this file in the game's folder, where gogdl would upload it with the saves.
     static func fingerprintFile(of backup: URL) -> URL {
         backup.deletingLastPathComponent().appending(path: backup.lastPathComponent + ".fingerprint")
     }
 
-    /// A copy of GOG's cloud saves, before an upload could replace them: gogdl downloads the cloud
-    /// into a fresh folder of the backups (with nothing there, it only downloads), which touches
-    /// neither the cloud nor the game's folder. A file it fails to fetch fails the whole copy, as
-    /// gogdl itself still exits 0. Throws when it fails: then nothing may replace the cloud's.
+    /// GOG's whole cloud listing for the game, from a gogdl run that can't move anything: an
+    /// empty folder and a location name no cloud file starts with, so gogdl finds no files on
+    /// either side and only logs the listing (saves.py `sync`). nil when gogdl logged none
+    /// (it logs none when GOG has no cloud storage for the game at all).
+    func listCloud(_ game: GOGStore.InstalledGame) throws -> [CloudFile]? {
+        let empty = FileManager.default.temporaryDirectory.appending(path: "highball-listing-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: empty) }
+        let nothing = Location(name: "highball-listing-only-\(UUID().uuidString)", template: "")
+        let result = try run(game, location: nothing, folder: empty, timestamp: "0", direction: .download)
+        guard result.status == 0, result.downloadFailures + result.otherFailures == 0 else {
+            throw HighballError.failed("gogdl could not list GOG's cloud saves (status \(result.status))")
+        }
+        return result.listing
+    }
+
+    /// Backs up GOG's cloud saves before an upload could replace or delete them. The listing
+    /// comes first: when the location has no files in the cloud there is nothing to back up
+    /// (nil), and when they match the newest cloud backup that one is returned. Otherwise gogdl
+    /// downloads them into an empty backup folder (with nothing local, it only downloads), which
+    /// touches neither the cloud nor the game's folder. gogdl exits 0 even when a file fails to
+    /// download, so the backup also checks that every file of this location in the listing came
+    /// down. `kept` backups are never pruned. Throws if the backup fails; the upload must then stop.
     @discardableResult
-    public func backUpCloud(_ game: GOGStore.InstalledGame, location: Location) throws -> URL {
+    public func backUpCloud(_ game: GOGStore.InstalledGame, location: Location, kept: Bool = false) throws -> URL? {
         let dir = backupsFolder(game, location)
-        return try finish(newBackup(in: dir, label: "cloud")) { partial in
-            try FileManager.default.createDirectory(at: partial, withIntermediateDirectories: true)
-            let failed = OSAllocatedUnfairLock(initialState: false)
-            let status = try store.withAuthFile {
-                try store.runStreaming(Self.arguments(folder: partial, id: game.id, location: location, timestamp: "0", direction: .forceDownload)) { line in
-                    if Self.isFailure(line, location: location) { failed.withLock { $0 = true } }
+        if let listing = try listCloud(game) {
+            guard !Self.ownFiles(for: location, in: listing).isEmpty else { return nil }
+            if let same = reuse(in: dir, kind: .cloud, fingerprint: Self.fingerprint(cloud: listing, location: location), kept: kept) {
+                return same
+            }
+        }
+        let fingerprint = OSAllocatedUnfairLock<String?>(initialState: nil)
+        do {
+            let target = try finish(newBackup(in: dir, label: kept ? "cloud-kept" : "cloud")) { partial in
+                try FileManager.default.createDirectory(at: partial, withIntermediateDirectories: true)
+                let result = try run(game, location: location, folder: partial, timestamp: "0", direction: .forceDownload)
+                let missing = result.listing.map { Self.ownFiles(for: location, in: $0).filter { !FileManager.default.fileExists(atPath: partial.appending(path: $0).path) } } ?? []
+                guard result.status == 0, Self.unexplainedFailures(result, location: location, folder: partial, since: 0) == 0, missing.isEmpty else {
+                    throw HighballError.failed("gogdl could not copy all of GOG's cloud saves (status \(result.status))")
                 }
+                guard !(try Self.files(in: partial)).isEmpty else { throw NothingToBackUp() }
+                fingerprint.withLock { $0 = result.listing.map { Self.fingerprint(cloud: $0, location: location) } }
             }
-            guard status == 0, !failed.withLock({ $0 }) else {
-                throw HighballError.failed("gogdl could not copy all of GOG's cloud saves (status \(status))")
+            if let value = fingerprint.withLock({ $0 }) {
+                try? value.write(to: Self.fingerprintFile(of: target), atomically: true, encoding: .utf8)
             }
+            return target
+        } catch is NothingToBackUp {
+            return nil
         }
     }
 
-    /// gogdl's lines for a file it could not move, or an error it logs and carries on past. Its
-    /// "Downloading file failed" names no file, so for a location whose name another one's starts
-    /// with it may be one of the other location's files, asked for at the wrong path, and does
-    /// not count (the other location's own sync fetches those).
-    static func isFailure(_ line: String, location: Location) -> Bool {
-        if line.contains("Downloading file failed") { return !location.sharesItsPrefix }
-        return line.contains(" ERROR: ")
-    }
+    private struct NothingToBackUp: Error {}
 
-    /// Fills a backup under a ".partial" name and gives it its own name only once complete, so a
-    /// failed copy never sits among the real ones; then keeps the newest `keep`, never this one.
+    /// gogdl's log line when a file fails to download. It names no file.
+    static func isDownloadFailure(_ line: String) -> Bool { line.contains("Downloading file failed") }
+    /// Any other error gogdl logs and continues past, such as a failed upload.
+    static func isFailure(_ line: String) -> Bool { isDownloadFailure(line) || line.contains(" ERROR: ") }
+
+    /// Fills a backup under a ".partial" name and renames it only once complete, so a failed
+    /// backup never sits among the real ones. Then prunes that kind's backups to the newest
+    /// `keep`, never removing this one or a kept one.
     private func finish(_ target: URL, fill: (URL) throws -> Void) throws -> URL {
-        let partial = target.deletingLastPathComponent().appending(path: target.lastPathComponent + ".partial", directoryHint: .isDirectory)
+        let dir = target.deletingLastPathComponent()
+        removeStalePartials(in: dir)
+        let partial = dir.appending(path: target.lastPathComponent + ".partial", directoryHint: .isDirectory)
         do {
             try fill(partial)
             try FileManager.default.moveItem(at: partial, to: target)
-            // A copied folder keeps its source's creation date, often years old: the copy is
-            // dated now, so the newest copies are the ones kept.
+            // A copied folder keeps the source's creation date, often years old. Date the backup
+            // now so pruning keeps the newest ones.
             try FileManager.default.setAttributes([.creationDate: Date()], ofItemAtPath: target.path)
         } catch {
             try? FileManager.default.removeItem(at: partial)
             throw error
         }
-        // By name: the same folder can be listed under /var and /private/var.
-        for old in backups(in: target.deletingLastPathComponent()).filter({ $0.lastPathComponent != target.lastPathComponent }).dropFirst(Self.keep - 1) {
+        let kind = Self.kind(of: target)
+        // Compare by name: the same folder can appear under both /var and /private/var.
+        let rotating = backups(in: dir).filter {
+            $0.lastPathComponent != target.lastPathComponent && Self.kind(of: $0) == kind && !Self.isKept($0)
+        }
+        for old in rotating.dropFirst(Self.keep - 1) {
             try? FileManager.default.removeItem(at: old)
             try? FileManager.default.removeItem(at: Self.fingerprintFile(of: old))
         }
         return target
     }
 
-    /// A location's complete backups, newest first by when they were made (not by name: a Mac
-    /// whose clock was wrong once must not prune today's copy as the oldest).
+    /// A backup left half-filled by a crash or a forced quit: older than an hour, so no sync
+    /// running now is still filling it.
+    private func removeStalePartials(in dir: URL) {
+        let all = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        for partial in all where partial.pathExtension == "partial" {
+            let made = (try? partial.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+            if made < Date().addingTimeInterval(-3600) { try? FileManager.default.removeItem(at: partial) }
+        }
+    }
+
+    /// A location's complete backups, newest first by creation date rather than by name, so a
+    /// clock that was once wrong never gets today's backup pruned as the oldest.
     func backups(in dir: URL) -> [URL] {
         let all = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey])) ?? []
         func made(_ url: URL) -> Date { (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast }
         return all.filter { !["partial", "fingerprint"].contains($0.pathExtension) }.sorted { made($0) > made($1) }
     }
+
+    // MARK: Locations sharing a prefix
+
+    /// A file in GOG's cloud storage, as gogdl lists it.
+    struct CloudFile: Equatable, Sendable {
+        let name: String
+        let hash: String
+        let modified: Date?
+    }
+
+    /// The hash gogdl skips: GOG's mark for a file deleted from the cloud.
+    static let deletedMark = "aadd86936a80ee8a369579c3926f1b3c"
+
+    /// With --debug, gogdl logs the client's whole cloud listing on one line, as a Python list of
+    /// dicts (saves.py `get_cloud_files_list`). Returns nil for any other line, or one that can't
+    /// be read.
+    static func cloudListing(in line: String) -> [CloudFile]? {
+        guard let start = line.range(of: "[SAVES] DEBUG: Files: ") else { return nil }
+        var reader = PythonLiteral(line[start.upperBound...])
+        guard let entries = reader.value() as? [Any], reader.atEnd else { return nil }
+        var files: [CloudFile] = []
+        for entry in entries {
+            guard let dict = entry as? [String: Any], let name = dict["name"] as? String else { return nil }
+            files.append(CloudFile(name: name, hash: dict["hash"] as? String ?? "",
+                                   modified: (dict["last_modified"] as? String).flatMap(Self.date(iso:))))
+        }
+        return files
+    }
+
+    /// gogdl reads these with Python's `fromisoformat` and then `astimezone()`, so a date with
+    /// no offset is local time. GOG writes an offset and microseconds; any fraction length, "Z",
+    /// a space for the "T" and missing seconds are read too.
+    static func date(iso: String) -> Date? {
+        let pattern = #/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:[.,](\d+))?)?(Z|[+-]\d{2}(?::?\d{2})?)?/#
+        guard let m = iso.trimmingCharacters(in: .whitespaces).wholeMatch(of: pattern) else { return nil }
+        var parts = DateComponents()
+        parts.year = Int(m.1); parts.month = Int(m.2); parts.day = Int(m.3)
+        parts.hour = Int(m.4); parts.minute = Int(m.5); parts.second = m.6.flatMap { Int($0) } ?? 0
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        if let offset = m.8 {
+            if offset == "Z" { calendar.timeZone = TimeZone(secondsFromGMT: 0)! } else {
+                let digits = offset.dropFirst().filter(\.isNumber)
+                let hours = Int(digits.prefix(2)) ?? 0, minutes = Int(digits.dropFirst(2)) ?? 0
+                let seconds = (hours * 3600 + minutes * 60) * (offset.first == "-" ? -1 : 1)
+                guard let zone = TimeZone(secondsFromGMT: seconds) else { return nil }
+                calendar.timeZone = zone
+            }
+        }
+        guard let date = calendar.date(from: parts) else { return nil }
+        return date.addingTimeInterval(m.7.flatMap { Double("0.\($0)") } ?? 0)
+    }
+
+    /// The paths, relative to the location's folder, of the location's own files in the cloud.
+    static func ownFiles(for location: Location, in listing: [CloudFile]) -> [String] {
+        listing.filter { $0.hash != deletedMark && $0.name.hasPrefix(location.name + "/") }
+            .map { String($0.name.dropFirst(location.name.count + 1)).replacingOccurrences(of: "\\", with: "/") }
+    }
+
+    /// Cloud files that gogdl picks up for `location` but that belong to another location.
+    /// gogdl matches a location's files with `startswith(name)` (saves.py `is_in_our_dir`), so
+    /// `saves` also picks up `saves_profiles/...`. It then requests them at the wrong path
+    /// (`saves/saves_profiles/...`), where the download fails, and any delete it sends for them
+    /// goes to that same wrong path and removes nothing.
+    static func strays(for location: Location, in listing: [CloudFile]) -> [CloudFile] {
+        listing.filter { $0.hash != deletedMark && $0.name.hasPrefix(location.name) && !$0.name.hasPrefix(location.name + "/") }
+    }
+
+    /// What one gogdl save-sync run reported.
+    struct Run: Sendable {
+        var status: Int32 = 0
+        var downloadFailures = 0
+        var otherFailures = 0
+        var conflict = false
+        var refused = false
+        /// gogdl downloaded something.
+        var downloaded = false
+        /// gogdl downloaded every file in the listing: the folder was empty, or the download was forced.
+        var downloadedAll = false
+        var timestamp: String?
+        var listing: [CloudFile]?
+
+        mutating func note(_ line: String) {
+            // A debug line can quote anything (file names, arguments): only the listing is read
+            // from one.
+            if GOGSaves.isDebug(line) {
+                if let files = GOGSaves.cloudListing(in: line) { listing = files }
+                return
+            }
+            if GOGSaves.isConflict(line) { conflict = true }
+            if GOGSaves.isRefusal(line) { refused = true }
+            if GOGSaves.isDownloadFailure(line) { downloadFailures += 1 } else if GOGSaves.isFailure(line) { otherFailures += 1 }
+            if line.contains("No files locally, downloading") || line.contains("Forcing download") { downloaded = true; downloadedAll = true }
+            if line.contains("Downloading files") { downloaded = true }
+        }
+    }
+
+    /// The failures that can't be put down to strays. Each stray gogdl tried to download fails,
+    /// so those failures are expected; any beyond them are this location's own files. Without a
+    /// listing to check against, every failure counts.
+    static func unexplainedFailures(_ run: Run, location: Location, folder: URL, since ts: Double) -> Int {
+        guard run.downloadFailures > 0, run.downloaded, let listing = run.listing else { return run.downloadFailures + run.otherFailures }
+        let tried = strays(for: location, in: listing).filter { stray in
+            run.downloadedAll || (stray.modified.map { $0.timeIntervalSince1970 > ts } ?? false)
+        }
+        // A stray that did come down, at the path gogdl asked for, did not fail.
+        let failed = tried.filter { !FileManager.default.fileExists(atPath: folder.appending(path: $0.name).path) }.count
+        return max(0, run.downloadFailures - failed) + run.otherFailures
+    }
+
+    /// Whether a conflict gogdl reported comes from strays alone: none of this location's own
+    /// cloud files changed since the last sync, but a stray did. Then only the Mac's saves
+    /// changed, which makes it an upload.
+    static func conflictIsOnlyStrays(_ run: Run, location: Location, since ts: Double) -> Bool {
+        guard run.conflict, let listing = run.listing else { return false }
+        func newer(_ file: CloudFile) -> Bool { file.modified.map { $0.timeIntervalSince1970 > ts } ?? true }
+        let own = listing.filter { $0.hash != deletedMark && $0.name.hasPrefix(location.name + "/") }
+        return !own.contains(where: newer) && strays(for: location, in: listing).contains(where: newer)
+    }
+
+    // MARK: Running gogdl
 
     var timestampsFile: URL { store.dir.appending(path: "saves.json") }
 
@@ -312,6 +549,8 @@ public struct GOGSaves: Sendable {
         "\(game.id).\(location.name)@\(game.folder.standardizedFileURL.path)"
     }
 
+    /// `--debug` makes gogdl log the cloud listing (cloudListing). Debug lines stay out of
+    /// Highball's log.
     static func arguments(folder: URL, id: String, location: Location, timestamp: String, direction: Direction) -> [String] {
         let flag: String
         switch direction {
@@ -320,8 +559,10 @@ public struct GOGSaves: Sendable {
         case .forceDownload: flag = "--force-download"
         case .forceUpload: flag = "--force-upload"
         }
-        return ["save-sync", folder.path, id, "--os", "windows", "--ts", timestamp, "--name", location.name, flag]
+        return ["save-sync", folder.path, id, "--os", "windows", "--ts", timestamp, "--name", location.name, "--debug", flag]
     }
+
+    static func isDebug(_ line: String) -> Bool { line.contains("] DEBUG: ") }
 
     /// gogdl's only stdout is the new timestamp, a bare number written without a newline, so on
     /// the shared pipe it usually arrives glued to the log line after it ("1793193913.87[SAVES] INFO:
@@ -335,51 +576,61 @@ public struct GOGSaves: Sendable {
     /// gogdl's line for a conflict: it moved nothing.
     static func isConflict(_ line: String) -> Bool { line.contains("Files in conflict") }
 
-    /// gogdl's line for refusing the direction asked for ("Refused to download files, newer files
-    /// locally"): it moved nothing.
+    /// gogdl's line when it refuses the requested direction ("Refused to download files, newer
+    /// files locally"). Nothing was transferred.
     static func isRefusal(_ line: String) -> Bool { line.contains("Refused to") }
 
+    private func run(_ game: GOGStore.InstalledGame, location: Location, folder: URL, timestamp: String, direction: Direction,
+                     onLine: (@Sendable (String) -> Void)? = nil) throws -> Run {
+        let run = OSAllocatedUnfairLock(initialState: Run())
+        // save-sync refreshes the game's own token into auth.json.
+        let status = try store.withAuthFile {
+            try store.runStreaming(Self.arguments(folder: folder, id: game.id, location: location, timestamp: timestamp, direction: direction)) { line in
+                let stamp = Self.timestamp(in: line)
+                let text = stamp?.1 ?? line
+                run.withLock { if let stamp { $0.timestamp = stamp.0 }; $0.note(text) }
+                if !text.isEmpty, !Self.isDebug(text) { onLine?(text) }
+            }
+        }
+        return run.withLock { $0.status = status; return $0 }
+    }
+
     /// Syncs one location. The new timestamp is kept only when something was decided.
+    /// `keepBackups`: the backup made first is never pruned (the player picked a side in a
+    /// conflict).
     public func sync(_ game: GOGStore.InstalledGame, location: Location, folder: URL, direction: Direction,
-                     onLine: (@Sendable (String) -> Void)? = nil) -> Outcome {
+                     keepBackups: Bool = false, onLine: (@Sendable (String) -> Void)? = nil) -> Outcome {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let ts = timestamps()[key(game, location)] ?? "0"
-        // Whatever a sync could replace or delete is copied first, and a failed copy stops it. An
-        // upload copies the cloud even after a session whose saves came down first: a download
-        // brings only cloud files newer than the last sync, so one older than it and missing on
-        // the Mac stays in the cloud alone, and the upload deletes it.
+        // Back up whatever the sync could replace or delete, and stop if the backup fails: the
+        // Mac's saves before a download, GOG's before an upload.
         do {
             switch direction {
-            case .download, .forceDownload: try backUpLocal(game, location: location, folder: folder)
-            case .upload, .forceUpload: try backUpCloud(game, location: location)
+            case .download, .forceDownload: try backUpLocal(game, location: location, folder: folder, kept: keepBackups)
+            case .upload, .forceUpload: try backUpCloud(game, location: location, kept: keepBackups)
             }
         } catch {
             return .failed("the saves could not be backed up first (\(error.localizedDescription)), so nothing was synced")
         }
-        let conflict = OSAllocatedUnfairLock(initialState: false)
-        let refused = OSAllocatedUnfairLock(initialState: false)
-        let failed = OSAllocatedUnfairLock(initialState: false)
-        let stdout = OSAllocatedUnfairLock<String?>(initialState: nil)
-        let status: Int32
+        var result: Run
         do {
-            // save-sync refreshes the game's own token into auth.json.
-            status = try store.withAuthFile { try store.runStreaming(Self.arguments(folder: folder, id: game.id, location: location, timestamp: ts, direction: direction)) { line in
-                if Self.isConflict(line) { conflict.withLock { $0 = true } }
-                if Self.isRefusal(line) { refused.withLock { $0 = true } }
-                if Self.isFailure(line, location: location) { failed.withLock { $0 = true } }
-                if let (value, rest) = Self.timestamp(in: line) {
-                    stdout.withLock { $0 = value }
-                    if !rest.isEmpty { onLine?(rest) }
-                } else { onLine?(line) }
-            } }
+            result = try run(game, location: location, folder: folder, timestamp: ts, direction: direction, onLine: onLine)
+            if result.status == 0, Self.conflictIsOnlyStrays(result, location: location, since: Double(ts) ?? 0) {
+                // Without the strays, only the Mac's saves changed: an upload, which a download
+                // leaves for after the game. The cloud was backed up above.
+                guard direction == .upload else { return .refused }
+                result = try run(game, location: location, folder: folder, timestamp: ts, direction: .forceUpload, onLine: onLine)
+            }
         } catch { return .failed(error.localizedDescription) }
-        guard status == 0 else { return .failed("gogdl save-sync exited with \(status)") }
-        // gogdl exits 0 after a file it could not move, and still prints a new timestamp: kept,
-        // that timestamp would hide the file from the next sync, so it is not.
-        if failed.withLock({ $0 }) { return .failed("gogdl could not move every file") }
-        if conflict.withLock({ $0 }) { return .conflict }
-        if refused.withLock({ $0 }) { return .refused }
-        if let new = stdout.withLock({ $0 }) {
+        guard result.status == 0 else { return .failed("gogdl save-sync exited with \(result.status)") }
+        // gogdl exits 0 even after failing to transfer a file, and still prints a new timestamp.
+        // Saving that timestamp would make the next sync skip the failed file, so it isn't saved.
+        if Self.unexplainedFailures(result, location: location, folder: folder, since: Double(ts) ?? 0) > 0 {
+            return .failed("gogdl could not move every file")
+        }
+        if result.conflict { return .conflict }
+        if result.refused { return .refused }
+        if let new = result.timestamp {
             updateTimestamps { $0[key(game, location)] = new }
         }
         return .synced
@@ -390,5 +641,89 @@ public struct GOGSaves: Sendable {
     public func forget(_ game: GOGStore.InstalledGame) {
         let suffix = "@\(game.folder.standardizedFileURL.path)"
         updateTimestamps { all in all = all.filter { !($0.key.hasPrefix(game.id + ".") && $0.key.hasSuffix(suffix)) } }
+    }
+}
+
+/// Reads the Python literals gogdl logs (lists, dicts, strings, numbers, None, True, False), as
+/// `repr` writes them. Works on Unicode scalars, so a quote followed by a combining mark is still
+/// a quote.
+struct PythonLiteral {
+    private let chars: [Unicode.Scalar]
+    private var i = 0
+    init(_ text: Substring) { chars = Array(text.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars) }
+
+    var atEnd: Bool { i == chars.count }
+
+    private mutating func skipSpace() { while i < chars.count, chars[i].properties.isWhitespace { i += 1 } }
+
+    /// The next value, or nil when the text isn't a literal this reads.
+    mutating func value() -> Any? {
+        skipSpace()
+        guard i < chars.count else { return nil }
+        switch chars[i] {
+        case "[": return sequence(close: "]").map { $0 as Any }
+        case "{":
+            i += 1
+            var dict: [String: Any] = [:]
+            while true {
+                skipSpace()
+                if i < chars.count, chars[i] == "}" { i += 1; return dict }
+                guard let key = value() as? String else { return nil }
+                skipSpace()
+                guard i < chars.count, chars[i] == ":" else { return nil }
+                i += 1
+                guard let v = value() else { return nil }
+                dict[key] = v
+                skipSpace()
+                if i < chars.count, chars[i] == "," { i += 1 }
+            }
+        case "'", "\"": return string()
+        default:
+            let start = i
+            while i < chars.count, !",]}:".unicodeScalars.contains(chars[i]), !chars[i].properties.isWhitespace { i += 1 }
+            let word = String(String.UnicodeScalarView(chars[start..<i]))
+            return word.isEmpty ? nil : word
+        }
+    }
+
+    private mutating func sequence(close: Unicode.Scalar) -> [Any]? {
+        i += 1
+        var items: [Any] = []
+        while true {
+            skipSpace()
+            if i < chars.count, chars[i] == close { i += 1; return items }
+            guard let item = value() else { return nil }
+            items.append(item)
+            skipSpace()
+            if i < chars.count, chars[i] == "," { i += 1 }
+        }
+    }
+
+    private mutating func string() -> String? {
+        let quote = chars[i]
+        i += 1
+        var out = ""
+        while i < chars.count {
+            let c = chars[i]
+            i += 1
+            if c == quote { return out }
+            guard c == "\\" else { out.unicodeScalars.append(c); continue }
+            guard i < chars.count else { return nil }
+            let e = chars[i]
+            i += 1
+            switch e {
+            case "n": out.append("\n")
+            case "t": out.append("\t")
+            case "r": out.append("\r")
+            case "x", "u", "U":
+                let n = e == "x" ? 2 : e == "u" ? 4 : 8
+                guard i + n <= chars.count, let code = UInt32(String(String.UnicodeScalarView(chars[i..<i + n])), radix: 16),
+                      let scalar = Unicode.Scalar(code) else { return nil }
+                out.unicodeScalars.append(scalar)
+                i += n
+            default: out.unicodeScalars.append(e)   // \\ \' \"
+            }
+        }
+        return nil
     }
 }

@@ -365,16 +365,29 @@ public struct GOGStore: Sendable {
 
     /// A blocking GET for callers already off the main thread (gogdl-side work, one request at a time).
     static func fetch(_ request: URLRequest) throws -> Data {
+        guard let data = try fetch(request, missingIsNil: false) else { throw HighballError.invalid("no data") }
+        return data
+    }
+
+    /// The same, but nil when the server answers 404: the thing asked for doesn't exist. Network
+    /// failures and other statuses still throw.
+    static func fetchIfFound(_ request: URLRequest) throws -> Data? {
+        try fetch(request, missingIsNil: true)
+    }
+
+    private static func fetch(_ request: URLRequest, missingIsNil: Bool) throws -> Data? {
         var request = request
         request.timeoutInterval = 30
-        let result = OSAllocatedUnfairLock<(data: Data, failure: String?)>(initialState: (Data(), nil))
+        let result = OSAllocatedUnfairLock<(data: Data?, failure: String?)>(initialState: (nil, nil))
         let address = request.url?.absoluteString ?? ""
         let done = DispatchSemaphore(value: 0)
         URLSession.shared.dataTask(with: request) { data, response, error in
-            let failure: String? = if let error { error.localizedDescription }
-                else if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { "HTTP \(http.statusCode) for \(address)" }
-                else { nil }
-            result.withLock { $0 = (data ?? Data(), failure) }
+            let status = (response as? HTTPURLResponse)?.statusCode
+            let found: (Data?, String?) = if let error { (nil, error.localizedDescription) }
+                else if missingIsNil, status == 404 { (nil, nil) }
+                else if let status, !(200..<300).contains(status) { (nil, "HTTP \(status) for \(address)") }
+                else { (data ?? Data(), nil) }
+            result.withLock { $0 = found }
             done.signal()
         }.resume()
         done.wait()

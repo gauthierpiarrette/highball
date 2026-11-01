@@ -837,9 +837,9 @@ struct GOG: AsyncParsableCommand {
             let saves = GOGSaves(store: store)
             let settings = GOGSettings.load(store)   // the game page's choices hold here too
             var folders: [(GOGSaves.Location, URL)] = []
-            if !noSaves, !settings.cloudSavesOff.contains(id), store.isAuthenticated, let locations = try? saves.cloudLocations(for: game) {
+            if !noSaves, !settings.cloudSavesOff.contains(id), store.isAuthenticated, let client = saves.clientID(for: game), let locations = try? saves.locations(clientID: client) {
                 folders = locations.compactMap { l in GOGSaves.resolve(l.template, game: game, driveC: b.driveC).map { (l, $0) } }
-                for (l, f) in folders { print("saves \(l.name) down: \(Self.describe(saves.sync(game, location: l, folder: f, direction: .download)))") }
+                for (l, f) in folders { print("saves \(l.name) down: \(Self.describe(saves.sync(game, location: l, folder: f, direction: .download), direction: .download))") }
             }
             var comet: Process?
             if !noComet, settings.cometOff[id] == nil, store.isAuthenticated {
@@ -873,14 +873,17 @@ struct GOG: AsyncParsableCommand {
                 }
             }
             GOGComet(store: store).stop(comet)
-            for (l, f) in folders { print("saves \(l.name) up: \(Self.describe(saves.sync(game, location: l, folder: f, direction: .upload)))") }
+            for (l, f) in folders { print("saves \(l.name) up: \(Self.describe(saves.sync(game, location: l, folder: f, direction: .upload), direction: .upload))") }
         }
 
-        static func describe(_ outcome: GOGSaves.Outcome) -> String {
+        static func describe(_ outcome: GOGSaves.Outcome, direction: GOGSaves.Direction) -> String {
             switch outcome {
             case .synced: return "synced"
             case .conflict: return "both copies changed, nothing moved; play from the app to choose which to keep"
-            case .refused: return "newer saves on the other side, nothing moved"
+            case .refused:
+                return direction == .upload
+                    ? "GOG's cloud has newer saves, nothing uploaded; they come down at the next play"
+                    : "this Mac's saves are newer, nothing downloaded; they go up after the game"
             case .failed(let why): return "failed (\(why))"
             }
         }
