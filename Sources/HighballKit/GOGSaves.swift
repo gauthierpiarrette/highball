@@ -749,9 +749,9 @@ public struct GOGSaves: Sendable {
         updateKeptSaves { $0[game.id]?.asked.append(game.folder.standardizedFileURL.path) }
     }
 
-    /// Whether this install has kept saves it hasn't been asked about.
-    public func keptSavesToOffer(_ game: GOGStore.InstalledGame) -> KeptSaves? {
-        guard let kept = keptSaves()[game.id], !kept.asked.contains(game.folder.standardizedFileURL.path) else { return nil }
+    /// The kept saves to offer this install: nil when there are none or it was asked already.
+    public static func toOffer(_ kept: KeptSaves?, to game: GOGStore.InstalledGame) -> KeptSaves? {
+        guard let kept, !kept.asked.contains(game.folder.standardizedFileURL.path) else { return nil }
         return kept
     }
 

@@ -313,16 +313,16 @@ final class GOGSaveSafetyTests: XCTestCase {
                                                           only: [old.folder.appending(path: "Profiles/p1.sav")]))
         saves.keep([(location.name, old.folder.appending(path: "saves"), named), (GOGSaves.gameFolder.name, old.folder, written)],
                    of: old, otherInstalls: [elsewhere.folder])
-        XCTAssertNil(saves.keptSavesToOffer(elsewhere))
+        XCTAssertNil(GOGSaves.toOffer(saves.keptSaves()[elsewhere.id], to: elsewhere))
         try write("fresh", to: new.folder.appending(path: "saves/slot.sav"))
-        let kept = try XCTUnwrap(saves.keptSavesToOffer(new))
+        let kept = try XCTUnwrap(GOGSaves.toOffer(saves.keptSaves()[new.id], to: new))
         XCTAssertEqual(try saves.putBack(kept, into: new), 2)
         XCTAssertEqual(try String(contentsOf: new.folder.appending(path: "saves/slot.sav"), encoding: .utf8), "cloud slot")
         XCTAssertEqual(try String(contentsOf: new.folder.appending(path: "Profiles/p1.sav"), encoding: .utf8), "local slot")
         let before = try XCTUnwrap(saves.backups(in: saves.backupsFolder(new, location)).first)
         XCTAssertEqual(try String(contentsOf: before.appending(path: "slot.sav"), encoding: .utf8), "fresh", "what was there is copied first")
         saves.markAsked(new)
-        XCTAssertNil(saves.keptSavesToOffer(new), "asked once")
+        XCTAssertNil(GOGSaves.toOffer(saves.keptSaves()[new.id], to: new), "asked once")
     }
 
     /// The latest uninstall's backups replace an earlier one's: a location it had nothing for
@@ -333,9 +333,9 @@ final class GOGSaveSafetyTests: XCTestCase {
         let old = root.appending(path: "backups/old"), new = root.appending(path: "backups/new")
         saves.keep([("saves", game.folder.appending(path: "saves"), old), (GOGSaves.gameFolder.name, game.folder, old)], of: game, otherInstalls: [])
         saves.keep([(GOGSaves.gameFolder.name, game.folder, new)], of: game, otherInstalls: [])
-        XCTAssertEqual(saves.keptSavesToOffer(game)?.entries.map(\.name), [GOGSaves.gameFolder.name])
-        XCTAssertEqual(saves.keptSavesToOffer(game)?.entries.map(\.backup), [new])
+        XCTAssertEqual(GOGSaves.toOffer(saves.keptSaves()[game.id], to: game)?.entries.map(\.name), [GOGSaves.gameFolder.name])
+        XCTAssertEqual(GOGSaves.toOffer(saves.keptSaves()[game.id], to: game)?.entries.map(\.backup), [new])
         saves.keep([], of: game, otherInstalls: [])
-        XCTAssertNil(saves.keptSavesToOffer(game))
+        XCTAssertNil(GOGSaves.toOffer(saves.keptSaves()[game.id], to: game))
     }
 }

@@ -563,7 +563,9 @@ private extension View {
     @MainActor func gogPutBackSavesAsk(_ state: AppState) -> some View {
         self.alert(state.gogSavesToPutBack.map { String(format: L("Put back your saves from %@?"),
                                                         $0.kept.date.formatted(date: .abbreviated, time: .omitted)) } ?? "",
-               isPresented: .init(get: { state.gogSavesToPutBack != nil }, set: { if !$0 { state.gogPutBackSaves(false) } }),
+               // The buttons answer (Escape is Not now); the dismissal that follows must not answer
+               // the next game's question, which an answer may already have raised.
+               isPresented: .init(get: { state.gogSavesToPutBack != nil }, set: { _ in }),
                presenting: state.gogSavesToPutBack) { _ in
             Button(L("Put them back")) { state.gogPutBackSaves(true) }.keyboardShortcut(.defaultAction)
             Button(L("Not now"), role: .cancel) { state.gogPutBackSaves(false) }

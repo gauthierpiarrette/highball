@@ -4056,9 +4056,11 @@ final class AppState {
     private func offerKeptGOGSaves() {
         guard gogSavesToPutBack == nil else { return }
         let saves = GOGSaves(store: gogStore)
+        let all = saves.keptSaves()   // one read, not one per installed game
+        guard !all.isEmpty else { return }
         for bottle in bottles {
             for game in gogInstalledByBottle[bottle.name] ?? [] {
-                guard let kept = saves.keptSavesToOffer(game),
+                guard let kept = GOGSaves.toOffer(all[game.id], to: game),
                       !gogStore.hasManifest(game) || GOGStore.setupDone(for: game, driveC: bottle.driveC),
                       !runningSessions.contains(where: { $0.libraryID == "gog:\(game.id)" && $0.bottleName == bottle.name }) else { continue }
                 gogSavesToPutBack = GOGSavesToPutBack(game: game, title: game.title, kept: kept)
