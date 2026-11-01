@@ -3593,7 +3593,7 @@ final class AppState {
         guard Self.relaunchEnabled, let bundle = app.bundleURL?.standardizedFileURL.path else { return }
         guard let item = libraryItems.first(where: { item in
             guard (item.source == .gog || item.source == .epic), let folder = macFolder(for: item)?.standardizedFileURL.path else { return false }
-            return bundle == folder || bundle.hasPrefix(folder + "/")
+            return MacRelaunch.opens(bundle: bundle, from: folder)
         }), !relaunching.contains(item.id) else { return }
         relaunching.insert(item.id)
         // A moment for Highball's own launch to be recorded (Epic's is, once legendary answers).
@@ -3611,23 +3611,20 @@ final class AppState {
         }
     }
 
-    /// Whether to close a game just opened outside Highball: only when it is not Highball's own
-    /// launch (within 15 seconds of Highball starting it, or while the game Highball started has
-    /// not ended: an app from its folder then is its own, a launcher's hand-over or a helper,
-    /// however late it opens), opened in the last few seconds, not closed already in the last
-    /// minute, and only when Highball can start it again right now. A busy Highball (a download
-    /// holding the strip) would close it and start nothing.
+    /// Whether to close a game just opened outside Highball (MacRelaunch.shouldTakeOver, which
+    /// the tests cover): what Highball knows of the game and the app, and whether it can start
+    /// the game again right now.
     private func relaunchShouldTakeOver(_ app: NSRunningApplication, item: LibraryItem) -> Bool {
-        let now = Date()
-        if macGameProcesses[item.id] != nil { return false }
-        if let started = macLaunchedAt[item.id], now.timeIntervalSince(started) < 15 { return false }
-        if let closed = macRelaunchedAt[item.id], now.timeIntervalSince(closed) < 60 { return false }
-        guard !app.isTerminated, let launched = app.launchDate, now.timeIntervalSince(launched) < 8, !busy else { return false }
+        let canStart: Bool
         switch item.source {
-        case .gog: return item.gogID.flatMap { gogMacInstalled[$0]?.app } != nil
-        case .epic: return item.epicAppName.flatMap { epicMacInstalls[$0] } != nil
-        default: return false
+        case .gog: canStart = item.gogID.flatMap { gogMacInstalled[$0]?.app } != nil
+        case .epic: canStart = item.epicAppName.flatMap { epicMacInstalls[$0] } != nil
+        default: canStart = false
         }
+        return MacRelaunch.shouldTakeOver(now: Date(), gameRunning: macGameProcesses[item.id] != nil,
+                                          startedAt: macLaunchedAt[item.id], takenOverAt: macRelaunchedAt[item.id],
+                                          appLaunchedAt: app.launchDate, appTerminated: app.isTerminated,
+                                          busy: busy, canStart: canStart)
     }
 
     /// Removes an Epic game's Mac build through legendary, so its library stays right.
