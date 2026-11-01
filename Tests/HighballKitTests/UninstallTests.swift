@@ -55,6 +55,14 @@ final class UninstallTests: XCTestCase {
         XCTAssertTrue(text.contains("delete the environment"), text)
     }
 
+    /// Owner review on #589: only GOG's cloud-save locations are copied before the folder goes, so
+    /// a game with cloud saves off that saves beside its exe loses those saves, and the text says so.
+    func testTheGOGMessagePromisesACopyOnlyOfWhatGOGSyncs() {
+        let text = Uninstall.confirmation(route: .gog(id: "1"), sizeOnDisk: 0)
+        XCTAssertTrue(text.contains("ones GOG does not sync, are deleted with it"), text)
+        XCTAssertFalse(text.contains("saves the game keeps inside its own folder are copied"), text)
+    }
+
     func testTheReasonIsWhatAnUnroutableGameShows() {
         let route = Uninstall.route(for: item(.steam))
         guard case let .none(reason) = route else { return XCTFail("expected none") }

@@ -3731,12 +3731,9 @@ final class AppState {
                 try await gogRunSetup(game, title: item.title, in: bottle, language: GOGStore.language(for: info?.languages ?? []))
             }
             let saveFolders = useSaves ? (await gogSaveLocations(game, in: bottle) ?? []) : []
-            var inStep = Set<String>()   // locations whose saves came down: their upload needs no copy of the cloud's first
             for (location, folder) in saveFolders {
                 stage = L("Bringing your saves down from GOG")
-                if try await gogSync(game, title: item.title, location: location, folder: folder, direction: .download, beforePlay: true) {
-                    inStep.insert(location.name)
-                }
+                try await gogSync(game, title: item.title, location: location, folder: folder, direction: .download, beforePlay: true)
             }
             // Stop during the steps before the game (setup, saves) ends the launch there: the
             // strip already reads "Stopped", so nothing may start after it.
@@ -3816,10 +3813,9 @@ final class AppState {
             sessionEndActions[session.id] = { [weak self] _ in
                 GOGComet(store: store).stop(comet)
                 guard let self, !saveFolders.isEmpty else { return }
-                Task { @MainActor [inStep] in
+                Task { @MainActor in
                     for (location, folder) in saveFolders {
-                        _ = try? await self.gogSync(game, title: item.title, location: location, folder: folder, direction: .upload,
-                                                    beforePlay: false, cloudInStep: inStep.contains(location.name))
+                        try? await self.gogSync(game, title: item.title, location: location, folder: folder, direction: .upload, beforePlay: false)
                     }
                 }
             }
@@ -3873,7 +3869,7 @@ final class AppState {
                 let running = comet.isRunning   // read before the log, so the last lines are never missed
                 let unlocks = reader.newUnlocks().filter { shown.insert($0.key).inserted }
                 if !unlocks.isEmpty {
-                    if clientID == nil { clientID = GOGSaves(store: store).clientID(for: game) }
+                    if clientID == nil { clientID = try? GOGSaves(store: store).clientID(for: game) }
                     let database = clientID.flatMap { $0 }.flatMap { GOGComet(store: store).achievementDatabase(clientID: $0) }
                     for unlock in unlocks {
                         let achievement = GOGAchievements.details(key: unlock.key, name: unlock.name, database: database)
@@ -3924,18 +3920,12 @@ final class AppState {
     }
 
     /// The game's cloud-save folders in this environment: empty for a game GOG keeps no saves
-    /// for, nil when GOG could not be asked (offline, no client id), as against none: a game without
-    /// cloud saves.
+    /// for (no client id, or cloud saves off), nil when GOG could not be asked (offline).
     private func gogSaveLocations(_ game: GOGStore.InstalledGame, in bottle: Bottle) async -> [(GOGSaves.Location, URL)]? {
         let saves = GOGSaves(store: gogStore)
         // Both can reach GOG (an offline install's client id comes from its build manifest).
-        // Kept apart: GOG unreachable (nil) and a game GOG keeps no saves for (.some(nil)).
-        let asked = await Task.detached { () -> [GOGSaves.Location]?? in
-            guard let client = saves.clientID(for: game) else { return nil }
-            do { return .some(try saves.locations(clientID: client)) } catch { return nil }
-        }.value
-        guard let answer = asked else { return nil }
-        return (answer ?? []).compactMap { location in
+        guard let locations = await Task.detached(operation: { try? saves.cloudLocations(for: game) }).value else { return nil }
+        return locations.compactMap { location in
             guard let folder = GOGSaves.resolve(location.template, game: game, driveC: bottle.driveC) else {
                 appendLog("\(game.title): cloud saves at \(location.template) have no folder here, skipping that one")
                 return nil
@@ -3954,23 +3944,20 @@ final class AppState {
 
     /// One sync, asking the player on a conflict. Before Play the launch waits for the answer;
     /// after the game it is asked whenever the player is back.
-    /// Whether the Mac's saves and the cloud's ended up in step.
-    @discardableResult
     private func gogSync(_ game: GOGStore.InstalledGame, title: String, location: GOGSaves.Location, folder: URL,
-                         direction: GOGSaves.Direction, beforePlay: Bool, cloudInStep: Bool = false) async throws -> Bool {
+                         direction: GOGSaves.Direction, beforePlay: Bool) async throws {
         let saves = GOGSaves(store: gogStore)
-        let outcome = await Task.detached { saves.sync(game, location: location, folder: folder, direction: direction, cloudInStep: cloudInStep) { line in
+        let outcome = await Task.detached { saves.sync(game, location: location, folder: folder, direction: direction) { line in
             Task { @MainActor in self.appendLog(line) }
         } }.value
         switch outcome {
         case .synced:
-            return true
+            return
         case .refused:
             // Newer saves on the other side; the next sync in that direction takes them.
-            return false
+            return
         case let .failed(why):
             appendLog("\(title): cloud saves did not sync (\(why)); \(beforePlay ? "playing with the saves on this Mac" : "they stay on this Mac until the next sync")")
-            return false
         case .conflict:
             let choice: GOGSaveConflict.Choice = await withCheckedContinuation { continuation in
                 // One question at a time: an earlier one still open (another game's) is answered
@@ -3987,7 +3974,7 @@ final class AppState {
             case .keepMac: forced = .forceUpload
             case .skip:
                 appendLog("\(title): cloud saves left as they are this time")
-                return false
+                return
             }
             let again = await Task.detached { saves.sync(game, location: location, folder: folder, direction: forced) }.value
             switch again {
@@ -3995,7 +3982,6 @@ final class AppState {
             case let .failed(why): appendLog("\(title): cloud saves did not sync (\(why))")
             case .conflict, .refused: appendLog("\(title): cloud saves did not sync")
             }
-            return again == .synced
         }
     }
 
@@ -4024,9 +4010,10 @@ final class AppState {
         runBusy(String(format: L("Removing %@"), title),
                 done: DoneState(title: String(format: L("%@ removed"), title), ctaTitle: nil, cta: nil),
                 stop: .killBottle(bottle, label: L("Stop"))) { [self] in
-            // Saves the game keeps inside its own folder go with the folder: copied first, before
-            // anything runs, and a failed copy stops the removal. Without GOG's answer of where
-            // the saves are, nothing is removed.
+            // GOG's cloud-save locations inside the game's own folder go with the folder: copied
+            // first, before anything runs, and a failed copy stops the removal. Without GOG's
+            // answer of where the saves are, nothing is removed; a game with no client id or with
+            // cloud saves off has none to copy. Nothing else in the folder is copied.
             guard let locations = await gogSaveLocations(game, in: bottle) else {
                 throw HighballError.failed(String(format: L("Highball could not ask GOG where %@ keeps its saves, so it left the game in place. Try again once GOG can be reached."), title))
             }

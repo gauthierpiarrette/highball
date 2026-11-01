@@ -17,12 +17,20 @@ public struct GOGSaves: Sendable {
         public let name: String
         /// GOG's template, e.g. "<?SAVED_GAMES?>/Remedy/Control".
         public let template: String
+        /// Another of the game's locations has a name that starts with this one's (saves and
+        /// saves_profiles). gogdl picks a location's cloud files by that prefix alone (saves.py,
+        /// is_in_our_dir), so it also lists the other one's, asks for them under this name, and
+        /// logs "Downloading file failed" for each, naming no file: here that line says nothing
+        /// about this location's own files.
+        public var sharesItsPrefix = false
     }
 
     /// The client id cloud storage is keyed by: the info file's, else the manifest gogdl kept
     /// (Control's info file has none; its manifest does), else GOG's latest build manifest for an
     /// install with neither (an offline installer, a gogdl install from elsewhere), remembered.
-    public func clientID(for game: GOGStore.InstalledGame) -> String? {
+    /// Nil when the game has none: GOG's own manifest names none (Beyond Good & Evil's), and gogdl
+    /// cannot sync such a game either. Throws when GOG could not be asked, which says nothing.
+    public func clientID(for game: GOGStore.InstalledGame) throws -> String? {
         if let id = game.clientID, !id.isEmpty { return id }
         if let data = try? Data(contentsOf: store.installManifest(game)),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -30,26 +38,51 @@ public struct GOGSaves: Sendable {
         let cacheFile = store.dir.appending(path: "client-ids.json")
         var cache = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: cacheFile))) ?? [:]
         if let id = cache[game.id] { return id }
-        guard let id = try? Self.publishedClientID(productID: game.id) else { return nil }
+        guard let id = try Self.publishedClientID(productID: game.id) else { return nil }
         cache[game.id] = id
         try? JSONEncoder().encode(cache).write(to: cacheFile, options: .atomic)
         return id
     }
 
-    /// The client id in the newest Windows build's manifest. The build list and manifests are
-    /// public; a v2 manifest is zlib-compressed JSON.
+    /// The client id in the newest Windows build's manifest, nil when GOG has none for the game
+    /// (no Windows build, or a manifest that names none). The build list and manifests are public;
+    /// a v2 manifest is zlib-compressed JSON. Throws when either cannot be fetched or read.
     static func publishedClientID(productID: String) throws -> String? {
         let list = URL(string: "https://content-system.gog.com/products/\(productID)/os/windows/builds?generation=2")!
-        guard let builds = try JSONSerialization.jsonObject(with: GOGStore.fetch(URLRequest(url: list))) as? [String: Any],
-              let link = ((builds["items"] as? [[String: Any]])?.first?["link"] as? String).flatMap(URL.init(string:)) else { return nil }
-        return clientID(inManifest: try GOGStore.fetch(URLRequest(url: link)))
+        guard let link = try newestBuild(inBuildList: GOGStore.fetch(URLRequest(url: list))) else { return nil }
+        return try clientID(inPublishedManifest: GOGStore.fetch(URLRequest(url: link)))
     }
 
-    static func clientID(inManifest data: Data) -> String? {
+    /// The newest build's manifest address, nil for a game with no build for Windows.
+    static func newestBuild(inBuildList data: Data) throws -> URL? {
+        guard let builds = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let items = builds["items"] as? [[String: Any]] else { throw HighballError.invalid("GOG's build list could not be read") }
+        guard let newest = items.first else { return nil }
+        guard let link = (newest["link"] as? String).flatMap(URL.init(string:)) else { throw HighballError.invalid("GOG's build list names no manifest") }
+        return link
+    }
+
+    /// A manifest GOG served: its client id, nil when it names none. Throws when it cannot be read,
+    /// as that is no answer.
+    static func clientID(inPublishedManifest data: Data) throws -> String? {
+        guard let obj = manifestObject(data) else { throw HighballError.invalid("GOG's build manifest could not be read") }
+        return obj["clientId"] as? String
+    }
+
+    static func clientID(inManifest data: Data) -> String? { manifestObject(data)?["clientId"] as? String }
+
+    private static func manifestObject(_ data: Data) -> [String: Any]? {
         // zlib = a 2-byte header, raw DEFLATE, then a checksum; Foundation's .zlib reads raw DEFLATE.
         let json = data.first == 0x78 ? (try? (data.dropFirst(2) as NSData).decompressed(using: .zlib) as Data) : data
         guard let json, let obj = try? JSONSerialization.jsonObject(with: json) as? [String: Any] else { return nil }
-        return obj["clientId"] as? String
+        return obj
+    }
+
+    /// Where the game keeps its cloud saves: none for a game with no client id or with cloud saves
+    /// off, both answers from GOG. Throws when GOG could not be asked: then nobody can say.
+    public func cloudLocations(for game: GOGStore.InstalledGame) throws -> [Location] {
+        guard let client = try clientID(for: game) else { return [] }
+        return try locations(clientID: client) ?? []
     }
 
     /// Where the game keeps its saves, nil when it has no cloud saves. An empty list from GOG means
@@ -64,9 +97,13 @@ public struct GOGSaves: Sendable {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let windows = (obj["content"] as? [String: Any])?["Windows"] as? [String: Any],
               let cloud = windows["cloudStorage"] as? [String: Any], cloud["enabled"] as? Bool == true else { return nil }
-        let list = (cloud["locations"] as? [[String: Any]] ?? []).compactMap { l -> Location? in
+        let named = (cloud["locations"] as? [[String: Any]] ?? []).compactMap { l -> Location? in
             guard let name = l["name"] as? String, let location = l["location"] as? String else { return nil }
             return Location(name: name, template: location)
+        }
+        let list = named.map { l in
+            Location(name: l.name, template: l.template,
+                     sharesItsPrefix: named.contains { $0.name != l.name && $0.name.hasPrefix(l.name) })
         }
         return list.isEmpty
             ? [Location(name: "__default", template: "<?APPLICATION_DATA_LOCAL?>/GOG.com/Galaxy/Applications/\(clientID)/Storage/Shared/Files")]
@@ -204,7 +241,7 @@ public struct GOGSaves: Sendable {
             let failed = OSAllocatedUnfairLock(initialState: false)
             let status = try store.withAuthFile {
                 try store.runStreaming(Self.arguments(folder: partial, id: game.id, location: location, timestamp: "0", direction: .forceDownload)) { line in
-                    if Self.isFailure(line) { failed.withLock { $0 = true } }
+                    if Self.isFailure(line, location: location) { failed.withLock { $0 = true } }
                 }
             }
             guard status == 0, !failed.withLock({ $0 }) else {
@@ -213,8 +250,14 @@ public struct GOGSaves: Sendable {
         }
     }
 
-    /// gogdl's lines for a file it could not move, or an error it logs and carries on past.
-    static func isFailure(_ line: String) -> Bool { line.contains("Downloading file failed") || line.contains(" ERROR: ") }
+    /// gogdl's lines for a file it could not move, or an error it logs and carries on past. Its
+    /// "Downloading file failed" names no file, so for a location whose name another one's starts
+    /// with it may be one of the other location's files, asked for at the wrong path, and does
+    /// not count (the other location's own sync fetches those).
+    static func isFailure(_ line: String, location: Location) -> Bool {
+        if line.contains("Downloading file failed") { return !location.sharesItsPrefix }
+        return line.contains(" ERROR: ")
+    }
 
     /// Fills a backup under a ".partial" name and gives it its own name only once complete, so a
     /// failed copy never sits among the real ones; then keeps the newest `keep`, never this one.
@@ -297,20 +340,18 @@ public struct GOGSaves: Sendable {
     static func isRefusal(_ line: String) -> Bool { line.contains("Refused to") }
 
     /// Syncs one location. The new timestamp is kept only when something was decided.
-    /// `cloudInStep`: this location's saves came down from the cloud before the session, so an
-    /// upload after it needs no copy of the cloud's first.
     public func sync(_ game: GOGStore.InstalledGame, location: Location, folder: URL, direction: Direction,
-                     cloudInStep: Bool = false, onLine: (@Sendable (String) -> Void)? = nil) -> Outcome {
+                     onLine: (@Sendable (String) -> Void)? = nil) -> Outcome {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let ts = timestamps()[key(game, location)] ?? "0"
         // Whatever a sync could replace or delete is copied first, and a failed copy stops it. An
-        // upload after a session whose saves came down first needs none: the cloud then held
-        // nothing the Mac did not, so it only takes what the game changed.
+        // upload copies the cloud even after a session whose saves came down first: a download
+        // brings only cloud files newer than the last sync, so one older than it and missing on
+        // the Mac stays in the cloud alone, and the upload deletes it.
         do {
             switch direction {
             case .download, .forceDownload: try backUpLocal(game, location: location, folder: folder)
-            case .forceUpload: try backUpCloud(game, location: location)
-            case .upload: if !cloudInStep { try backUpCloud(game, location: location) }
+            case .upload, .forceUpload: try backUpCloud(game, location: location)
             }
         } catch {
             return .failed("the saves could not be backed up first (\(error.localizedDescription)), so nothing was synced")
@@ -325,7 +366,7 @@ public struct GOGSaves: Sendable {
             status = try store.withAuthFile { try store.runStreaming(Self.arguments(folder: folder, id: game.id, location: location, timestamp: ts, direction: direction)) { line in
                 if Self.isConflict(line) { conflict.withLock { $0 = true } }
                 if Self.isRefusal(line) { refused.withLock { $0 = true } }
-                if Self.isFailure(line) { failed.withLock { $0 = true } }
+                if Self.isFailure(line, location: location) { failed.withLock { $0 = true } }
                 if let (value, rest) = Self.timestamp(in: line) {
                     stdout.withLock { $0 = value }
                     if !rest.isEmpty { onLine?(rest) }

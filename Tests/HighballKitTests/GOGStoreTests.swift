@@ -213,6 +213,9 @@ final class GOGStoreTests: XCTestCase {
                        "<?APPLICATION_DATA_LOCAL?>/GOG.com/Galaxy/Applications/533/Storage/Shared/Files")
         let off = #"{"content":{"Windows":{"cloudStorage":{"enabled":false}}}}"#
         XCTAssertNil(GOGSaves.parseLocations(Data(off.utf8), clientID: "c"))
+        // gogdl lists a location's cloud files by name prefix, so `saves` also sees saves_profiles'.
+        let shared = #"{"content":{"Windows":{"cloudStorage":{"enabled":true,"locations":[{"name":"saves_profiles","location":"<?INSTALL?>/p"},{"name":"saves","location":"<?INSTALL?>/s"},{"name":"config","location":"<?INSTALL?>/c"}]}}}}"#
+        XCTAssertEqual(GOGSaves.parseLocations(Data(shared.utf8), clientID: "c")?.map(\.sharesItsPrefix), [false, true, false])
     }
 
     func testClientIDFromCompressedBuildManifest() throws {
@@ -222,6 +225,19 @@ final class GOGStoreTests: XCTestCase {
         XCTAssertEqual(GOGSaves.clientID(inManifest: zlib), "53538800219319237")
         XCTAssertEqual(GOGSaves.clientID(inManifest: json), "53538800219319237", "plain JSON reads too")
         XCTAssertNil(GOGSaves.clientID(inManifest: Data([0x78, 0x9c, 0x00])))
+    }
+
+    /// Owner review on #589: a game whose build manifest names no client id (Beyond Good & Evil's)
+    /// has no cloud saves, an answer, where GOG out of reach or answering something unreadable is
+    /// none: only the second may keep an uninstall waiting.
+    func testAGameWithoutAClientIDIsAnAnswerNotAFailure() throws {
+        XCTAssertNil(try GOGSaves.clientID(inPublishedManifest: Data(#"{"baseProductId":"1207658746"}"#.utf8)))
+        XCTAssertEqual(try GOGSaves.clientID(inPublishedManifest: Data(#"{"clientId":"5353"}"#.utf8)), "5353")
+        XCTAssertThrowsError(try GOGSaves.clientID(inPublishedManifest: Data([0x78, 0x9c, 0x00])))
+        XCTAssertNil(try GOGSaves.newestBuild(inBuildList: Data(#"{"total_count":0,"items":[]}"#.utf8)), "no build for Windows")
+        XCTAssertEqual(try GOGSaves.newestBuild(inBuildList: Data(#"{"items":[{"link":"https://cdn.gog.com/a"},{"link":"https://cdn.gog.com/b"}]}"#.utf8)),
+                       URL(string: "https://cdn.gog.com/a"))
+        XCTAssertThrowsError(try GOGSaves.newestBuild(inBuildList: Data("<html>".utf8)))
     }
 
     func testSaveFoldersResolveInsideTheEnvironment() throws {
