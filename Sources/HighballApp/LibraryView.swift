@@ -45,11 +45,9 @@ struct LibraryView: View {
         return shown.filter { item in
             if let sourceFilter, item.source != sourceFilter { return false }
             if installedOnly && !item.installedAnywhere { return false }
-            // A game with no sign of whose it is is every account's (`.unknown`), so it stays.
-            if let account {
-                let owners = state.steamOwners(for: item)?.accounts
-                if !(owners?.contains(account) ?? false) { return false }
-            }
+            // A game with no sign of whose it is is every account's (`.unknown`), so it stays, as
+            // does one Highball cannot place (Steam for Mac's, or before the accounts are read).
+            if let account, let owners = state.steamOwners(for: item), !owners.accounts.contains(account) { return false }
             if verifiedOnly {
                 guard state.gameDB.entry(for: item)?.status == "verified-local" else { return false }
             }
@@ -280,7 +278,7 @@ extension LibraryView {
             .foregroundStyle(activeSteamAccount == nil ? .secondary : Color(red: 0.13, green: 0.08, blue: 0.01))
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-        .help(L("Steam games of one account on this Mac: the one that installed or played them, or was signed in when they appeared. A game with no sign of whose it is shows under every account."))
+        .help(L("Steam games of one account on this Mac: the one that installed them, or was signed in when they appeared. A game with no sign of whose it is shows under every account."))
     }
 }
 

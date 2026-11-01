@@ -73,14 +73,14 @@ public enum SteamAccounts {
     /// `activeUser` is the registry's (signedIn(bottleURL:)), `steamRunning` whether this Steam
     /// runs now: ActiveUser can outlive Steam, so only then is it who is signed in. Without it,
     /// the account signed in last is loginusers.vdf's newest. The accounts that have the game are
-    /// the player's choice when there is one (`chosen`, Every account included), else the
+    /// `owners`, as the Account row shows them (the player's choice, else every sign), else the
     /// installer; the warning names the current account only when it is not among them.
     public static func note(installedBy owner: UInt64?, accounts: [SteamAccount], activeUser: UInt64?,
-                            steamRunning: Bool, chosen: Set<UInt64>? = nil) -> GameNote? {
+                            steamRunning: Bool, owners: Set<UInt64>? = nil) -> GameNote? {
         guard accounts.count > 1, let owner, let installer = accounts.first(where: { $0.id == owner }) else { return nil }
         let active = activeUser.flatMap { id in accounts.first { $0.id == id } }
         let current = active ?? (activeUser == nil ? accounts.first : nil)
-        let haveIt: Set<UInt64> = chosen.flatMap { $0.isEmpty ? nil : $0 } ?? [owner]
+        let haveIt: Set<UInt64> = owners.flatMap { $0.isEmpty ? nil : $0 } ?? [owner]
         return GameNote(installedBy: installer, otherAccount: current.flatMap { haveIt.contains($0.id) ? nil : $0 },
                         signedInNow: steamRunning && active != nil)
     }

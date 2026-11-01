@@ -105,14 +105,14 @@ final class SteamAccountsTests: XCTestCase {
         let accounts = SteamAccounts.parse(loginUsers: loginUsers)
         let alder: UInt64 = 76561198000000001, birch: UInt64 = 76561198000000002
         XCTAssertNil(SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: birch, steamRunning: true,
-                                        chosen: [birch])?.otherAccount, "the player says the signed-in account has it")
+                                        owners: [birch])?.otherAccount, "the player says the signed-in account has it")
         XCTAssertNil(SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: birch, steamRunning: true,
-                                        chosen: [alder, birch])?.otherAccount, "Every account here")
+                                        owners: [alder, birch])?.otherAccount, "Every account here")
         XCTAssertEqual(SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: alder, steamRunning: true,
-                                          chosen: [birch])?.otherAccount?.displayName, "Alder",
+                                          owners: [birch])?.otherAccount?.displayName, "Alder",
                        "the player says only the other account has it")
         XCTAssertEqual(SteamAccounts.note(installedBy: alder, accounts: accounts, activeUser: birch, steamRunning: true,
-                                          chosen: [])?.otherAccount?.displayName, "Birch", "an empty choice is no choice")
+                                          owners: [])?.otherAccount?.displayName, "Birch", "an empty choice is no choice")
     }
 
     /// The player's choice wins; otherwise every account with a sign, the strongest named.

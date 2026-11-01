@@ -312,7 +312,10 @@ final class AppState {
     // MARK: Whose Steam games
 
     /// The accounts that have signed in to each environment's Steam, newest sign-in first.
-    var steamAccountsByBottle: [String: [SteamAccount]] = [:]
+    var steamAccountsByBottle: [String: [SteamAccount]] = [:] {
+        didSet { steamAccountIDsByBottle = steamAccountsByBottle.mapValues { Set($0.map(\.id)) } }
+    }
+    @ObservationIgnored private var steamAccountIDsByBottle: [String: Set<UInt64>] = [:]
     /// Every account across them, once each, sorted by display name.
     private(set) var steamAccounts: [SteamAccount] = [] {
         didSet { steamAccountIDs = Set(steamAccounts.map(\.id)) }
@@ -331,7 +334,7 @@ final class AppState {
     /// built with the library, so the account filter looks it up rather than scanning.
     @ObservationIgnored private var steamInstallers: [String: [Int: UInt64]] = [:]
     /// Kept on disk (steam-accounts.json): which account was signed in when a game first
-    /// appeared, the owners the player chose, and the games already seen.
+    /// appeared, the owners the player chose, and the games already seen in each environment.
     private var steamBook = SteamBook() {
         didSet { mergeSteamArrivals() }   // rare: loaded, a game noted, a choice set
     }
@@ -344,7 +347,20 @@ final class AppState {
     private struct SteamBook: Codable {
         var added: [Int: UInt64] = [:]
         var chosen: [Int: Set<UInt64>] = [:]
-        var seen: Set<Int> = []
+        /// Per environment, so one added later gets its own first look instead of its whole
+        /// library being put down to whoever is signed in.
+        var seen: [String: Set<Int>] = [:]
+
+        init() {}
+
+        // Each field optional on read: an earlier file kept `seen` for every environment at once,
+        // and dropping it only means one more first look, which marks and puts down nothing.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            added = (try? c.decodeIfPresent([Int: UInt64].self, forKey: .added)) ?? [:]
+            chosen = (try? c.decodeIfPresent([Int: Set<UInt64>].self, forKey: .chosen)) ?? [:]
+            seen = (try? c.decodeIfPresent([String: Set<Int>].self, forKey: .seen)) ?? [:]
+        }
     }
 
     private var steamBookFile: URL { paths.home.appending(path: "steam-accounts.json") }
@@ -365,11 +381,14 @@ final class AppState {
     private func noteNewSteamGames(_ appIDsByBottle: [String: Set<Int>], signedIn: [String: UInt64]) {
         loadSteamBook()
         var book = steamBook
-        let firstLook = book.seen.isEmpty
         var changed = false
         for (bottle, appIDs) in appIDsByBottle.sorted(by: { $0.key < $1.key }) {
-            changed = SteamAccounts.noteArrivals(appIDs, signedIn: signedIn[bottle], firstLook: firstLook,
-                                                 seen: &book.seen, added: &book.added) || changed
+            var seen = book.seen[bottle] ?? []
+            if SteamAccounts.noteArrivals(appIDs, signedIn: signedIn[bottle], firstLook: book.seen[bottle] == nil,
+                                          seen: &seen, added: &book.added) || book.seen[bottle] == nil {
+                book.seen[bottle] = seen
+                changed = true
+            }
         }
         guard changed else { return }
         steamBook = book
@@ -377,15 +396,21 @@ final class AppState {
     }
 
     /// Whose a Steam game is, as far as this Mac can tell (SteamAccounts.owners), among the
-    /// accounts known here; every one of them when there is no sign (`.unknown`). nil only with
-    /// one account, or for a game that is not Steam's.
+    /// accounts of its environment's Steam; every one of them when there is no sign (`.unknown`).
+    /// nil with fewer than two accounts across this Mac, for a game outside an environment
+    /// (Steam for Mac's) and for one that is not Steam's.
     func steamOwners(for item: LibraryItem) -> SteamAccounts.Owners? {
-        guard item.source == .steam, steamAccountIDs.count > 1, let appID = item.steamAppID else { return nil }
-        // The game's own environment first: a second copy elsewhere may have another installer.
-        let installer = item.bottleName.flatMap { steamInstallers[$0]?[appID] }
-            ?? steamInstallers.values.lazy.compactMap { $0[appID] }.first
-        return SteamAccounts.owners(appID: appID, installedBy: installer, added: steamAddedBy,
-                                    chosen: steamBook.chosen, present: steamAccountIDs)
+        guard item.source == .steam, steamAccountIDs.count > 1, let appID = item.steamAppID,
+              let present = item.bottleName.flatMap({ steamAccountIDsByBottle[$0] }), !present.isEmpty else { return nil }
+        return SteamAccounts.owners(appID: appID, installedBy: steamInstaller(for: item), added: steamAddedBy,
+                                    chosen: steamBook.chosen, present: present)
+    }
+
+    /// Who installed a Steam game: its own environment's record first (a second copy elsewhere
+    /// may have another installer), else any environment's.
+    func steamInstaller(for item: LibraryItem) -> UInt64? {
+        guard let appID = item.steamAppID else { return nil }
+        return item.bottleName.flatMap { steamInstallers[$0]?[appID] } ?? steamInstallers.values.lazy.compactMap { $0[appID] }.first
     }
 
     /// The player's own answer to whose a game is; nil goes back to Highball's guess.

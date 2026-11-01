@@ -398,8 +398,8 @@ enum L10n {
         "Size on disk": "Taille sur le disque",
         "Installed by": "Installé par",
         "All Steam accounts": "Tous les comptes Steam",
-        "Steam games of one account on this Mac: the one that installed or played them, or was signed in when they appeared. A game with no sign of whose it is shows under every account.":
-            "Les jeux Steam d’un seul compte sur ce Mac : celui qui les a installés ou y a joué, ou qui était connecté quand ils sont apparus. Un jeu sans indice du compte apparaît sous chaque compte.",
+        "Steam games of one account on this Mac: the one that installed them, or was signed in when they appeared. A game with no sign of whose it is shows under every account.":
+            "Les jeux Steam d’un seul compte sur ce Mac : celui qui les a installés, ou qui était connecté quand ils sont apparus. Un jeu sans indice du compte apparaît sous chaque compte.",
         "Account": "Compte",
         "set by you": "choisi par vous",
         "installed it": "l’a installé",

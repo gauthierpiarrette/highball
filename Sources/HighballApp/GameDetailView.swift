@@ -76,16 +76,14 @@ struct GameDetailView: View {
     }
 
     /// Who installed this Steam game, and whether Steam is signed in, or signed in last, to an
-    /// account that may not have it: "is signed in" only while that Steam runs, and an account the
-    /// player said has the game is never warned about.
-    private var accountNote: SteamAccounts.GameNote? {
-        guard item.source == .steam, let appID = item.steamAppID, let name = item.bottleName,
-              let read = activeUserRead, read.bottle == name else { return nil }
-        let owners = state.steamOwners(for: item)
-        return SteamAccounts.note(installedBy: state.gamesByBottle[name]?.first { $0.appid == appID }?.lastOwner,
+    /// account that may not have it: "is signed in" only while that Steam runs, and an account
+    /// the Account row counts as having the game is never warned about.
+    private func accountNote(_ owners: SteamAccounts.Owners?) -> SteamAccounts.GameNote? {
+        guard item.source == .steam, let name = item.bottleName, let read = activeUserRead, read.bottle == name else { return nil }
+        return SteamAccounts.note(installedBy: state.steamInstaller(for: item),
                                   accounts: state.steamAccountsByBottle[name] ?? [], activeUser: read.user,
                                   steamRunning: state.steamClients.contains(name),
-                                  chosen: owners?.reason == .chosen ? owners?.accounts : nil)
+                                  owners: owners?.reason == .unknown ? nil : owners?.accounts)
     }
 
     var body: some View {
@@ -244,8 +242,9 @@ struct GameDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             row(L("Source"), item.source == .steam ? "Steam" : item.source == .epic ? "Epic Games"
                 : item.source == .gog ? "GOG" : item.source == .battlenet ? "Battle.net" : L("Windows program"))
-            if item.source == .steam, let owners = state.steamOwners(for: item) { steamAccountRow(owners) }
-            if let note = accountNote {
+            let owners = state.steamOwners(for: item)
+            if let owners, (state.steamAccountsByBottle[item.bottleName ?? ""]?.count ?? 0) > 1 { steamAccountRow(owners) }
+            if let note = accountNote(owners) {
                 VStack(alignment: .leading, spacing: 6) {
                     row(L("Installed by"), note.installedBy.displayName)
                     if let other = note.otherAccount {
@@ -774,9 +773,11 @@ struct GameDetailView: View {
     }
 
     /// Whose Steam game this is, by profile name, and why Highball thinks so; the menu sets it.
-    /// Shown with more than one account, also when Highball has no sign of whose it is
+    /// Shown with more than one account on its Steam, also when Highball has no sign of whose it is
     /// (SteamAccounts.Owners), so the player can say.
     private func steamAccountRow(_ owners: SteamAccounts.Owners) -> some View {
+        // The accounts of this game's own Steam: another environment's are no answer here.
+        let accounts = state.steamAccountsByBottle[item.bottleName ?? ""] ?? []
         let names = owners.reason == .unknown ? [L("Any account")]
             : owners.accounts.compactMap { state.steamAccountName($0) }.sorted()
         let why: String = switch owners.reason {
@@ -786,12 +787,12 @@ struct GameDetailView: View {
         case .unknown: L("no sign of whose it is")
         }
         return HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(L("Account")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+            Text(L("Account")).font(.caption).foregroundStyle(.secondary).frame(width: Self.rowLabelWidth, alignment: .leading)
             Menu {
-                ForEach(state.steamAccounts, id: \.id) { account in
+                ForEach(accounts, id: \.id) { account in
                     Button(account.displayName) { state.setSteamOwners([account.id], for: item) }
                 }
-                Button(L("Every account here")) { state.setSteamOwners(Set(state.steamAccounts.map(\.id)), for: item) }
+                Button(L("Every account here")) { state.setSteamOwners(Set(accounts.map(\.id)), for: item) }
                 Divider()
                 Button(L("Let Highball guess")) { state.setSteamOwners(nil, for: item) }
             } label: {
