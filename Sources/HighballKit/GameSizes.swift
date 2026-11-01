@@ -38,10 +38,14 @@ public enum DiskUsage {
 
 extension EpicStore {
     /// What legendary says a download of the game's build for `platform` ("Windows" or "Mac")
-    /// takes, from its manifest: the bytes fetched and the installed size.
+    /// takes, from its manifest: the bytes fetched and the installed size. Throws when legendary's
+    /// answer has no manifest to read, so an answer that says nothing is never kept as the size.
     public func downloadEstimate(_ appName: String, platform: String = "Windows") throws -> DownloadEstimate {
         let out = try capture(["info", appName, "--json", "--platform", platform])
-        return Self.parseEstimate(Data(out.utf8)) ?? DownloadEstimate(download: nil, disk: nil)
+        guard let estimate = Self.parseEstimate(Data(out.utf8)) else {
+            throw HighballError.invalid("legendary info gave no manifest for \(appName) (\(platform))")
+        }
+        return estimate
     }
 
     static func parseEstimate(_ data: Data) -> DownloadEstimate? {
