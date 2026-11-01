@@ -291,9 +291,19 @@ final class GOGMacSavesTests: XCTestCase {
                       "<?LIBRARY?>/Containers", "<?LIBRARY?>/Group Containers", "<?LIBRARY?>/preferences/",
                       "<?LIBRARY?>", "<?PREFERENCES?>", "<?APPLICATION_SUPPORT?>", "<?CACHES?>",
                       "<?LIBRARY?>/Mobile Documents/com~apple~CloudDocs", "<?LIBRARY?>/CloudStorage/Dropbox",
-                      "<?LIBRARY?>/Containers/com.studio.game", "<?DOCUMENTS?>/../Desktop"] {
+                      "<?LIBRARY?>/Containers/com.studio.game", "<?DOCUMENTS?>/../Desktop",
+                      // Folders many games share one level deeper, each game in its own folder below.
+                      "<?DOCUMENTS?>/My Games", "<?DOCUMENTS?>/my games/", "<?APPLICATION_SUPPORT?>/GOG.com",
+                      "<?APPLICATION_SUPPORT?>/Steam", "<?APPLICATION_SUPPORT?>/Epic", "<?APPLICATION_SUPPORT?>/Epic Games",
+                      "<?LIBRARY?>/Application Support/Feral Interactive", "<?APPLICATION_SUPPORT?>/Aspyr"] {
             XCTAssertNil(GOGSaves.resolveMac(whole, installFolder: install, home: home), whole)
         }
+        XCTAssertEqual(GOGSaves.resolveMac("<?DOCUMENTS?>/My Games/Studio Game", installFolder: install, home: home)?.path,
+                       "/Users/someone/Documents/My Games/Studio Game")
+        XCTAssertEqual(GOGSaves.resolveMac("<?APPLICATION_SUPPORT?>/Feral Interactive/Game/Saves", installFolder: install, home: home)?.path,
+                       "/Users/someone/Library/Application Support/Feral Interactive/Game/Saves")
+        XCTAssertEqual(GOGSaves.resolveMac("<?APPLICATION_SUPPORT?>/GOG.com/Galaxy/Applications/c/Storage/Shared/Files", installFolder: install, home: home)?.path,
+                       "/Users/someone/Library/Application Support/GOG.com/Galaxy/Applications/c/Storage/Shared/Files")
         XCTAssertEqual(GOGSaves.resolveMac("<?LIBRARY?>/Preferences/Studio Game", installFolder: install, home: home)?.path,
                        "/Users/someone/Library/Preferences/Studio Game")
         XCTAssertEqual(GOGSaves.resolveMac("<?LIBRARY?>/Containers/com.studio.game/Data/Saves", installFolder: install, home: home)?.path,
