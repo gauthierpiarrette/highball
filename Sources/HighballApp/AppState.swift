@@ -2895,7 +2895,9 @@ final class AppState {
         }
     }
 
-    func deleteBottle(_ name: String) {
+    /// Deletes an environment. With `keepSaves` its save folders are copied into Highball's
+    /// save backups first, and a copy that fails stops the delete.
+    func deleteBottle(_ name: String, keepSaves: Bool) {
         // The row and its Delete item stay on screen for the whole operation, so without this a
         // second click started a second delete and the loser reported "missing" for a delete that
         // was in fact succeeding.
@@ -2905,17 +2907,24 @@ final class AppState {
                 cleanup: { [weak self] in self?.deletingBottles.remove(name) }) { [self] in
             let store = bottleStore
             let killer = killerFor(name)
+            let environment = paths.bottle(name), backups = paths.saveBackups
             // Stop the bottle before anything moves: `wineserver -k` resolves the prefix by path,
             // so after the rename it exits 1 and leaves the server running. It is a synchronous
             // wineserver call that measured 2.3 s against a live server, so it belongs off the
             // main actor with the purge rather than in front of it, freezing the window.
             // A prefix can be tens of GB, and the old delete ran the whole walk on the main
             // actor — 985 ms for 20,841 entries, minutes for a big Steam bottle.
-            let leftovers = try await Task.detached {
+            // The saves are copied after the stop, so nothing is still writing them.
+            let (kept, leftovers) = try await Task.detached {
                 killer?()
-                return try store.delete(name)
+                let kept = keepSaves ? try EnvironmentSaves.keep(environment: environment, name: name, backups: backups) : nil
+                return (kept, try store.delete(name))
             }.value
             await MainActor.run {
+                if keepSaves {
+                    self.appendLog(kept.map { "kept the saves of '\(name)' in \($0.folder.path) (\(ByteCountFormatter.string(fromByteCount: $0.bytes, countStyle: .file)))" }
+                                   ?? "'\(name)' held no saves to keep")
+                }
                 if self.selectedBottle == name { self.selectedBottle = nil }
                 guard let first = leftovers.first else { return }
                 self.errorIsPartialSuccess = true

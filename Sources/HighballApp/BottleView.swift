@@ -627,13 +627,7 @@ struct EnvironmentSettingsPage: View {
         .navigationTitle(L("Environment settings"))
         .navigationBarBackButtonHidden(showsInlineBack)
         .background { PageCancelShortcut { dismiss() } }
-        .confirmationDialog(UserFolders.hasFilesInside(driveC: bottle.driveC)
-                            ? L("Delete this environment? Its Windows drive and everything installed in it are removed, including the game saves kept in its Documents folder.")
-                            : L("Delete this environment? Its Windows drive and everything installed in it are removed."),
-                            isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button(L("Delete"), role: .destructive) { dismiss(); state.deleteBottle(bottle.name) }
-            Button(L("Cancel"), role: .cancel) {}
-        }
+        .deleteEnvironmentDialog(bottle.name, isPresented: $confirmDelete) { dismiss() }
         .alert(L("About frame generation"), isPresented: $showFrameGenInfo) {
             Button(L("Got it"), role: .cancel) {}
         } message: {
@@ -668,6 +662,49 @@ struct EnvironmentSettingsPage: View {
                 copy.settings[keyPath: keyPath] = newValue
                 Task { @MainActor in state.update(copy) }
             })
+    }
+}
+
+/// The question before an environment goes: keep a copy of its saves first (the default), or
+/// delete everything as before. The size of the copy is measured off the main actor while the
+/// question is up.
+private struct DeleteEnvironmentDialog: ViewModifier {
+    @Environment(AppState.self) private var state
+    let name: String?
+    @Binding var isPresented: Bool
+    let onDelete: () -> Void
+    @State private var savesSize: String?
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(String(format: L("Delete the %@ environment?"), name ?? ""),
+                                isPresented: $isPresented, titleVisibility: .visible) {
+                Button(L("Keep saves")) { delete(keepSaves: true) }.keyboardShortcut(.defaultAction)
+                Button(L("Delete everything"), role: .destructive) { delete(keepSaves: false) }
+                Button(L("Cancel"), role: .cancel) {}
+            } message: {
+                Text(savesSize.map { String(format: L("Its Windows drive and everything installed in it are removed. Keep saves first puts a copy of its saves folders (%@) in Highball's save-backups folder."), $0) }
+                     ?? L("Its Windows drive and everything installed in it are removed. Keep saves first puts a copy of its saves folders in Highball's save-backups folder."))
+            }
+            .task(id: isPresented ? name : nil) {
+                savesSize = nil
+                guard isPresented, let name else { return }
+                let environment = state.paths.bottle(name)
+                let bytes = await Task.detached { EnvironmentSaves.bytes(environment: environment) }.value
+                savesSize = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+            }
+    }
+
+    private func delete(keepSaves: Bool) {
+        guard let name else { return }
+        onDelete()
+        state.deleteBottle(name, keepSaves: keepSaves)
+    }
+}
+
+extension View {
+    func deleteEnvironmentDialog(_ name: String?, isPresented: Binding<Bool>, onDelete: @escaping () -> Void = {}) -> some View {
+        modifier(DeleteEnvironmentDialog(name: name, isPresented: isPresented, onDelete: onDelete))
     }
 }
 

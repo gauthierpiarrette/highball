@@ -164,6 +164,9 @@ public struct HighballPaths: Sendable {
     /// than `~/.Trash` so the move is always same-filesystem — `rename(2)` cannot cross one,
     /// and Finder could not empty an undeletable prefix anyway.
     public var trash: URL { home.appending(path: ".trash", directoryHint: .isDirectory) }
+    /// Copies of game saves Highball made before deleting something that held them, made on
+    /// demand and never cleared by Highball.
+    public var saveBackups: URL { home.appending(path: "save-backups", directoryHint: .isDirectory) }
 
     public func engine(_ id: String) -> URL { engines.appending(path: id, directoryHint: .isDirectory) }
     public func bottle(_ name: String) -> URL { bottles.appending(path: name, directoryHint: .isDirectory) }
