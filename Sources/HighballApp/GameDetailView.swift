@@ -30,7 +30,15 @@ struct GameDetailView: View {
     @State private var showWhy = false
     @State private var showAdvanced = false
 
-    private var entry: GameDBEntry? { state.gameDB.entry(for: item) }
+    private var entry: GameDBEntry? {
+        var row = state.gameDB.entry(for: item)
+        // On a game's preview route the route's mode is the game's, whatever the row verified for its other route.
+        if let recipe = fixRecipe, recipe.isPreviewRoute {
+            row?.renderer = recipe.renderer; row?.rendererMinMacOS = nil
+            if let verified = recipe.previewRouteVerified { row?.verified = verified; row?.lastVerified = recipe.lastVerified?.date }
+        }
+        return row
+    }
     private var bottle: Bottle? { item.bottleName.flatMap { name in state.bottles.first { $0.name == name } } }
     private var blocked: Bool { entry?.isBlocked == true }
     /// Steam already has an appmanifest for it (downloading or updating), as opposed to a game
@@ -51,7 +59,7 @@ struct GameDetailView: View {
     private var verdict: GamePageCopy.Verdict { GamePageCopy.verdict(entry, myChip: state.machineChip) }
     private var willDo: [GamePageCopy.WillDo] {
         GamePageCopy.willDo(entry, recipe: fixRecipe, applied: fixApplied, bottleRenderer: bottle?.settings.renderer ?? .dxvk,
-                            explicit: bottle?.settings.rendererExplicit ?? false, gameOverride: state.rendererOverride(for: item),
+                            explicit: (bottle?.settings.rendererExplicit ?? false) && fixRecipe?.isPreviewRoute != true, gameOverride: state.rendererOverride(for: item),
                             needsDirect3D12: item.installed && entry?.nativeVulkan != true && state.programNeedsDirect3D12(item))
     }
     private var engineName: String? { bottle.flatMap { state.engine(for: $0) }?.displayName }
@@ -614,6 +622,15 @@ struct GameDetailView: View {
                         }
                         if item.source == .epic, let app = item.epicAppName, epicCloudSaves {
                             epicSettings(app)
+                        }
+                        // A second route on a preview engine: Play asks once, and here it can be asked again.
+                        if let offer = state.routeOffer(for: item) {
+                            HStack(alignment: .top, spacing: 12) {
+                                Text(L("Other route")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+                                Button(String(format: L("Try the %@ engine…"), GamePageCopy.shortEngineName(offer.manifest))) {
+                                    state.pendingPreview = (offer.recipe, bottle, offer.manifest, item, nil)
+                                }.disabled(state.busy)
+                            }
                         }
                         // The engine is the environment's, so the page says so and can change it
                         // through the same switch page as the environment's settings, which lists

@@ -442,7 +442,7 @@ final class AppState {
     /// The verified fix recipe for a library item, if the db has one (db entry id == recipe id).
     func fixRecipe(for item: LibraryItem) -> HighballKit.Recipe? {
         guard let entry = gameDB.entry(for: item),
-              let recipe = Self.recipe(entry.id), recipe.kind == .game else { return nil }
+              let recipe = Self.recipe(entry.id).map({ routed($0, for: item) }), recipe.kind == .game else { return nil }
         // A recipe pinned to an engine this install does not see (a line still in preview) is not
         // offered: the game page and Play stay as they were before the recipe existed.
         let defaults = UserDefaults.standard
@@ -457,9 +457,36 @@ final class AppState {
     /// pinned to a hidden engine), for what Play checks before anything else. An opt-in recipe stays the page's
     /// business, as everywhere.
     func gameRecipe(for item: LibraryItem) -> HighballKit.Recipe? {
-        guard let entry = gameDB.entry(for: item), let recipe = Self.recipe(entry.id), recipe.kind == .game, !recipe.isOptIn
+        guard let entry = gameDB.entry(for: item), let recipe = Self.recipe(entry.id).map({ routed($0, for: item) }),
+              recipe.kind == .game, !recipe.isOptIn
         else { return nil }
         return recipe
+    }
+
+    /// The recipe the environment `item` plays in goes by (Recipe.routed).
+    private func routed(_ recipe: HighballKit.Recipe, for item: LibraryItem) -> HighballKit.Recipe {
+        recipe.routed(onEngine: bottles.first { $0.name == item.bottleName }?.settings.engineID)
+    }
+
+    /// The preview route a game's recipe offers (Recipe.previewRoute) where this Mac can run it and the game does not
+    /// play on it already, with the newest revision of its line.
+    func routeOffer(for item: LibraryItem) -> (recipe: HighballKit.Recipe, manifest: EngineManifest)? {
+        guard let entry = gameDB.entry(for: item), let base = Self.recipe(entry.id), base.kind == .game, !base.isOptIn,
+              let route = base.route, let pin = route.engine,
+              !routed(base, for: item).isPreviewRoute else { return nil }
+        let revisions = Self.bundledManifests.filter { EngineManifest.line(of: $0.id) == EngineManifest.line(of: pin) && $0.runs(onMacOS: EngineManifest.currentMacOS) }
+        guard let manifest = revisions.max(by: { (EngineManifest.revision(of: $0.id) ?? 0) < (EngineManifest.revision(of: $1.id) ?? 0) }) else { return nil }
+        return (route, manifest)
+    }
+
+    /// Games Play has asked about their preview route: the ask comes once, the game page can ask again.
+    static let previewRouteAskedKey = "previewRouteAsked"
+    static func firstPreviewRouteAsk(game: String) -> Bool {
+        var asked = UserDefaults.standard.stringArray(forKey: previewRouteAskedKey) ?? []
+        guard !asked.contains(game) else { return false }
+        asked.append(game)
+        UserDefaults.standard.set(asked, forKey: previewRouteAskedKey)
+        return true
     }
 
     /// The preview engine a game's recipe pins while this Mac does not see it (EngineChannels.previewToOffer): Play
@@ -497,6 +524,11 @@ final class AppState {
            let floor = recipe.engineMacOSFloor(bundled: Self.bundledManifests),
            !(engine(for: bottle).map { EngineManifest.isAtOrAfter(current: $0.manifest.id, wanted: id) } ?? false) {
             pendingMacOS = (recipe, floor, item, bottle, renderer)
+            return
+        }
+        // A game with a second route on a preview engine: the player chooses once, and the answer stands.
+        if let offer = routeOffer(for: item), Self.firstPreviewRouteAsk(game: offer.recipe.id) {
+            pendingPreview = (offer.recipe, bottle, offer.manifest, item, renderer)
             return
         }
         // A recipe pinned to a preview engine this Mac does not see yet: before 0.10.19 Play launched the game here
@@ -583,7 +615,10 @@ final class AppState {
                 pendingD3DMetal = (item, bottle, engine)
                 return
             case .notShipped:
-                let instead = Renderer.fallback(for: wanted, in: engine)
+                // The mode the game's recipe names comes first: the per-game mode a player chose on another route
+                // follows the game to an engine that lacks it (D3DMetal, on the native arm64 line).
+                let named = fixRecipe(for: item)?.renderer.flatMap { $0.availability(in: engine) == .available ? $0 : nil }
+                let instead = named ?? Renderer.fallback(for: wanted, in: engine)
                 appendLog("\(item.title): \(wanted.unavailableReason(in: engine) ?? "") Playing with \(GamePageCopy.plainName(instead)).")
                 renderer = instead
             }
@@ -1672,6 +1707,12 @@ final class AppState {
         pendingPreview = nil
         Self.optInPreview(pending.manifest.id)
         appendLog("\(pending.item.title): the \(pending.manifest.id) preview engine is offered on this Mac from now on")
+        // A route lives beside the recipe, so nothing further in Play would ask for its engine.
+        if pending.recipe.isPreviewRoute {
+            pendingEngine = (pending.recipe, pending.bottle, pending.manifest, pending.item,
+                             environmentFit(for: pending.recipe, besides: pending.bottle, item: pending.item))
+            return
+        }
         play(pending.item, renderer: pending.renderer)
     }
 
@@ -1679,6 +1720,11 @@ final class AppState {
     func playWithoutPreview() {
         guard let pending = pendingPreview else { return }
         pendingPreview = nil
+        if pending.recipe.isPreviewRoute {
+            appendLog("\(pending.item.title): staying on its current route, without the \(pending.manifest.id) preview engine.")
+            play(pending.item, renderer: pending.renderer)
+            return
+        }
         appendLog("\(pending.item.title): its fix needs the \(pending.manifest.id) preview engine; playing without it.")
         launch(pending.item, in: pending.bottle, renderer: pending.renderer)
     }
@@ -1991,7 +2037,8 @@ final class AppState {
     }
 
     func applyRecipe(_ id: String, to bottle: Bottle, then done: DoneState? = nil) {
-        guard let engine = engine(for: bottle), let recipe = Self.recipe(id) else { return }
+        guard let engine = engine(for: bottle),
+              let recipe = Self.recipe(id)?.routed(onEngine: bottle.settings.engineID) else { return }
         if let wanted = recipe.engineToOffer(current: engine.manifest, known: Self.knownManifests) {
             pendingEngine = (recipe, bottle, wanted, nil, nil); return
         }
@@ -4584,7 +4631,8 @@ final class AppState {
     }
 
     func offeredEngines(for bottle: Bottle) -> [EngineStore.OfferedEngine] {
-        EngineStore.offeredEngines(installed: engines, known: Self.knownManifests, current: bottle.settings.engineID)
+        EngineStore.offeredEngines(installed: engines, known: Self.knownManifests, current: bottle.settings.engineID,
+                                   allRevisions: UserDefaults.standard.bool(forKey: EngineStore.showOlderRevisionsKey))
     }
 
     /// Moves a bottle to an engine by id, installing it first when it is only known from a
