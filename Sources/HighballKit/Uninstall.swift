@@ -67,7 +67,7 @@ public enum Uninstall {
         case .epic:
             return "The Epic tools do the uninstalling, so their library stays right.\(size)"
         case .gog:
-            return "Highball deletes the game's folder from this environment. Saves synced to GOG's cloud stay there, and cloud-save folders inside the game's folder are copied to Highball's save-backups first. Anything else in the game's folder is deleted with it, including saves of a game without GOG cloud saves. The game stays in your GOG library to install again.\(size)"
+            return "Highball deletes the game's folder from this environment. Keep save data first copies your saves from it, and every file the game changed there since you first played it, to Highball's save-backups, and offers to put them back if you install the game again. Delete save data too copies nothing and also deletes the game's save folders elsewhere in this environment. Saves in GOG's cloud stay there either way, and the game stays in your GOG library to install again.\(size)"
         case .windowsUninstaller:
             return "Highball opens Windows' Add or Remove Programs in this environment, where you pick it from the list. A game with no uninstaller of its own will not be in that list, and then the only way to remove it is to delete the environment."
         case let .none(reason):

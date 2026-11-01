@@ -217,4 +217,125 @@ final class GOGSaveSafetyTests: XCTestCase {
         XCTAssertEqual(plan(["<?INSTALL?>", "<?INSTALL?>/", "<?INSTALL?>/%SAVES%", "<?INSTALL?>/../Other"]).cannotBackUp.count, 4)
         XCTAssertEqual(plan(["<?INSTALL?>\\Save Data"]).backUp.map(\.folder.lastPathComponent), ["Save Data"])
     }
+
+    private func write(_ text: String, to url: URL, dated date: Date? = nil) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: url)
+        if let date { try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path) }
+    }
+
+    /// What the game wrote in its folder is what changed after Highball first set it up there and
+    /// not while an update ran: a save from before the last update still counts, the patch's
+    /// files don't, nor what the installer put down or the locations backed up on their own.
+    /// Never set up here: nothing to tell apart, so nothing is copied.
+    func testTheGameFolderCopyHoldsWhatTheGameWrote() throws {
+        let saves = GOGSaves(store: GOGStore(paths: HighballPaths(home: root.appending(path: "home"))))
+        let driveC = root.appending(path: "drive_c")
+        let game = GOGStore.InstalledGame(id: "7", title: "Game", folder: driveC.appending(path: "GOG Games/Game"), buildID: "b1", clientID: nil, dlcIDs: [], tasks: [])
+        let now = Date()
+        try write("exe", to: game.folder.appending(path: "game.exe"), dated: now.addingTimeInterval(-7200))
+        XCTAssertNil(try saves.backUpGameFolder(game, driveC: driveC), "never set up through Highball")
+        GOGStore.markSetupDone(for: game, driveC: driveC)
+        let setUp = try XCTUnwrap(GOGStore.history(for: game, driveC: driveC).firstSetup)
+        GOGStore.recordUpdate(for: game, driveC: driveC, start: setUp.addingTimeInterval(1200), end: setUp.addingTimeInterval(2400))
+        GOGStore.markSetupDone(for: game, driveC: driveC)   // the update's setup keeps the first date
+        XCTAssertEqual(GOGStore.history(for: game, driveC: driveC).firstSetup, setUp)
+        try write("before the update", to: game.folder.appending(path: "SAVES/slot1.sav"), dated: setUp.addingTimeInterval(600))
+        try write("patch", to: game.folder.appending(path: "data/patch.pak"), dated: setUp.addingTimeInterval(1800))
+        try write("after it", to: game.folder.appending(path: "SAVES/slot2.sav"), dated: setUp.addingTimeInterval(3000))
+        try write("cloud", to: game.folder.appending(path: "cloud/a.sav"), dated: setUp.addingTimeInterval(600))
+        let copy = try XCTUnwrap(try saves.backUpGameFolder(game, driveC: driveC, skipping: [game.folder.appending(path: "cloud")]))
+        XCTAssertEqual(try GOGSaves.files(in: copy).map { GOGSaves.relativePath(of: $0, in: copy) }, ["SAVES/slot1.sav", "SAVES/slot2.sav"])
+        XCTAssertTrue(GOGSaves.isKept(copy))
+        XCTAssertEqual(GOGSaves.contents(of: copy).files, 2)
+        XCTAssertEqual(GOGSaves.contents(of: copy).bytes, 25)
+    }
+
+    /// An install set up before the history was kept counts from its setup marker's date.
+    func testAnInstallWithNoHistoryCountsFromItsMarker() throws {
+        let driveC = root.appending(path: "drive_c")
+        let game = GOGStore.InstalledGame(id: "7", title: "Game", folder: driveC.appending(path: "Game"), buildID: "b1", clientID: nil, dlcIDs: [], tasks: [])
+        let marked = Date(timeIntervalSince1970: 1_700_000_000)
+        try write("b1", to: GOGStore.setupMarker(for: game, driveC: driveC), dated: marked)
+        let history = GOGStore.history(for: game, driveC: driveC)
+        XCTAssertEqual(history.firstSetup, marked)
+        XCTAssertTrue(history.isGameWritten(marked.addingTimeInterval(1)))
+        XCTAssertFalse(history.isGameWritten(marked.addingTimeInterval(-1)))
+        GOGStore.markSetupDone(for: game, driveC: driveC)
+        XCTAssertEqual(GOGStore.history(for: game, driveC: driveC).firstSetup, marked, "the marker's old date, read before it is rewritten")
+    }
+
+    /// Deleting saves with the game removes the folders GOG names elsewhere, and never a whole or
+    /// shared folder, Highball's save-backups (even through a link), or one holding the game.
+    func testDeletingSavesLeavesSharedFoldersAndBackupsAlone() throws {
+        let home = root.appending(path: "home")
+        let saves = GOGSaves(store: GOGStore(paths: HighballPaths(home: home)))
+        let driveC = root.appending(path: "drive_c")
+        let user = driveC.appending(path: "users/player")
+        let game = GOGStore.InstalledGame(id: "7", title: "Game", folder: user.appending(path: "AppData/Local/Games/Game"), buildID: nil, clientID: nil, dlcIDs: [], tasks: [])
+        try write("exe", to: game.folder.appending(path: "game.exe"))
+        try write("own", to: user.appending(path: "Saved Games/Studio/Game/slot.sav"))
+        try write("other game", to: user.appending(path: "Saved Games/Other/slot.sav"))
+        try write("kept", to: saves.backupsDir.appending(path: "7-saves-1/2026-mac-kept/slot.sav"))
+        try FileManager.default.createDirectory(at: user.appending(path: "AppData/Roaming"), withIntermediateDirectories: true)
+        // The environment's Documents is the Mac's own, here `home`, as UserFolders links it.
+        try FileManager.default.createSymbolicLink(at: user.appending(path: "Documents"), withDestinationURL: home)
+        try write("mac", to: home.appending(path: "My Games/Game/slot.sav"))
+        let templates = ["<?SAVED_GAMES?>/Studio/Game", "<?SAVED_GAMES?>", "<?DOCUMENTS?>/save-backups", "<?DOCUMENTS?>",
+                         "<?APPLICATION_DATA_LOCAL?>/Games", "<?SAVED_GAMES?>/../Saved Games/Other", "<?INSTALL?>/saves",
+                         "<?DOCUMENTS?>/My Games/Game"]
+        let plan = GOGSaves.uninstallPlan(templates.enumerated().map { GOGSaves.Location(name: "l\($0.offset)", template: $0.element) },
+                                          game: game, driveC: driveC, userName: "player")
+        let (removed, leftAlone) = saves.removeSaves(plan, game: game, driveC: driveC)
+        XCTAssertEqual(removed.map(\.lastPathComponent), ["Game"])
+        XCTAssertEqual(leftAlone.map(\.lastPathComponent), ["save-backups", "Games", "Game"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: home.appending(path: "My Games/Game/slot.sav").path), "the Mac's Documents, through the link")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: user.appending(path: "Saved Games/Studio/Game").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: user.appending(path: "Saved Games/Other/slot.sav").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: saves.backupsDir.appending(path: "7-saves-1/2026-mac-kept/slot.sav").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: game.folder.appending(path: "game.exe").path))
+    }
+
+    /// Kept saves go back where they came from in a new install: a named location to its folder,
+    /// the game-folder copy by its paths. What is there already is copied first, the install is
+    /// asked once, and copies of the game still in other environments are never asked.
+    func testPuttingSavesBackPlacesThemInTheNewInstall() throws {
+        let saves = GOGSaves(store: GOGStore(paths: HighballPaths(home: root.appending(path: "home"))))
+        func install(_ path: String) -> GOGStore.InstalledGame {
+            GOGStore.InstalledGame(id: "7", title: "Game", folder: root.appending(path: path), buildID: nil, clientID: nil, dlcIDs: [], tasks: [])
+        }
+        let old = install("A/Game"), new = install("B/Game"), elsewhere = install("C/Game")
+        let location = GOGSaves.Location(name: "saves", template: "<?INSTALL?>/saves")
+        try write("cloud slot", to: old.folder.appending(path: "saves/slot.sav"))
+        try write("local slot", to: old.folder.appending(path: "Profiles/p1.sav"))
+        let named = try XCTUnwrap(try saves.backUpLocal(old, location: location, folder: old.folder.appending(path: "saves"), kept: true))
+        let written = try XCTUnwrap(try saves.backUpLocal(old, location: GOGSaves.gameFolder, folder: old.folder, kept: true,
+                                                          only: [old.folder.appending(path: "Profiles/p1.sav")]))
+        saves.keep([(location.name, old.folder.appending(path: "saves"), named), (GOGSaves.gameFolder.name, old.folder, written)],
+                   of: old, otherInstalls: [elsewhere.folder])
+        XCTAssertNil(saves.keptSavesToOffer(elsewhere))
+        try write("fresh", to: new.folder.appending(path: "saves/slot.sav"))
+        let kept = try XCTUnwrap(saves.keptSavesToOffer(new))
+        XCTAssertEqual(try saves.putBack(kept, into: new), 2)
+        XCTAssertEqual(try String(contentsOf: new.folder.appending(path: "saves/slot.sav"), encoding: .utf8), "cloud slot")
+        XCTAssertEqual(try String(contentsOf: new.folder.appending(path: "Profiles/p1.sav"), encoding: .utf8), "local slot")
+        let before = try XCTUnwrap(saves.backups(in: saves.backupsFolder(new, location)).first)
+        XCTAssertEqual(try String(contentsOf: before.appending(path: "slot.sav"), encoding: .utf8), "fresh", "what was there is copied first")
+        saves.markAsked(new)
+        XCTAssertNil(saves.keptSavesToOffer(new), "asked once")
+    }
+
+    /// The latest uninstall's backups replace an earlier one's: a location it had nothing for
+    /// never brings back an older copy, and an uninstall that kept nothing offers nothing.
+    func testOnlyTheLatestUninstallsBackupsAreOffered() throws {
+        let saves = GOGSaves(store: GOGStore(paths: HighballPaths(home: root.appending(path: "home"))))
+        let game = GOGStore.InstalledGame(id: "7", title: "Game", folder: root.appending(path: "A/Game"), buildID: nil, clientID: nil, dlcIDs: [], tasks: [])
+        let old = root.appending(path: "backups/old"), new = root.appending(path: "backups/new")
+        saves.keep([("saves", game.folder.appending(path: "saves"), old), (GOGSaves.gameFolder.name, game.folder, old)], of: game, otherInstalls: [])
+        saves.keep([(GOGSaves.gameFolder.name, game.folder, new)], of: game, otherInstalls: [])
+        XCTAssertEqual(saves.keptSavesToOffer(game)?.entries.map(\.name), [GOGSaves.gameFolder.name])
+        XCTAssertEqual(saves.keptSavesToOffer(game)?.entries.map(\.backup), [new])
+        saves.keep([], of: game, otherInstalls: [])
+        XCTAssertNil(saves.keptSavesToOffer(game))
+    }
 }

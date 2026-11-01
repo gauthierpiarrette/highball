@@ -231,13 +231,19 @@ enum L10n {
             "Les sauvegardes de ce Mac et celles du cloud GOG ont toutes deux changé depuis leur dernière synchronisation, ou n’ont pas encore été synchronisées depuis cette installation : aucune n’a été copiée.",
         "Use GOG's cloud saves replaces this Mac's; Keep this Mac's saves replaces the cloud's. Either way, a copy of what gets replaced is kept first, in %@.":
             "Utiliser les sauvegardes du cloud GOG remplace celles de ce Mac ; Garder les sauvegardes de ce Mac remplace celles du cloud. Dans les deux cas, une copie de ce qui est remplacé est d’abord conservée dans %@.",
-        "Remove %@ without backing up its saves?": "Supprimer %@ sans sauvegarder ses parties ?",
-        "Remove without a backup": "Supprimer sans copie",
-        "%@ keeps some of its saves directly in the game's folder, which Highball can't back up on its own, so removing the game deletes them. Its other saves inside the folder are backed up first, and saves already in GOG's cloud are not affected.":
-            "%@ garde une partie de ses sauvegardes directement dans le dossier du jeu, que Highball ne peut pas copier à part : supprimer le jeu les efface. Ses autres sauvegardes du dossier sont d’abord copiées, et celles déjà dans le cloud GOG ne sont pas touchées.",
+        "Remove %@ without a copy of every save?": "Supprimer %@ sans copie de toutes ses sauvegardes ?",
+        "Remove anyway": "Supprimer quand même",
+        "Keep save data": "Garder les sauvegardes",
+        "Delete save data too": "Supprimer aussi les sauvegardes",
+        "Put back your saves from %@?": "Remettre vos sauvegardes du %@ ?",
+        "Put them back": "Les remettre",
+        "Highball kept %@'s saves when it was removed. Put them back copies them into the game's folder; anything already there is copied to save-backups first.": "Highball a gardé les sauvegardes de %@ lors de sa suppression. Les remettre les copie dans le dossier du jeu ; ce qui s’y trouve déjà est d’abord copié dans save-backups.",
+        "Highball could not put back all of %@'s saves: %@": "Highball n’a pas pu remettre toutes les sauvegardes de %@ : %@",
+        "GOG says %@ keeps some of its saves directly in the game's folder, which Highball can't copy as one save folder. Files the game changed in its folder since you first played it are still copied to save-backups first, along with its other save folders, and saves already in GOG's cloud are not affected.":
+            "Selon GOG, %@ garde une partie de ses sauvegardes directement dans le dossier du jeu, que Highball ne peut pas copier comme un dossier de sauvegardes. Les fichiers que le jeu a modifiés dans son dossier depuis votre première partie sont tout de même copiés dans save-backups, avec ses autres dossiers de sauvegardes, et celles déjà dans le cloud GOG ne sont pas touchées.",
         "Finding the game's saves": "Recherche des sauvegardes du jeu",
-        "Highball couldn't reach GOG to find out where %@ keeps its saves, so it can't back up any saves inside the game's folder. Saves already in GOG's cloud are not affected. To keep a backup, cancel and try again once GOG can be reached.":
-            "Highball n’a pas pu joindre GOG pour savoir où %@ garde ses sauvegardes : il ne peut donc copier aucune sauvegarde du dossier du jeu. Les sauvegardes déjà dans le cloud GOG ne sont pas touchées. Pour garder une copie, annulez et réessayez quand GOG est joignable.",
+        "Highball couldn't reach GOG to find out where %@ keeps its saves, so the save folders GOG names inside the game's folder are deleted with it. Files the game changed in its folder since you first played it are still copied to save-backups first, and saves already in GOG's cloud are not affected. To keep every save, cancel and try again once GOG can be reached.":
+            "Highball n’a pas pu joindre GOG pour savoir où %@ garde ses sauvegardes : les dossiers de sauvegarde que GOG indique dans le dossier du jeu sont donc supprimés avec lui. Les fichiers que le jeu a modifiés dans son dossier depuis votre première partie sont tout de même copiés d’abord dans save-backups, et les sauvegardes déjà dans le cloud GOG ne sont pas touchées. Pour garder toutes vos sauvegardes, annulez et réessayez quand GOG est joignable.",
         "Keeping a copy of the game's saves": "Copie des sauvegardes du jeu",
         "Decide later plays with this Mac's saves and leaves the cloud alone.": "Décider plus tard joue avec les sauvegardes de ce Mac et ne touche pas au cloud.",
         "Decide later leaves both as they are until the next time you play.": "Décider plus tard laisse les deux telles quelles jusqu’à la prochaine partie.",

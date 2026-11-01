@@ -125,11 +125,14 @@ public struct GOGSaves: Sendable {
         /// Locations inside the game's folder that can't be backed up: the game's folder itself,
         /// or a path that climbs out of it. Removing the game then needs the player's go-ahead.
         public var cannotBackUp: [Location] = []
+        /// Folders elsewhere in the environment, left alone unless the player asks for the saves
+        /// to go with the game (removeSaves).
+        public var outside: [(location: Location, folder: URL)] = []
         public init() {}
     }
 
-    /// Locations elsewhere in the environment are left alone: they outlive the game's folder. A
-    /// `<?INSTALL?>` location `resolve` turns down (it refuses whole folders and unknown parts,
+    /// Locations elsewhere in the environment outlive the game's folder, so they are only listed
+    /// in `outside`, as far as `resolve` accepts them. A `<?INSTALL?>` location `resolve` turns down (it refuses whole folders and unknown parts,
     /// which sync could empty) is still backed up for an uninstall, which only copies: up to the
     /// first part Highball can't resolve, such as a %VARIABLE%.
     public static func uninstallPlan(_ locations: [Location], game: GOGStore.InstalledGame, driveC: URL,
@@ -138,7 +141,7 @@ public struct GOGSaves: Sendable {
         var plan = UninstallPlan()
         for location in locations {
             if let folder = resolve(location.template, game: game, driveC: driveC, userName: userName) {
-                if folder.standardizedFileURL.path.hasPrefix(root + "/") { plan.backUp.append((location, folder)) }
+                if folder.standardizedFileURL.path.hasPrefix(root + "/") { plan.backUp.append((location, folder)) } else { plan.outside.append((location, folder)) }
                 continue
             }
             let template = location.template.replacingOccurrences(of: "\\", with: "/")
@@ -152,6 +155,25 @@ public struct GOGSaves: Sendable {
             }
         }
         return plan
+    }
+
+    /// Deletes the save folders `plan` found outside the game's folder, for a player who asked
+    /// for the saves to go with the game. Links followed, only a folder inside the environment's
+    /// drive_c is deleted: an environment's Documents is often a link to the Mac's own
+    /// (UserFolders), whose folders are the Mac's. One that holds or sits inside Highball's
+    /// save-backups or the game's folder is left alone too. Returns what was removed and what
+    /// was left for that reason.
+    public func removeSaves(_ plan: UninstallPlan, game: GOGStore.InstalledGame, driveC: URL) -> (removed: [URL], leftAlone: [URL]) {
+        func path(_ url: URL) -> String { url.resolvingSymlinksInPath().standardizedFileURL.path }
+        func overlap(_ a: String, _ b: String) -> Bool { a == b || a.hasPrefix(b + "/") || b.hasPrefix(a + "/") }
+        let keep = [path(backupsDir), path(game.folder)], environment = path(driveC) + "/"
+        var removed: [URL] = [], leftAlone: [URL] = []
+        for folder in plan.outside.map(\.folder) where FileManager.default.fileExists(atPath: folder.path) {
+            let real = path(folder)
+            guard real.hasPrefix(environment), !keep.contains(where: { overlap(real, $0) }) else { leftAlone.append(folder); continue }
+            if (try? FileManager.default.removeItem(at: folder)) != nil { removed.append(folder) }
+        }
+        return (removed, leftAlone)
     }
 
     // MARK: Sync
@@ -224,9 +246,9 @@ public struct GOGSaves: Sendable {
 
     /// A digest of a folder's files: each one's path, size and last change. When it matches a
     /// backup's, a new backup would be a duplicate.
-    static func fingerprint(_ folder: URL) -> String {
+    static func fingerprint(_ folder: URL, files chosen: [URL]? = nil) -> String {
         let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey]
-        let lines = ((try? files(in: folder)) ?? []).map { file -> String in
+        let lines = (chosen ?? (try? files(in: folder)) ?? []).map { file -> String in
             let values = try? file.resolvingSymlinksInPath().resourceValues(forKeys: keys)
             return "\(relativePath(of: file, in: folder))\t\(values?.fileSize ?? 0)\t\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)"
         }
@@ -268,14 +290,16 @@ public struct GOGSaves: Sendable {
 
     /// Backs up the local saves before something could replace or delete them. Returns the
     /// newest Mac backup when nothing has changed since it, or nil when there is nothing to back
-    /// up. `kept` backups are never pruned. Throws if the backup fails, leaving no partial copy
-    /// behind; the caller must then stop.
+    /// up. `kept` backups are never pruned. `only` limits it to some of the folder's files, as
+    /// files(in:) names them. Throws if the backup fails, leaving no partial copy behind; the
+    /// caller must then stop.
     @discardableResult
-    public func backUpLocal(_ game: GOGStore.InstalledGame, location: Location, folder: URL, kept: Bool = false) throws -> URL? {
-        let files = try Self.files(in: folder)
+    public func backUpLocal(_ game: GOGStore.InstalledGame, location: Location, folder: URL, kept: Bool = false,
+                            only: [URL]? = nil) throws -> URL? {
+        let files = try only ?? Self.files(in: folder)
         guard !files.isEmpty else { return nil }
         let dir = backupsFolder(game, location)
-        let fingerprint = Self.fingerprint(folder)
+        let fingerprint = Self.fingerprint(folder, files: files)
         if let same = reuse(in: dir, kind: .mac, fingerprint: fingerprint, kept: kept) { return same }
         let target = try finish(newBackup(in: dir, label: kept ? "mac-kept" : "mac")) { partial in
             // What a link points at, not the link: gogdl writes through it, so a download replaces
@@ -290,6 +314,43 @@ public struct GOGSaves: Sendable {
         }
         try? fingerprint.write(to: Self.fingerprintFile(of: target), atomically: true, encoding: .utf8)
         return target
+    }
+
+    /// Where the files a game wrote in its own folder are backed up (backUpGameFolder). Not a
+    /// location GOG names, so a game without cloud saves has one too.
+    public static let gameFolder = Location(name: "game-folder", template: "<?INSTALL?>")
+
+    /// The files under `folder` the game wrote, by the install's history, links counted by what
+    /// they point at.
+    static func files(in folder: URL, writtenPer history: GOGStore.InstallHistory) throws -> [URL] {
+        try files(in: folder).filter { file in
+            let changed = try? file.resolvingSymlinksInPath().resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            return history.isGameWritten(changed ?? .distantPast)
+        }
+    }
+
+    /// Before an uninstall, backs up (kept) every file the game wrote in its own folder: changed
+    /// after Highball first set it up there and outside its updates (GOGStore.InstallHistory),
+    /// which is where a game without cloud saves often keeps them. Files under `skipping` (the
+    /// locations backed up on their own) are left out. nil when Highball never set the game up
+    /// in this environment, or it wrote nothing. Throws if the backup fails; the uninstall must
+    /// then stop.
+    public func backUpGameFolder(_ game: GOGStore.InstalledGame, driveC: URL, skipping: [URL] = []) throws -> URL? {
+        let history = GOGStore.history(for: game, driveC: driveC)
+        guard history.firstSetup != nil else { return nil }
+        let skipped = skipping.map { $0.standardizedFileURL.path + "/" }
+        let written = try Self.files(in: game.folder, writtenPer: history).filter { file in
+            !skipped.contains { file.standardizedFileURL.path.hasPrefix($0) }
+        }
+        guard !written.isEmpty else { return nil }
+        return try backUpLocal(game, location: Self.gameFolder, folder: game.folder, kept: true, only: written)
+    }
+
+    /// How many files a backup holds and their size, for the log.
+    public static func contents(of backup: URL) -> (files: Int, bytes: Int64) {
+        let all = (try? files(in: backup)) ?? []
+        let bytes = all.reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+        return (all.count, bytes)
     }
 
     /// Stored next to the backup rather than inside it, so restoring a backup by hand never puts
@@ -634,6 +695,94 @@ public struct GOGSaves: Sendable {
             updateTimestamps { $0[key(game, location)] = new }
         }
         return .synced
+    }
+
+    // MARK: Putting saves back
+
+    /// What an uninstall kept of a game's saves, so installing it again can put them back.
+    public struct KeptSaves: Codable, Sendable, Equatable {
+        public struct Entry: Codable, Sendable, Equatable {
+            /// The location's name, or gameFolder's.
+            public let name: String
+            /// Where its files sat, relative to the game's folder; empty for the folder itself.
+            public let path: String
+            public let backup: URL
+        }
+        public var date: Date
+        public var entries: [Entry]
+        /// Install folders already asked, whatever the answer: never asked again.
+        public var asked: [String]
+    }
+
+    var keptSavesFile: URL { store.dir.appending(path: "kept-saves.json") }
+
+    /// Every game's kept saves, by game id.
+    public func keptSaves() -> [String: KeptSaves] {
+        (try? JSONDecoder().decode([String: KeptSaves].self, from: Data(contentsOf: keptSavesFile))) ?? [:]
+    }
+
+    private static let keptSavesLock = NSLock()
+    private func updateKeptSaves(_ change: (inout [String: KeptSaves]) -> Void) {
+        Self.keptSavesLock.withLock {
+            var all = keptSaves()
+            change(&all)
+            store.secureDirectory()
+            try? JSONEncoder().encode(all).write(to: keptSavesFile, options: .atomic)
+        }
+    }
+
+    /// Remembers the backups an uninstall kept of `game`, each with the folder it came from, in
+    /// place of what an earlier uninstall kept: a location this one had nothing for never brings
+    /// back an older copy. `otherInstalls` (copies of the game still in other environments) are never asked: they
+    /// still have their own saves.
+    public func keep(_ backups: [(name: String, folder: URL, backup: URL)], of game: GOGStore.InstalledGame,
+                     otherInstalls: [URL]) {
+        let entries = backups.map { KeptSaves.Entry(name: $0.name, path: $0.folder == game.folder ? "" : Self.relativePath(of: $0.folder, in: game.folder),
+                                                    backup: $0.backup) }
+        updateKeptSaves { all in
+            all[game.id] = entries.isEmpty ? nil : KeptSaves(date: Date(), entries: entries, asked: otherInstalls.map(\.standardizedFileURL.path))
+        }
+    }
+
+    /// The install was asked about putting saves back: it is not asked again.
+    public func markAsked(_ game: GOGStore.InstalledGame) {
+        updateKeptSaves { $0[game.id]?.asked.append(game.folder.standardizedFileURL.path) }
+    }
+
+    /// Whether this install has kept saves it hasn't been asked about.
+    public func keptSavesToOffer(_ game: GOGStore.InstalledGame) -> KeptSaves? {
+        guard let kept = keptSaves()[game.id], !kept.asked.contains(game.folder.standardizedFileURL.path) else { return nil }
+        return kept
+    }
+
+    /// Puts kept saves back into an install of the game: each backup's files to the same place
+    /// in the game's folder. A file already there is backed up first (kept), so a newer one is
+    /// never lost. The game-folder files are dated now, so the next uninstall counts them as the
+    /// game's. Returns how many files were put back; throws, having put back what it had, when a
+    /// copy fails.
+    @discardableResult
+    public func putBack(_ kept: KeptSaves, into game: GOGStore.InstalledGame) throws -> Int {
+        var count = 0
+        for entry in kept.entries {
+            let target = entry.path.isEmpty ? game.folder : game.folder.appending(path: entry.path)
+            let files = try Self.files(in: entry.backup).map { ($0, Self.relativePath(of: $0, in: entry.backup)) }
+            let there = files.map { target.appending(path: $0.1) }.filter { FileManager.default.fileExists(atPath: $0.path) }
+            if !there.isEmpty {
+                try backUpLocal(game, location: Location(name: entry.name, template: ""), folder: target, kept: true, only: there)
+            }
+            for (file, path) in files {
+                // Through a link, as gogdl writes.
+                let copy = target.appending(path: path).resolvingSymlinksInPath()
+                try FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if FileManager.default.fileExists(atPath: copy.path) { try FileManager.default.removeItem(at: copy) }
+                try FileManager.default.copyItem(at: file, to: copy)
+                if entry.name == Self.gameFolder.name {
+                    try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: copy.path)
+                }
+                count += 1
+            }
+        }
+        return count
     }
 
     /// Forgets an install's sync history (uninstall), so a reinstall starts by asking the cloud.

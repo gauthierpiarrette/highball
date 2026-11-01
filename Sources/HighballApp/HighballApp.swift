@@ -257,6 +257,7 @@ struct ContentView: View {
         .sheet(isPresented: $state.showGOGSignIn) { GOGSignInSheet() }
         .gogSaveConflictAsk(state)
         .gogRemovalWithoutBackupAsk(state)
+        .gogPutBackSavesAsk(state)
         .sheet(item: $state.engineTransition) { t in EngineTransitionSheet(transition: t) }
         #if DEBUG
         // Screenshot runs only: HB_SHOW_ENGINE_SWITCH="<environment>><engine id>" opens the switch
@@ -531,7 +532,11 @@ private extension View {
         self.alert(state.pendingUninstall.map { String(format: L("Remove %@?"), $0.item.title) } ?? "",
                isPresented: .init(get: { state.pendingUninstall != nil }, set: { if !$0 { state.pendingUninstall = nil } }),
                presenting: state.pendingUninstall) { pending in
-            if Uninstall.isActionable(pending.route) {
+            if case .gog = pending.route {
+                // Keeping the saves is the answer Return gives.
+                Button(L("Keep save data")) { state.uninstallConfirmed() }.keyboardShortcut(.defaultAction)
+                Button(L("Delete save data too"), role: .destructive) { state.uninstallConfirmed(deleteSaves: true) }
+            } else if Uninstall.isActionable(pending.route) {
                 Button(L("Remove"), role: .destructive) { state.uninstallConfirmed() }
             }
             Button(L("Cancel"), role: .cancel) { state.pendingUninstall = nil }
@@ -554,18 +559,31 @@ private extension View {
         }
     }
 
+    /// An uninstall kept this game's saves, and it is installed again: offered once per install.
+    @MainActor func gogPutBackSavesAsk(_ state: AppState) -> some View {
+        self.alert(state.gogSavesToPutBack.map { String(format: L("Put back your saves from %@?"),
+                                                        $0.kept.date.formatted(date: .abbreviated, time: .omitted)) } ?? "",
+               isPresented: .init(get: { state.gogSavesToPutBack != nil }, set: { if !$0 { state.gogPutBackSaves(false) } }),
+               presenting: state.gogSavesToPutBack) { _ in
+            Button(L("Put them back")) { state.gogPutBackSaves(true) }.keyboardShortcut(.defaultAction)
+            Button(L("Not now"), role: .cancel) { state.gogPutBackSaves(false) }
+        } message: { pending in
+            Text(String(format: L("Highball kept %@'s saves when it was removed. Put them back copies them into the game's folder; anything already there is copied to save-backups first."), pending.title))
+        }
+    }
+
     /// Some of a game's saves can't be backed up before it is removed (GOG unreachable, or saves
     /// kept directly in the game's folder). Nothing is removed unless the player agrees.
     @MainActor func gogRemovalWithoutBackupAsk(_ state: AppState) -> some View {
-        self.alert(state.gogRemovalWithoutBackup.map { String(format: L("Remove %@ without backing up its saves?"), $0.title) } ?? "",
+        self.alert(state.gogRemovalWithoutBackup.map { String(format: L("Remove %@ without a copy of every save?"), $0.title) } ?? "",
                isPresented: .init(get: { state.gogRemovalWithoutBackup != nil }, set: { if !$0 { state.gogRemovalWithoutBackup = nil } }),
                presenting: state.gogRemovalWithoutBackup) { _ in
-            Button(L("Remove without a backup"), role: .destructive) { state.gogRemoveWithoutBackup() }
+            Button(L("Remove anyway"), role: .destructive) { state.gogRemoveWithoutBackup() }
             Button(L("Cancel"), role: .cancel) { state.gogRemovalWithoutBackup = nil }
         } message: { pending in
             Text(pending.plan == nil
-                 ? String(format: L("Highball couldn't reach GOG to find out where %@ keeps its saves, so it can't back up any saves inside the game's folder. Saves already in GOG's cloud are not affected. To keep a backup, cancel and try again once GOG can be reached."), pending.title)
-                 : String(format: L("%@ keeps some of its saves directly in the game's folder, which Highball can't back up on its own, so removing the game deletes them. Its other saves inside the folder are backed up first, and saves already in GOG's cloud are not affected."), pending.title))
+                 ? String(format: L("Highball couldn't reach GOG to find out where %@ keeps its saves, so the save folders GOG names inside the game's folder are deleted with it. Files the game changed in its folder since you first played it are still copied to save-backups first, and saves already in GOG's cloud are not affected. To keep every save, cancel and try again once GOG can be reached."), pending.title)
+                 : String(format: L("GOG says %@ keeps some of its saves directly in the game's folder, which Highball can't copy as one save folder. Files the game changed in its folder since you first played it are still copied to save-backups first, along with its other save folders, and saves already in GOG's cloud are not affected."), pending.title))
         }
     }
 

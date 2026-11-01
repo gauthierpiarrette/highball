@@ -522,8 +522,58 @@ extension GOGStore {
         (try? String(contentsOf: setupMarker(for: game, driveC: driveC), encoding: .utf8)) == (game.buildID ?? "")
     }
     public static func markSetupDone(for game: InstalledGame, driveC: URL) {
+        // Read before the marker is rewritten: an install from before the history falls back
+        // to the marker's old date.
+        var history = history(for: game, driveC: driveC)
+        if history.firstSetup == nil { history.firstSetup = Date() }
+        save(history, for: game, driveC: driveC)
         let url = setupMarker(for: game, driveC: driveC)
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? (game.buildID ?? "").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// When Highball first set an install up in the environment and when it updated it, so an
+    /// uninstall can tell the files the game wrote from the ones the installer and the patches
+    /// put down (GOGSaves.backUpGameFolder). Kept next to the setup marker.
+    public struct InstallHistory: Codable, Sendable, Equatable {
+        public struct Window: Codable, Sendable, Equatable {
+            public let start: Date
+            public let end: Date
+        }
+        public var firstSetup: Date?
+        public var updates: [Window] = []
+
+        /// Written by the game: changed after the first setup, and not while an update ran.
+        public func isGameWritten(_ changed: Date) -> Bool {
+            guard let firstSetup, changed > firstSetup else { return false }
+            return !updates.contains { $0.start <= changed && changed <= $0.end }
+        }
+    }
+
+    public static func historyFile(for game: InstalledGame, driveC: URL) -> URL {
+        driveC.appending(path: "highball/gog-setup/\(game.id).history.json")
+    }
+
+    /// An install set up before the history was kept falls back to the marker's date for its
+    /// first setup.
+    public static func history(for game: InstalledGame, driveC: URL) -> InstallHistory {
+        var history = (try? Data(contentsOf: historyFile(for: game, driveC: driveC)))
+            .flatMap { try? JSONDecoder().decode(InstallHistory.self, from: $0) } ?? InstallHistory()
+        if history.firstSetup == nil {
+            history.firstSetup = try? setupMarker(for: game, driveC: driveC).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        }
+        return history
+    }
+
+    private static func save(_ history: InstallHistory, for game: InstalledGame, driveC: URL) {
+        let url = historyFile(for: game, driveC: driveC)
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? JSONEncoder().encode(history).write(to: url, options: .atomic)
+    }
+
+    /// An update ran from `start` to `end`: what changed in the game's folder then is the patch's.
+    public static func recordUpdate(for game: InstalledGame, driveC: URL, start: Date, end: Date) {
+        var history = history(for: game, driveC: driveC)
+        history.updates.append(.init(start: start, end: end))
+        save(history, for: game, driveC: driveC)
     }
 }
