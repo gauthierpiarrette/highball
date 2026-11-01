@@ -41,17 +41,27 @@ extension EpicStore {
     /// takes, from its manifest: the bytes fetched and the installed size. Throws when legendary's
     /// answer has no manifest to read, so an answer that says nothing is never kept as the size.
     public func downloadEstimate(_ appName: String, platform: String = "Windows") throws -> DownloadEstimate {
-        let out = try capture(["info", appName, "--json", "--platform", platform])
-        guard let estimate = Self.parseEstimate(Data(out.utf8)) else {
+        let (out, log) = try captureWithLog(["info", appName, "--json", "--platform", platform])
+        guard let estimate = Self.parseEstimate(Data(out.utf8), log: log, platform: platform) else {
             throw HighballError.invalid("legendary info gave no manifest for \(appName) (\(platform))")
         }
         return estimate
     }
 
-    static func parseEstimate(_ data: Data) -> DownloadEstimate? {
-        guard let start = data.firstIndex(of: UInt8(ascii: "{")),
-              let obj = try? JSONSerialization.jsonObject(with: data[start...]) as? [String: Any],
-              let manifest = obj["manifest"] as? [String: Any] else { return nil }
+    /// The sizes in legendary's manifest. The Mac build's count only from its own manifest
+    /// (EpicStore.manifest): with the Mac asset missing, legendary prints the installed Windows
+    /// build's instead, which would show as the Mac build's size.
+    static func parseEstimate(_ data: Data, log: String = "", platform: String = "Windows") -> DownloadEstimate? {
+        let found: [String: Any]?
+        if platform == "Mac" {
+            found = manifest(data, log: log, platform: platform)
+        } else if let start = data.firstIndex(of: UInt8(ascii: "{")),
+                  let obj = try? JSONSerialization.jsonObject(with: data[start...]) as? [String: Any] {
+            found = obj["manifest"] as? [String: Any]
+        } else {
+            found = nil
+        }
+        guard let manifest = found else { return nil }
         return DownloadEstimate(download: (manifest["download_size"] as? NSNumber)?.int64Value,
                                 disk: (manifest["disk_size"] as? NSNumber)?.int64Value)
     }

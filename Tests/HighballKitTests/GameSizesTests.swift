@@ -28,6 +28,19 @@ final class GameSizesTests: XCTestCase {
         XCTAssertNil(EpicStore.parseEstimate(Data("no json".utf8)))
     }
 
+    /// With the Mac asset gone, legendary warns, answers offline and prints the installed Windows
+    /// build's manifest: that is never shown as the Mac build's size.
+    func testEpicMacEstimateIgnoresTheWindowsManifestLegendaryFallsBackTo() {
+        let windowsOnly = #"{"game": {"platform_versions": {"Windows": "2.1.9a"}}, "install": {}, "manifest": {"build_version": "2.1.9a", "disk_size": 1, "download_size": 2}}"#
+        XCTAssertNil(EpicStore.parseEstimate(Data(windowsOnly.utf8), platform: "Mac"))
+        XCTAssertEqual(EpicStore.parseEstimate(Data(windowsOnly.utf8), platform: "Windows"), DownloadEstimate(download: 2, disk: 1))
+        let listedButOffline = #"{"game": {"platform_versions": {"Mac": "3 OSX", "Windows": "2.1.9a"}}, "manifest": {"build_version": "2.1.9a", "disk_size": 1, "download_size": 2}}"#
+        XCTAssertNil(EpicStore.parseEstimate(Data(listedButOffline.utf8), platform: "Mac"))
+        let mac = #"{"game": {"platform_versions": {"Mac": "3 OSX"}}, "manifest": {"build_version": "3 OSX", "disk_size": 1, "download_size": 2}}"#
+        XCTAssertNil(EpicStore.parseEstimate(Data(mac.utf8), log: #"[Core] WARNING: Asset information for "A" is missing"#, platform: "Mac"))
+        XCTAssertEqual(EpicStore.parseEstimate(Data(mac.utf8), platform: "Mac"), DownloadEstimate(download: 2, disk: 1))
+    }
+
     func testEpicInstallRecordKeepsSizeAndSaveFolder() throws {
         let json = #"[{"app_name":"Garlic","install_path":"/x","install_size":356045656,"save_path":"/s"},{"app_name":"Old","install_path":"/y"}]"#
         let games = try JSONDecoder().decode([EpicStore.InstalledGame].self, from: Data(json.utf8))
