@@ -1164,6 +1164,7 @@ final class AppState {
         readBattleNetInstalls()
         startSteamClientWatch()
         startDiscordWatch()
+        startMacLaunchWatch()
         libraryPlays = libraryStore.load()
         libraryOverrides = libraryStore.rendererOverrides()
         libraryLaunchArgs = libraryStore.launchArguments()
@@ -3517,6 +3518,7 @@ final class AppState {
         }
         let store = epicStore
         runBusy(String(format: L("Starting %@"), item.title), done: .handedOff) { [self] in
+            macLaunchedAt[item.id] = Date()
             appendLog("\(item.title): opening the Mac version")
             let info = try await Task.detached { try store.launchInfo(app) }.value
             try Task.checkCancellation()
@@ -3533,6 +3535,74 @@ final class AppState {
             // exit never leaves a stale entry.
             macGameProcesses[item.id] = p
             recordPlay(item)
+        }
+    }
+
+    // MARK: Mac games opened outside Highball
+
+    static let relaunchDefaultsKey = "openMacGamesThroughHighball"
+    /// Off unless turned on in Settings: closing an app the player opened is a surprise otherwise.
+    static var relaunchEnabled: Bool { UserDefaults.standard.bool(forKey: relaunchDefaultsKey) }
+    @ObservationIgnored private var macLaunchObserver: NSObjectProtocol?
+    @ObservationIgnored private var relaunching: Set<String> = []
+    /// When Highball last started each Mac game, and last closed one to start it again: a launch
+    /// near either is Highball's own (a game whose app hands over to another process) and is left
+    /// alone, so the watcher can never loop.
+    @ObservationIgnored private var macLaunchedAt: [String: Date] = [:]
+    @ObservationIgnored private var macRelaunchedAt: [String: Date] = [:]
+
+    /// A GOG or Epic Mac game opened from Applications, the Dock or Spotlight starts without
+    /// what Highball brings (comet, which a game looks for only at startup, the save sync and its
+    /// backups, Epic's sign-in). With the setting on, such a launch is closed within its first
+    /// seconds and started again through Highball. Never one Highball started, and never one
+    /// running for longer than a few seconds.
+    private func startMacLaunchWatch() {
+        guard macLaunchObserver == nil else { return }
+        macLaunchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            MainActor.assumeIsolated { self?.macAppLaunched(app) }
+        }
+    }
+
+    private func macAppLaunched(_ app: NSRunningApplication) {
+        guard Self.relaunchEnabled, let bundle = app.bundleURL?.standardizedFileURL.path else { return }
+        guard let item = libraryItems.first(where: { item in
+            guard (item.source == .gog || item.source == .epic), let folder = macFolder(for: item)?.standardizedFileURL.path else { return false }
+            return bundle == folder || bundle.hasPrefix(folder + "/")
+        }), !relaunching.contains(item.id) else { return }
+        relaunching.insert(item.id)
+        // A moment for Highball's own launch to be recorded (Epic's is, once legendary answers).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            defer { self.relaunching.remove(item.id) }
+            guard self.relaunchShouldTakeOver(app, item: item) else { return }
+            self.macRelaunchedAt[item.id] = Date()
+            self.appendLog("\(item.title) was opened outside Highball; starting it again through Highball")
+            app.terminate()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                if !app.isTerminated { app.forceTerminate() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self?.playOnMac(item) }
+            }
+        }
+    }
+
+    /// Whether to close a game just opened outside Highball: only when it is not Highball's own
+    /// launch (within 15 seconds of Highball starting it, or while the game Highball started has
+    /// not ended: an app from its folder then is its own, a launcher's hand-over or a helper,
+    /// however late it opens), opened in the last few seconds, not closed already in the last
+    /// minute, and only when Highball can start it again right now. A busy Highball (a download
+    /// holding the strip) would close it and start nothing.
+    private func relaunchShouldTakeOver(_ app: NSRunningApplication, item: LibraryItem) -> Bool {
+        let now = Date()
+        if macGameProcesses[item.id] != nil { return false }
+        if let started = macLaunchedAt[item.id], now.timeIntervalSince(started) < 15 { return false }
+        if let closed = macRelaunchedAt[item.id], now.timeIntervalSince(closed) < 60 { return false }
+        guard !app.isTerminated, let launched = app.launchDate, now.timeIntervalSince(launched) < 8, !busy else { return false }
+        switch item.source {
+        case .gog: return item.gogID.flatMap { gogMacInstalled[$0]?.app } != nil
+        case .epic: return item.epicAppName.flatMap { epicMacInstalls[$0] } != nil
+        default: return false
         }
     }
 
@@ -3912,6 +3982,7 @@ final class AppState {
                 throw HighballError.failed(String(format: L("The Mac version of %@ did not start: %@"), item.title, error.localizedDescription))
             }
             macGameProcesses[item.id] = process
+            macLaunchedAt[item.id] = Date()
             recordPlay(item)
             appendLog("\(item.title): the Mac version is running\(comet != nil ? ", with comet for achievements" : "")")
             watchMacGame(process, item: item, game: game, comet: comet, cometLog: cometLog, saveFolders: saveFolders)

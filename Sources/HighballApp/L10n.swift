@@ -437,6 +437,9 @@ enum L10n {
         "Switch %@ to the Windows version?": "Passer %@ à la version Windows ?",
         "Epic keeps one version of a game installed at a time, so the Mac version is removed first, then the Windows version downloads into your environment.":
             "Epic n’installe qu’une version d’un jeu à la fois : la version Mac est d’abord supprimée, puis la version Windows est téléchargée dans votre environnement.",
+        "A Mac game opened from Applications, the Dock or Spotlight is closed within its first seconds and started again through Highball, which brings GOG's achievements and cloud saves and Epic's sign-in. Only while Highball is open, and never while it is busy with another task.":
+            "Un jeu Mac ouvert depuis Applications, le Dock ou Spotlight est fermé dans ses premières secondes et relancé avec Highball, qui apporte les succès et sauvegardes en ligne de GOG et la connexion d’Epic. Seulement quand Highball est ouvert, et jamais pendant une autre tâche.",
+        "Open GOG and Epic Mac games through Highball": "Ouvrir les jeux Mac GOG et Epic avec Highball",
         "Highball could not find the Mac version of %@ to open.": "Highball ne trouve pas la version Mac de %@ à ouvrir.",
         "The Mac version of %@ did not start: %@": "La version Mac de %@ n’a pas démarré : %@",
         "Removing the Windows version of %@": "Suppression de la version Windows de %@",
