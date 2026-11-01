@@ -260,6 +260,19 @@ public struct EpicStore: Sendable {
         return versions[platform] != nil
     }
 
+    /// What a Mac install does once `hasMacBuild` has answered: nil when it could not ask. Stop
+    /// with nothing changed unless Epic named a Mac build, and only then remove the Windows build
+    /// first when switching from it, so a missing build never costs the Windows copy.
+    public enum MacInstallStep: Equatable, Sendable {
+        case couldNotAsk, noMacBuild, install, removeWindowsThenInstall
+
+        public static func after(hasMacBuild: Bool?, replacingWindows: Bool) -> MacInstallStep {
+            guard let hasMacBuild else { return .couldNotAsk }
+            guard hasMacBuild else { return .noMacBuild }
+            return replacingWindows ? .removeWindowsThenInstall : .install
+        }
+    }
+
     /// Installs a game's Windows build into the bottle at drive_c/Games/<folder>.
     @discardableResult
     public func install(_ appName: String, into bottle: Bottle, control: LegendaryControl? = nil,

@@ -3484,17 +3484,23 @@ final class AppState {
         let store = epicStore
         let checkThenRemoveWindows: @MainActor () async throws -> Void = { [self] in
             stage = L("Asking Epic about the Mac version")
-            let hasMac: Bool
+            let hasMac: Bool?
             do {
                 hasMac = try await Task.detached { try store.hasMacBuild(app) }.value
             } catch {
                 appendLog("\(item.title): legendary info --platform Mac failed: \(error)")
+                hasMac = nil
+            }
+            switch EpicStore.MacInstallStep.after(hasMacBuild: hasMac, replacingWindows: replacingWindows) {
+            case .couldNotAsk:
                 throw HighballError.failed(L("Highball could not ask Epic whether a Mac build of this game is there to download, so nothing was changed. Check your connection, then try again."))
-            }
-            guard hasMac else {
+            case .noMacBuild:
                 throw HighballError.failed(L("Epic lists a Mac version of this game, but has no Mac build to download for your account, so nothing was changed."))
+            case .install:
+                return
+            case .removeWindowsThenInstall:
+                break
             }
-            guard replacingWindows else { return }
             stage = String(format: L("Removing the Windows version of %@"), item.title)
             let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
             let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
@@ -3509,7 +3515,8 @@ final class AppState {
     /// Epic's own launcher passes (single use, fetched right before). On the strip, as the GOG
     /// Mac build and the Windows build start: legendary takes seconds to answer, and a second
     /// Play meanwhile finds Highball busy and starts nothing, where it used to start a second
-    /// copy. A failure reaches the alert, not only the log.
+    /// copy. A failure reaches the alert, not only the log. The game runs until nothing runs from
+    /// its folder (watchEpicMacGame), a launcher's hand-over included.
     func epicPlayMac(_ item: LibraryItem) {
         guard let app = item.epicAppName else { return }
         if macGameProcesses[item.id] != nil {
@@ -3527,16 +3534,33 @@ final class AppState {
             p.arguments = info.arguments
             p.currentDirectoryURL = info.workingDirectory
             p.environment = ProcessInfo.processInfo.environment.merging(info.environment) { $1 }
-            p.terminationHandler = { [weak self] _ in Task { @MainActor in self?.macGameProcesses[item.id] = nil } }
             do { try p.run() } catch {
                 throw HighballError.failed(String(format: L("The Mac version of %@ did not start: %@"), item.title, error.localizedDescription))
             }
-            // Set before the termination handler's hop to the main actor can run, so an early
-            // exit never leaves a stale entry.
             macGameProcesses[item.id] = p
             recordPlay(item)
+            watchEpicMacGame(p, item: item, folder: epicMacInstalls[app].map { URL(fileURLWithPath: $0, isDirectory: true) })
         }
     }
+
+    /// Once an Epic Mac build quits, as for a GOG one (watchMacGame): the process Highball started
+    /// may be a launcher that hands over to the game and exits at once, so its entry in
+    /// macGameProcesses, which keeps a second Play from starting another copy, stays until
+    /// nothing runs from the game's folder (MacGameWatch). Never the Mac games folder itself,
+    /// which holds every other game.
+    private func watchEpicMacGame(_ process: Process, item: LibraryItem, folder: URL?) {
+        let started = Date()
+        let watched = folder.flatMap { $0.standardizedFileURL.path == GOGStore.macGamesDir.standardizedFileURL.path ? nil : $0 }
+        Task.detached { [weak self] in
+            process.waitUntilExit()
+            if let watched, await MacGameWatch.waitForHandover(from: watched, ranFor: Date().timeIntervalSince(started)) {
+                await self?.appendLog("\(item.title): the Mac version handed over to another process, which has now quit too")
+            }
+            await self?.epicMacGameEnded(item)
+        }
+    }
+
+    private func epicMacGameEnded(_ item: LibraryItem) { macGameProcesses[item.id] = nil }
 
     // MARK: Mac games opened outside Highball
 
@@ -4057,13 +4081,11 @@ final class AppState {
     /// A GOG Mac build the player asked to move to the Trash: asked first, with what goes.
     var pendingGOGMacTrash: LibraryItem?
 
-    /// What the Trash takes for a GOG game's Mac build: its app, or the folder holding its info
-    /// (GOGStore.MacInstalledGame.folder). Nil when there is none, or when it would be a folder
-    /// Mac builds are looked for in, which holds other apps.
+    /// What the Trash takes for a GOG game's Mac build (GOGStore.macTrashTarget). Nil when there
+    /// is none, or when it would be a folder holding other apps.
     func gogMacTrashTarget(for item: LibraryItem) -> URL? {
-        guard let id = item.gogID, let folder = gogMacInstalled[id]?.folder else { return nil }
-        let searched = Set(GOGStore.macSearchFolders.map { $0.standardizedFileURL.path })
-        return searched.contains(folder.standardizedFileURL.path) ? nil : folder
+        guard let id = item.gogID, let game = gogMacInstalled[id] else { return nil }
+        return GOGStore.macTrashTarget(for: game)
     }
 
     /// Moves a GOG game's Mac build to the Trash, where it can still be put back. Only once the

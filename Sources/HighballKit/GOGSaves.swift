@@ -143,19 +143,29 @@ public struct GOGSaves: Sendable {
     /// Desktop and the rest), every folder straight inside its Library (Preferences, Application
     /// Support, Caches, Containers, Group Containers, Saved Application State and the rest), and
     /// the top of a synced drive or a container there (iCloud Drive's com~apple~CloudDocs, a
-    /// CloudStorage provider's folder, an app's container). A game's own folder sits deeper, as
-    /// in ~/Library/Application Support/<studio>/<game>. Compared without case, as the Mac's
-    /// disks are.
+    /// CloudStorage provider's folder, an app's container). Also the few folders many games share
+    /// one level deeper: ~/Documents/My Games, and a launcher's or porting house's folder in
+    /// Application Support (sharedVendorFolders). A game's own folder sits deeper, as in
+    /// ~/Library/Application Support/<studio>/<game>. Compared without case, as the Mac's disks
+    /// are.
     static func isSharedFolder(_ folder: URL, home: URL) -> Bool {
         let homeParts = home.standardizedFileURL.pathComponents.map { $0.lowercased() }
         let parts = folder.standardizedFileURL.pathComponents.map { $0.lowercased() }
         guard parts.count >= homeParts.count, Array(parts.prefix(homeParts.count)) == homeParts else { return false }
         let inside = Array(parts.dropFirst(homeParts.count))
         if inside.count <= 1 { return true }
+        if inside == ["documents", "my games"] { return true }
         guard inside[0] == "library" else { return false }
         if inside.count == 2 { return true }
-        return inside.count == 3 && ["mobile documents", "cloudstorage", "containers", "group containers"].contains(inside[1])
+        guard inside.count == 3 else { return false }
+        return ["mobile documents", "cloudstorage", "containers", "group containers"].contains(inside[1])
+            || (inside[1] == "application support" && sharedVendorFolders.contains(inside[2]))
     }
+
+    /// Folders in ~/Library/Application Support that hold many games' files, each game in its own
+    /// folder below: the stores' launchers and the porting houses whose Mac versions keep their
+    /// saves there. Lowercased.
+    static let sharedVendorFolders: Set<String> = ["gog.com", "steam", "epic", "epic games", "feral interactive", "aspyr"]
 
     /// A location as a folder on the Mac, inside the environment. GOG's variables are the Windows
     /// known folders; Wine keeps them under drive_c/users/<Mac user name>. A Documents folder the

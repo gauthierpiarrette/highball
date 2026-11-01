@@ -96,6 +96,43 @@ final class GOGMacBuildTests: XCTestCase {
         XCTAssertEqual(games.first?.app?.lastPathComponent, "Samorost 1.app")
         XCTAssertEqual(games.first?.folder.lastPathComponent, "Samorost 1.app", "the info sits in the app, so the app is the game's folder")
         XCTAssertEqual(games.first?.buildID, "55")
+        XCTAssertEqual(games.first?.dlcIDs, ["99"])
+        XCTAssertEqual(games.first?.asInstalledGame.dlcIDs, ["99"], "the record the Windows paths take keeps the DLC")
+    }
+
+    /// DLC is the info beside the game's own that names it as root: never another app's info in
+    /// the same folder of apps, whether that app is another game or names this one.
+    func testDLCIsOnlyTheInfoBesideTheGamesOwn() throws {
+        let applications = FileManager.default.temporaryDirectory.appending(path: "apps-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: applications) }
+        let games = applications.appending(path: "Games")
+        let foo = games.appending(path: "Foo.app/Contents/Resources"), zed = games.appending(path: "Zed.app/Contents/Resources")
+        for folder in [foo, zed] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        try #"{"gameId":"1","rootGameId":"1","name":"Foo"}"#.write(to: foo.appending(path: "goggame-1.info"), atomically: true, encoding: .utf8)
+        try #"{"gameId":"2","rootGameId":"1","name":"Foo DLC"}"#.write(to: foo.appending(path: "goggame-2.info"), atomically: true, encoding: .utf8)
+        try #"{"gameId":"5","name":"Zed"}"#.write(to: zed.appending(path: "goggame-5.info"), atomically: true, encoding: .utf8)
+        try #"{"gameId":"6","rootGameId":"1","name":"Stray"}"#.write(to: zed.appending(path: "goggame-6.info"), atomically: true, encoding: .utf8)
+
+        let game = try XCTUnwrap(GOGStore.macInstalledGames(in: applications).first)
+        XCTAssertEqual(game.id, "1")
+        XCTAssertEqual(game.dlcIDs, ["2"])
+    }
+
+    /// The Trash takes the game's own app or folder, never a searched folder, one holding it, or
+    /// the root.
+    func testTheTrashNeverTakesAFolderHoldingOtherApps() {
+        let own = URL(fileURLWithPath: "/Users/someone/Applications/Highball Games")
+        let searched = [own, URL(fileURLWithPath: "/Applications")]
+        func game(_ path: String) -> GOGStore.MacInstalledGame {
+            GOGStore.MacInstalledGame(id: "1", title: "Game", folder: URL(fileURLWithPath: path), app: nil, buildID: nil, arch: .unknown)
+        }
+        XCTAssertEqual(GOGStore.macTrashTarget(for: game("/Applications/Games/Foo.app"), searched: searched)?.path, "/Applications/Games/Foo.app")
+        XCTAssertEqual(GOGStore.macTrashTarget(for: game("/Users/someone/Applications/Highball Games/Samorost 1.app"), searched: searched)?.path,
+                       "/Users/someone/Applications/Highball Games/Samorost 1.app")
+        for whole in ["/Applications", "/Applications/", "/Users/someone/Applications/Highball Games", "/Users/someone/Applications",
+                      "/Users/someone", "/"] {
+            XCTAssertNil(GOGStore.macTrashTarget(for: game(whole), searched: searched), whole)
+        }
     }
 
     /// An app among others in a folder of /Applications (/Applications/Games/Foo.app): the game,
@@ -151,6 +188,7 @@ final class GOGMacBuildTests: XCTestCase {
         XCTAssertEqual(games.map(\.id), ["1423049311"])
         XCTAssertEqual(games.first?.app?.lastPathComponent, "Cyberpunk2077.app")
         XCTAssertEqual(games.first?.folder.lastPathComponent, "Cyberpunk 2077")
+        XCTAssertEqual(games.first?.dlcIDs, ["1256837418"])
     }
 
     /// A folder with several apps beside its info opens the one the primary play task names, not
@@ -210,6 +248,16 @@ final class EpicMacBuildTests: XCTestCase {
         XCTAssertFalse(EpicStore.listsBuild(Data(windowsOnly.utf8), platform: "Mac"), "a Windows manifest from the install is not a Mac build")
         XCTAssertFalse(EpicStore.listsBuild(Data(#"{"game": null, "install": null, "manifest": null}"#.utf8), platform: "Mac"))
         XCTAssertFalse(EpicStore.listsBuild(Data("No game information available.".utf8), platform: "Mac"))
+    }
+
+    /// The Windows copy goes only once Epic named a Mac build, and only when switching from it.
+    func testTheWindowsCopyGoesOnlyOnceEpicNamedAMacBuild() {
+        typealias Step = EpicStore.MacInstallStep
+        XCTAssertEqual(Step.after(hasMacBuild: nil, replacingWindows: true), .couldNotAsk)
+        XCTAssertEqual(Step.after(hasMacBuild: false, replacingWindows: true), .noMacBuild)
+        XCTAssertEqual(Step.after(hasMacBuild: false, replacingWindows: false), .noMacBuild)
+        XCTAssertEqual(Step.after(hasMacBuild: true, replacingWindows: false), .install)
+        XCTAssertEqual(Step.after(hasMacBuild: true, replacingWindows: true), .removeWindowsThenInstall)
     }
 
     func testTheFallBackToWindowsIsSeen() {
@@ -291,9 +339,19 @@ final class GOGMacSavesTests: XCTestCase {
                       "<?LIBRARY?>/Containers", "<?LIBRARY?>/Group Containers", "<?LIBRARY?>/preferences/",
                       "<?LIBRARY?>", "<?PREFERENCES?>", "<?APPLICATION_SUPPORT?>", "<?CACHES?>",
                       "<?LIBRARY?>/Mobile Documents/com~apple~CloudDocs", "<?LIBRARY?>/CloudStorage/Dropbox",
-                      "<?LIBRARY?>/Containers/com.studio.game", "<?DOCUMENTS?>/../Desktop"] {
+                      "<?LIBRARY?>/Containers/com.studio.game", "<?DOCUMENTS?>/../Desktop",
+                      // Folders many games share one level deeper, each game in its own folder below.
+                      "<?DOCUMENTS?>/My Games", "<?DOCUMENTS?>/my games/", "<?APPLICATION_SUPPORT?>/GOG.com",
+                      "<?APPLICATION_SUPPORT?>/Steam", "<?APPLICATION_SUPPORT?>/Epic", "<?APPLICATION_SUPPORT?>/Epic Games",
+                      "<?LIBRARY?>/Application Support/Feral Interactive", "<?APPLICATION_SUPPORT?>/Aspyr"] {
             XCTAssertNil(GOGSaves.resolveMac(whole, installFolder: install, home: home), whole)
         }
+        XCTAssertEqual(GOGSaves.resolveMac("<?DOCUMENTS?>/My Games/Studio Game", installFolder: install, home: home)?.path,
+                       "/Users/someone/Documents/My Games/Studio Game")
+        XCTAssertEqual(GOGSaves.resolveMac("<?APPLICATION_SUPPORT?>/Feral Interactive/Game/Saves", installFolder: install, home: home)?.path,
+                       "/Users/someone/Library/Application Support/Feral Interactive/Game/Saves")
+        XCTAssertEqual(GOGSaves.resolveMac("<?APPLICATION_SUPPORT?>/GOG.com/Galaxy/Applications/c/Storage/Shared/Files", installFolder: install, home: home)?.path,
+                       "/Users/someone/Library/Application Support/GOG.com/Galaxy/Applications/c/Storage/Shared/Files")
         XCTAssertEqual(GOGSaves.resolveMac("<?LIBRARY?>/Preferences/Studio Game", installFolder: install, home: home)?.path,
                        "/Users/someone/Library/Preferences/Studio Game")
         XCTAssertEqual(GOGSaves.resolveMac("<?LIBRARY?>/Containers/com.studio.game/Data/Saves", installFolder: install, home: home)?.path,
