@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.10.24</title>
+      <description><![CDATA[Forza Horizon 6 can run on a native Apple silicon engine, without the hitch every second]]></description>
+      <pubDate>Sun, 01 Nov 2026 10:43:06 +0100</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.10.24/Highball-0.10.24.zip" sparkle:version="0.10.24" sparkle:shortVersionString="0.10.24" sparkle:edSignature="9u1ZO80mKh0q747H7ucTG7GaGfXPzzOibbPDQHG9PwNnfE9PfBhELGA9RytzL+XVWaTHxW0PjicFrJbxRYwDDQ==" length="8493222" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.10.23</title>
       <description><![CDATA[GOG and Battle.net in the library, Forza Horizon 6 trees and liveries, and many fixes]]></description>
       <pubDate>Sat, 31 Oct 2026 21:54:04 +0100</pubDate>
