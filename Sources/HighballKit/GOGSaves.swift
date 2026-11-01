@@ -61,9 +61,12 @@ public struct GOGSaves: Sendable {
     /// Where the game keeps its saves, nil when it has no cloud saves. An empty list from GOG means
     /// the SDK's own storage folder, which Galaxy names __default.
     public func locations(clientID: String) throws -> [Location]? {
-        let url = URL(string: "https://remote-config.gog.com/components/galaxy_client/clients/\(clientID)?component_version=2.0.45")!
-        let data = try GOGStore.fetch(URLRequest(url: url))
-        return Self.parseLocations(data, clientID: clientID)
+        Self.parseLocations(try Self.remoteConfig(clientID), clientID: clientID)
+    }
+
+    /// The remote config GOG publishes per client id, which names every version's cloud saves.
+    static func remoteConfig(_ clientID: String) throws -> Data {
+        try GOGStore.fetch(URLRequest(url: URL(string: "https://remote-config.gog.com/components/galaxy_client/clients/\(clientID)?component_version=2.0.45")!))
     }
 
     /// `platform` is GOG's: "Windows", or "MacOS" for the Mac build's own locations.
@@ -94,8 +97,7 @@ public struct GOGSaves: Sendable {
 
     /// Both versions' setups, from the one remote config GOG publishes per client id.
     public func cloudSetup(clientID: String) throws -> CloudSetup {
-        let url = URL(string: "https://remote-config.gog.com/components/galaxy_client/clients/\(clientID)?component_version=2.0.45")!
-        return Self.parseCloudSetup(try GOGStore.fetch(URLRequest(url: url)), clientID: clientID)
+        Self.parseCloudSetup(try Self.remoteConfig(clientID), clientID: clientID)
     }
 
     static func parseCloudSetup(_ data: Data, clientID: String) -> CloudSetup {
@@ -109,8 +111,7 @@ public struct GOGSaves: Sendable {
     /// build. A game that syncs its own saves through GOG's SDK (Cyberpunk 2077 on Mac, through
     /// comet) needs none from Highball, and a file sync beside it would fight it.
     public func macLocations(clientID: String) throws -> [Location]? {
-        let url = URL(string: "https://remote-config.gog.com/components/galaxy_client/clients/\(clientID)?component_version=2.0.45")!
-        return Self.parseLocations(try GOGStore.fetch(URLRequest(url: url)), clientID: clientID, platform: "MacOS")
+        Self.parseLocations(try Self.remoteConfig(clientID), clientID: clientID, platform: "MacOS")
     }
 
     /// A Mac location as a folder, from GOG's Mac variables.

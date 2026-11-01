@@ -73,7 +73,6 @@ extension GOGStore {
         public var asInstalledGame: InstalledGame {
             InstalledGame(id: id, title: title, folder: folder, buildID: buildID, clientID: clientID, dlcIDs: dlcIDs, tasks: tasks)
         }
-
     }
 
     /// Where Mac builds go: an Applications folder Spotlight and Launchpad already look in, the
@@ -126,8 +125,6 @@ extension GOGStore {
         }
         .filter { seen.insert($0.id).inserted }
     }
-
-    public static func macInstalledGames(in base: URL) -> [MacInstalledGame] { macInstalledGames(in: [base]) }
 
     static func macInstalledGame(in folder: URL) -> MacInstalledGame? {
         let fm = FileManager.default

@@ -91,7 +91,7 @@ final class GOGMacBuildTests: XCTestCase {
         try FileManager.default.createDirectory(at: partial, withIntermediateDirectories: true)
         try Data().write(to: partial.appending(path: ".gogdl-resume"))
 
-        let games = GOGStore.macInstalledGames(in: base)
+        let games = GOGStore.macInstalledGames(in: [base])
         XCTAssertEqual(games.map(\.id), ["2006298293"])
         XCTAssertEqual(games.first?.app?.lastPathComponent, "Samorost 1.app")
         XCTAssertEqual(games.first?.folder.lastPathComponent, "Samorost 1.app", "the info sits in the app, so the app is the game's folder")
@@ -113,7 +113,7 @@ final class GOGMacBuildTests: XCTestCase {
         try #"{"gameId":"5","name":"Zed"}"#.write(to: zed.appending(path: "goggame-5.info"), atomically: true, encoding: .utf8)
         try #"{"gameId":"6","rootGameId":"1","name":"Stray"}"#.write(to: zed.appending(path: "goggame-6.info"), atomically: true, encoding: .utf8)
 
-        let game = try XCTUnwrap(GOGStore.macInstalledGames(in: applications).first)
+        let game = try XCTUnwrap(GOGStore.macInstalledGames(in: [applications]).first)
         XCTAssertEqual(game.id, "1")
         XCTAssertEqual(game.dlcIDs, ["2"])
     }
@@ -148,7 +148,7 @@ final class GOGMacBuildTests: XCTestCase {
         try #"{"gameId":"1207658924","rootGameId":"1207658924"}"#
             .write(to: resources.appending(path: "goggame-1207658924.info"), atomically: true, encoding: .utf8)
 
-        let game = try XCTUnwrap(GOGStore.macInstalledGames(in: applications).first)
+        let game = try XCTUnwrap(GOGStore.macInstalledGames(in: [applications]).first)
         XCTAssertEqual(game.folder.lastPathComponent, "Foo.app")
         XCTAssertEqual(game.folder.deletingLastPathComponent().lastPathComponent, "Games")
         XCTAssertEqual(game.app?.lastPathComponent, "Foo.app")
@@ -163,7 +163,7 @@ final class GOGMacBuildTests: XCTestCase {
         try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
         try #"{"gameId":"2006298293","rootGameId":"2006298293","name":"Samorost 1"}"#
             .write(to: resources.appending(path: "goggame-2006298293.info"), atomically: true, encoding: .utf8)
-        let game = try XCTUnwrap(GOGStore.macInstalledGames(in: base).first)
+        let game = try XCTUnwrap(GOGStore.macInstalledGames(in: [base]).first)
         XCTAssertEqual(game.id, "2006298293")
         XCTAssertEqual(game.app?.lastPathComponent, "Samorost 1.app")
         XCTAssertEqual(game.folder.lastPathComponent, "Samorost 1.app")
@@ -205,7 +205,7 @@ final class GOGMacBuildTests: XCTestCase {
         try #"{"gameId":"7","rootGameId":"7","name":"Some Game","clientId":"5150","playTasks":[{"category":"tool","type":"FileTask","path":"A Config Tool.app"},{"category":"game","isPrimary":true,"type":"FileTask","path":"Some Game.app/Contents/MacOS/Some Game"}]}"#
             .write(to: folder.appending(path: "Contents/Resources/goggame-7.info"), atomically: true, encoding: .utf8)
 
-        let game = try XCTUnwrap(GOGStore.macInstalledGames(in: applications).first)
+        let game = try XCTUnwrap(GOGStore.macInstalledGames(in: [applications]).first)
         XCTAssertEqual(game.app?.lastPathComponent, "Some Game.app")
         XCTAssertEqual(game.folder.lastPathComponent, "Some Game")
         XCTAssertEqual(game.asInstalledGame.clientID, "5150")

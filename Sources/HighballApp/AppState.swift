@@ -3544,15 +3544,19 @@ final class AppState {
 
     /// GOG Mac builds in the Mac games folder and the Applications folders, scanned off the main
     /// actor: /Applications holds every app on the Mac.
-    private func refreshGOGMacInstalls() async {
+    /// What the scan found, also when a newer scan has started since and this one's result is
+    /// not applied: an install reads its own game from it.
+    @discardableResult
+    private func refreshGOGMacInstalls() async -> [String: GOGStore.MacInstalledGame] {
         macScanGeneration += 1
         let generation = macScanGeneration
         let mac = await Task.detached { Dictionary(GOGStore.macInstalledGames().map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }.value
         // Scans overlap (the install watcher fires many times during a download): an older one
         // landing last must not bring back a game moved to the Trash since.
-        guard generation == macScanGeneration, mac != gogMacInstalled else { return }
+        guard generation == macScanGeneration, mac != gogMacInstalled else { return mac }
         gogMacInstalled = mac
         rebuildLibrary()
+        return mac
     }
 
     /// The GOG tile a program added by hand plays as (LibraryIndex.gogCoveredPins), if any, with
@@ -3717,8 +3721,7 @@ final class AppState {
                 try store.installMac(id, language: language, control: control, onLine: onLine)
             }
             busyProgress = nil; transferRate = nil
-            await refreshGOGMacInstalls()
-            guard let game = gogMacInstalled[id] else {
+            guard let game = await refreshGOGMacInstalls()[id] else {
                 throw HighballError.failed(L("The download finished, but Highball could not find the Mac version in it."))
             }
             appendLog("\(item.title): Mac version installed in \(game.folder.path), built for \(game.arch)")
@@ -3730,9 +3733,10 @@ final class AppState {
     var macGameProcesses: [String: Process] = [:]
 
     /// Plays a GOG game's Mac build as the Windows one plays: saves down from GOG's cloud first
-    /// (GOG's Mac locations, or the Windows ones a Mac folder shares, GOGSaves.macLocations), comet
-    /// beside it for achievements and the unlock card, and saves back up once it quits. The app
-    /// runs as itself, no Wine; Highball starts its executable so it knows when it has quit.
+    /// (GOG's Mac locations, GOGSaves.macLocations), comet beside it for achievements and the
+    /// unlock card, and saves back up once it quits. The app runs as itself, no Wine; Highball
+    /// starts its executable, with the play task's arguments and working folder as Galaxy passes
+    /// them, so it knows when it has quit.
     func gogPlayMac(_ item: LibraryItem) {
         guard let id = item.gogID, let mac = gogMacInstalled[id], let app = mac.app,
               let executable = Bundle(url: app)?.executableURL else {
@@ -3766,7 +3770,9 @@ final class AppState {
 
             let process = Process()
             process.executableURL = executable
-            process.currentDirectoryURL = app.deletingLastPathComponent()
+            let task = game.launchTask(), launch = task.flatMap { GOGStore.launch($0, in: game) }
+            process.arguments = launch?.arguments ?? []
+            process.currentDirectoryURL = (task?.workingDir ?? "").isEmpty ? app.deletingLastPathComponent() : launch?.workingDirectory
             do { try process.run() } catch {
                 GOGComet(store: store).stop(comet)
                 throw HighballError.failed(String(format: L("The Mac version of %@ did not start: %@"), item.title, error.localizedDescription))
@@ -3785,14 +3791,32 @@ final class AppState {
     private func watchMacGame(_ process: Process, item: LibraryItem, game: GOGStore.InstalledGame, comet: Process?,
                               cometLog: URL, saveFolders: [(GOGSaves.Location, URL)]) {
         let store = gogStore
-        let folder = game.folder, started = Date()
+        let folder = game.folder
         Task.detached { [weak self] in
-            process.waitUntilExit()
-            if await MacGameWatch.waitForHandover(from: folder, ranFor: Date().timeIntervalSince(started)) {
-                await self?.appendLog("\(item.title): the Mac version handed over to another process, which has now quit too")
+            if await Self.macGameEnd(of: process, watching: folder) {
+                await self?.appendLog("\(item.title): the Mac version handed over to another app, which has now quit too")
             }
             GOGComet(store: store).stop(comet)
             await self?.macGameEnded(item: item, game: game, cometRan: comet != nil, cometLog: cometLog, saveFolders: saveFolders)
+        }
+    }
+
+    /// Waits until a Mac game Highball started has ended: its process has quit (awaited, holding
+    /// no thread for the session), and no app from its folder runs any more
+    /// (MacGameWatch.waitForHandover). Only apps a player sees count: a crash reporter or helper
+    /// left behind would keep the game running, comet up and its saves unsynced until Highball
+    /// quits. Whether the game handed over to another app.
+    nonisolated private static func macGameEnd(of process: Process, watching folder: URL?) async -> Bool {
+        let started = Date()
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            let once = OSAllocatedUnfairLock(initialState: false)
+            let finish: @Sendable () -> Void = { if once.withLock({ let first = !$0; $0 = true; return first }) { done.resume() } }
+            process.terminationHandler = { _ in finish() }
+            if !process.isRunning { finish() }   // quit before the handler was set
+        }
+        guard let folder else { return false }
+        return await MacGameWatch.waitForHandover(from: folder, ranFor: Date().timeIntervalSince(started)) { folder in
+            MacGameWatch.processes(runningFrom: folder).filter { NSRunningApplication(processIdentifier: $0)?.activationPolicy == .regular }
         }
     }
 
@@ -3841,7 +3865,6 @@ final class AppState {
             return (location, folder)
         }
     }
-
 
     /// A GOG Mac build the player asked to move to the Trash: asked first, with what goes.
     var pendingGOGMacTrash: LibraryItem?
