@@ -461,7 +461,7 @@ struct LibraryTile: View {
             // once the player has seen what goes.
             if item.source == .gog, item.installedOnMac {
                 Button(L("Move the Mac version to the Trash…"), role: .destructive) { state.pendingGOGMacTrash = item }
-                    .disabled(state.busy)
+                    .disabled(state.busy || state.isRunningNow(item))
             }
         }
         .accessibilityLabel("\(item.title), \(item.source.rawValue)\(item.installedOnMac ? ", " + (item.source == .steam ? L("Installed in Steam for Mac") : L("Mac version installed")) : item.installed ? "" : ", " + L("Not installed"))")

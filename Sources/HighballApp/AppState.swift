@@ -3732,6 +3732,25 @@ final class AppState {
     /// placement and so Play cannot start a second copy.
     var macGameProcesses: [String: Process] = [:]
 
+    /// Whether a game runs now, either build: changing or removing a build then would pull its
+    /// files from under it.
+    func isRunningNow(_ item: LibraryItem) -> Bool {
+        macGameProcesses[item.id] != nil || runningSessions.contains { $0.libraryID == item.id }
+    }
+
+    /// True when a change to the game's builds may go ahead; otherwise says why.
+    private func refuseWhileRunning(_ item: LibraryItem) -> Bool {
+        guard isRunningNow(item) else { return true }
+        fail(HighballError.failed(String(format: L("Quit %@ first: it is running."), item.title)))
+        return false
+    }
+
+    /// Play on Mac would do nothing: the game runs already, or a GOG or Epic Mac build would wait
+    /// on the progress strip another task holds (its start runs there).
+    func macPlayUnavailable(_ item: LibraryItem) -> Bool {
+        isRunningNow(item) || ((item.source == .gog || item.source == .epic) && busy)
+    }
+
     /// Plays a GOG game's Mac build as the Windows one plays: saves down from GOG's cloud first
     /// (GOG's Mac locations, GOGSaves.macLocations), comet beside it for achievements and the
     /// unlock card, and saves back up once it quits. The app runs as itself, no Wine; Highball
@@ -3857,7 +3876,7 @@ final class AppState {
             return (try? saves.macLocations(clientID: client)) ?? nil
         }.value
         return (locations ?? []).compactMap { location in
-            guard let folder = GOGSaves.resolveMac(location.template, installFolder: game.folder) else {
+            guard let folder = GOGSaves.resolveMac(location.template, installFolder: game.folder, gameID: game.id) else {
                 appendLog("\(game.title): cloud saves at \(location.template) have no folder on this Mac, skipping that one")
                 return nil
             }
@@ -3869,17 +3888,17 @@ final class AppState {
     /// A GOG Mac build the player asked to move to the Trash: asked first, with what goes.
     var pendingGOGMacTrash: LibraryItem?
 
-    /// What the Trash takes for a GOG game's Mac build (GOGStore.macTrashTarget). Nil when there
-    /// is none, or when it would be a folder holding other apps.
+    /// What the Trash takes for a GOG game's Mac build, as the scan worked it out
+    /// (GOGStore.macTrashTarget). Nil when there is none, or when it would be a folder holding
+    /// other apps or another game's.
     func gogMacTrashTarget(for item: LibraryItem) -> URL? {
-        guard let id = item.gogID, let game = gogMacInstalled[id] else { return nil }
-        return GOGStore.macTrashTarget(for: game)
+        item.gogID.flatMap { gogMacInstalled[$0]?.trashTarget }
     }
 
     /// Moves a GOG game's Mac build to the Trash, where it can still be put back. Only once the
-    /// player said yes (pendingGOGMacTrash).
+    /// player said yes (pendingGOGMacTrash), and never while it runs.
     func gogTrashMac(_ item: LibraryItem) {
-        guard let target = gogMacTrashTarget(for: item) else { return }
+        guard refuseWhileRunning(item), let target = gogMacTrashTarget(for: item) else { return }
         NSWorkspace.shared.recycle([target]) { [weak self] _, error in
             Task { @MainActor in
                 if let error { self?.appendLog("\(item.title): could not move the Mac version to the Trash: \(error.localizedDescription)") }
@@ -4477,7 +4496,8 @@ final class AppState {
                 stage = L("Deleting the game's files")
                 try await Task.detached { try FileManager.default.removeItem(at: game.folder) }.value
             }
-            let elsewhere = gogInstalledByBottle.contains { $0.key != bottle.name && $0.value.contains { $0.id == id } }
+            let elsewhere = GOGStore.otherInstallsRemain(id, removingFrom: bottle.name, installedByBottle: gogInstalledByBottle,
+                                                         macInstalls: Set(gogMacInstalled.keys))
             store.forget(id, otherInstallsRemain: elsewhere)
             GOGSaves(store: store).forget(game)
             try? FileManager.default.removeItem(at: GOGStore.setupMarker(for: game, driveC: bottle.driveC))
