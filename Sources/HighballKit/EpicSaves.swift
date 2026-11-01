@@ -211,7 +211,7 @@ public struct EpicSaves: Sendable {
         return (existing.resolvingSymlinksInPath().pathComponents + rest).map { $0.lowercased() }
     }
 
-    static func isInside(_ path: URL, roots: [URL]) -> Bool {
+    public static func isInside(_ path: URL, roots: [URL]) -> Bool {
         let parts = components(path)
         return roots.contains { parts.starts(with: components($0)) }
     }
@@ -362,7 +362,7 @@ public struct EpicSaves: Sendable {
     /// One lock per game: a sync that starts while another runs (an upload still going when
     /// Play is pressed again) waits for it.
     private static let gameLocks = OSAllocatedUnfairLock(initialState: [String: NSLock]())
-    private static func lock(for app: String) -> NSLock {
+    static func lock(for app: String) -> NSLock {
         gameLocks.withLock { locks in
             if let lock = locks[app] { return lock }
             let lock = NSLock(); locks[app] = lock
@@ -382,9 +382,9 @@ public struct EpicSaves: Sendable {
         return Run(status: status, lines: lines.withLock { $0 })
     }
 
-    private enum Compared { case success(Check), failure(String) }
+    enum Compared { case success(Check), failure(String) }
 
-    private func compare(_ app: String, environment: [String: String], onLine: (@Sendable (String) -> Void)?) -> Compared {
+    func compare(_ app: String, environment: [String: String], onLine: (@Sendable (String) -> Void)?) -> Compared {
         do {
             let result = try run(app, direction: nil, environment: environment, onLine: onLine)
             guard result.status == 0, !result.lines.contains(where: Self.isFailure), let check = Self.check(in: result.lines) else {
@@ -525,5 +525,158 @@ public struct EpicSaves: Sendable {
             return .failed("the download from Epic failed (\(problem)), and the saves couldn't be put back automatically; their backup is in \(((backup?.path ?? backupDir.path) as NSString).abbreviatingWithTildeInPath)")
         }
         return .restored(problem)
+    }
+}
+
+// MARK: Uninstalling and putting saves back
+
+extension EpicSaves {
+    /// When Highball first installed a game into an environment through legendary and when it
+    /// installed over it again (an update or a repair), so an uninstall can tell the files the
+    /// game wrote in its folder from legendary's (GameInstallHistory). Kept in the environment,
+    /// like GOG's next to its setup marker; removed with the game.
+    public static func historyFile(app: String, driveC: URL) -> URL {
+        driveC.appending(path: "highball/epic-installs/\(app).history.json")
+    }
+
+    /// An install from before the history was kept has none: nothing tells its files apart.
+    public static func history(app: String, driveC: URL) -> GameInstallHistory {
+        GameInstallHistory.read(historyFile(app: app, driveC: driveC)) ?? GameInstallHistory()
+    }
+
+    /// A legendary install of the game into the environment ran from `start` to `end`. The first
+    /// one that `finished` starts the history at its end; after that each run, finished or not,
+    /// is a window whose changes are legendary's.
+    public static func recordInstall(app: String, driveC: URL, start: Date, end: Date, finished: Bool) {
+        var history = history(app: app, driveC: driveC)
+        if history.firstSetup != nil {
+            history.updates.append(.init(start: start, end: end))
+        } else if finished {
+            history.firstSetup = end
+        } else {
+            return
+        }
+        history.write(to: historyFile(app: app, driveC: driveC))
+    }
+
+    /// The game moved to another environment: its history goes with it.
+    public static func moveHistory(app: String, from: URL, to: URL) {
+        let source = historyFile(app: app, driveC: from), target = historyFile(app: app, driveC: to)
+        guard FileManager.default.fileExists(atPath: source.path) else { return }
+        try? FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: target)
+        try? FileManager.default.moveItem(at: source, to: target)
+    }
+
+    public static func forgetHistory(app: String, driveC: URL) {
+        try? FileManager.default.removeItem(at: historyFile(app: app, driveC: driveC))
+    }
+
+    /// The kept copy of the save folder, and of what the game wrote in its install folder.
+    public static let savesName = "saves"
+    public static let gameFolderName = "game-folder"
+
+    func backupFolder(_ app: String, _ name: String, install: URL) -> URL {
+        // The save folder's kept copies sit with its sync backups, so an unchanged one is reused.
+        backups.folder(name == Self.gameFolderName ? "epic-\(app)-\(name)" : "epic-\(app)", install: install)
+    }
+
+    /// The save folder an uninstall deals with: the one legendary stored, when it lies in the
+    /// environment, a Mac folder its user folders link to, or the install folder (where sync
+    /// would look), and isn't one sync refuses for holding more than this game's saves. With
+    /// `resolve`, a game whose folder legendary hasn't worked out yet (or worked out for another
+    /// environment) has it resolve the folder, comparing without moving anything, as a sync
+    /// starts. nil when there is none.
+    public func uninstallSaveFolder(_ app: String, install: URL, prefix: URL, resolve: Bool,
+                                    home: URL = FileManager.default.homeDirectoryForCurrentUser,
+                                    onLine: (@Sendable (String) -> Void)? = nil) -> URL? {
+        let roots = Self.allowedRoots(prefix: prefix, home: home) + [install]
+        func usable(_ folder: URL?) -> URL? {
+            guard let folder, Self.isInside(folder, roots: roots),
+                  Self.refusal(for: folder, install: install, prefix: prefix, home: home, filter: catalog(app)?.filter ?? .everything) == nil
+            else { return nil }
+            return folder
+        }
+        if let folder = usable(savePath(app)) { return folder }
+        guard resolve, supportsCloudSaves(app) else { return nil }
+        let gameLock = Self.lock(for: app)
+        gameLock.lock()
+        defer { gameLock.unlock() }
+        if let stored = savePath(app), !Self.isInside(stored, roots: roots) {
+            guard (try? forgetSavePath(app)) != nil else { return nil }
+        }
+        guard case .success = compare(app, environment: ["WINEPREFIX": prefix.path], onLine: onLine) else { return nil }
+        return usable(savePath(app))
+    }
+
+    /// Before an uninstall, copies as kept backups (never pruned): the save folder's files the
+    /// catalog's include and exclude lists pick, when `saveFolder` is given, and every file the
+    /// game wrote in its install folder since Highball installed it there, outside the runs that
+    /// installed over it (history), leaving out the save folder. Never installed through Highball
+    /// here: no install-folder copy. Returns what was kept, each with where it came from; throws
+    /// when a copy fails, and the uninstall must then stop.
+    public func backUpForUninstall(_ app: String, install: URL, prefix: URL, saveFolder: URL?) throws -> [KeptSaves.Entry] {
+        var kept: [KeptSaves.Entry] = []
+        if let saveFolder,
+           let copy = try backups.backUpLocal(saveFolder, into: backupFolder(app, Self.savesName, install: install),
+                                              filter: catalog(app)?.filter ?? .everything, kept: true) {
+            kept.append(KeptSaves.Entry(name: Self.savesName, folder: saveFolder, backup: copy, install: install, environment: prefix))
+        }
+        let history = Self.history(app: app, driveC: prefix.appending(path: "drive_c"))
+        guard history.firstSetup != nil else { return kept }
+        let skipped = saveFolder.map { $0.standardizedFileURL.path + "/" }
+        let written = try SaveBackups.files(in: install, writtenPer: history).filter { file in
+            skipped.map { !file.standardizedFileURL.path.hasPrefix($0) } ?? true
+        }
+        if !written.isEmpty,
+           let copy = try backups.backUpLocal(install, into: backupFolder(app, Self.gameFolderName, install: install), kept: true, only: written) {
+            kept.append(KeptSaves.Entry(name: Self.gameFolderName, path: "", backup: copy, place: .game))
+        }
+        return kept
+    }
+
+    /// For a player who asked for the saves to go with the game: deletes the save folder (only
+    /// the files the include and exclude lists pick, when the catalog has them) when, links
+    /// followed, it lies inside the environment's drive_c and neither holds nor sits inside
+    /// Highball's save-backups or the install folder (which the uninstall removes anyway).
+    /// Returns whether it was deleted.
+    public func removeSaves(_ app: String, folder: URL, install: URL, prefix: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: folder.path),
+              SaveBackups.mayDelete(folder, driveC: prefix.appending(path: "drive_c"), sparing: [backups.root, install]) else { return false }
+        let filter = catalog(app)?.filter ?? .everything
+        if filter.isEverything { return (try? FileManager.default.removeItem(at: folder)) != nil }
+        for file in SaveBackups.files(in: folder, matching: filter) {
+            guard (try? FileManager.default.removeItem(at: file)) != nil else { return false }
+        }
+        return true
+    }
+
+    var keptSavesFile: KeptSavesFile { KeptSavesFile(url: store.configDir.deletingLastPathComponent().appending(path: "epic-kept-saves.json")) }
+
+    /// Remembers what an uninstall kept of the game, in place of what an earlier one kept.
+    /// legendary installs a game once, so there is no other install to leave out.
+    public func keep(_ entries: [KeptSaves.Entry], of app: String) {
+        keptSavesFile.keep(entries, for: app, otherInstalls: [])
+    }
+
+    public func keptSaves() -> [String: KeptSaves] { keptSavesFile.all() }
+
+    public func markAsked(_ app: String, install: URL) { keptSavesFile.markAsked(app, install: install) }
+
+    /// Puts kept saves back into a new install of the game: the save folder's to the same place in
+    /// the environment (or the install folder, or the Mac folder it was in), the game-folder copy
+    /// to the same paths in the install folder, dated now so the next uninstall counts them as the
+    /// game's. A file already there is backed up first (kept). Returns how many files were put
+    /// back; throws, having put back what it had, when a copy fails.
+    @discardableResult
+    public func putBack(_ kept: KeptSaves, app: String, install: URL, prefix: URL) throws -> Int {
+        var count = 0
+        for entry in kept.entries {
+            guard let target = entry.folder(install: install, environment: prefix) else { continue }
+            count += try SaveBackups.putBack(entry.backup, into: target, redate: entry.name == Self.gameFolderName) { there in
+                try backups.backUpLocal(target, into: backupFolder(app, entry.name, install: install), kept: true, only: there)
+            }
+        }
+        return count
     }
 }

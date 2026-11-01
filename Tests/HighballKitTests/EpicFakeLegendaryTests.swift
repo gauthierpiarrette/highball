@@ -192,6 +192,20 @@ final class EpicFakeLegendaryTests: XCTestCase {
         XCTAssertEqual(read(folder.appending(path: "slot.sav")), "v1")
     }
 
+    /// An uninstall has legendary work out a save folder it hasn't stored yet, or stored for
+    /// another environment, comparing without moving anything; told not to, it doesn't.
+    func testAnUninstallResolvesTheSaveFolder() throws {
+        try write("save", to: folder.appending(path: "slot.sav"), at: hourAgo)
+        try cloudSave("v1", at: dayAgo)
+        XCTAssertNil(saves.uninstallSaveFolder(app, install: install, prefix: prefix, resolve: false, home: userHome))
+        XCTAssertNil(saves.savePath(app))
+        try installed(savePath: root.appending(path: "OtherEnv/drive_c/users/player/AppData/Local/Game/Saved").path)
+        let found = saves.uninstallSaveFolder(app, install: install, prefix: prefix, resolve: true, home: userHome)
+        XCTAssertEqual(found?.standardizedFileURL.path, folder.standardizedFileURL.path)
+        XCTAssertEqual(read(folder.appending(path: "slot.sav")), "save")
+        XCTAssertEqual(cloudSaveCount, 1)
+    }
+
     /// A download Highball was in the middle of when it quit: its backup goes back first.
     func testAnInterruptedDownloadIsUndoneNextTime() throws {
         try syncedOnce()

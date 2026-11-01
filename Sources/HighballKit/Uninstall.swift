@@ -65,7 +65,7 @@ public enum Uninstall {
         case .steam:
             return "Steam does the uninstalling and asks you to confirm in its own window, so its library stays right.\(size)"
         case .epic:
-            return "The Epic tools do the uninstalling, so their library stays right.\(size)"
+            return "The Epic tools do the uninstalling, so their library stays right. Keep save data first copies the game's save folder, and every file the game changed in its folder since Highball installed it, to Highball's save-backups, and offers to put them back if you install the game again. Delete save data too copies nothing and also deletes the game's save folder when it is inside this environment. Saves in Epic's cloud stay there either way.\(size)"
         case .gog:
             return "Highball deletes the game's folder from this environment. Keep save data first copies your saves from it, and every file the game changed there since you first played it, to Highball's save-backups, and offers to put them back if you install the game again. Delete save data too copies nothing and also deletes the game's save folders elsewhere in this environment. Saves in GOG's cloud stay there either way, and the game stays in your GOG library to install again.\(size)"
         case .windowsUninstaller:

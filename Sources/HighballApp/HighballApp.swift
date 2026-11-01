@@ -258,6 +258,7 @@ struct ContentView: View {
         .gogSaveConflictAsk(state)
         .gogRemovalWithoutBackupAsk(state)
         .gogPutBackSavesAsk(state)
+        .epicPutBackSavesAsk(state)
         .sheet(item: $state.engineTransition) { t in EngineTransitionSheet(transition: t) }
         #if DEBUG
         // Screenshot runs only: HB_SHOW_ENGINE_SWITCH="<environment>><engine id>" opens the switch
@@ -532,12 +533,15 @@ private extension View {
         self.alert(state.pendingUninstall.map { String(format: L("Remove %@?"), $0.item.title) } ?? "",
                isPresented: .init(get: { state.pendingUninstall != nil }, set: { if !$0 { state.pendingUninstall = nil } }),
                presenting: state.pendingUninstall) { pending in
-            if case .gog = pending.route {
+            switch pending.route {
+            case .gog, .epic:
                 // Keeping the saves is the answer Return gives.
                 Button(L("Keep save data")) { state.uninstallConfirmed() }.keyboardShortcut(.defaultAction)
                 Button(L("Delete save data too"), role: .destructive) { state.uninstallConfirmed(deleteSaves: true) }
-            } else if Uninstall.isActionable(pending.route) {
-                Button(L("Remove"), role: .destructive) { state.uninstallConfirmed() }
+            default:
+                if Uninstall.isActionable(pending.route) {
+                    Button(L("Remove"), role: .destructive) { state.uninstallConfirmed() }
+                }
             }
             Button(L("Cancel"), role: .cancel) { state.pendingUninstall = nil }
         } message: { pending in
@@ -572,6 +576,20 @@ private extension View {
             Button(L("Not now"), role: .cancel) { state.gogPutBackSaves(false) }
         } message: { pending in
             Text(String(format: L("Highball kept %@'s saves when it was removed. Put them back copies them into the game's folder; anything already there is copied to save-backups first."), pending.title))
+        }
+    }
+
+    /// An uninstall kept this Epic game's saves, and it is installed again: offered once per install.
+    @MainActor func epicPutBackSavesAsk(_ state: AppState) -> some View {
+        self.alert(state.epicSavesToPutBack.map { String(format: L("Put back your saves from %@?"),
+                                                         $0.kept.date.formatted(date: .abbreviated, time: .omitted)) } ?? "",
+               // As GOG's: the buttons answer, the dismissal never answers the next game's question.
+               isPresented: .init(get: { state.epicSavesToPutBack != nil }, set: { _ in }),
+               presenting: state.epicSavesToPutBack) { _ in
+            Button(L("Put them back")) { state.epicPutBackSaves(true) }.keyboardShortcut(.defaultAction)
+            Button(L("Not now"), role: .cancel) { state.epicPutBackSaves(false) }
+        } message: { pending in
+            Text(String(format: L("Highball kept %@'s saves when it was removed. Put them back copies them to where they were; anything already there is copied to save-backups first."), pending.title))
         }
     }
 

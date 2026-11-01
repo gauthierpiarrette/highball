@@ -163,13 +163,9 @@ public struct GOGSaves: Sendable {
     /// save-backups or the game's folder is left alone too. Returns what was removed and what
     /// was left for that reason.
     public func removeSaves(_ plan: UninstallPlan, game: GOGStore.InstalledGame, driveC: URL) -> (removed: [URL], leftAlone: [URL]) {
-        func path(_ url: URL) -> String { url.resolvingSymlinksInPath().standardizedFileURL.path }
-        func overlap(_ a: String, _ b: String) -> Bool { a == b || a.hasPrefix(b + "/") || b.hasPrefix(a + "/") }
-        let keep = [path(backupsDir), path(game.folder)], environment = path(driveC) + "/"
         var removed: [URL] = [], leftAlone: [URL] = []
         for folder in plan.outside.map(\.folder) where FileManager.default.fileExists(atPath: folder.path) {
-            let real = path(folder)
-            guard real.hasPrefix(environment), !keep.contains(where: { overlap(real, $0) }) else { leftAlone.append(folder); continue }
+            guard SaveBackups.mayDelete(folder, driveC: driveC, sparing: [backupsDir, game.folder]) else { leftAlone.append(folder); continue }
             if (try? FileManager.default.removeItem(at: folder)) != nil { removed.append(folder) }
         }
         return (removed, leftAlone)
@@ -236,13 +232,9 @@ public struct GOGSaves: Sendable {
     /// location GOG names, so a game without cloud saves has one too.
     public static let gameFolder = Location(name: "game-folder", template: "<?INSTALL?>")
 
-    /// The files under `folder` the game wrote, by the install's history, links counted by what
-    /// they point at.
+    /// The files under `folder` the game wrote, by the install's history (SaveBackups).
     static func files(in folder: URL, writtenPer history: GOGStore.InstallHistory) throws -> [URL] {
-        try walk(folder).filter { file in
-            let changed = try? file.resolvingSymlinksInPath().resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-            return history.isGameWritten(changed ?? .distantPast)
-        }
+        try SaveBackups.files(in: folder, writtenPer: history)
     }
 
     /// Before an uninstall, backs up (kept) every file the game wrote in its own folder: changed
@@ -263,11 +255,7 @@ public struct GOGSaves: Sendable {
     }
 
     /// How many files a backup holds and their size, for the log.
-    public static func contents(of backup: URL) -> (files: Int, bytes: Int64) {
-        let all = files(in: backup)
-        let bytes = all.reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
-        return (all.count, bytes)
-    }
+    public static func contents(of backup: URL) -> (files: Int, bytes: Int64) { SaveBackups.contents(of: backup) }
 
     /// GOG's whole cloud listing for the game, from a gogdl run that can't move anything: an
     /// empty folder and a location name no cloud file starts with, so gogdl finds no files on
@@ -558,59 +546,33 @@ public struct GOGSaves: Sendable {
     // MARK: Putting saves back
 
     /// What an uninstall kept of a game's saves, so installing it again can put them back.
-    public struct KeptSaves: Codable, Sendable, Equatable {
-        public struct Entry: Codable, Sendable, Equatable {
-            /// The location's name, or gameFolder's.
-            public let name: String
-            /// Where its files sat, relative to the game's folder; empty for the folder itself.
-            public let path: String
-            public let backup: URL
-        }
-        public var date: Date
-        public var entries: [Entry]
-        /// Install folders already asked, whatever the answer: never asked again.
-        public var asked: [String]
-    }
+    public typealias KeptSaves = HighballKit.KeptSaves
 
-    var keptSavesFile: URL { store.dir.appending(path: "kept-saves.json") }
+    var keptSavesFile: KeptSavesFile { KeptSavesFile(url: store.dir.appending(path: "kept-saves.json")) }
 
     /// Every game's kept saves, by game id.
-    public func keptSaves() -> [String: KeptSaves] {
-        (try? JSONDecoder().decode([String: KeptSaves].self, from: Data(contentsOf: keptSavesFile))) ?? [:]
-    }
-
-    private static let keptSavesLock = NSLock()
-    private func updateKeptSaves(_ change: (inout [String: KeptSaves]) -> Void) {
-        Self.keptSavesLock.withLock {
-            var all = keptSaves()
-            change(&all)
-            store.secureDirectory()
-            try? JSONEncoder().encode(all).write(to: keptSavesFile, options: .atomic)
-        }
-    }
+    public func keptSaves() -> [String: KeptSaves] { keptSavesFile.all() }
 
     /// Remembers the backups an uninstall kept of `game`, each with the folder it came from, in
-    /// place of what an earlier uninstall kept: a location this one had nothing for never brings
-    /// back an older copy. `otherInstalls` (copies of the game still in other environments) are never asked: they
-    /// still have their own saves.
+    /// place of what an earlier uninstall kept (KeptSavesFile.keep). `otherInstalls` (copies of
+    /// the game still in other environments) are never asked: they still have their own saves.
     public func keep(_ backups: [(name: String, folder: URL, backup: URL)], of game: GOGStore.InstalledGame,
                      otherInstalls: [URL]) {
         let entries = backups.map { KeptSaves.Entry(name: $0.name, path: $0.folder == game.folder ? "" : Self.relativePath(of: $0.folder, in: game.folder),
                                                     backup: $0.backup) }
-        updateKeptSaves { all in
-            all[game.id] = entries.isEmpty ? nil : KeptSaves(date: Date(), entries: entries, asked: otherInstalls.map(\.standardizedFileURL.path))
-        }
+        store.secureDirectory()
+        keptSavesFile.keep(entries, for: game.id, otherInstalls: otherInstalls)
     }
 
     /// The install was asked about putting saves back: it is not asked again.
     public func markAsked(_ game: GOGStore.InstalledGame) {
-        updateKeptSaves { $0[game.id]?.asked.append(game.folder.standardizedFileURL.path) }
+        store.secureDirectory()
+        keptSavesFile.markAsked(game.id, install: game.folder)
     }
 
     /// The kept saves to offer this install: nil when there are none or it was asked already.
     public static func toOffer(_ kept: KeptSaves?, to game: GOGStore.InstalledGame) -> KeptSaves? {
-        guard let kept, !kept.asked.contains(game.folder.standardizedFileURL.path) else { return nil }
-        return kept
+        KeptSavesFile.toOffer(kept, install: game.folder)
     }
 
     /// Puts kept saves back into an install of the game: each backup's files to the same place
@@ -622,22 +584,9 @@ public struct GOGSaves: Sendable {
     public func putBack(_ kept: KeptSaves, into game: GOGStore.InstalledGame) throws -> Int {
         var count = 0
         for entry in kept.entries {
-            let target = entry.path.isEmpty ? game.folder : game.folder.appending(path: entry.path)
-            let files = try Self.walk(entry.backup).map { ($0, Self.relativePath(of: $0, in: entry.backup)) }
-            let there = files.map { target.appending(path: $0.1) }.filter { FileManager.default.fileExists(atPath: $0.path) }
-            if !there.isEmpty {
+            guard let target = entry.folder(install: game.folder, environment: nil) else { continue }
+            count += try SaveBackups.putBack(entry.backup, into: target, redate: entry.name == Self.gameFolder.name) { there in
                 try backUpLocal(game, location: Location(name: entry.name, template: ""), folder: target, kept: true, only: there)
-            }
-            for (file, path) in files {
-                // Through a link, as gogdl writes.
-                let copy = target.appending(path: path).resolvingSymlinksInPath()
-                try FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
-                if FileManager.default.fileExists(atPath: copy.path) { try FileManager.default.removeItem(at: copy) }
-                try FileManager.default.copyItem(at: file, to: copy)
-                if entry.name == Self.gameFolder.name {
-                    try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: copy.path)
-                }
-                count += 1
             }
         }
         return count
