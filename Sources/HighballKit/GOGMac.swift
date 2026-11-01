@@ -63,12 +63,15 @@ extension GOGStore {
         public var clientID: String? = nil
         /// The info file's play tasks, what Galaxy's Play button runs.
         public var tasks: [PlayTask] = []
+        /// The DLC installed with it: the other info files beside the game's own whose root game is
+        /// this one.
+        public var dlcIDs: [String] = []
 
         /// The same game as the installed-game record the Windows paths take, so the save sync,
         /// comet's achievement lookup and the rest run unchanged. Its folder keeps the Mac build's
         /// sync history apart from a Windows copy's.
         public var asInstalledGame: InstalledGame {
-            InstalledGame(id: id, title: title, folder: folder, buildID: buildID, clientID: clientID, dlcIDs: [], tasks: tasks)
+            InstalledGame(id: id, title: title, folder: folder, buildID: buildID, clientID: clientID, dlcIDs: dlcIDs, tasks: tasks)
         }
 
     }
@@ -150,9 +153,12 @@ extension GOGStore {
         // opens), not the first by name; none named, the first.
         let app = home ?? taskApp(tasks, in: own, among: apps) ?? apps.first
         let named = home.map { $0.deletingPathExtension().lastPathComponent } ?? folder.lastPathComponent
+        // DLC sits beside the game's own info and names it as its root. Only the same place's: a
+        // folder of apps holds other games' infos, each its own root.
+        let dlcs = infos.filter { $0.1 == home && $0.0.gameId != base.gameId && $0.0.rootGameId == base.gameId }.map { $0.0.gameId }.sorted()
         return MacInstalledGame(id: base.gameId, title: base.name ?? named, folder: own,
                                 app: app, buildID: base.buildId, arch: app.map(MacBinaryArch.ofApp(at:)) ?? .unknown,
-                                clientID: base.clientId, tasks: tasks)
+                                clientID: base.clientId, tasks: tasks, dlcIDs: dlcs)
     }
 
     /// The app among `apps` that the primary play task (else the first file task) points at or

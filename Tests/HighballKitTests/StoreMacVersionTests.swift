@@ -96,6 +96,26 @@ final class GOGMacBuildTests: XCTestCase {
         XCTAssertEqual(games.first?.app?.lastPathComponent, "Samorost 1.app")
         XCTAssertEqual(games.first?.folder.lastPathComponent, "Samorost 1.app", "the info sits in the app, so the app is the game's folder")
         XCTAssertEqual(games.first?.buildID, "55")
+        XCTAssertEqual(games.first?.dlcIDs, ["99"])
+        XCTAssertEqual(games.first?.asInstalledGame.dlcIDs, ["99"], "the record the Windows paths take keeps the DLC")
+    }
+
+    /// DLC is the info beside the game's own that names it as root: never another app's info in
+    /// the same folder of apps, whether that app is another game or names this one.
+    func testDLCIsOnlyTheInfoBesideTheGamesOwn() throws {
+        let applications = FileManager.default.temporaryDirectory.appending(path: "apps-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: applications) }
+        let games = applications.appending(path: "Games")
+        let foo = games.appending(path: "Foo.app/Contents/Resources"), zed = games.appending(path: "Zed.app/Contents/Resources")
+        for folder in [foo, zed] { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        try #"{"gameId":"1","rootGameId":"1","name":"Foo"}"#.write(to: foo.appending(path: "goggame-1.info"), atomically: true, encoding: .utf8)
+        try #"{"gameId":"2","rootGameId":"1","name":"Foo DLC"}"#.write(to: foo.appending(path: "goggame-2.info"), atomically: true, encoding: .utf8)
+        try #"{"gameId":"5","name":"Zed"}"#.write(to: zed.appending(path: "goggame-5.info"), atomically: true, encoding: .utf8)
+        try #"{"gameId":"6","rootGameId":"1","name":"Stray"}"#.write(to: zed.appending(path: "goggame-6.info"), atomically: true, encoding: .utf8)
+
+        let game = try XCTUnwrap(GOGStore.macInstalledGames(in: applications).first)
+        XCTAssertEqual(game.id, "1")
+        XCTAssertEqual(game.dlcIDs, ["2"])
     }
 
     /// An app among others in a folder of /Applications (/Applications/Games/Foo.app): the game,
@@ -151,6 +171,7 @@ final class GOGMacBuildTests: XCTestCase {
         XCTAssertEqual(games.map(\.id), ["1423049311"])
         XCTAssertEqual(games.first?.app?.lastPathComponent, "Cyberpunk2077.app")
         XCTAssertEqual(games.first?.folder.lastPathComponent, "Cyberpunk 2077")
+        XCTAssertEqual(games.first?.dlcIDs, ["1256837418"])
     }
 
     /// A folder with several apps beside its info opens the one the primary play task names, not
