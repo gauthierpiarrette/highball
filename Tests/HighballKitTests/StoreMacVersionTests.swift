@@ -263,6 +263,22 @@ final class GOGMacSavesTests: XCTestCase {
         XCTAssertNil(GOGSaves.resolveMac("<?DOCUMENTS?>", installFolder: install, home: home))
         XCTAssertNil(GOGSaves.resolveMac("<?DOCUMENTS?>/../..", installFolder: install, home: home))
         XCTAssertNil(GOGSaves.resolveMac("<?SOMETHING_NEW?>/x", installFolder: install, home: home))
+        // A variable reaching into a known folder names all of it, which gogdl would empty of
+        // whatever the cloud lacks.
+        for whole in ["<?LIBRARY?>/Preferences", "<?LIBRARY?>/Application Support", "<?LIBRARY?>/Caches",
+                      "<?LIBRARY?>/Containers", "<?LIBRARY?>/Group Containers", "<?LIBRARY?>/preferences/",
+                      "<?LIBRARY?>", "<?PREFERENCES?>", "<?APPLICATION_SUPPORT?>", "<?CACHES?>",
+                      "<?LIBRARY?>/Mobile Documents/com~apple~CloudDocs", "<?LIBRARY?>/CloudStorage/Dropbox",
+                      "<?LIBRARY?>/Containers/com.studio.game", "<?DOCUMENTS?>/../Desktop"] {
+            XCTAssertNil(GOGSaves.resolveMac(whole, installFolder: install, home: home), whole)
+        }
+        XCTAssertEqual(GOGSaves.resolveMac("<?LIBRARY?>/Preferences/Studio Game", installFolder: install, home: home)?.path,
+                       "/Users/someone/Library/Preferences/Studio Game")
+        XCTAssertEqual(GOGSaves.resolveMac("<?LIBRARY?>/Containers/com.studio.game/Data/Saves", installFolder: install, home: home)?.path,
+                       "/Users/someone/Library/Containers/com.studio.game/Data/Saves")
+        XCTAssertEqual(GOGSaves.resolveMac("<?DOCUMENTS?>/Studio", installFolder: install, home: home)?.path, "/Users/someone/Documents/Studio")
+        XCTAssertEqual(GOGSaves.resolveMac("<?INSTALL?>/saves", installFolder: home.appending(path: "Applications/Highball Games/Game.app"), home: home)?.path,
+                       "/Users/someone/Applications/Highball Games/Game.app/saves")
     }
 
     func testSyncNamesTheSystemOfTheLocation() {

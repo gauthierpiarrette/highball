@@ -114,7 +114,9 @@ public struct GOGSaves: Sendable {
     }
 
     /// A Mac location as a folder, from GOG's Mac variables.
-    /// Never a whole known folder (gogdl deletes local files the cloud lacks).
+    /// Never a whole known folder (gogdl deletes local files the cloud lacks): not the variable's
+    /// own folder, and not one a variable reaches into either (`<?LIBRARY?>/Preferences` is all
+    /// of ~/Library/Preferences), see `isSharedFolder`.
     public static func resolveMac(_ template: String, installFolder: URL,
                                   home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL? {
         let values: [String: URL] = [
@@ -132,7 +134,27 @@ public struct GOGSaves: Sendable {
         guard !path.contains("%"), !path.contains("<?") else { return nil }
         let parts = path.split(separator: "/").map(String.init)
         guard !parts.isEmpty, !parts.contains(where: { $0 == "." || $0 == ".." }) else { return nil }
-        return parts.reduce(base) { $0.appending(path: $1) }
+        let folder = parts.reduce(base) { $0.appending(path: $1) }
+        return isSharedFolder(folder, home: home) ? nil : folder
+    }
+
+    /// A folder of the home that holds more than one game's files, which a save sync must never
+    /// be given whole: the home itself, every folder straight inside it (Documents, Library,
+    /// Desktop and the rest), every folder straight inside its Library (Preferences, Application
+    /// Support, Caches, Containers, Group Containers, Saved Application State and the rest), and
+    /// the top of a synced drive or a container there (iCloud Drive's com~apple~CloudDocs, a
+    /// CloudStorage provider's folder, an app's container). A game's own folder sits deeper, as
+    /// in ~/Library/Application Support/<studio>/<game>. Compared without case, as the Mac's
+    /// disks are.
+    static func isSharedFolder(_ folder: URL, home: URL) -> Bool {
+        let homeParts = home.standardizedFileURL.pathComponents.map { $0.lowercased() }
+        let parts = folder.standardizedFileURL.pathComponents.map { $0.lowercased() }
+        guard parts.count >= homeParts.count, Array(parts.prefix(homeParts.count)) == homeParts else { return false }
+        let inside = Array(parts.dropFirst(homeParts.count))
+        if inside.count <= 1 { return true }
+        guard inside[0] == "library" else { return false }
+        if inside.count == 2 { return true }
+        return inside.count == 3 && ["mobile documents", "cloudstorage", "containers", "group containers"].contains(inside[1])
     }
 
     /// A location as a folder on the Mac, inside the environment. GOG's variables are the Windows
