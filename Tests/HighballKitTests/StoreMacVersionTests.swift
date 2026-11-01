@@ -158,6 +158,22 @@ final class EpicMacBuildTests: XCTestCase {
         XCTAssertEqual(EpicStore.installArguments(appName: "Garlic", basePath: "/w")[3], "Windows")
     }
 
+    /// Epic's catalog can list Mac with no Mac asset, and legendary's install then falls back to
+    /// Windows: the Windows copy is removed only when `info` names a Mac version.
+    func testAMacBuildIsThereOnlyWhenLegendaryNamesAMacVersion() {
+        let both = #"[cli] INFO: Getting game metadata... {"game": {"app_name": "Garlic", "platform_versions": {"Windows": "1.0-w", "Mac": "1.0-m"}}, "install": null, "manifest": null}"#
+        let windowsOnly = #"{"game": {"app_name": "Duck", "platform_versions": {"Windows": "2.0"}}, "install": {"platform": "Windows"}, "manifest": {"disk_size": 5}}"#
+        XCTAssertTrue(EpicStore.listsBuild(Data(both.utf8), platform: "Mac"))
+        XCTAssertFalse(EpicStore.listsBuild(Data(windowsOnly.utf8), platform: "Mac"), "a Windows manifest from the install is not a Mac build")
+        XCTAssertFalse(EpicStore.listsBuild(Data(#"{"game": null, "install": null, "manifest": null}"#.utf8), platform: "Mac"))
+        XCTAssertFalse(EpicStore.listsBuild(Data("No game information available.".utf8), platform: "Mac"))
+    }
+
+    func testTheFallBackToWindowsIsSeen() {
+        XCTAssertTrue(EpicStore.fellBackToWindows(#"[cli] WARNING: App has no asset for platform "Mac", falling back to "Windows"."#))
+        XCTAssertFalse(EpicStore.fellBackToWindows(#"[cli] INFO: Preparing download for "Garlic"..."#))
+    }
+
     func testInstallRecordSaysWhichBuild() throws {
         let json = #"[{"app_name":"Garlic","install_path":"/m/Enter the Gungeon","platform":"Mac"},{"app_name":"Duck","install_path":"/w","platform":"Windows"},{"app_name":"Old","install_path":"/o"}]"#
         let games = try JSONDecoder().decode([EpicStore.InstalledGame].self, from: Data(json.utf8))

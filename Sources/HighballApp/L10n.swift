@@ -449,6 +449,11 @@ enum L10n {
         "Switch to the Mac version…": "Passer à la version Mac…",
         "Epic keeps one version of a game installed at a time, so the Windows version is removed first, then the Mac version downloads. Your Highball settings for the game stay.":
             "Epic n’installe qu’une version d’un jeu à la fois : la version Windows est d’abord supprimée, puis la version Mac est téléchargée. Vos réglages Highball pour ce jeu sont conservés.",
+        "Asking Epic about the Mac version": "Demande des informations sur la version Mac à Epic",
+        "Highball could not ask Epic whether a Mac build of this game is there to download, so nothing was changed. Check your connection, then try again.":
+            "Highball n’a pas pu demander à Epic si une version Mac de ce jeu est disponible au téléchargement, donc rien n’a été modifié. Vérifiez votre connexion, puis réessayez.",
+        "Epic lists a Mac version of this game, but has no Mac build to download for your account, so nothing was changed.":
+            "Epic indique une version Mac de ce jeu, mais n’en propose aucune à télécharger pour votre compte, donc rien n’a été modifié.",
         "Remove the Mac version of %@?": "Supprimer la version Mac de %@ ?",
         "Remove the Mac version…": "Supprimer la version Mac…",
         "Epic removes its files. Playing it again means downloading it again.": "Epic supprime ses fichiers. Pour y rejouer, il faudra le télécharger à nouveau.",

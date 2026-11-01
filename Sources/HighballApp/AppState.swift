@@ -3474,21 +3474,33 @@ final class AppState {
     }
 
     /// Installs an Epic game's Mac build. With the Windows build installed, that one is removed
-    /// first through legendary, once the player has said yes (pendingEpicMacSwitch).
+    /// first through legendary, once the player has said yes (pendingEpicMacSwitch). Before
+    /// anything is removed, legendary is asked whether Epic has a Mac build for this account:
+    /// with none, its install would fall back to the Windows build and put it in the Mac games
+    /// folder, outside every environment, after the Windows copy was already gone.
     func epicInstallMac(_ item: LibraryItem, replacingWindows: Bool = false) {
         guard let app = item.epicAppName else { return }
         if item.installed && !replacingWindows { pendingEpicMacSwitch = item; return }
         let store = epicStore
-        var removeWindows: (@MainActor () async throws -> Void)?
-        if replacingWindows {
-            removeWindows = { [self] in
-                stage = String(format: L("Removing the Windows version of %@"), item.title)
-                let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
-                let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
-                guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall", status: status, output: "see the log above") }
+        let checkThenRemoveWindows: @MainActor () async throws -> Void = { [self] in
+            stage = L("Asking Epic about the Mac version")
+            let hasMac: Bool
+            do {
+                hasMac = try await Task.detached { try store.hasMacBuild(app) }.value
+            } catch {
+                appendLog("\(item.title): legendary info --platform Mac failed: \(error)")
+                throw HighballError.failed(L("Highball could not ask Epic whether a Mac build of this game is there to download, so nothing was changed. Check your connection, then try again."))
             }
+            guard hasMac else {
+                throw HighballError.failed(L("Epic lists a Mac version of this game, but has no Mac build to download for your account, so nothing was changed."))
+            }
+            guard replacingWindows else { return }
+            stage = String(format: L("Removing the Windows version of %@"), item.title)
+            let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
+            let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
+            guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall", status: status, output: "see the log above") }
         }
-        epicDownload(title: String(format: L("Installing the Mac version of %@"), item.title), before: removeWindows) { store, control, onLine in
+        epicDownload(title: String(format: L("Installing the Mac version of %@"), item.title), before: checkThenRemoveWindows) { store, control, onLine in
             try store.installMac(app, control: control, onLine: onLine)
         }
     }
