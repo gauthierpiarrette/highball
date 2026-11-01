@@ -3452,6 +3452,14 @@ final class AppState {
     /// asked first, as the Mac build is removed.
     var pendingEpicWindowsSwitch: LibraryItem?
 
+    /// Removes an Epic game's installed build through legendary (one per game), its lines in the log.
+    private func legendaryUninstall(_ app: String) async throws {
+        let store = epicStore
+        let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
+        let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
+        guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall", status: status, output: "see the log above") }
+    }
+
     /// Removes an Epic game's Mac build through legendary, then installs the Windows one in the
     /// default environment: legendary keeps one build per game.
     func epicSwitchToWindows(_ item: LibraryItem) {
@@ -3460,12 +3468,11 @@ final class AppState {
             fail(HighballError.failed(L("Make an environment first: the Windows version installs into one.")))
             return
         }
-        let store = epicStore
         let removeMac: @MainActor () async throws -> Void = { [self] in
+            try Task.checkCancellation()
             stage = String(format: L("Removing the Mac version of %@"), item.title)
-            let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
-            let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
-            guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall", status: status, output: "see the log above") }
+            try await legendaryUninstall(app)
+            if Task.isCancelled { appendLog("\(item.title): the Mac version was removed before Stop; Install downloads the Windows version") }
         }
         epicDownload(title: "Installing \(game.app_title)", before: removeMac) { store, control, onLine in
             try store.install(app, into: bottle, control: control, onLine: onLine)
@@ -3500,10 +3507,12 @@ final class AppState {
             case .removeWindowsThenInstall:
                 break
             }
+            // Stop before this point changes nothing. Once legendary is removing the Windows copy
+            // it finishes, and a Stop pressed meanwhile is said to have come after it.
+            try Task.checkCancellation()
             stage = String(format: L("Removing the Windows version of %@"), item.title)
-            let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
-            let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
-            guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall", status: status, output: "see the log above") }
+            try await legendaryUninstall(app)
+            if Task.isCancelled { appendLog("\(item.title): the Windows version was removed before Stop; Install the Mac version downloads it") }
         }
         epicDownload(title: String(format: L("Installing the Mac version of %@"), item.title), before: checkThenRemoveWindows) { store, control, onLine in
             try store.installMac(app, control: control, onLine: onLine)
@@ -3537,7 +3546,11 @@ final class AppState {
             }
             macGameProcesses[item.id] = p
             recordPlay(item)
-            watchEpicMacGame(p, item: item, folder: epicMacInstalls[app].map { URL(fileURLWithPath: $0, isDirectory: true) })
+            // The install's folder, else the app legendary's launch runs from.
+            let folder = epicMacInstalls[app].map { URL(fileURLWithPath: $0, isDirectory: true) }
+                ?? sequence(first: info.executable, next: { $0.pathComponents.count > 1 ? $0.deletingLastPathComponent() : nil })
+                    .first { $0.pathExtension == "app" }
+            watchEpicMacGame(p, item: item, folder: folder)
         }
     }
 
@@ -3547,12 +3560,10 @@ final class AppState {
     /// nothing runs from the game's folder (MacGameWatch). Never the Mac games folder itself,
     /// which holds every other game.
     private func watchEpicMacGame(_ process: Process, item: LibraryItem, folder: URL?) {
-        let started = Date()
         let watched = folder.flatMap { $0.standardizedFileURL.path == GOGStore.macGamesDir.standardizedFileURL.path ? nil : $0 }
         Task.detached { [weak self] in
-            process.waitUntilExit()
-            if let watched, await MacGameWatch.waitForHandover(from: watched, ranFor: Date().timeIntervalSince(started)) {
-                await self?.appendLog("\(item.title): the Mac version handed over to another process, which has now quit too")
+            if await Self.macGameEnd(of: process, watching: watched) {
+                await self?.appendLog("\(item.title): the Mac version handed over to another app, which has now quit too")
             }
             await self?.epicMacGameEnded(item)
         }
@@ -3563,11 +3574,8 @@ final class AppState {
     /// Removes an Epic game's Mac build through legendary, so its library stays right.
     func epicUninstallMac(_ item: LibraryItem) {
         guard let app = item.epicAppName else { return }
-        let store = epicStore
         runBusy(String(format: L("Removing the Mac version of %@"), item.title), expected: nil) { [self] in
-            let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
-            let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
-            guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall", status: status, output: "see the log above") }
+            try await legendaryUninstall(app)
             await MainActor.run { self.epicRefresh() }
         }
     }
