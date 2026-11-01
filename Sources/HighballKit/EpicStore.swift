@@ -108,6 +108,9 @@ public struct EpicStore: Sendable {
         /// 2:3 cover for the future unified library. Same type mapping Heroic uses.
         public let artworkWide: URL?
         public let artworkTall: URL?
+        /// The catalog item names a cloud save folder (metadata.customAttributes.CloudSaveFolder):
+        /// Epic's cloud keeps its saves when Epic's own launcher syncs them.
+        public var cloudSaves = false
 
         public init(app_name: String, app_title: String, artworkWide: URL? = nil, artworkTall: URL? = nil) {
             self.app_name = app_name; self.app_title = app_title
@@ -115,8 +118,9 @@ public struct EpicStore: Sendable {
         }
 
         private enum CodingKeys: String, CodingKey { case app_name, app_title, metadata }
-        private enum MetadataKeys: String, CodingKey { case keyImages }
+        private enum MetadataKeys: String, CodingKey { case keyImages, customAttributes }
         private struct KeyImage: Codable { let type: String?; let url: String? }
+        private struct CustomAttribute: Codable { let value: String? }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -125,6 +129,8 @@ public struct EpicStore: Sendable {
             var images: [KeyImage] = []
             if let md = try? c.nestedContainer(keyedBy: MetadataKeys.self, forKey: .metadata) {
                 images = (try? md.decode([KeyImage].self, forKey: .keyImages)) ?? []
+                let attributes = (try? md.decode([String: CustomAttribute].self, forKey: .customAttributes)) ?? [:]
+                cloudSaves = !(attributes["CloudSaveFolder"]?.value ?? "").isEmpty
             }
             func first(_ types: [String]) -> URL? {
                 for t in types {
@@ -153,6 +159,10 @@ public struct EpicStore: Sendable {
     public struct InstalledGame: Codable, Sendable {
         public let app_name: String
         public let install_path: String?
+        /// legendary's record of the installed size, in bytes.
+        public var install_size: Int64? = nil
+        /// Where the game keeps the saves legendary syncs, once it has synced them.
+        public var save_path: String? = nil
     }
 
     /// Everything legendary has installed, with where. Legendary's install state is global

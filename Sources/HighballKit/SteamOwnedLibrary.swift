@@ -12,11 +12,13 @@ public struct OwnedSteamGame: Sendable, Hashable {
     public var listsMac = false
     /// What appinfo says about the Mac build: 64-bit, 32-bit only, or none (MacAppInfoBuild).
     public var macBuild: MacAppInfoBuild = .absent
+    /// appinfo's `ufs` gives the game room in Steam Cloud, which Steam syncs per account.
+    public var steamCloud = false
 
     public init(appid: Int, name: String, localCapsule: URL? = nil, localHeader: URL? = nil, listsMac: Bool = false,
-                macBuild: MacAppInfoBuild = .absent) {
+                macBuild: MacAppInfoBuild = .absent, steamCloud: Bool = false) {
         self.appid = appid; self.name = name; self.localCapsule = localCapsule; self.localHeader = localHeader
-        self.listsMac = listsMac; self.macBuild = macBuild
+        self.listsMac = listsMac; self.macBuild = macBuild; self.steamCloud = steamCloud
     }
 
     /// Local art first: newer apps keep theirs at hashed store paths, so the fixed CDN name
@@ -61,7 +63,7 @@ public enum SteamOwnedLibrary {
             return OwnedSteamGame(appid: appid, name: name, localCapsule: art["library_600x900.jpg"],
                                   localHeader: art["library_header.jpg"] ?? art["header.jpg"],
                                   listsMac: app.oslist?.lowercased().contains("macos") ?? false,
-                                  macBuild: app.macBuild)
+                                  macBuild: app.macBuild, steamCloud: app.steamCloudQuota > 0)
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
@@ -103,6 +105,23 @@ public enum SteamAppInfo {
         public var osextended: String? = nil
         /// The `osarch` of each macOS launch entry under `config.launch`, "" for one naming none.
         public var macLaunchArchs: [String] = []
+        /// The app's depots: the pieces Steam downloads, with their sizes (SteamDownloadSize).
+        public var depots: [Depot] = []
+        /// `ufs.quota`: the room the game has in Steam Cloud, 0 for a game Steam Cloud does not keep.
+        public var steamCloudQuota: Int64 = 0
+
+        public struct Depot: Sendable, Equatable {
+            public let id: Int
+            public var oslist = ""
+            public var language = ""
+            /// Set for a depot only some regions or editions get (low-violence, Steam China).
+            public var restricted = false
+            /// The DLC app whose purchase brings the depot, 0 for the game's own.
+            public var dlcAppID = 0
+            /// Installed and download size of the public branch's manifest, 0 when Steam's data has none.
+            public var size: Int64 = 0
+            public var download: Int64 = 0
+        }
 
         public var macBuild: MacAppInfoBuild {
             MacAppInfoBuild(oslist: oslist, osextended: osextended, macLaunchArchs: macLaunchArchs)
@@ -147,8 +166,18 @@ public enum SteamAppInfo {
                 .compactMap { $0.object?["config"]?.object }
                 .filter { ($0["oslist"]?.string ?? "").lowercased().contains("macos") }
                 .map { $0["osarch"]?.string ?? "" }.sorted()
+            let depots = (info["depots"]?.object ?? [:]).compactMap { key, node -> App.Depot? in
+                guard let id = Int(key), let o = node.object, o["sharedinstall"] == nil, o["depotfromapp"] == nil else { return nil }
+                let config = o["config"]?.object ?? [:]
+                let manifest = o["manifests"]?.object?["public"]?.object
+                return App.Depot(id: id, oslist: config["oslist"]?.string ?? "", language: config["language"]?.string ?? "",
+                                 restricted: config["lowviolence"]?.string == "1" || config["realm"] != nil,
+                                 dlcAppID: Int(o["dlcappid"]?.string ?? "") ?? 0,
+                                 size: Int64(manifest?["size"]?.string ?? "") ?? 0, download: Int64(manifest?["download"]?.string ?? "") ?? 0)
+            }.sorted { $0.id < $1.id }
             apps[appid] = App(name: common?["name"]?.string, type: common?["type"]?.string, oslist: common?["oslist"]?.string,
-                              osextended: common?["osextended"]?.string, macLaunchArchs: macArchs)
+                              osextended: common?["osextended"]?.string, macLaunchArchs: macArchs, depots: depots,
+                              steamCloudQuota: Int64(info["ufs"]?.object?["quota"]?.string ?? "") ?? 0)
         }
         return apps
     }
