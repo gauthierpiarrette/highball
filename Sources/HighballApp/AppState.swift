@@ -3947,7 +3947,8 @@ final class AppState {
             fail(HighballError.failed(String(format: L("Highball could not find the Mac version of %@ to open."), item.title)))
             return
         }
-        if macGameProcesses[item.id]?.isRunning == true {
+        // The entry stays until the game has ended (watchMacGame), a launcher's hand-over included.
+        if macGameProcesses[item.id] != nil {
             fail(HighballError.failed("\(item.title) is already running."))
             return
         }
@@ -3986,12 +3987,19 @@ final class AppState {
         }
     }
 
-    /// Once the Mac build quits: comet stops, and the saves go back up.
+    /// Once the Mac build quits: comet stops, and the saves go back up. The process Highball
+    /// started may be a launcher that hands over to the game and exits at once, so the game ends
+    /// only once nothing runs from its folder any more (MacGameWatch), as a Windows session
+    /// ends only once none of its programs runs.
     private func watchMacGame(_ process: Process, item: LibraryItem, game: GOGStore.InstalledGame, comet: Process?,
                               cometLog: URL, saveFolders: [(GOGSaves.Location, URL)]) {
         let store = gogStore
+        let folder = game.folder, started = Date()
         Task.detached { [weak self] in
             process.waitUntilExit()
+            if await MacGameWatch.waitForHandover(from: folder, ranFor: Date().timeIntervalSince(started)) {
+                await self?.appendLog("\(item.title): the Mac version handed over to another process, which has now quit too")
+            }
             GOGComet(store: store).stop(comet)
             await self?.macGameEnded(item: item, game: game, cometRan: comet != nil, cometLog: cometLog, saveFolders: saveFolders)
         }
@@ -4313,8 +4321,8 @@ final class AppState {
                 appendLog("\(environment.bottle.name): registered the GalaxyCommunication placeholder comet uses")
             }
             // Only when no game of ours uses a comet: a Windows GOG session leaves an end action, a
-            // Mac one a running process.
-            let noOtherGame = sessionEndActions.isEmpty && !macGameProcesses.values.contains { $0.isRunning }
+            // Mac one its entry in macGameProcesses until it has ended, a hand-over included.
+            let noOtherGame = sessionEndActions.isEmpty && macGameProcesses.isEmpty
             let process = try await Task.detached {
                 if noOtherGame { comet.stopStrays() }
                 return try comet.start(log: log)
@@ -4498,7 +4506,7 @@ final class AppState {
             guard let self else { return }
             for item in libraryItems where !item.installed && (item.source == .gog || item.source == .epic) {
                 for mac in [false] + (offersMacVersion(item) && !item.installedOnMac ? [true] : []) where savedEstimate(for: item, mac: mac) == nil {
-                    while busy || !runningSessions.isEmpty || macGameProcesses.values.contains(where: \.isRunning) {
+                    while busy || !runningSessions.isEmpty || !macGameProcesses.isEmpty {
                         try? await Task.sleep(for: .seconds(30))
                         if Task.isCancelled { return }
                     }

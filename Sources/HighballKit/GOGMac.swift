@@ -147,3 +147,53 @@ extension GOGStore {
                                 app: app, buildID: base.buildId, arch: app.map(MacBinaryArch.ofApp(at:)) ?? .unknown)
     }
 }
+
+/// A Mac game's processes, seen from outside: what tells it is still running once the process
+/// Highball started has quit. A launcher that hands over to the game exits at once, so its exit
+/// alone is not the game's end.
+public enum MacGameWatch {
+    /// Whether an executable runs from inside a game's app or folder, by the kernel's path of it.
+    /// Pure, so it is tested without processes.
+    public static func runs(executable: String, from folder: String) -> Bool {
+        let root = folder.hasSuffix("/") ? folder : folder + "/"
+        return executable.hasPrefix(root)
+    }
+
+    /// The processes running an executable from inside the folder, never Highball itself.
+    public static func processes(runningFrom folder: URL) -> [pid_t] {
+        let root = ProcessTable.canonical(folder.path)
+        let own = getpid()
+        return ProcessTable.allPIDs().filter { pid in
+            pid != own && executablePath(of: pid).map { runs(executable: $0, from: root) } == true
+        }
+    }
+
+    /// The executable a process runs, or nil when it cannot be read (not ours, gone).
+    static func executablePath(of pid: pid_t) -> String? {
+        var buffer = [UInt8](repeating: 0, count: Int(MAXPATHLEN) * 4)
+        let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return nil }
+        return String(decoding: buffer.prefix(Int(length)), as: UTF8.self)
+    }
+
+    /// Once the process Highball started has quit: waits while anything else runs from the
+    /// game's folder, and, when that process quit within `quickExit` seconds of starting (a
+    /// launcher), up to `grace` seconds for its successor to appear, since one opened through
+    /// Launch Services may show up after the launcher is gone. Whether another process ran.
+    @discardableResult
+    public static func waitForHandover(from folder: URL, ranFor: TimeInterval, quickExit: TimeInterval = 30,
+                                       grace: TimeInterval = 10, interval: TimeInterval = 2,
+                                       running: (URL) -> [pid_t] = MacGameWatch.processes(runningFrom:)) async -> Bool {
+        var deadline = Date().addingTimeInterval(ranFor < quickExit ? grace : 0)
+        var handedOver = false
+        while true {
+            if !running(folder).isEmpty {
+                handedOver = true
+                deadline = Date()
+            } else if Date() >= deadline {
+                return handedOver
+            }
+            try? await Task.sleep(for: .seconds(interval))
+        }
+    }
+}

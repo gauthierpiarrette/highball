@@ -312,3 +312,43 @@ final class MacBuildDetectionTests: XCTestCase {
         XCTAssertEqual(GOGStore.macInstalledGames(in: [own, applications]).map(\.folder.lastPathComponent), [])
     }
 }
+
+/// A Mac game ends once nothing runs from its folder, not when the process Highball started
+/// quits: that one may be a launcher handing over to the game.
+final class MacGameWatchTests: XCTestCase {
+    func testAProcessRunsFromTheFolderOnlyInsideIt() {
+        XCTAssertTrue(MacGameWatch.runs(executable: "/Applications/Games/Foo.app/Contents/MacOS/Foo", from: "/Applications/Games/Foo.app"))
+        XCTAssertTrue(MacGameWatch.runs(executable: "/Applications/Games/Foo.app/Contents/MacOS/Foo", from: "/Applications/Games/Foo.app/"))
+        XCTAssertFalse(MacGameWatch.runs(executable: "/Applications/Games/Foo.app2/Contents/MacOS/Foo", from: "/Applications/Games/Foo.app"))
+        XCTAssertFalse(MacGameWatch.runs(executable: "/Applications/Games/Bar.app/Contents/MacOS/Bar", from: "/Applications/Games/Foo.app"))
+    }
+
+    func testALauncherThatHandsOverIsFollowedUntilTheGameQuits() async {
+        var checks = 0
+        let handedOver = await MacGameWatch.waitForHandover(from: URL(fileURLWithPath: "/g"), ranFor: 1, grace: 5, interval: 0.01) { _ in
+            checks += 1
+            return checks <= 3 ? [42] : []
+        }
+        XCTAssertTrue(handedOver)
+        XCTAssertEqual(checks, 4, "ends at the first look that finds nothing, not after the grace")
+    }
+
+    func testAGameThatRanAWhileEndsWithItsProcess() async {
+        var checks = 0
+        let handedOver = await MacGameWatch.waitForHandover(from: URL(fileURLWithPath: "/g"), ranFor: 600, interval: 0.01) { _ in
+            checks += 1
+            return []
+        }
+        XCTAssertFalse(handedOver)
+        XCTAssertEqual(checks, 1)
+    }
+
+    func testAQuickExitWaitsAMomentForItsSuccessor() async {
+        var checks = 0
+        let handedOver = await MacGameWatch.waitForHandover(from: URL(fileURLWithPath: "/g"), ranFor: 1, grace: 2, interval: 0.01) { _ in
+            checks += 1
+            return checks == 5 ? [42] : []
+        }
+        XCTAssertTrue(handedOver, "a successor that shows up after the launcher quit still counts")
+    }
+}
