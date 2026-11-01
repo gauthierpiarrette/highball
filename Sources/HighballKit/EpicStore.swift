@@ -40,7 +40,10 @@ public struct EpicStore: Sendable {
     /// Captures stdout only. Legendary writes its log lines to stderr and JSON to stdout;
     /// merging them (Shell.capture) breaks JSON parsing.
     @discardableResult
-    func capture(_ args: [String]) throws -> String {
+    func capture(_ args: [String]) throws -> String { try captureWithLog(args).out }
+
+    /// legendary's output and its log (stderr), where its warnings appear, such as a missing asset.
+    func captureWithLog(_ args: [String]) throws -> (out: String, log: String) {
         let p = Process()
         p.executableURL = binary
         p.arguments = args
@@ -57,7 +60,7 @@ public struct EpicStore: Sendable {
                                               status: p.terminationStatus,
                                               output: String(decoding: errData.suffix(2000), as: UTF8.self))
         }
-        return String(decoding: data, as: UTF8.self)
+        return (String(decoding: data, as: UTF8.self), String(decoding: errData, as: UTF8.self))
     }
 
     /// Runs legendary streaming each output line (installs are long and progress matters).
@@ -212,11 +215,11 @@ public struct EpicStore: Sendable {
     }
 
     /// Installs a game's Mac build into the Mac games folder, beside GOG's (GOGStore.macGamesDir).
-    /// legendary keeps one install per game, so the Windows one must be removed first, and only
-    /// once `hasMacBuild` said yes. Should legendary still fall back to the Windows build (its
-    /// install_platform_fallback, on by default and with no flag to turn it off, makes a missing
-    /// Mac asset a warning and downloads the Windows build into this folder, outside every
-    /// environment), it is stopped at that line, before the download, and the install fails.
+    /// legendary keeps one install per game, so the Windows one's record must be dropped first
+    /// (EpicBuildSwitch), and only once `hasMacBuild` said yes. Should legendary still fall back
+    /// to the Windows build (its install_platform_fallback, on by default and with no flag to
+    /// turn it off, makes a missing Mac asset a warning and downloads the Windows build into this
+    /// folder, outside every environment), it is stopped at that line, before the download, and the install fails.
     @discardableResult
     public func installMac(_ appName: String, control: LegendaryControl? = nil,
                            onLine: (@Sendable (String) -> Void)? = nil) throws -> Int32 {
@@ -245,32 +248,25 @@ public struct EpicStore: Sendable {
     /// read from `legendary info --platform Mac`. A catalog listing Mac (Game.listsMac) does not
     /// promise one.
     public func hasMacBuild(_ appName: String) throws -> Bool {
-        let out = try capture(["info", appName, "--json", "--platform", "Mac"])
-        return Self.listsBuild(Data(out.utf8), platform: "Mac")
+        let (out, log) = try captureWithLog(["info", appName, "--json", "--platform", "Mac"])
+        return Self.manifest(Data(out.utf8), log: log, platform: "Mac") != nil
     }
 
-    /// legendary's `info --json` names a version for each platform the game has an asset for
-    /// (game.platform_versions, from the asset list its install checks). None for the platform,
-    /// or output that cannot be read, is no build.
-    static func listsBuild(_ data: Data, platform: String) -> Bool {
-        guard let start = data.firstIndex(of: UInt8(ascii: "{")),
+    /// The manifest `legendary info --json --platform <platform>` printed, only when it is that
+    /// platform's build. With the platform's asset missing, legendary logs "Asset information
+    /// for ... is missing", answers offline and prints the installed build's manifest instead (a
+    /// Windows one for a Mac question), so the log must hold no such warning and the manifest's
+    /// build version must be the one Epic lists for the platform (game.platform_versions, from
+    /// the asset list its install checks). Output that cannot be read is no build.
+    static func manifest(_ data: Data, log: String, platform: String) -> [String: Any]? {
+        guard !log.contains("Asset information for"),
+              let start = data.firstIndex(of: UInt8(ascii: "{")),
               let obj = try? JSONSerialization.jsonObject(with: data[start...]) as? [String: Any],
-              let game = obj["game"] as? [String: Any],
-              let versions = game["platform_versions"] as? [String: Any] else { return false }
-        return versions[platform] != nil
-    }
-
-    /// What a Mac install does once `hasMacBuild` has answered: nil when it could not ask. Stop
-    /// with nothing changed unless Epic named a Mac build, and only then remove the Windows build
-    /// first when switching from it, so a missing build never costs the Windows copy.
-    public enum MacInstallStep: Equatable, Sendable {
-        case couldNotAsk, noMacBuild, install, removeWindowsThenInstall
-
-        public static func after(hasMacBuild: Bool?, replacingWindows: Bool) -> MacInstallStep {
-            guard let hasMacBuild else { return .couldNotAsk }
-            guard hasMacBuild else { return .noMacBuild }
-            return replacingWindows ? .removeWindowsThenInstall : .install
-        }
+              let manifest = obj["manifest"] as? [String: Any],
+              let versions = (obj["game"] as? [String: Any])?["platform_versions"] as? [String: Any],
+              let listed = versions[platform] as? String,
+              manifest["build_version"] as? String == listed else { return nil }
+        return manifest
     }
 
     /// Installs a game's Windows build into the bottle at drive_c/Games/<folder>.
@@ -357,6 +353,24 @@ public struct EpicStore: Sendable {
     }
 
     static func uninstallArguments(appName: String) -> [String] { ["uninstall", appName, "-y"] }
+    static func keepFilesUninstallArguments(appName: String) -> [String] { ["uninstall", appName, "-y", "--keep-files", "--skip-uninstaller"] }
+    static func importArguments(appName: String, path: String, platform: String) -> [String] {
+        ["import", appName, path, "--platform", platform, "--with-dlcs", "--disable-check"]
+    }
+
+    /// Drops legendary's record of an install and keeps its files, so a switch to the other build
+    /// can be undone (`restoreRecord`) until the new build is in (EpicBuildSwitch).
+    @discardableResult
+    public func forgetRecordKeepingFiles(_ appName: String, onLine: (@Sendable (String) -> Void)? = nil) throws -> Int32 {
+        try runStreaming(Self.keepFilesUninstallArguments(appName: appName), onLine: onLine)
+    }
+
+    /// Records again an install whose files are still on disk (`legendary import`).
+    @discardableResult
+    public func restoreRecord(_ appName: String, path: String, platform: String,
+                              onLine: (@Sendable (String) -> Void)? = nil) throws -> Int32 {
+        try runStreaming(Self.importArguments(appName: appName, path: path, platform: platform), onLine: onLine)
+    }
 
     /// Removes a game legendary installed. Legendary owns the Epic install state, so it does the
     /// deleting and its library stays right; deleting the folder ourselves would leave it

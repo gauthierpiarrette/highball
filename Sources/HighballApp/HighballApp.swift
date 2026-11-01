@@ -527,8 +527,8 @@ private extension View {
             Text(GamePageCopy.updateAsk(recipe: pending.recipe, engineID: pending.engineID, canPlay: pending.play != nil))
         }
     }
-    /// Epic keeps one build per game: switching to the Mac one removes the Windows one first,
-    /// and removing the Mac one means downloading it again to play it. A GOG Mac build goes to
+    /// Epic keeps one build per game: switching to the Mac one removes the Windows one once the
+    /// Mac one is in (EpicBuildSwitch), and removing the Mac one means downloading it again to play it. A GOG Mac build goes to
     /// the Trash only once the player has seen what goes.
     @MainActor func macVersionAsks(_ state: AppState) -> some View {
         self.alert(state.pendingEpicMacSwitch.map { String(format: L("Switch %@ to the Mac version?"), $0.title) } ?? "",
@@ -537,7 +537,7 @@ private extension View {
             Button(L("Switch to the Mac version")) { state.pendingEpicMacSwitch = nil; state.epicInstallMac(item, replacingWindows: true) }
             Button(L("Cancel"), role: .cancel) { state.pendingEpicMacSwitch = nil }
         } message: { _ in
-            Text(L("Epic keeps one version of a game installed at a time, so the Windows version is removed first, then the Mac version downloads. Your Highball settings for the game stay."))
+            Text(L("Epic keeps one version of a game installed at a time, so the Mac version downloads and the Windows version is removed once it is in. Stop the download, or should it fail, and the Windows version stays. Your Highball settings for the game stay."))
         }
         .alert(state.pendingEpicWindowsSwitch.map { String(format: L("Switch %@ to the Windows version?"), $0.title) } ?? "",
                isPresented: .init(get: { state.pendingEpicWindowsSwitch != nil }, set: { if !$0 { state.pendingEpicWindowsSwitch = nil } }),
@@ -545,7 +545,7 @@ private extension View {
             Button(L("Switch to the Windows version")) { state.pendingEpicWindowsSwitch = nil; state.epicSwitchToWindows(item) }
             Button(L("Cancel"), role: .cancel) { state.pendingEpicWindowsSwitch = nil }
         } message: { _ in
-            Text(L("Epic keeps one version of a game installed at a time, so the Mac version is removed first, then the Windows version downloads into your environment."))
+            Text(L("Epic keeps one version of a game installed at a time, so the Windows version downloads into your environment and the Mac version is removed once it is in. Stop the download, or should it fail, and the Mac version stays."))
         }
         .alert(state.pendingEpicMacUninstall.map { String(format: L("Remove the Mac version of %@?"), $0.title) } ?? "",
                isPresented: .init(get: { state.pendingEpicMacUninstall != nil }, set: { if !$0 { state.pendingEpicMacUninstall = nil } }),

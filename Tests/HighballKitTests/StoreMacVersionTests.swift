@@ -135,6 +135,36 @@ final class GOGMacBuildTests: XCTestCase {
         }
     }
 
+    /// Galaxy's layout with another game's app put beside the first: the scan leaves nothing for
+    /// the Trash to take. The game's own DLC app is still the game's.
+    func testTheTrashNeverTakesAFolderHoldingAnotherGamesApp() throws {
+        let applications = FileManager.default.temporaryDirectory.appending(path: "apps-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: applications) }
+        func info(_ json: String, at path: String) throws {
+            let file = applications.appending(path: path)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try json.write(to: file, atomically: true, encoding: .utf8)
+        }
+        try info(#"{"gameId":"1","rootGameId":"1","name":"Shared"}"#, at: "Shared/Contents/Resources/goggame-1.info")
+        try info(#"{"gameId":"2","rootGameId":"2"}"#, at: "Shared/Other.app/Contents/Resources/goggame-2.info")
+        try info(#"{"gameId":"3","rootGameId":"3","name":"Big"}"#, at: "Big/Contents/Resources/goggame-3.info")
+        try info(#"{"gameId":"5","rootGameId":"3"}"#, at: "Big/Extra.app/Contents/Resources/goggame-5.info")
+        let games = Dictionary(uniqueKeysWithValues: GOGStore.macInstalledGames(in: [applications]).map { ($0.id, $0) })
+        XCTAssertNil(try XCTUnwrap(games["1"]).trashTarget)
+        XCTAssertEqual(try XCTUnwrap(games["3"]).trashTarget?.lastPathComponent, "Big")
+        XCTAssertTrue(GOGStore.holdsOtherGames(applications.appending(path: "Shared"), besides: "1"))
+        XCTAssertFalse(GOGStore.holdsOtherGames(applications.appending(path: "Big"), besides: "3"))
+    }
+
+    /// Removing the Windows copy keeps gogdl's files while the Mac build, or another
+    /// environment's copy, still uses them.
+    func testForgettingAWindowsCopyKeepsWhatTheMacBuildUses() {
+        let game = GOGStore.InstalledGame(id: "1", title: "G", folder: URL(fileURLWithPath: "/x"), buildID: nil, clientID: nil, dlcIDs: [], tasks: [])
+        XCTAssertTrue(GOGStore.otherInstallsRemain("1", removingFrom: "A", installedByBottle: ["A": [game]], macInstalls: ["1"]))
+        XCTAssertTrue(GOGStore.otherInstallsRemain("1", removingFrom: "A", installedByBottle: ["A": [game], "B": [game]], macInstalls: []))
+        XCTAssertFalse(GOGStore.otherInstallsRemain("1", removingFrom: "A", installedByBottle: ["A": [game]], macInstalls: ["2"]))
+    }
+
     /// An app among others in a folder of /Applications (/Applications/Games/Foo.app): the game,
     /// and so its Trash, is that app alone, never the folder with the other apps in it.
     func testAppInAFolderOfOtherAppsIsTheGamesFolderAlone() throws {
@@ -240,24 +270,27 @@ final class EpicMacBuildTests: XCTestCase {
     }
 
     /// Epic's catalog can list Mac with no Mac asset, and legendary's install then falls back to
-    /// Windows: the Windows copy is removed only when `info` names a Mac version.
-    func testAMacBuildIsThereOnlyWhenLegendaryNamesAMacVersion() {
-        let both = #"[cli] INFO: Getting game metadata... {"game": {"app_name": "Garlic", "platform_versions": {"Windows": "1.0-w", "Mac": "1.0-m"}}, "install": null, "manifest": null}"#
-        let windowsOnly = #"{"game": {"app_name": "Duck", "platform_versions": {"Windows": "2.0"}}, "install": {"platform": "Windows"}, "manifest": {"disk_size": 5}}"#
-        XCTAssertTrue(EpicStore.listsBuild(Data(both.utf8), platform: "Mac"))
-        XCTAssertFalse(EpicStore.listsBuild(Data(windowsOnly.utf8), platform: "Mac"), "a Windows manifest from the install is not a Mac build")
-        XCTAssertFalse(EpicStore.listsBuild(Data(#"{"game": null, "install": null, "manifest": null}"#.utf8), platform: "Mac"))
-        XCTAssertFalse(EpicStore.listsBuild(Data("No game information available.".utf8), platform: "Mac"))
+    /// Windows: a Mac build is there only when `info` prints the Mac manifest Epic lists.
+    func testAMacBuildIsThereOnlyWhenLegendaryPrintsItsManifest() {
+        func mac(_ out: String, log: String = "") -> Bool { EpicStore.manifest(Data(out.utf8), log: log, platform: "Mac") != nil }
+        let both = #"[cli] INFO: Getting game metadata... {"game": {"app_name": "Garlic", "platform_versions": {"Windows": "1.0-w", "Mac": "1.0-m"}}, "install": null, "manifest": {"build_version": "1.0-m"}}"#
+        let windowsOnly = #"{"game": {"app_name": "Duck", "platform_versions": {"Windows": "2.0"}}, "install": {"platform": "Windows"}, "manifest": {"build_version": "2.0", "disk_size": 5}}"#
+        XCTAssertTrue(mac(both))
+        XCTAssertFalse(mac(windowsOnly), "a Windows manifest from the install is not a Mac build")
+        XCTAssertFalse(mac(#"{"game": null, "install": null, "manifest": null}"#))
+        XCTAssertFalse(mac("No game information available."))
+        // The Mac asset gone: legendary warns, answers offline and prints the installed Windows
+        // build's manifest, with Mac still listed.
+        let installedWindows = #"{"game": {"app_name": "Garlic", "platform_versions": {"Windows": "1.0-w", "Mac": "1.0-m"}}, "manifest": {"build_version": "1.0-w"}}"#
+        XCTAssertFalse(mac(installedWindows))
+        XCTAssertFalse(mac(both, log: #"[Core] WARNING: Asset information for "Garlic" is missing, the game may have been removed from your account."#))
     }
 
-    /// The Windows copy goes only once Epic named a Mac build, and only when switching from it.
-    func testTheWindowsCopyGoesOnlyOnceEpicNamedAMacBuild() {
-        typealias Step = EpicStore.MacInstallStep
-        XCTAssertEqual(Step.after(hasMacBuild: nil, replacingWindows: true), .couldNotAsk)
-        XCTAssertEqual(Step.after(hasMacBuild: false, replacingWindows: true), .noMacBuild)
-        XCTAssertEqual(Step.after(hasMacBuild: false, replacingWindows: false), .noMacBuild)
-        XCTAssertEqual(Step.after(hasMacBuild: true, replacingWindows: false), .install)
-        XCTAssertEqual(Step.after(hasMacBuild: true, replacingWindows: true), .removeWindowsThenInstall)
+    /// A switch between builds drops only legendary's record first, so it can be put back.
+    func testABuildSwitchKeepsTheOldFilesUntilTheNewBuildIsIn() {
+        XCTAssertEqual(EpicStore.keepFilesUninstallArguments(appName: "A"), ["uninstall", "A", "-y", "--keep-files", "--skip-uninstaller"])
+        XCTAssertEqual(EpicStore.importArguments(appName: "A", path: "/x/A", platform: "Windows"),
+                       ["import", "A", "/x/A", "--platform", "Windows", "--with-dlcs", "--disable-check"])
     }
 
     func testTheFallBackToWindowsIsSeen() {
@@ -343,7 +376,10 @@ final class GOGMacSavesTests: XCTestCase {
                       // Folders many games share one level deeper, each game in its own folder below.
                       "<?DOCUMENTS?>/My Games", "<?DOCUMENTS?>/my games/", "<?APPLICATION_SUPPORT?>/GOG.com",
                       "<?APPLICATION_SUPPORT?>/Steam", "<?APPLICATION_SUPPORT?>/Epic", "<?APPLICATION_SUPPORT?>/Epic Games",
-                      "<?LIBRARY?>/Application Support/Feral Interactive", "<?APPLICATION_SUPPORT?>/Aspyr"] {
+                      "<?LIBRARY?>/Application Support/Feral Interactive", "<?APPLICATION_SUPPORT?>/Aspyr",
+                      // Any folder straight inside a shared one may be a studio's, holding its other games.
+                      "<?DOCUMENTS?>/Studio", "<?LIBRARY?>/Preferences/Studio Game", "<?LIBRARY?>/Studio",
+                      "<?LIBRARY?>/Containers/com.studio.game/Data"] {
             XCTAssertNil(GOGSaves.resolveMac(whole, installFolder: install, home: home), whole)
         }
         XCTAssertEqual(GOGSaves.resolveMac("<?DOCUMENTS?>/My Games/Studio Game", installFolder: install, home: home)?.path,
@@ -352,13 +388,37 @@ final class GOGMacSavesTests: XCTestCase {
                        "/Users/someone/Library/Application Support/Feral Interactive/Game/Saves")
         XCTAssertEqual(GOGSaves.resolveMac("<?APPLICATION_SUPPORT?>/GOG.com/Galaxy/Applications/c/Storage/Shared/Files", installFolder: install, home: home)?.path,
                        "/Users/someone/Library/Application Support/GOG.com/Galaxy/Applications/c/Storage/Shared/Files")
-        XCTAssertEqual(GOGSaves.resolveMac("<?LIBRARY?>/Preferences/Studio Game", installFolder: install, home: home)?.path,
-                       "/Users/someone/Library/Preferences/Studio Game")
+        XCTAssertEqual(GOGSaves.resolveMac("<?LIBRARY?>/Preferences/Studio/Game", installFolder: install, home: home)?.path,
+                       "/Users/someone/Library/Preferences/Studio/Game")
+        XCTAssertEqual(GOGSaves.resolveMac("<?APPLICATION_SUPPORT?>/Feral Interactive/Game", installFolder: install, home: home)?.path,
+                       "/Users/someone/Library/Application Support/Feral Interactive/Game")
         XCTAssertEqual(GOGSaves.resolveMac("<?LIBRARY?>/Containers/com.studio.game/Data/Saves", installFolder: install, home: home)?.path,
                        "/Users/someone/Library/Containers/com.studio.game/Data/Saves")
-        XCTAssertEqual(GOGSaves.resolveMac("<?DOCUMENTS?>/Studio", installFolder: install, home: home)?.path, "/Users/someone/Documents/Studio")
         XCTAssertEqual(GOGSaves.resolveMac("<?INSTALL?>/saves", installFolder: home.appending(path: "Applications/Highball Games/Game.app"), home: home)?.path,
                        "/Users/someone/Applications/Highball Games/Game.app/saves")
+    }
+
+    /// A link to a shared folder counts as that folder.
+    func testALinkToASharedFolderIsRefused() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "home-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: home) }
+        try FileManager.default.createDirectory(at: home.appending(path: "Library/Application Support"), withIntermediateDirectories: true)
+        let game = home.appending(path: "Games/Game")
+        try FileManager.default.createDirectory(at: game, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: game.appending(path: "Support"), withDestinationURL: home.appending(path: "Library/Application Support"))
+        XCTAssertNil(GOGSaves.resolveMac("<?INSTALL?>/Support", installFolder: game, home: home))
+        XCTAssertNotNil(GOGSaves.resolveMac("<?INSTALL?>/saves", installFolder: game, home: home))
+    }
+
+    /// An install folder that also holds another game's app is never synced as this game's.
+    func testInstallSavesRefuseAFolderHoldingAnotherGamesApp() throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "shared-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        let other = folder.appending(path: "Other.app/Contents/Resources")
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
+        try #"{"gameId":"2"}"#.write(to: other.appending(path: "goggame-2.info"), atomically: true, encoding: .utf8)
+        XCTAssertNil(GOGSaves.resolveMac("<?INSTALL?>/saves", installFolder: folder, gameID: "1"))
+        XCTAssertNotNil(GOGSaves.resolveMac("<?INSTALL?>/saves", installFolder: folder, gameID: "2"))
     }
 
     func testSyncNamesTheSystemOfTheLocation() {
@@ -401,6 +461,18 @@ final class MacGameWatchTests: XCTestCase {
         XCTAssertTrue(MacGameWatch.runs(executable: "/Applications/Games/Foo.app/Contents/MacOS/Foo", from: "/Applications/Games/Foo.app/"))
         XCTAssertFalse(MacGameWatch.runs(executable: "/Applications/Games/Foo.app2/Contents/MacOS/Foo", from: "/Applications/Games/Foo.app"))
         XCTAssertFalse(MacGameWatch.runs(executable: "/Applications/Games/Bar.app/Contents/MacOS/Bar", from: "/Applications/Games/Foo.app"))
+    }
+
+    /// An app linked into the game's folder runs from where the link points: that place counts.
+    func testALinkedAppInTheFolderIsFollowed() throws {
+        let base = FileManager.default.temporaryDirectory.appending(path: "linked-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: base) }
+        let real = base.appending(path: "Elsewhere/Game.app"), folder = base.appending(path: "Game")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: folder.appending(path: "Game.app"), withDestinationURL: real)
+        try FileManager.default.createSymbolicLink(at: folder.appending(path: "Shared"), withDestinationURL: base)
+        XCTAssertEqual(MacGameWatch.linkTargets(in: folder), [ProcessTable.canonical(real.path)], "an app, not a folder of other things")
     }
 
     func testALauncherThatHandsOverIsFollowedUntilTheGameQuits() async {

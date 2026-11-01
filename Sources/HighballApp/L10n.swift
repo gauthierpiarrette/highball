@@ -435,8 +435,8 @@ enum L10n {
         "Switch to the Windows version…": "Passer à la version Windows…",
         "Switch to the Windows version": "Passer à la version Windows",
         "Switch %@ to the Windows version?": "Passer %@ à la version Windows ?",
-        "Epic keeps one version of a game installed at a time, so the Mac version is removed first, then the Windows version downloads into your environment.":
-            "Epic n’installe qu’une version d’un jeu à la fois : la version Mac est d’abord supprimée, puis la version Windows est téléchargée dans votre environnement.",
+        "Epic keeps one version of a game installed at a time, so the Windows version downloads into your environment and the Mac version is removed once it is in. Stop the download, or should it fail, and the Mac version stays.":
+            "Epic n’installe qu’une version d’un jeu à la fois : la version Windows est téléchargée dans votre environnement, puis la version Mac est supprimée une fois la nouvelle en place. Si vous arrêtez le téléchargement, ou s’il échoue, la version Mac reste.",
         "A Mac game opened from Applications, the Dock or Spotlight is closed within its first seconds and started again through Highball, which brings GOG's achievements and cloud saves and Epic's sign-in. Only while Highball is open, and never while it is busy with another task.":
             "Un jeu Mac ouvert depuis Applications, le Dock ou Spotlight est fermé dans ses premières secondes et relancé avec Highball, qui apporte les succès et sauvegardes en ligne de GOG et la connexion d’Epic. Seulement quand Highball est ouvert, et jamais pendant une autre tâche.",
         "Open GOG and Epic Mac games through Highball": "Ouvrir les jeux Mac GOG et Epic avec Highball",
@@ -447,8 +447,8 @@ enum L10n {
         "Switch %@ to the Mac version?": "Passer %@ à la version Mac ?",
         "Switch to the Mac version": "Passer à la version Mac",
         "Switch to the Mac version…": "Passer à la version Mac…",
-        "Epic keeps one version of a game installed at a time, so the Windows version is removed first, then the Mac version downloads. Your Highball settings for the game stay.":
-            "Epic n’installe qu’une version d’un jeu à la fois : la version Windows est d’abord supprimée, puis la version Mac est téléchargée. Vos réglages Highball pour ce jeu sont conservés.",
+        "Epic keeps one version of a game installed at a time, so the Mac version downloads and the Windows version is removed once it is in. Stop the download, or should it fail, and the Windows version stays. Your Highball settings for the game stay.":
+            "Epic n’installe qu’une version d’un jeu à la fois : la version Mac est téléchargée, puis la version Windows est supprimée une fois la nouvelle en place. Si vous arrêtez le téléchargement, ou s’il échoue, la version Windows reste. Vos réglages Highball pour ce jeu sont conservés.",
         "Asking Epic about the Mac version": "Demande des informations sur la version Mac à Epic",
         "Highball could not ask Epic whether a Mac build of this game is there to download, so nothing was changed. Check your connection, then try again.":
             "Highball n’a pas pu demander à Epic si une version Mac de ce jeu est disponible au téléchargement, donc rien n’a été modifié. Vérifiez votre connexion, puis réessayez.",
@@ -486,6 +486,7 @@ enum L10n {
         "%@ goes to the Trash, where you can still put it back.": "%@ va à la corbeille, d’où vous pouvez encore le récupérer.",
         "Highball could not tell which folder is this game's alone, so it leaves the files where they are.":
             "Highball ne sait pas quel dossier appartient à ce seul jeu, donc il laisse les fichiers où ils sont.",
+        "Quit %@ first: it is running.": "Quittez d’abord %@ : le jeu est en cours d’exécution.",
         "Built for Apple silicon: runs natively.": "Conçue pour Apple silicon : tourne en natif.",
         "Built for Intel Macs: runs through Rosetta.": "Conçue pour les Mac Intel : tourne via Rosetta.",
         "A 32-bit build, which current macOS can't run. Play the Windows version instead.":
