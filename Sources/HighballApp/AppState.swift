@@ -3484,17 +3484,23 @@ final class AppState {
         let store = epicStore
         let checkThenRemoveWindows: @MainActor () async throws -> Void = { [self] in
             stage = L("Asking Epic about the Mac version")
-            let hasMac: Bool
+            let hasMac: Bool?
             do {
                 hasMac = try await Task.detached { try store.hasMacBuild(app) }.value
             } catch {
                 appendLog("\(item.title): legendary info --platform Mac failed: \(error)")
+                hasMac = nil
+            }
+            switch EpicStore.MacInstallStep.after(hasMacBuild: hasMac, replacingWindows: replacingWindows) {
+            case .couldNotAsk:
                 throw HighballError.failed(L("Highball could not ask Epic whether a Mac build of this game is there to download, so nothing was changed. Check your connection, then try again."))
-            }
-            guard hasMac else {
+            case .noMacBuild:
                 throw HighballError.failed(L("Epic lists a Mac version of this game, but has no Mac build to download for your account, so nothing was changed."))
+            case .install:
+                return
+            case .removeWindowsThenInstall:
+                break
             }
-            guard replacingWindows else { return }
             stage = String(format: L("Removing the Windows version of %@"), item.title)
             let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
             let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
