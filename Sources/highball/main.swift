@@ -28,10 +28,10 @@ struct Engine: AsyncParsableCommand {
         @Argument var license: String
         func run() async throws {
             let store = EngineStore()
-            guard let installed = try? store.engine(engine) else {
+            guard FileManager.default.fileExists(atPath: HighballPaths().engine(engine).appending(path: "manifest.json").path) else {
                 fail("engine '\(engine)' is not installed; `highball engine list` shows the ids")
             }
-            let e = try store.accept(license: license, engine: installed)
+            let e = try store.accept(license: license, engine: store.engine(engine))
             print("accepted \(license) for \(e.id); renderers now: \(HighballKit.Renderer.allCases.filter { $0 == .wined3d || e.rendererDir($0.rawValue) != nil }.map(\.rawValue).joined(separator: ","))")
         }
     }
