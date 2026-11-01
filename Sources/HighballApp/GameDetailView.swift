@@ -429,9 +429,10 @@ struct GameDetailView: View {
                         .padding(.top, 2)
                     }
                 } else if let folder = state.macFolder(for: item) {
-                    // Epic's Mac build, installed through legendary.
-                    if let note = Self.archNote(MacBinaryArch.ofApp(at: folder)) {
-                        Text(note).font(.callout).foregroundStyle(.secondary)
+                    // Epic's Mac build, installed through legendary; its processor read once per refresh.
+                    let arch = item.epicAppName.flatMap { state.epicMacArch[$0] } ?? .unknown
+                    if let note = Self.archNote(arch) {
+                        Text(note).font(.callout).foregroundStyle(arch == .only32Bit ? HB.warn : .secondary)
                     }
                     HStack(spacing: 10) {
                         Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([folder]) }
