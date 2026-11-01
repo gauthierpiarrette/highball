@@ -3661,8 +3661,8 @@ final class AppState {
     }
 
     /// Whether to close a game just opened outside Highball (MacRelaunch.shouldTakeOver, which
-    /// the tests cover): what Highball knows of the game and the app, and whether it can start
-    /// the game again right now.
+    /// the tests cover): what Highball knows of the game and the app, whether it can start the
+    /// game again right now, and whether its start adds anything.
     private func relaunchShouldTakeOver(_ app: NSRunningApplication, item: LibraryItem) -> Bool {
         let canStart: Bool
         switch item.source {
@@ -3673,7 +3673,19 @@ final class AppState {
         return MacRelaunch.shouldTakeOver(now: Date(), gameRunning: macGameProcesses[item.id] != nil,
                                           startedAt: macLaunchedAt[item.id], takenOverAt: macRelaunchedAt[item.id],
                                           appLaunchedAt: app.launchDate, appTerminated: app.isTerminated,
-                                          busy: busy, canStart: canStart)
+                                          busy: busy, canStart: canStart, highballAdds: highballAddsToMacLaunch(item))
+    }
+
+    /// What Highball's start brings that a launch from outside lacks: comet or the save sync for
+    /// a GOG game, when signed in and not turned off for it; Epic's sign-in for an Epic one.
+    private func highballAddsToMacLaunch(_ item: LibraryItem) -> Bool {
+        switch item.source {
+        case .gog:
+            guard gogSignedIn, let id = item.gogID else { return false }
+            return gogSettings.cometOff[id] == nil || !gogSettings.cloudSavesOff.contains(id)
+        case .epic: return epicSignedIn
+        default: return false
+        }
     }
 
     /// Removes an Epic game's Mac build through legendary, so its library stays right.

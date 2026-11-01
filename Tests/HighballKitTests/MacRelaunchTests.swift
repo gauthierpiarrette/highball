@@ -7,12 +7,12 @@ final class MacRelaunchTests: XCTestCase {
 
     private func takesOver(gameRunning: Bool = false, startedAgo: TimeInterval? = nil, takenOverAgo: TimeInterval? = nil,
                            appLaunchedAgo: TimeInterval? = 2, appTerminated: Bool = false, busy: Bool = false,
-                           canStart: Bool = true) -> Bool {
+                           canStart: Bool = true, highballAdds: Bool = true) -> Bool {
         MacRelaunch.shouldTakeOver(now: now, gameRunning: gameRunning,
                                    startedAt: startedAgo.map { now.addingTimeInterval(-$0) },
                                    takenOverAt: takenOverAgo.map { now.addingTimeInterval(-$0) },
                                    appLaunchedAt: appLaunchedAgo.map { now.addingTimeInterval(-$0) },
-                                   appTerminated: appTerminated, busy: busy, canStart: canStart)
+                                   appTerminated: appTerminated, busy: busy, canStart: canStart, highballAdds: highballAdds)
     }
 
     func testAFreshOutsideLaunchHighballCanStartIsTakenOver() {
@@ -49,6 +49,13 @@ final class MacRelaunchTests: XCTestCase {
     func testABusyHighballOrOneThatCannotStartTheGameLeavesItAlone() {
         XCTAssertFalse(takesOver(busy: true))
         XCTAssertFalse(takesOver(canStart: false))
+    }
+
+    /// Signed out, or comet and the save sync both off for the game: Highball's start adds
+    /// nothing, so the game is left as the player opened it.
+    func testAGameHighballAddsNothingToIsLeftAlone() {
+        XCTAssertFalse(takesOver(highballAdds: false))
+        XCTAssertFalse(takesOver(startedAgo: 600, takenOverAgo: 600, highballAdds: false))
     }
 
     func testAnAppIsFromAGamesFolderOnlyWhenItIsTheFolderOrInsideIt() {

@@ -17,13 +17,17 @@ public enum MacRelaunch {
     /// within `takenOverWindow` of closing it already. Only an app that is still running and
     /// opened within `freshLaunchWindow`, and only when Highball can start the game again right
     /// now: a busy Highball (a download holding the strip) would close it and start nothing.
+    /// And only when Highball's start adds something the outside launch lacks (`highballAdds`:
+    /// comet or the save sync for a GOG game, Epic's sign-in for an Epic one): without it,
+    /// closing the game would only cost the player a restart.
     public static func shouldTakeOver(now: Date, gameRunning: Bool, startedAt: Date?, takenOverAt: Date?,
-                                      appLaunchedAt: Date?, appTerminated: Bool, busy: Bool, canStart: Bool) -> Bool {
+                                      appLaunchedAt: Date?, appTerminated: Bool, busy: Bool, canStart: Bool,
+                                      highballAdds: Bool) -> Bool {
         if gameRunning { return false }
         if let startedAt, now.timeIntervalSince(startedAt) < ownLaunchWindow { return false }
         if let takenOverAt, now.timeIntervalSince(takenOverAt) < takenOverWindow { return false }
         guard !appTerminated, let appLaunchedAt, now.timeIntervalSince(appLaunchedAt) < freshLaunchWindow, !busy else { return false }
-        return canStart
+        return canStart && highballAdds
     }
 
     /// Whether an app at `bundle` is from a game's `folder`: the folder itself (a GOG build's
