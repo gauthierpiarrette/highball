@@ -435,8 +435,8 @@ enum L10n {
         "Switch to the Windows version…": "Passer à la version Windows…",
         "Switch to the Windows version": "Passer à la version Windows",
         "Switch %@ to the Windows version?": "Passer %@ à la version Windows ?",
-        "Epic keeps one version of a game installed at a time, so the Mac version is removed first, then the Windows version downloads into your environment.":
-            "Epic n’installe qu’une version d’un jeu à la fois : la version Mac est d’abord supprimée, puis la version Windows est téléchargée dans votre environnement.",
+        "Epic keeps one version of a game installed at a time, so the Windows version downloads into your environment and the Mac version is removed once it is in. Stop the download, or should it fail, and the Mac version stays.":
+            "Epic n’installe qu’une version d’un jeu à la fois : la version Windows est téléchargée dans votre environnement, puis la version Mac est supprimée une fois la nouvelle en place. Si vous arrêtez le téléchargement, ou s’il échoue, la version Mac reste.",
         "Highball could not find the Mac version of %@ to open.": "Highball ne trouve pas la version Mac de %@ à ouvrir.",
         "The Mac version of %@ did not start: %@": "La version Mac de %@ n’a pas démarré : %@",
         "Removing the Windows version of %@": "Suppression de la version Windows de %@",
@@ -444,8 +444,8 @@ enum L10n {
         "Switch %@ to the Mac version?": "Passer %@ à la version Mac ?",
         "Switch to the Mac version": "Passer à la version Mac",
         "Switch to the Mac version…": "Passer à la version Mac…",
-        "Epic keeps one version of a game installed at a time, so the Windows version is removed first, then the Mac version downloads. Your Highball settings for the game stay.":
-            "Epic n’installe qu’une version d’un jeu à la fois : la version Windows est d’abord supprimée, puis la version Mac est téléchargée. Vos réglages Highball pour ce jeu sont conservés.",
+        "Epic keeps one version of a game installed at a time, so the Mac version downloads and the Windows version is removed once it is in. Stop the download, or should it fail, and the Windows version stays. Your Highball settings for the game stay.":
+            "Epic n’installe qu’une version d’un jeu à la fois : la version Mac est téléchargée, puis la version Windows est supprimée une fois la nouvelle en place. Si vous arrêtez le téléchargement, ou s’il échoue, la version Windows reste. Vos réglages Highball pour ce jeu sont conservés.",
         "Asking Epic about the Mac version": "Demande des informations sur la version Mac à Epic",
         "Highball could not ask Epic whether a Mac build of this game is there to download, so nothing was changed. Check your connection, then try again.":
             "Highball n’a pas pu demander à Epic si une version Mac de ce jeu est disponible au téléchargement, donc rien n’a été modifié. Vérifiez votre connexion, puis réessayez.",

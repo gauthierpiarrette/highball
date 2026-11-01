@@ -466,7 +466,7 @@ struct LibraryTile: View {
             // Epic's goes through legendary, so its library stays right.
             if item.source == .epic, item.installedOnMac {
                 Button(L("Remove the Mac version…"), role: .destructive) { state.pendingEpicMacUninstall = item }
-                    .disabled(state.busy)
+                    .disabled(state.busy || state.isRunningNow(item))
             }
         }
         .accessibilityLabel("\(item.title), \(item.source.rawValue)\(item.installedOnMac ? ", " + (item.source == .steam ? L("Installed in Steam for Mac") : L("Mac version installed")) : item.installed ? "" : ", " + L("Not installed"))")

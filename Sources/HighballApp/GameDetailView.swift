@@ -436,13 +436,13 @@ struct GameDetailView: View {
                     }
                     HStack(spacing: 10) {
                         Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([folder]) }
-                        Button(L("Remove the Mac version…")) { state.pendingEpicMacUninstall = item }.disabled(state.busy)
+                        Button(L("Remove the Mac version…")) { state.pendingEpicMacUninstall = item }.disabled(state.busy || state.isRunningNow(item))
                     }
                     .controlSize(.small).padding(.top, 2)
                 } else if item.installed {
                     // Epic keeps one build per game: from the Windows one, a switch.
                     HStack(spacing: 8) {
-                        Button(L("Switch to the Mac version…")) { state.installOnMac(item) }.controlSize(.small).disabled(state.busy)
+                        Button(L("Switch to the Mac version…")) { state.installOnMac(item) }.controlSize(.small).disabled(state.busy || state.isRunningNow(item))
                         estimateText(macEstimate)
                     }
                     .padding(.top, 2)
@@ -666,7 +666,7 @@ struct GameDetailView: View {
                 // out is the Windows build, which takes its place.
                 Text(L("This Mac version is 32-bit, which current macOS can't run.")).font(.callout).foregroundStyle(HB.warn)
                 Button(L("Switch to the Windows version…")) { state.pendingEpicWindowsSwitch = item }
-                    .controlSize(.large).disabled(state.busy)
+                    .controlSize(.large).disabled(state.busy || state.isRunningNow(item))
             } else if item.source == .epic || item.source == .gog {
                 Button { state.install(item) } label: { primaryActionLabel(L("Install"), symbol: "arrow.down") }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                     .disabled(state.busy)

@@ -270,24 +270,27 @@ final class EpicMacBuildTests: XCTestCase {
     }
 
     /// Epic's catalog can list Mac with no Mac asset, and legendary's install then falls back to
-    /// Windows: the Windows copy is removed only when `info` names a Mac version.
-    func testAMacBuildIsThereOnlyWhenLegendaryNamesAMacVersion() {
-        let both = #"[cli] INFO: Getting game metadata... {"game": {"app_name": "Garlic", "platform_versions": {"Windows": "1.0-w", "Mac": "1.0-m"}}, "install": null, "manifest": null}"#
-        let windowsOnly = #"{"game": {"app_name": "Duck", "platform_versions": {"Windows": "2.0"}}, "install": {"platform": "Windows"}, "manifest": {"disk_size": 5}}"#
-        XCTAssertTrue(EpicStore.listsBuild(Data(both.utf8), platform: "Mac"))
-        XCTAssertFalse(EpicStore.listsBuild(Data(windowsOnly.utf8), platform: "Mac"), "a Windows manifest from the install is not a Mac build")
-        XCTAssertFalse(EpicStore.listsBuild(Data(#"{"game": null, "install": null, "manifest": null}"#.utf8), platform: "Mac"))
-        XCTAssertFalse(EpicStore.listsBuild(Data("No game information available.".utf8), platform: "Mac"))
+    /// Windows: a Mac build is there only when `info` prints the Mac manifest Epic lists.
+    func testAMacBuildIsThereOnlyWhenLegendaryPrintsItsManifest() {
+        func mac(_ out: String, log: String = "") -> Bool { EpicStore.manifest(Data(out.utf8), log: log, platform: "Mac") != nil }
+        let both = #"[cli] INFO: Getting game metadata... {"game": {"app_name": "Garlic", "platform_versions": {"Windows": "1.0-w", "Mac": "1.0-m"}}, "install": null, "manifest": {"build_version": "1.0-m"}}"#
+        let windowsOnly = #"{"game": {"app_name": "Duck", "platform_versions": {"Windows": "2.0"}}, "install": {"platform": "Windows"}, "manifest": {"build_version": "2.0", "disk_size": 5}}"#
+        XCTAssertTrue(mac(both))
+        XCTAssertFalse(mac(windowsOnly), "a Windows manifest from the install is not a Mac build")
+        XCTAssertFalse(mac(#"{"game": null, "install": null, "manifest": null}"#))
+        XCTAssertFalse(mac("No game information available."))
+        // The Mac asset gone: legendary warns, answers offline and prints the installed Windows
+        // build's manifest, with Mac still listed.
+        let installedWindows = #"{"game": {"app_name": "Garlic", "platform_versions": {"Windows": "1.0-w", "Mac": "1.0-m"}}, "manifest": {"build_version": "1.0-w"}}"#
+        XCTAssertFalse(mac(installedWindows))
+        XCTAssertFalse(mac(both, log: #"[Core] WARNING: Asset information for "Garlic" is missing, the game may have been removed from your account."#))
     }
 
-    /// The Windows copy goes only once Epic named a Mac build, and only when switching from it.
-    func testTheWindowsCopyGoesOnlyOnceEpicNamedAMacBuild() {
-        typealias Step = EpicStore.MacInstallStep
-        XCTAssertEqual(Step.after(hasMacBuild: nil, replacingWindows: true), .couldNotAsk)
-        XCTAssertEqual(Step.after(hasMacBuild: false, replacingWindows: true), .noMacBuild)
-        XCTAssertEqual(Step.after(hasMacBuild: false, replacingWindows: false), .noMacBuild)
-        XCTAssertEqual(Step.after(hasMacBuild: true, replacingWindows: false), .install)
-        XCTAssertEqual(Step.after(hasMacBuild: true, replacingWindows: true), .removeWindowsThenInstall)
+    /// A switch between builds drops only legendary's record first, so it can be put back.
+    func testABuildSwitchKeepsTheOldFilesUntilTheNewBuildIsIn() {
+        XCTAssertEqual(EpicStore.keepFilesUninstallArguments(appName: "A"), ["uninstall", "A", "-y", "--keep-files", "--skip-uninstaller"])
+        XCTAssertEqual(EpicStore.importArguments(appName: "A", path: "/x/A", platform: "Windows"),
+                       ["import", "A", "/x/A", "--platform", "Windows", "--with-dlcs", "--disable-check"])
     }
 
     func testTheFallBackToWindowsIsSeen() {
