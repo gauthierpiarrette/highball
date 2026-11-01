@@ -789,10 +789,16 @@ struct GameDetailView: View {
         return HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(L("Account")).font(.caption).foregroundStyle(.secondary).frame(width: Self.rowLabelWidth, alignment: .leading)
             Menu {
+                // A checkmark on the player's own pick.
+                let picked = owners.reason == .chosen ? owners.accounts : nil
                 ForEach(accounts, id: \.id) { account in
-                    Button(account.displayName) { state.setSteamOwners([account.id], for: item) }
+                    Button { state.setSteamOwners([account.id], for: item) } label: {
+                        if picked == [account.id] { Label(account.displayName, systemImage: "checkmark") } else { Text(account.displayName) }
+                    }
                 }
-                Button(L("Every account here")) { state.setSteamOwners(Set(accounts.map(\.id)), for: item) }
+                Button { state.setSteamOwners(Set(accounts.map(\.id)), for: item) } label: {
+                    if accounts.count > 1, picked == Set(accounts.map(\.id)) { Label(L("Every account here"), systemImage: "checkmark") } else { Text(L("Every account here")) }
+                }
                 Divider()
                 Button(L("Let Highball guess")) { state.setSteamOwners(nil, for: item) }
             } label: {
