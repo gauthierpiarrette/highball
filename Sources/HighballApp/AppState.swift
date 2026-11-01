@@ -3506,31 +3506,35 @@ final class AppState {
     }
 
     /// Starts an Epic game's Mac build the way legendary launches it, with the sign-in arguments
-    /// Epic's own launcher passes (single use, fetched right before).
+    /// Epic's own launcher passes (single use, fetched right before). On the strip, as the GOG
+    /// Mac build and the Windows build start: legendary takes seconds to answer, and a second
+    /// Play meanwhile finds Highball busy and starts nothing, where it used to start a second
+    /// copy. A failure reaches the alert, not only the log.
     func epicPlayMac(_ item: LibraryItem) {
         guard let app = item.epicAppName else { return }
-        if macGameProcesses[item.id]?.isRunning == true {
+        if macGameProcesses[item.id] != nil {
             fail(HighballError.failed("\(item.title) is already running."))
             return
         }
-        recordPlay(item)
-        macLaunchedAt[item.id] = Date()
-        appendLog("\(item.title): opening the Mac version")
         let store = epicStore
-        Task.detached { [weak self] in
-            do {
-                let info = try store.launchInfo(app)
-                let p = Process()
-                p.executableURL = info.executable
-                p.arguments = info.arguments
-                p.currentDirectoryURL = info.workingDirectory
-                p.environment = ProcessInfo.processInfo.environment.merging(info.environment) { $1 }
-                p.terminationHandler = { _ in Task { @MainActor in self?.macGameProcesses[item.id] = nil } }
-                try p.run()
-                await MainActor.run { self?.macGameProcesses[item.id] = p }
-            } catch {
-                await MainActor.run { self?.appendLog("\(item.title): the Mac version did not start: \(error.localizedDescription)") }
+        runBusy(String(format: L("Starting %@"), item.title), done: .handedOff) { [self] in
+            macLaunchedAt[item.id] = Date()
+            appendLog("\(item.title): opening the Mac version")
+            let info = try await Task.detached { try store.launchInfo(app) }.value
+            try Task.checkCancellation()
+            let p = Process()
+            p.executableURL = info.executable
+            p.arguments = info.arguments
+            p.currentDirectoryURL = info.workingDirectory
+            p.environment = ProcessInfo.processInfo.environment.merging(info.environment) { $1 }
+            p.terminationHandler = { [weak self] _ in Task { @MainActor in self?.macGameProcesses[item.id] = nil } }
+            do { try p.run() } catch {
+                throw HighballError.failed(String(format: L("The Mac version of %@ did not start: %@"), item.title, error.localizedDescription))
             }
+            // Set before the termination handler's hop to the main actor can run, so an early
+            // exit never leaves a stale entry.
+            macGameProcesses[item.id] = p
+            recordPlay(item)
         }
     }
 
