@@ -1115,6 +1115,17 @@ extension RegressionTests {
         XCTAssertEqual(ids(installed: [], current: "x64-gone-r1"), ["x64-b-r3", "x64-a-r11", "x64-a-r10", "x64-gone-r1"])
     }
 
+    /// highball#618: a long digest lost its end to the URL limit, and the end is the crash.
+    func testAReportTooLongForItsURLKeepsBothEnds() throws {
+        let lines = ["# gin engine header"] + (0..<400).map { "0123:err:ole:class \($0) not registered, padded out to make the digest long" } + ["unhandled exception at the very end"]
+        var text = lines.joined(separator: "\n")
+        while text.count > 1500 { text = BugReport.shortened(text) }
+        XCTAssertTrue(text.contains("# gin engine header"))
+        XCTAssertTrue(text.contains("unhandled exception at the very end"))
+        let few = String(repeating: "x", count: 4000)
+        XCTAssertLessThan(BugReport.shortened(few).count, few.count, "a text it can't cut between lines still gets shorter")
+    }
+
     // Forza Horizon 6's second route: an environment on the route's line goes by the route, every other by the recipe,
     // under one id, so what an environment records for the game stays in one place.
     func testPreviewRouteAppliesOnlyOnItsOwnLine() throws {

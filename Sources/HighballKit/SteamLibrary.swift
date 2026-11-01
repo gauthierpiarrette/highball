@@ -101,12 +101,14 @@ public enum SteamLibrary {
     /// paths (`D:\SteamLibrary`), which the bottle's drive letters turn back into Mac paths; a
     /// letter the bottle does not map, or a folder that is not there (an external disk left at
     /// home), is skipped. Before this a game installed in a second library folder never reached
-    /// the library at all (highball-db#316, a Steam library on /Volumes/MEDIA_DEV).
+    /// the library at all (highball-db#316, a Steam library on /Volumes/MEDIA_DEV). Steam keeps the
+    /// list in `config` too, the only copy left where `steamapps` itself can't be read, such as a
+    /// Finder alias left in its place (highball#603).
     static func libraryFolders(steamRoot root: URL, bottleURL: URL) -> [URL] {
         var folders = [root.standardizedFileURL]
-        let vdf = root.appending(path: "steamapps/libraryfolders.vdf")
-        guard let text = try? String(contentsOf: vdf, encoding: .utf8) else { return folders }
-        for path in libraryPaths(in: text) {
+        let lists = ["steamapps/libraryfolders.vdf", "config/libraryfolders.vdf"]
+            .compactMap { try? String(contentsOf: root.appending(path: $0), encoding: .utf8) }
+        for path in lists.flatMap(libraryPaths(in:)) {
             guard let url = unixURL(windowsPath: path, bottleURL: bottleURL)?.standardizedFileURL,
                   !folders.contains(url),
                   FileManager.default.fileExists(atPath: url.appending(path: "steamapps").path) else { continue }
