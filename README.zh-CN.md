@@ -66,7 +66,7 @@ git clone https://github.com/gauthierpiarrette/highball && cd highball        # 
 git clone https://github.com/gauthierpiarrette/highball-db ../highball-db     # 配方和游戏数据库（CC0）
 swift build -c release
 .build/release/highball engine install spike/engine-manifest.json
-.build/release/highball engine accept x64-sikarugir10.0_6-r2 apple-gptk-license-2023-08-17  # 可选：启用 D3DMetal
+.build/release/highball engine accept <the id install printed> apple-gptk-license-2023-08-17  # 可选：启用 D3DMetal
 .build/release/highball bottle create play --recipe steam
 .build/release/highball run play Steam
 ```

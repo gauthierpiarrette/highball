@@ -142,8 +142,23 @@ final class EnvironmentTests: XCTestCase {
         try FileManager.default.createDirectory(at: d9vkWine, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: dxvkWine, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: engine.root) }
+        let refreshRate = Bottle.displayRefreshRate
+        defer { Bottle.displayRefreshRate = refreshRate }
+        Bottle.displayRefreshRate = { 60 }
         env = try bottle.environment(engine: engine, renderer: .dxvk)
         XCTAssertEqual(env["DXVK_FRAME_RATE"], "60")
+        XCTAssertEqual(env["HB_PRESENT_PACE_FPS"], "60", "a cap that divides the refresh rate paces at the Metal layer")
+        bottle.settings.fpsCap = 45
+        env = try bottle.environment(engine: engine, renderer: .dxvk)
+        XCTAssertEqual(env["DXVK_FRAME_RATE"], "45")
+        XCTAssertNil(env["HB_PRESENT_PACE_FPS"], "45 has no slot on 60 Hz: Metal would round it to 30")
+        Bottle.displayRefreshRate = { 120 }
+        bottle.settings.fpsCap = 40
+        env = try bottle.environment(engine: engine, renderer: .dxvk)
+        XCTAssertEqual(env["HB_PRESENT_PACE_FPS"], "40", "40 is three vsyncs of a 120 Hz panel")
+        bottle.settings.fpsCap = 60
+        Bottle.displayRefreshRate = { 60 }
+        env = try bottle.environment(engine: engine, renderer: .dxvk)
         // The async toggle travels via the generated conf, never DXVK_ASYNC: the async fork
         // reads `env == "1" || config.enableAsync`, so an env 1 would defeat the per-game
         // [csgo.exe] override that issue #21 requires.
