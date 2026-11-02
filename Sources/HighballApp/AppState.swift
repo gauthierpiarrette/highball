@@ -548,12 +548,9 @@ final class AppState {
 
     /// Play on Mac leads for this item (see MacSteamBuild.leads).
     func prefersMacBuild(_ item: LibraryItem) -> Bool {
-        if item.source == .gog {
-            return StoreMacBuild.leads(entry: gameDB.entry(for: item), installedOnMac: item.installedOnMac,
-                                       arch: item.gogID.flatMap { gogMacInstalled[$0] }?.arch)
-        }
-        if item.source == .epic {
-            return item.installedOnMac && item.epicAppName.flatMap { epicMacArch[$0] } != .only32Bit
+        if item.source == .gog || item.source == .epic {
+            let arch = item.source == .gog ? item.gogID.flatMap { gogMacInstalled[$0] }?.arch : item.epicAppName.flatMap { epicMacArch[$0] }
+            return StoreMacBuild.leads(entry: gameDB.entry(for: item), installedOnMac: item.installedOnMac, arch: arch)
         }
         return MacSteamBuild.leads(entry: gameDB.entry(for: item), installedOnMac: item.installedOnMac,
                             appInfo: item.steamAppID.flatMap { macAppInfoByAppID[$0] })
