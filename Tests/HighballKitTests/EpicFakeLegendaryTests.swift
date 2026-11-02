@@ -219,6 +219,33 @@ final class EpicFakeLegendaryTests: XCTestCase {
         XCTAssertNil(saves.records()[EpicSaves.key(app: app, install: install)]?.restoring)
     }
 
+    /// A leftover download marker restores its old backup, but what the folder holds now (saves
+    /// written while sync was off or signed out) is copied first, kept. With nothing changed since
+    /// the download's backup, that backup becomes the kept copy and still goes back.
+    func testAnInterruptedDownloadKeepsWhatTheFolderHeldFirst() throws {
+        try syncedOnce()
+        let key = EpicSaves.key(app: app, install: install), dir = saves.backups.folder("epic-\(app)", install: install)
+        let backup = try XCTUnwrap(try saves.backups.backUpLocal(folder, into: dir))
+        try SaveBackups.pin(backup)
+        saves.update(key) { $0?.restoring = backup.path }
+        try write("played while sync was off", to: folder.appending(path: "slot.sav"), at: Date())
+        _ = sync(.download)
+        XCTAssertEqual(read(folder.appending(path: "slot.sav")), "v1")
+        let kept = saves.backups.backups(in: dir).filter(SaveBackups.isKept)
+        XCTAssertEqual(kept.count, 1)
+        XCTAssertEqual(read(kept[0].appending(path: "slot.sav")), "played while sync was off")
+        XCTAssertFalse(SaveBackups.isPinned(backup))
+
+        // Nothing changed since the marker's backup: reused as the kept copy, and put back.
+        let again = try XCTUnwrap(try saves.backups.backUpLocal(folder, into: dir))
+        try SaveBackups.pin(again)
+        saves.update(key) { $0?.restoring = again.path }
+        _ = sync(.download)
+        XCTAssertEqual(read(folder.appending(path: "slot.sav")), "v1")
+        XCTAssertNil(saves.records()[key]?.restoring)
+        XCTAssertTrue(saves.backups.backups(in: dir).filter(SaveBackups.isKept).allSatisfy { !SaveBackups.isPinned($0) })
+    }
+
     /// Epic's backups are named like GOG's (<date>-mac), so they rotate per kind; the one made
     /// for the player's pick in a conflict is kept, never pruned.
     func testThePlayersPickKeepsItsBackup() throws {

@@ -417,14 +417,20 @@ public struct EpicSaves: Sendable {
         let filter = catalog(app)?.filter ?? .everything
         let backupDir = backups.folder("epic-\(app)", install: install)
 
-        // A download that never finished: its backup goes back first.
+        // A download that never finished: its backup goes back first. What the folder holds now
+        // is copied first (kept): saves written since, while sync was off or signed out, are
+        // never replaced without a copy.
         if let pending = records()[key]?.restoring, let folder = savePath(app) {
             do {
-                let backup = pending.isEmpty ? nil : URL(fileURLWithPath: pending)
+                let current = try backups.backUpLocal(folder, into: backupDir, filter: filter, kept: true)
+                var backup = pending.isEmpty ? nil : URL(fileURLWithPath: pending)
+                // Nothing changed since the download's backup: that copy is now the kept one.
+                if let pinned = backup, !FileManager.default.fileExists(atPath: pinned.path) { backup = current }
                 try SaveBackups.restore(backup, into: folder, filter: filter)
                 if let backup { SaveBackups.unpin(backup) }
                 clearRestoring(key)
-                onLine?("Highball: an earlier download of these saves didn't finish, so this Mac's saves were put back from their backup")
+                onLine?("Highball: an earlier download of these saves didn't finish, so this Mac's saves were put back from their backup"
+                        + (current.map { "; what the save folder held first was copied to \($0.path)" } ?? ""))
             } catch {
                 return .failed("an earlier download didn't finish, and the saves couldn't be put back from \((pending as NSString).abbreviatingWithTildeInPath) (\(error.localizedDescription))")
             }
@@ -663,8 +669,8 @@ extension EpicSaves {
 
     /// Before an uninstall, copies as kept backups (never pruned): the save folder's files the
     /// catalog's include and exclude lists pick, when `saveFolder` is given, and every file the
-    /// game wrote in its install folder (gameFiles), leaving out the save folder. Nothing tells
-    /// them apart: no install-folder copy. Returns what was kept, each with where it came from;
+    /// game wrote in its install folder (gameFiles), leaving out the ones the save-folder copy
+    /// took. Nothing tells them apart: no install-folder copy. Returns what was kept, each with where it came from;
     /// throws when a copy fails, and the uninstall must then stop.
     public func backUpForUninstall(_ app: String, install: URL, prefix: URL, saveFolder: URL?) throws -> [KeptSaves.Entry] {
         try backUpForUninstall(app, install: install, prefix: prefix, saveFolder: saveFolder,
@@ -681,9 +687,15 @@ extension EpicSaves {
             kept.append(KeptSaves.Entry(name: Self.savesName, folder: saveFolder, backup: copy, install: install, environment: prefix))
         }
         guard let gameFiles else { return kept }
-        let skipped = saveFolder.map { $0.standardizedFileURL.path + "/" }
+        // Only the files the save-folder copy took: what the include and exclude lists leave out
+        // of a save folder inside the install folder is still the game's, and removeLeftover
+        // deletes it with the folder.
+        let filter = catalog(app)?.filter ?? .everything
+        let taken = Set(try saveFolder.map { folder in
+            try SaveBackups.walk(folder).filter { filter.matches(SaveBackups.relativePath($0, in: folder)) }.map(\.standardizedFileURL.path)
+        } ?? [])
         let written = try SaveBackups.walk(install).filter { file in
-            guard skipped.map({ !file.standardizedFileURL.path.hasPrefix($0) }) ?? true else { return false }
+            guard !taken.contains(file.standardizedFileURL.path) else { return false }
             let changed = try? file.resolvingSymlinksInPath().resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
             return gameFiles.isGameWritten(SaveBackups.relativePath(file, in: install), changed: changed)
         }

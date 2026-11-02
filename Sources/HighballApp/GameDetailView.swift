@@ -158,9 +158,10 @@ struct GameDetailView: View {
         }
     }
 
-    /// A sync that worked shows nothing else, so the setting says when the last one was.
-    @ViewBuilder private var lastSyncedLine: some View {
-        if let lastSynced {
+    /// A sync that worked shows nothing else, so the setting says when the last one was; not
+    /// while sync is turned off for the game (`on` false), when no sync runs.
+    @ViewBuilder private func lastSyncedLine(on: Bool) -> some View {
+        if on, let lastSynced {
             Text(String(format: L("Last synced: %@"), Self.syncedFormatter.string(from: lastSynced)))
                 .font(.caption).foregroundStyle(.secondary)
         }
@@ -203,7 +204,7 @@ struct GameDetailView: View {
                     Text(String(format: L("Saves sync from %@."), (epicSaveFolder.path as NSString).abbreviatingWithTildeInPath))
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 }
-                lastSyncedLine
+                lastSyncedLine(on: !state.epicCloudSavesOff.contains(app))
             }
         }
     }
@@ -232,7 +233,7 @@ struct GameDetailView: View {
                     .toggleStyle(.checkbox).disabled(!state.gogSignedIn)
                 Text(L("Saves come down from GOG's cloud before Play and go back up when the game ends. If both copies changed, Highball asks which one wins."))
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                lastSyncedLine
+                lastSyncedLine(on: !state.gogSettings.cloudSavesOff.contains(game.id))
                 if !state.gogSignedIn {
                     Button(L("Connect GOG")) { state.showGOGSignIn = true }.controlSize(.small)
                 }

@@ -3526,6 +3526,8 @@ final class AppState {
                     } else if FileManager.default.fileExists(atPath: saveFolder.path) {
                         appendLog("\(title): saves at \(saveFolder.path) left in place: they are outside this environment, or hold other things Highball keeps")
                     }
+                } else if deleteSaves {
+                    appendLog("\(title): Highball found no save folder for it to delete, so no saves outside the game's folder were deleted")
                 }
                 // Recorded once legendary's record is gone, so this install is never offered its own saves.
                 saves.keep(kept, of: app)
@@ -3744,6 +3746,7 @@ final class AppState {
             let again = await Task.detached { saves.sync(app, install: install, prefix: prefix, direction: forced, keepBackups: true, onLine: log) }.value
             switch again {
             case .synced:
+                savesSynced += 1
                 appendLog("\(title): \(choice == .useCloud ? "Epic's cloud saves replaced this Mac's, after a backup of them" : "Epic's cloud now has this Mac's saves as its newest")")
                 return true
             case let .restored(why):
@@ -4339,7 +4342,9 @@ final class AppState {
             // The backup made before the side the player picked replaces the other is kept for good.
             let again = await Task.detached { saves.sync(game, location: location, folder: folder, direction: forced, keepBackups: true) }.value
             switch again {
-            case .synced: appendLog("\(title): cloud saves \(choice == .useCloud ? "replaced with GOG's copy" : "uploaded from this Mac"), a copy of what was replaced kept first")
+            case .synced:
+                savesSynced += 1
+                appendLog("\(title): cloud saves \(choice == .useCloud ? "replaced with GOG's copy" : "uploaded from this Mac"), a copy of what was replaced kept first")
             case let .failed(why): appendLog("\(title): cloud saves did not sync (\(why))")
             case .conflict, .refused: appendLog("\(title): cloud saves did not sync")
             }

@@ -27,9 +27,10 @@ final class EpicUninstallSavesTests: XCTestCase {
         if let root { try? FileManager.default.removeItem(at: root) }
     }
 
-    private func catalog(include: String?) throws {
-        var attributes: [String: Any] = ["CloudSaveFolder": ["type": "STRING", "value": "{AppData}/Game/Saved"]]
+    private func catalog(include: String?, exclude: String? = nil, folder: String = "{AppData}/Game/Saved") throws {
+        var attributes: [String: Any] = ["CloudSaveFolder": ["type": "STRING", "value": folder]]
         if let include { attributes["CloudIncludeList"] = ["type": "STRING", "value": include] }
+        if let exclude { attributes["CloudExcludeList"] = ["type": "STRING", "value": exclude] }
         let obj: [String: Any] = ["app_name": app, "metadata": ["customAttributes": attributes]]
         try JSONSerialization.data(withJSONObject: obj).write(to: config.appending(path: "metadata/\(app).json"))
     }
@@ -105,6 +106,22 @@ final class EpicUninstallSavesTests: XCTestCase {
         XCTAssertEqual(kept[0].path, "Saved")
         XCTAssertEqual(relative(kept[1].backup), ["Profiles/p1.ini"], "not the installer's, the patch's or the save folder's")
         XCTAssertTrue(SaveBackups.isKept(kept[1].backup))
+    }
+
+    /// A save folder inside the install folder whose exclude list leaves some of it out: the
+    /// game-folder copy skips only the files the save-folder copy took, so the rest (Saved/Config)
+    /// is still kept before the leftover folder is removed.
+    func testKeepCopiesWhatTheExcludeListLeavesOutOfASaveFolderInTheInstall() throws {
+        try catalog(include: nil, exclude: "Config/", folder: "{InstallDir}/Saved")
+        let now = Date()
+        EpicSaves.recordInstall(app: app, driveC: driveC, start: now.addingTimeInterval(-7260), end: now.addingTimeInterval(-7200), finished: true)
+        try write("exe", to: install.appending(path: "Game.exe"), dated: now.addingTimeInterval(-7230))
+        try write("save", to: install.appending(path: "Saved/SaveGames/slot1.sav"), dated: now.addingTimeInterval(-60))
+        try write("settings", to: install.appending(path: "Saved/Config/Windows/GameUserSettings.ini"), dated: now.addingTimeInterval(-60))
+        let kept = try saves.backUpForUninstall(app, install: install, prefix: prefix, saveFolder: install.appending(path: "Saved"))
+        XCTAssertEqual(kept.map(\.name), [EpicSaves.savesName, EpicSaves.gameFolderName])
+        XCTAssertEqual(relative(kept[0].backup), ["SaveGames/slot1.sav"])
+        XCTAssertEqual(relative(kept[1].backup), ["Saved/Config/Windows/GameUserSettings.ini"], "what the save copy left out, and only that")
     }
 
     /// A save folder that can't be read stops the removal.

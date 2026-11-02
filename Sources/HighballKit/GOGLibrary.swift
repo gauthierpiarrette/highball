@@ -541,9 +541,9 @@ extension GOGStore {
     }
 
     /// An install set up before the history was kept falls back to the earliest of its marker's,
-    /// info file's and folder's dates for its first setup (storedHistory). One Highball never set up (an offline installer's: no manifest, so no setup
-    /// and no marker) falls back to when its goggame-<id>.info file landed on this disk, which
-    /// the install wrote. nil firstSetup: none of them exists, so nothing tells the game's files
+    /// info file's and folder's dates for its first setup (storedHistory). One Highball never set
+    /// up (an offline installer's: no manifest, so no setup and no marker) falls back to when its
+    /// goggame-<id>.info file landed on this disk, which the install wrote. nil firstSetup: none of them exists, so nothing tells the game's files
     /// from the installer's.
     public static func history(for game: InstalledGame, driveC: URL) -> InstallHistory {
         var history = storedHistory(for: game, driveC: driveC)

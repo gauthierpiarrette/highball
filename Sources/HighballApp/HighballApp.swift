@@ -646,7 +646,7 @@ private extension View {
             Button(L("Remove anyway"), role: .destructive) { state.epicRemoveWithoutCopy() }
             Button(L("Cancel"), role: .cancel) { state.epicRemovalWithoutCopy = nil }
         } message: { pending in
-            Text(String(format: L("Highball can't tell which files in %@'s folder the game wrote: the Epic tools have no file list for it, and it was installed before Highball kept a record of installs. Its save folder is still copied to save-backups first, but any other save the game kept in its folder is deleted with it. Saves in Epic's cloud are not affected."), pending.title))
+            Text(String(format: L("Highball can't tell which files in %@'s folder the game wrote: the Epic tools have no file list for it, and it was installed before Highball kept a record of installs. Its save folder is copied to save-backups first when Highball can find it, but any other save the game kept in its folder is deleted with it. Saves in Epic's cloud are not affected."), pending.title))
         }
     }
 
