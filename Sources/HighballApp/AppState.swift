@@ -309,7 +309,6 @@ final class AppState {
         sortLibraryByDisplayTitle()
         if let deferred = deferredPlayLink { resolvePlayLink(deferred.request) }
         refreshMacFlags()
-        if sizePrefetch == nil, libraryItems.contains(where: { $0.source == .gog || $0.source == .epic }) { prefetchDownloadSizes() }
     }
 
     // MARK: Whose Steam games
@@ -549,12 +548,9 @@ final class AppState {
 
     /// Play on Mac leads for this item (see MacSteamBuild.leads).
     func prefersMacBuild(_ item: LibraryItem) -> Bool {
-        // A GOG Mac build leads once installed, unless it is one macOS no longer runs.
-        if item.source == .gog {
-            return item.installedOnMac && item.gogID.flatMap { gogMacInstalled[$0] }?.arch != .only32Bit
-        }
-        if item.source == .epic {
-            return item.installedOnMac && item.epicAppName.flatMap { epicMacArch[$0] } != .only32Bit
+        if item.source == .gog || item.source == .epic {
+            let arch = item.source == .gog ? item.gogID.flatMap { gogMacInstalled[$0] }?.arch : item.epicAppName.flatMap { epicMacArch[$0] }
+            return StoreMacBuild.leads(entry: gameDB.entry(for: item), installedOnMac: item.installedOnMac, arch: arch)
         }
         return MacSteamBuild.leads(entry: gameDB.entry(for: item), installedOnMac: item.installedOnMac,
                             appInfo: item.steamAppID.flatMap { macAppInfoByAppID[$0] })
@@ -906,7 +902,7 @@ final class AppState {
                 self.noteNewSteamGames(owned.mapValues { Set($0.map(\.appid)) }, signedIn: signedIn)
                 guard owned != self.steamOwnedByBottle else { return }
                 self.steamOwnedByBottle = owned
-                self.steamCloudAppIDs = Set(owned.values.joined().filter(\.steamCloud).map(\.appid))
+                self.steamCloudByAppID = Dictionary(owned.values.joined().map { ($0.appid, $0.steamCloud) }, uniquingKeysWith: { a, b in a || b })
                 self.macAppInfoByAppID = Dictionary(owned.values.joined().map { ($0.appid, $0.macBuild) },
                                                     uniquingKeysWith: { a, _ in a })
                 self.rebuildLibrary()
@@ -1347,6 +1343,7 @@ final class AppState {
         loadLibraryCache()
         rebuildLibrary()
         steamOwnedRefresh()
+        finishEpicSwitches()
         epicRefresh()
         gogRefresh()
         maybeAutoUpdateEngine()
@@ -3739,21 +3736,32 @@ final class AppState {
         return { [self] download in
             let steps = EpicBuildSwitch.Steps(
                 hasNewBuild: hasNewBuild,
+                // legendary's record of the old build is kept aside first (EpicStore.saveRecord),
+                // so the undo puts it back from disk: no sign-in, no network, either build.
                 dropOldRecord: oldPath.map { _ in { [self] in
                     stage = removing
+                    try await Task.detached { try store.saveRecord(app) }.value
                     let status = try await Task.detached { try store.forgetRecordKeepingFiles(app, onLine: log) }.value
-                    guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall --keep-files", status: status, output: "see the log above") }
+                    guard status == 0 else {
+                        _ = try? await Task.detached { try store.restoreSavedRecord(app) }.value
+                        throw HighballError.processFailed(command: "legendary uninstall --keep-files", status: status, output: "see the log above")
+                    }
                 } },
                 install: download,
                 restoreOldRecord: { [self] in
                     guard let oldPath else { return }
-                    let status = try await Task.detached { try store.restoreRecord(app, path: oldPath, platform: oldPlatform, onLine: log) }.value
-                    appendLog(status == 0 ? "\(item.title): the \(oldPlatform) version is back as it was"
-                                          : "\(item.title): could not record the \(oldPlatform) version again (legendary import exited with \(status)); its files are still in \(oldPath)")
+                    do {
+                        let back = try await Task.detached { try store.restoreSavedRecord(app) }.value
+                        appendLog(back ? "\(item.title): the \(oldPlatform) version is back as it was"
+                                       : "\(item.title): legendary records the game already, so its record was left as it is")
+                    } catch {
+                        appendLog("\(item.title): could not put the \(oldPlatform) version's record back yet (\(error.localizedDescription)); its files are still in \(oldPath), and Highball finishes this when it next opens")
+                    }
                     epicRefresh()
                 },
                 deleteOldFiles: { [self] in
                     guard let oldPath else { return }
+                    store.discardSavedRecord(app)
                     let folder = URL(fileURLWithPath: oldPath, isDirectory: true)
                     guard EpicBuildSwitch.isSafeToDelete(folder, roots: roots) else {
                         appendLog("\(item.title): left the old \(oldPlatform) files in \(oldPath), outside Highball's game folders")
@@ -3765,6 +3773,23 @@ final class AppState {
                 })
             do { try await EpicBuildSwitch.run(steps) } catch EpicBuildSwitch.Failure.noNewBuild {
                 throw HighballError.failed(L("Epic lists a Mac version of this game, but has no Mac build to download for your account, so nothing was changed."))
+            }
+        }
+    }
+
+    @ObservationIgnored private var epicSwitchesFinished = false
+
+    /// Completes the undo of a build switch Highball quit in the middle of (EpicStore.switchesInFlight):
+    /// the old build's record goes back from where the switch kept it. Once, at launch.
+    private func finishEpicSwitches() {
+        guard !epicSwitchesFinished else { return }
+        epicSwitchesFinished = true
+        let store = epicStore
+        for app in store.switchesInFlight() {
+            do {
+                if try store.restoreSavedRecord(app) { appendLog("\(app): a switch between Epic builds did not finish, so the old build is back as it was") }
+            } catch {
+                appendLog("\(app): a switch between Epic builds did not finish, and its old record could not go back yet (\(error.localizedDescription)); Highball tries again when it next opens")
             }
         }
     }
@@ -4010,9 +4035,13 @@ final class AppState {
         gogLoading = gogSignedIn && gogGames.isEmpty
         let signedIn = gogSignedIn
         let installedIDs = Set(gogInstalledByBottle.values.joined().map(\.id))
+        let shown = gogGames
         Task.detached { [store = gogStore] in
             GOGComet(store: store).removeStaleTokens()
-            var games = signedIn ? ((try? await store.ownedGames()) ?? []) : []
+            // nil when GOG could not answer (offline, GOG down): the list shown, the one saved last
+            // time, stays, as Epic's does, rather than shrinking to the installed games.
+            let owned: [GOGStore.Game]? = signedIn ? (try? await store.ownedGames()) : []
+            var games = owned ?? shown
             // A GOG game in an environment that the account list does not name still gets its
             // title, cover and database match.
             let known = Set(games.map(\.id))
@@ -4024,7 +4053,10 @@ final class AppState {
                 guard let self else { return }
                 self.gogFetchInFlight = false
                 self.gogLoading = false
-                if found != self.gogGames { self.gogGames = found; self.rebuildLibrary(); self.saveLibraryCache() }
+                guard found != self.gogGames else { return }
+                self.gogGames = found
+                self.rebuildLibrary()
+                if owned != nil { self.saveLibraryCache() }
             }
         }
     }
@@ -4358,8 +4390,9 @@ final class AppState {
         }
     }
 
-    /// Steam games Steam Cloud keeps saves for (OwnedSteamGame.steamCloud).
-    var steamCloudAppIDs: Set<Int> = []
+    /// Whether Steam Cloud keeps each owned Steam game's saves (OwnedSteamGame.steamCloud), for the
+    /// games an environment's Steam has listed; a game not here is one Highball cannot say about.
+    var steamCloudByAppID: [Int: Bool] = [:]
 
     /// How GOG syncs each GOG game's saves (GOGSaves.CloudSetup), asked once a session per game.
     @ObservationIgnored private var gogCloudSetups: [String: GOGSaves.CloudSetup] = [:]
@@ -4830,30 +4863,12 @@ final class AppState {
 
     /// A native Mac version the store offers: Steam's (MacSteamBuild), or one GOG or Epic lists.
     func offersMacVersion(_ item: LibraryItem) -> Bool {
-        item.installedOnMac || (item.source == .steam ? macSteamBuild(for: item) != nil : item.macListed)
+        item.installedOnMac || (item.source == .steam ? macSteamBuild(for: item) != nil : macListed(item))
     }
 
-    private var sizePrefetch: Task<Void, Never>?
-
-    /// Once a session, in the background: the sizes of GOG and Epic games not installed yet, so a
-    /// page has them before it is opened. One store question at a time (each takes seconds and
-    /// holds the GOG sign-in file), none while a game runs or a task holds the progress bar, and
-    /// none for sizes saved this week. Steam needs none: its sizes are read from disk at once.
-    private func prefetchDownloadSizes() {
-        sizePrefetch = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(30))   // after the libraries have come in
-            guard let self else { return }
-            for item in libraryItems where !item.installed && (item.source == .gog || item.source == .epic) {
-                for mac in [false] + (offersMacVersion(item) && !item.installedOnMac ? [true] : []) where savedEstimate(for: item, mac: mac) == nil {
-                    while busy || !runningSessions.isEmpty || !macGameProcesses.isEmpty {
-                        try? await Task.sleep(for: .seconds(30))
-                        if Task.isCancelled { return }
-                    }
-                    if Task.isCancelled { return }
-                    _ = await downloadEstimate(for: item, mac: mac)
-                }
-            }
-        }
+    /// GOG or Epic lists a Mac version and the database row does not say otherwise (StoreMacBuild).
+    func macListed(_ item: LibraryItem) -> Bool {
+        StoreMacBuild.listed(item.macListed, entry: gameDB.entry(for: item))
     }
 
     /// An installed game's folder and saves as they are on disk now.

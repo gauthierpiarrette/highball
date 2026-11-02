@@ -354,22 +354,12 @@ public struct EpicStore: Sendable {
 
     static func uninstallArguments(appName: String) -> [String] { ["uninstall", appName, "-y"] }
     static func keepFilesUninstallArguments(appName: String) -> [String] { ["uninstall", appName, "-y", "--keep-files", "--skip-uninstaller"] }
-    static func importArguments(appName: String, path: String, platform: String) -> [String] {
-        ["import", appName, path, "--platform", platform, "--with-dlcs", "--disable-check"]
-    }
 
     /// Drops legendary's record of an install and keeps its files, so a switch to the other build
-    /// can be undone (`restoreRecord`) until the new build is in (EpicBuildSwitch).
+    /// can be undone (`restoreSavedRecord`) until the new build is in (EpicBuildSwitch).
     @discardableResult
     public func forgetRecordKeepingFiles(_ appName: String, onLine: (@Sendable (String) -> Void)? = nil) throws -> Int32 {
         try runStreaming(Self.keepFilesUninstallArguments(appName: appName), onLine: onLine)
-    }
-
-    /// Records again an install whose files are still on disk (`legendary import`).
-    @discardableResult
-    public func restoreRecord(_ appName: String, path: String, platform: String,
-                              onLine: (@Sendable (String) -> Void)? = nil) throws -> Int32 {
-        try runStreaming(Self.importArguments(appName: appName, path: path, platform: platform), onLine: onLine)
     }
 
     /// Removes a game legendary installed. Legendary owns the Epic install state, so it does the
