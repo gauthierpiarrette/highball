@@ -466,6 +466,8 @@ enum L10n {
         "Highball could not tell which folder is this game's alone, so it leaves the files where they are.":
             "Highball ne sait pas quel dossier appartient à ce seul jeu, donc il laisse les fichiers où ils sont.",
         "Quit %@ first: it is running.": "Quittez d’abord %@ : le jeu est en cours d’exécution.",
+        "%@ is running as its Mac version. Quit it first.": "%@ est lancé dans sa version Mac. Quittez-le d’abord.",
+        "%@ is running as its Windows version. Quit it first.": "%@ est lancé dans sa version Windows. Quittez-le d’abord.",
         "Built for Apple silicon: runs natively.": "Conçue pour Apple silicon : tourne en natif.",
         "Built for Intel Macs: runs through Rosetta.": "Conçue pour les Mac Intel : tourne via Rosetta.",
         "A 32-bit build, which current macOS can't run. Play the Windows version instead.":

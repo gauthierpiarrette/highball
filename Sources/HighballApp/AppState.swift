@@ -634,6 +634,12 @@ final class AppState {
     /// it the native build goes first.
     func play(_ item: LibraryItem, renderer: Renderer? = nil, windowsBuild: Bool = false) {
         if prefersMacBuild(item), renderer == nil, !windowsBuild { playOnMac(item); return }
+        // One build at a time: the Mac build Highball started is still running, and both would
+        // sign in to the same store client and upload the same saves.
+        if macGameProcesses[item.id] != nil {
+            fail(HighballError.failed(String(format: L("%@ is running as its Mac version. Quit it first."), item.title)))
+            return
+        }
         guard let bottleName = item.bottleName,
               let found = bottles.first(where: { $0.name == bottleName }) else { return }
         var bottle = found
@@ -3989,6 +3995,11 @@ final class AppState {
         // The entry stays until the game has ended (watchMacGame), a launcher's hand-over included.
         if macGameProcesses[item.id] != nil {
             fail(HighballError.failed("\(item.title) is already running."))
+            return
+        }
+        // Nor beside the Windows build's session: one build at a time.
+        if runningSessions.contains(where: { $0.libraryID == item.id }) {
+            fail(HighballError.failed(String(format: L("%@ is running as its Windows version. Quit it first."), item.title)))
             return
         }
         let game = mac.asInstalledGame

@@ -694,8 +694,9 @@ struct GameDetailView: View {
                 .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                 .disabled(state.macPlayUnavailable(item))
                 if item.installed {
+                    // Not while the Mac build Highball started runs: one build at a time.
                     Button(L("Play the Windows version")) { commitTypedArguments(); state.play(item, windowsBuild: true) }
-                        .controlSize(.large).disabled(state.busy || blocked)
+                        .controlSize(.large).disabled(state.busy || blocked || state.isRunningNow(item))
                 } else {
                     Text(item.source == .steam ? L("Starts through Steam for Mac.") : L("Opens the Mac version, without Wine."))
                         .font(.callout).foregroundStyle(.secondary)
@@ -705,7 +706,7 @@ struct GameDetailView: View {
                     primaryActionLabel(L("Play"), symbol: "play.fill")
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
-                .disabled(state.busy || blocked)
+                .disabled(state.busy || blocked || state.isRunningNow(item))
                 if item.installedOnMac {
                     // The row put the Windows build first (a Mac build missing content); the Mac one stays a click away.
                     Button(L("Play on Mac")) { commitTypedArguments(); state.playOnMac(item) }.controlSize(.large)
