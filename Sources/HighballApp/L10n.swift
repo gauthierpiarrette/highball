@@ -208,6 +208,7 @@ enum L10n {
             "Ce lien a expiré ou a déjà servi. Cliquez à nouveau sur Ouvrir la connexion GOG : GOG vous donne aussitôt un nouveau lien, souvent sans redemander votre mot de passe.",
         "Achievements": "Succès",
         "Cloud saves": "Sauvegardes dans le cloud",
+        "Last synced: %@": "Dernière synchronisation : %@",
         "Sync saves with GOG": "Synchroniser les sauvegardes avec GOG",
         "Achievements and stats (comet)": "Succès et statistiques (comet)",
         "comet stands in for GOG Galaxy while the game runs, so achievements, stats and play time reach your GOG account. If the game won't start with it, Highball starts it again without.":

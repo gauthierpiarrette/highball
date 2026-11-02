@@ -124,6 +124,20 @@ final class GOGSaveSafetyTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: GOGSaves.fingerprintFile(of: copy).path))
     }
 
+    /// The Cloud saves setting says when this install last synced: the newest of its locations'
+    /// timestamps, never another install's or another game's.
+    func testLastSyncedIsThisInstallsNewest() throws {
+        let (saves, game, location, _) = try fixture()
+        let (_, other, _, _) = try fixture(install: "Other")
+        XCTAssertNil(saves.lastSynced(game))
+        let profiles = GOGSaves.Location(name: "profiles", template: "")
+        let all: [String: String] = [saves.key(game, location): "1793000000.5", saves.key(game, profiles): "1793000100",
+                                     saves.key(other, location): "1799999999", "2.saves@\(game.folder.standardizedFileURL.path)": "1799999999"]
+        try FileManager.default.createDirectory(at: saves.timestampsFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(all).write(to: saves.timestampsFile)
+        XCTAssertEqual(saves.lastSynced(game), Date(timeIntervalSince1970: 1793000100))
+    }
+
     func testARefusalMovesNothing() {
         XCTAssertTrue(GOGSaves.isRefusal("[SAVES] WARNING: Refused to download files, newer files locally"))
         XCTAssertFalse(GOGSaves.isRefusal("[SAVES] INFO: Done"))

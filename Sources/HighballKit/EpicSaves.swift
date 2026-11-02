@@ -271,6 +271,12 @@ public struct EpicSaves: Sendable {
 
     var recordsFile: URL { store.configDir.deletingLastPathComponent().appending(path: "epic-saves.json") }
 
+    /// When this install's saves were last in step with Epic's cloud; nil when they never were
+    /// (a download's marker alone is no sync).
+    public func lastSynced(_ app: String, install: URL) -> Date? {
+        records()[Self.key(app: app, install: install)].flatMap { $0.synced == .distantPast ? nil : $0.synced }
+    }
+
     public func records() -> [String: Record] {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: recordsFile) else { return [:] }

@@ -3694,6 +3694,10 @@ final class AppState {
         if on { epicCloudSavesOff.remove(app) } else { epicCloudSavesOff.insert(app) }
     }
 
+    /// Counts the GOG and Epic syncs that worked, so a game page shows a new last-synced time
+    /// as soon as one ends, also the upload after a session.
+    var savesSynced = 0
+
     /// One Epic sync, asking the player when both sides changed (EpicSaves). Returns true when the
     /// saves end up in step, or when only the other direction has work left, so an upload after
     /// the game may follow; false when the player chose to decide later or the sync failed, so
@@ -3708,6 +3712,7 @@ final class AppState {
         let outcome = await Task.detached { saves.sync(app, install: install, prefix: prefix, direction: direction, onLine: log) }.value
         switch outcome {
         case .synced:
+            savesSynced += 1
             return true
         case .left:
             appendLog(beforePlay ? "\(title): this Mac's saves are newer than Epic's cloud; they go up after you play"
@@ -4298,6 +4303,7 @@ final class AppState {
         } }.value
         switch outcome {
         case .synced:
+            savesSynced += 1
             return true
         case .refused:
             // Before Play: this Mac's saves are newer, and the upload after the game takes them.

@@ -18,6 +18,8 @@ struct GameDetailView: View {
     @State private var epicCloudSaves = false
     /// Where legendary keeps the game's saves, once a sync has worked it out.
     @State private var epicSaveFolder: URL?
+    /// When this install's saves last synced with GOG or Epic, for the Cloud saves setting.
+    @State private var lastSynced: Date?
     @State private var argsLoaded = false
     /// Saves a line still being typed, so the Play that follows launches with it. Skipped until the
     /// field has loaded, or its empty text would clear the stored arguments.
@@ -105,6 +107,10 @@ struct GameDetailView: View {
             epicCloudSaves = found?.0 ?? false
             epicSaveFolder = found?.1
         }
+        // Read again whenever a sync ends (AppState.savesSynced).
+        .task(id: "\(item.id)|\(state.savesSynced)") {
+            lastSynced = await syncedAt()
+        }
         .task(id: storeAppID) {
             storeDetails = nil
             expandedDescription = false
@@ -152,6 +158,37 @@ struct GameDetailView: View {
         }
     }
 
+    /// A sync that worked shows nothing else, so the setting says when the last one was.
+    @ViewBuilder private var lastSyncedLine: some View {
+        if let lastSynced {
+            Text(String(format: L("Last synced: %@"), Self.syncedFormatter.string(from: lastSynced)))
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// "Today at 10:50", "Yesterday at 21:04", or the date.
+    private static let syncedFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium; f.timeStyle = .short; f.doesRelativeDateFormatting = true
+        return f
+    }()
+
+    /// This install's last sync, read off the main thread (the stores keep it in JSON files).
+    private func syncedAt() async -> Date? {
+        switch item.source {
+        case .gog:
+            guard let game = item.bottleName.flatMap({ name in state.gogInstalledByBottle[name]?.first { $0.id == item.gogID } }) else { return nil }
+            let saves = GOGSaves(store: state.gogStore)
+            return await Task.detached { saves.lastSynced(game) }.value
+        case .epic:
+            guard let app = item.epicAppName, let path = state.epicInstalls[app] else { return nil }
+            let saves = EpicSaves(store: state.epicStore), install = URL(fileURLWithPath: path, isDirectory: true)
+            return await Task.detached { saves.lastSynced(app, install: install) }.value
+        default:
+            return nil
+        }
+    }
+
     /// An Epic game's cloud-save setting, in the game settings like GOG's.
     private func epicSettings(_ app: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
@@ -166,6 +203,7 @@ struct GameDetailView: View {
                     Text(String(format: L("Saves sync from %@."), (epicSaveFolder.path as NSString).abbreviatingWithTildeInPath))
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 }
+                lastSyncedLine
             }
         }
     }
@@ -194,6 +232,7 @@ struct GameDetailView: View {
                     .toggleStyle(.checkbox).disabled(!state.gogSignedIn)
                 Text(L("Saves come down from GOG's cloud before Play and go back up when the game ends. If both copies changed, Highball asks which one wins."))
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                lastSyncedLine
                 if !state.gogSignedIn {
                     Button(L("Connect GOG")) { state.showGOGSignIn = true }.controlSize(.small)
                 }

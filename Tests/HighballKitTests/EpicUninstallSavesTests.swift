@@ -47,6 +47,21 @@ final class EpicUninstallSavesTests: XCTestCase {
 
     /// The first install that finishes starts the history; one that failed before it doesn't, and
     /// every run after it (an update, a repair, a failed one) is legendary's window.
+    /// The Cloud saves setting says when this install's saves were last in step; a download's
+    /// marker alone is no sync.
+    func testLastSyncedReadsThisInstallsRecord() throws {
+        let install = root.appending(path: "Game"), other = root.appending(path: "Other")
+        XCTAssertNil(saves.lastSynced("Garlic", install: install))
+        let when = Date(timeIntervalSince1970: 1793000000)
+        let records: [String: EpicSaves.Record] = [EpicSaves.key(app: "Garlic", install: install): .init(synced: when),
+                                                   EpicSaves.key(app: "Garlic", install: other): .init(synced: .distantPast)]
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        try FileManager.default.createDirectory(at: saves.recordsFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try encoder.encode(records).write(to: saves.recordsFile)
+        XCTAssertEqual(saves.lastSynced("Garlic", install: install), when)
+        XCTAssertNil(saves.lastSynced("Garlic", install: other), "a marker, not a sync")
+    }
+
     func testTheHistoryStartsAtTheFirstFinishedInstall() {
         let t = Date(timeIntervalSince1970: 1_800_000_000)
         EpicSaves.recordInstall(app: app, driveC: driveC, start: t, end: t.addingTimeInterval(60), finished: false)

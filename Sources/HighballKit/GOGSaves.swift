@@ -469,6 +469,15 @@ public struct GOGSaves: Sendable {
         }
     }
 
+    /// When this install's saves last synced with GOG, across its locations: gogdl's timestamp,
+    /// written when a sync moved or matched files (a refusal or a failure keeps the old one).
+    /// nil when it never has.
+    public func lastSynced(_ game: GOGStore.InstalledGame) -> Date? {
+        let suffix = "@\(game.folder.standardizedFileURL.path)"
+        return timestamps().filter { $0.key.hasPrefix(game.id + ".") && $0.key.hasSuffix(suffix) }
+            .compactMap { Double($0.value).flatMap { $0 > 0 ? Date(timeIntervalSince1970: $0) : nil } }.max()
+    }
+
     /// Per install, not per game: the same game in two environments has two sets of saves, each
     /// with its own last sync.
     func key(_ game: GOGStore.InstalledGame, _ location: Location) -> String {
