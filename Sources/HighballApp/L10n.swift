@@ -436,6 +436,8 @@ enum L10n {
         "Epic's launcher syncs a game's saves with Epic's cloud when the game sets a cloud save folder. Highball plays Epic games through legendary, and their saves stay on this Mac.":
             "Le lanceur d’Epic synchronise les sauvegardes d’un jeu avec le cloud d’Epic quand le jeu définit un dossier de sauvegarde en ligne. Highball lance les jeux Epic par legendary, et leurs sauvegardes restent sur ce Mac.",
         "This Mac version is 32-bit, which current macOS can't run.": "Cette version Mac est en 32 bits, que les macOS récents ne lancent plus.",
+        "Highball's game database says this Mac version is not the one to play: the Windows version is.":
+            "La base de jeux de Highball indique que cette version Mac n’est pas celle à lancer : c’est la version Windows.",
         "Switch to the Windows version…": "Passer à la version Windows…",
         "Switch to the Windows version": "Passer à la version Windows",
         "Switch %@ to the Windows version?": "Passer %@ à la version Windows ?",

@@ -753,9 +753,13 @@ struct GameDetailView: View {
                     }
                 }
             } else if item.source == .epic, item.installedOnMac {
-                // Epic keeps one build per game, and this Mac one does not run (32-bit): the way
-                // out is the Windows build, which takes its place.
-                Text(L("This Mac version is 32-bit, which current macOS can't run.")).font(.callout).foregroundStyle(HB.warn)
+                // Epic keeps one build per game, and this Mac one is not played (32-bit, or the
+                // database row says it is not the one to play): the way out is the Windows build,
+                // which takes its place.
+                Text(item.epicAppName.flatMap { state.epicMacArch[$0] } == .only32Bit
+                     ? L("This Mac version is 32-bit, which current macOS can't run.")
+                     : L("Highball's game database says this Mac version is not the one to play: the Windows version is."))
+                    .font(.callout).foregroundStyle(HB.warn)
                 Button(L("Switch to the Windows version…")) { state.pendingEpicWindowsSwitch = item }
                     .controlSize(.large).disabled(state.busy || state.isRunningNow(item))
             } else if item.source == .epic || item.source == .gog {
