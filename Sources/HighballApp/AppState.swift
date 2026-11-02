@@ -3533,11 +3533,18 @@ final class AppState {
                 saves.keep(kept, of: app)
                 // What legendary didn't install keeps its folder, which a reinstall there can't use.
                 if FileManager.default.fileExists(atPath: install.path) {
-                    let others = ((try? store.installedGames()) ?? []).compactMap { $0.install_path.map { URL(fileURLWithPath: $0) } }
-                    if saves.removeLeftover(install, prefix: bottle.url, stillInstalled: others) {
-                        appendLog("\(title): removed the folder the Epic tools left at \(install.path)")
-                    } else {
-                        appendLog("\(title): the Epic tools left \(install.path), with files they didn't install; Highball leaves it, as it holds more than this game")
+                    // legendary's own records, read locally and off the main actor; when they can't
+                    // be read, nothing tells whether another game is inside, so the folder stays.
+                    let prefix = bottle.url
+                    let removed = await Task.detached { () -> Bool? in
+                        guard let records = store.installRecords() else { return nil }
+                        let others = records.values.filter { !$0.isEmpty }.map { URL(fileURLWithPath: $0) }
+                        return saves.removeLeftover(install, prefix: prefix, stillInstalled: others)
+                    }.value
+                    switch removed {
+                    case true?: appendLog("\(title): removed the folder the Epic tools left at \(install.path)")
+                    case false?: appendLog("\(title): the Epic tools left \(install.path), with files they didn't install; Highball leaves it, as it holds more than this game")
+                    case nil: appendLog("\(title): the Epic tools left \(install.path); Highball couldn't read their install records, so it leaves the folder")
                     }
                 }
             }
