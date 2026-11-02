@@ -413,6 +413,8 @@ enum L10n {
         "The Mac version's saves sync with GOG's cloud before and after you play.": "Les sauvegardes de la version Mac se synchronisent avec le cloud GOG avant et après chaque partie.",
         "The game handles the Mac version's saves; some games sync them with GOG's cloud themselves while comet runs.":
             "Le jeu gère les sauvegardes de la version Mac ; certains jeux les synchronisent eux-mêmes avec le cloud GOG quand comet tourne.",
+        "GOG names a folder for the Mac version's saves that other apps may share, so Highball does not sync it: the saves stay on this Mac.":
+            "GOG indique pour les sauvegardes de la version Mac un dossier que d’autres apps peuvent partager, donc Highball ne le synchronise pas : les sauvegardes restent sur ce Mac.",
         "How saves sync with GOG": "Comment les sauvegardes se synchronisent avec GOG",
         "GOG syncs saves in one of two ways, chosen per game and per version.": "GOG synchronise les sauvegardes de deux façons, selon le jeu et la version.",
         "Folder sync: GOG names the folders a game saves in, and Highball copies them to and from GOG's cloud before and after you play, as GOG Galaxy does. When both copies changed, Highball asks which one to keep.":

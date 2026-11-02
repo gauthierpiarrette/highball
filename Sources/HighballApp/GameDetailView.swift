@@ -17,6 +17,9 @@ struct GameDetailView: View {
     /// How this GOG game's saves sync, per version; asked when the page opens.
     @State private var cloudSetup: GOGSaves.CloudSetup?
     @State private var cloudSetupAsked = false
+    /// The installed Mac build's cloud-save locations Highball syncs: the ones resolveMac gives a
+    /// folder, as the play sync does (gogMacSaveLocations). The others are left alone.
+    @State private var macSyncedSaves: [GOGSaves.Location] = []
     @State private var showCloudHelp = false
     @State private var loadingDetails = true
     @State private var expandedDescription = false
@@ -147,9 +150,15 @@ struct GameDetailView: View {
             loadingDetails = false
         }
         .task(id: "\(item.id)|\(item.installed)|\(item.installedOnMac)|cloud") {
-            cloudSetup = nil; cloudSetupAsked = false
+            cloudSetup = nil; cloudSetupAsked = false; macSyncedSaves = []
             guard item.source == .gog, item.installedAnywhere else { return }
-            cloudSetup = await state.gogCloudSetup(for: item)
+            let setup = await state.gogCloudSetup(for: item)
+            if let setup, let mac = item.gogID.flatMap({ state.gogMacInstalled[$0] }) {
+                macSyncedSaves = await Task.detached {
+                    setup.mac.filter { GOGSaves.resolveMac($0.template, installFolder: mac.folder, gameID: mac.id) != nil }
+                }.value
+            }
+            cloudSetup = setup
             cloudSetupAsked = true
         }
         // How much room it takes: the store's estimate before an install, the folders after.
@@ -552,8 +561,11 @@ struct GameDetailView: View {
                               own: L("The game handles the Windows version's saves; some games sync them with GOG's cloud themselves while comet runs.")))
         }
         if item.installedOnMac {
-            lines.append(line(setup.mac, synced: L("The Mac version's saves sync with GOG's cloud before and after you play."),
-                              own: L("The game handles the Mac version's saves; some games sync them with GOG's cloud themselves while comet runs.")))
+            // GOG names Mac folders none of which is clearly the game's own: nothing syncs them.
+            lines.append(!setup.mac.isEmpty && macSyncedSaves.isEmpty
+                ? L("GOG names a folder for the Mac version's saves that other apps may share, so Highball does not sync it: the saves stay on this Mac.")
+                : line(macSyncedSaves, synced: L("The Mac version's saves sync with GOG's cloud before and after you play."),
+                       own: L("The game handles the Mac version's saves; some games sync them with GOG's cloud themselves while comet runs.")))
         }
         return lines
     }
@@ -589,7 +601,7 @@ struct GameDetailView: View {
                 .font(.callout).foregroundStyle(.secondary)
             Text(L("The game's own sync: some games send their saves to GOG's cloud themselves, through GOG's game kit. With Highball that works while comet runs beside the game, and the game says so when it syncs, as Cyberpunk 2077 does."))
                 .font(.callout).foregroundStyle(.secondary)
-            let folders = (cloudSetup.map { (item.installed ? $0.windows : []) + (item.installedOnMac ? $0.mac : []) } ?? []).map(\.template)
+            let folders = ((cloudSetup.map { item.installed ? $0.windows : [] } ?? []) + (item.installedOnMac ? macSyncedSaves : [])).map(\.template)
             if !folders.isEmpty {
                 Text(L("Folders this game syncs")).font(.caption.weight(.semibold)).padding(.top, 2)
                 ForEach(folders, id: \.self) { Text(verbatim: $0).font(.caption.monospaced()).textSelection(.enabled) }
