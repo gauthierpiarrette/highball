@@ -257,6 +257,7 @@ struct ContentView: View {
         .sheet(isPresented: $state.showGOGSignIn) { GOGSignInSheet() }
         .gogSaveConflictAsk(state)
         .gogRemovalWithoutBackupAsk(state)
+        .epicRemovalWithoutCopyAsk(state)
         .gogPutBackSavesAsk(state)
         .epicPutBackSavesAsk(state)
         .sheet(item: $state.engineTransition) { t in EngineTransitionSheet(transition: t) }
@@ -634,6 +635,19 @@ private extension View {
                 String(format: L("Use Epic's cloud saves replaces this Mac's, after backing them up to %@. Keep this Mac's saves uploads them as Epic's newest save, which your other devices then download."),
                        (backups.path as NSString).abbreviatingWithTildeInPath),
                 decideLater].joined(separator: " ")
+    }
+
+    /// Nothing tells the files an Epic game wrote in its folder from legendary's, so Keep can't
+    /// copy them. Nothing is removed unless the player agrees.
+    @MainActor func epicRemovalWithoutCopyAsk(_ state: AppState) -> some View {
+        self.alert(state.epicRemovalWithoutCopy.map { String(format: L("Remove %@ without a copy of its folder?"), $0.title) } ?? "",
+                   isPresented: .init(get: { state.epicRemovalWithoutCopy != nil }, set: { if !$0 { state.epicRemovalWithoutCopy = nil } }),
+                   presenting: state.epicRemovalWithoutCopy) { _ in
+            Button(L("Remove anyway"), role: .destructive) { state.epicRemoveWithoutCopy() }
+            Button(L("Cancel"), role: .cancel) { state.epicRemovalWithoutCopy = nil }
+        } message: { pending in
+            Text(String(format: L("Highball can't tell which files in %@'s folder the game wrote: the Epic tools have no file list for it, and it was installed before Highball kept a record of installs. Its save folder is still copied to save-backups first, but any other save the game kept in its folder is deleted with it. Saves in Epic's cloud are not affected."), pending.title))
+        }
     }
 
     /// Each choice says what it replaces and that a backup is made first (GOGSaves backups).

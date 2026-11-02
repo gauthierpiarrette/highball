@@ -3445,12 +3445,33 @@ final class AppState {
         }
     }
 
+    /// An Epic game the player is asked about before it is removed: nothing tells the files the
+    /// game wrote in its install folder from legendary's (no manifest, and installed before
+    /// Highball kept a history), so Keep can't copy them. Nothing is removed until they agree.
+    struct EpicRemovalWithoutCopy {
+        let app: String
+        let title: String
+        let bottle: Bottle
+    }
+    var epicRemovalWithoutCopy: EpicRemovalWithoutCopy?
+
+    /// The player agreed to remove the Epic game without a copy of its install folder.
+    func epicRemoveWithoutCopy() {
+        guard let pending = epicRemovalWithoutCopy else { return }
+        epicRemovalWithoutCopy = nil
+        appendLog("\(pending.title): removing it without a copy of what it wrote in its folder, as asked")
+        epicUninstall(pending.app, title: pending.title, in: pending.bottle, deleteSaves: false, agreed: true)
+    }
+
     /// Removes an Epic game through legendary, so its library stays right. Keep save data (the
     /// default) first copies, as kept backups, the game's Epic save folder and every file the game
-    /// wrote in its install folder since Highball installed it, and stops if a copy fails; a later
-    /// install is offered them back. `deleteSaves` copies nothing and also deletes the save folder
-    /// when it lies inside the environment (EpicSaves.removeSaves).
-    private func epicUninstall(_ app: String, title: String, in bottle: Bottle, deleteSaves: Bool) {
+    /// wrote in its install folder (EpicSaves.gameFiles), and stops if a copy fails; a later
+    /// install is offered them back. When nothing tells the game's files apart, the player is
+    /// asked first (epicRemovalWithoutCopy); `agreed` is their go-ahead. `deleteSaves` copies
+    /// nothing and also deletes the save folder when it lies inside the environment
+    /// (EpicSaves.removeSaves). What follows the uninstall waits for legendary's record of the
+    /// game to be gone, not the folder: legendary leaves the folder when the game wrote files in it.
+    private func epicUninstall(_ app: String, title: String, in bottle: Bottle, deleteSaves: Bool, agreed: Bool = false) {
         let store = epicStore
         let install = epicInstalls[app].map { URL(fileURLWithPath: $0, isDirectory: true) }
         // Resolving the save folder runs legendary's sync-saves (moving nothing), which a player
@@ -3466,11 +3487,22 @@ final class AppState {
             if let install, EpicStore.isInstalled(path: install.path, inDriveC: bottle.driveC) {
                 stage = L("Finding the game's saves")
                 saveFolder = await Task.detached { saves.uninstallSaveFolder(app, install: install, prefix: prefix, resolve: resolve, onLine: log) }.value
+                try checkStopped()
                 if !deleteSaves {
+                    let gameFiles = await Task.detached { saves.gameFiles(app, install: install, prefix: prefix) }.value
+                    try checkStopped()
+                    if gameFiles == nil, !agreed {
+                        epicRemovalWithoutCopy = EpicRemovalWithoutCopy(app: app, title: title, bottle: bottle)
+                        busyDoneOverride = .handedOff   // the question takes over; nothing was removed
+                        return
+                    }
                     // These would go with the game, so they are copied before anything runs, and a
                     // failed copy stops the removal. Never pruned.
                     stage = L("Keeping a copy of the game's saves")
-                    kept = try await Task.detached { try saves.backUpForUninstall(app, install: install, prefix: prefix, saveFolder: saveFolder) }.value
+                    kept = try await Task.detached {
+                        try saves.backUpForUninstall(app, install: install, prefix: prefix, saveFolder: saveFolder, gameFiles: gameFiles)
+                    }.value
+                    try checkStopped()   // a detached copy runs on through a Stop: nothing is removed after one
                     for entry in kept {
                         let (files, bytes) = SaveBackups.contents(of: entry.backup)
                         let what = entry.name == EpicSaves.gameFolderName ? "the game wrote in its folder" : "in its save folder"
@@ -3478,19 +3510,34 @@ final class AppState {
                     }
                 }
             }
+            try checkStopped()
             appendLog("\(title): asking the Epic tools to uninstall it")
             _ = try await Task.detached { try store.uninstall(app, onLine: log) }.value
-            if let install, !FileManager.default.fileExists(atPath: install.path) {
+            // legendary's records unreadable: the folder vanishing is all there is to go by.
+            let uninstalled = store.isRecorded(app).map { !$0 } ?? install.map { !FileManager.default.fileExists(atPath: $0.path) } ?? false
+            if install != nil, !uninstalled {
+                appendLog("\(title): the Epic tools still list it as installed, so no saves were kept or deleted")
+            }
+            if let install, uninstalled {
                 EpicSaves.forgetHistory(app: app, driveC: bottle.driveC)
-                if deleteSaves, let saveFolder, !EpicSaves.isInside(saveFolder, roots: [install]) {
+                if deleteSaves, let saveFolder {
                     if saves.removeSaves(app, folder: saveFolder, install: install, prefix: prefix) {
                         appendLog("\(title): saves at \(saveFolder.path) deleted, as asked")
                     } else if FileManager.default.fileExists(atPath: saveFolder.path) {
                         appendLog("\(title): saves at \(saveFolder.path) left in place: they are outside this environment, or hold other things Highball keeps")
                     }
                 }
-                // Recorded once the folder is gone, so this install is never offered its own saves.
+                // Recorded once legendary's record is gone, so this install is never offered its own saves.
                 saves.keep(kept, of: app)
+                // What legendary didn't install keeps its folder, which a reinstall there can't use.
+                if FileManager.default.fileExists(atPath: install.path) {
+                    let others = ((try? store.installedGames()) ?? []).compactMap { $0.install_path.map { URL(fileURLWithPath: $0) } }
+                    if saves.removeLeftover(install, prefix: bottle.url, stillInstalled: others) {
+                        appendLog("\(title): removed the folder the Epic tools left at \(install.path)")
+                    } else {
+                        appendLog("\(title): the Epic tools left \(install.path), with files they didn't install; Highball leaves it, as it holds more than this game")
+                    }
+                }
             }
             await MainActor.run { self.refresh() }
         }

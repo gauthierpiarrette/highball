@@ -248,6 +248,70 @@ final class EpicFakeLegendaryTests: XCTestCase {
         XCTAssertNil(read(home.appending(path: "fake-overlap")), "two legendary runs overlapped")
     }
 
+    private func manifest(_ app: String, _ names: [String]) throws {
+        try JSONSerialization.data(withJSONObject: names).write(to: home.appending(path: "fake-manifest-\(app).json"))
+    }
+    private func relative(_ backup: URL) -> [String] { SaveBackups.files(in: backup).map { SaveBackups.relativePath($0, in: backup) } }
+
+    /// An install from before the history was kept: legendary's installed manifests (the game's
+    /// and its DLC's, sharing the folder) tell its files apart, names in any case, and what no
+    /// manifest names is the game's. With no manifest, or one whose names aren't on disk (an
+    /// encrypted one lists obfuscated names), and no history, nothing tells them apart.
+    func testKeepCopiesWhatNoManifestNames() throws {
+        let game: [String: Any] = ["app_name": app, "title": "Game", "install_path": install.path]
+        let dlc: [String: Any] = ["app_name": "GameDLC", "title": "DLC", "install_path": install.path]
+        try JSONSerialization.data(withJSONObject: [app: game, "GameDLC": dlc]).write(to: config.appending(path: "installed.json"))
+        let old = dayAgo.addingTimeInterval(-86_400)
+        for name in ["Game.exe", "Data/base.pak", "DLC/extra.pak", "Config/Default.ini"] {
+            try write("installed", to: install.appending(path: name), at: old)
+        }
+        try write("profile", to: install.appending(path: "Profiles/p1.ini"), at: old)
+        try write("log", to: install.appending(path: "Logs/game.log"), at: hourAgo)
+        XCTAssertNil(saves.gameFiles(app, install: install, prefix: prefix), "no manifest, no history")
+        try manifest(app, ["Game.exe", "data/Base.pak", "Config/Default.ini"])
+        XCTAssertNil(saves.gameFiles(app, install: install, prefix: prefix), "the DLC sharing the folder has no list")
+        try manifest("GameDLC", ["DLC/extra.pak"])
+        let files = try XCTUnwrap(saves.gameFiles(app, install: install, prefix: prefix))
+        XCTAssertNil(files.history.firstSetup)
+        let kept = try saves.backUpForUninstall(app, install: install, prefix: prefix, saveFolder: nil, gameFiles: files)
+        XCTAssertEqual(kept.map(\.name), [EpicSaves.gameFolderName])
+        XCTAssertEqual(relative(kept[0].backup), ["Logs/game.log", "Profiles/p1.ini"], "not what a manifest names")
+
+        try manifest(app, ["0a1b2c", "3d4e5f"])
+        XCTAssertNil(saves.gameFiles(app, install: install, prefix: prefix), "obfuscated names")
+        // With a history too, a file the game rewrote after Highball installed it also counts.
+        try manifest(app, ["Game.exe", "data/Base.pak", "Config/Default.ini"])
+        EpicSaves.recordInstall(app: app, driveC: prefix.appending(path: "drive_c"), start: old.addingTimeInterval(-60), end: old.addingTimeInterval(1), finished: true)
+        try write("rewritten", to: install.appending(path: "Config/Default.ini"), at: hourAgo)
+        let both = try saves.backUpForUninstall(app, install: install, prefix: prefix, saveFolder: nil)
+        XCTAssertEqual(relative(both[0].backup), ["Config/Default.ini", "Logs/game.log", "Profiles/p1.ini"])
+    }
+
+    /// legendary's uninstall deletes the files its manifest names and leaves the folder when the
+    /// game wrote others there, but its record of the game is gone: what an uninstall waits for.
+    /// Delete save data too then deletes a save folder left inside it.
+    func testAnUninstallIsDoneWhenLegendarysRecordIsGone() throws {
+        let store = EpicStore(paths: HighballPaths(home: home))
+        try manifest(app, ["Game.exe", "Data/base.pak"])
+        try write("exe", to: install.appending(path: "Game.exe"), at: dayAgo)
+        try write("pak", to: install.appending(path: "Data/base.pak"), at: dayAgo)
+        try write("save", to: install.appending(path: "Saved/slot1.sav"), at: hourAgo)
+        XCTAssertEqual(store.isRecorded(app), true)
+        XCTAssertEqual(try store.installedFiles(app), ["Game.exe", "Data/base.pak"])
+        XCTAssertEqual(try store.uninstall(app), 0)
+        XCTAssertEqual(store.isRecorded(app), false)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: install.path), "the save keeps the folder")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: install.appending(path: "Data").path))
+        XCTAssertThrowsError(try store.installedFiles(app), "no manifest once uninstalled")
+        XCTAssertTrue(saves.removeSaves(app, folder: install.appending(path: "Saved"), install: install, prefix: prefix))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: install.appending(path: "Saved").path))
+        XCTAssertFalse(saves.removeSaves(app, folder: install, install: install, prefix: prefix), "never the install folder itself")
+        try "not json".write(to: config.appending(path: "installed.json"), atomically: true, encoding: .utf8)
+        XCTAssertNil(store.isRecorded(app), "unreadable records say nothing")
+        try FileManager.default.removeItem(at: config.appending(path: "installed.json"))
+        XCTAssertEqual(store.isRecorded(app), false, "nothing installed")
+    }
+
     /// legendary 0.21.0's sync-saves, reduced to what EpicSaves relies on.
     static let script = #"""
     #!/usr/bin/python3 -I
@@ -257,6 +321,35 @@ final class EpicFakeLegendaryTests: XCTestCase {
     args = sys.argv[1:]
     debug = args and args[0] == '-v'
     if debug: args = args[1:]
+    if args[0] in ('list-files', 'uninstall'):
+        config = os.environ['LEGENDARY_CONFIG_PATH']
+        installed_file = os.path.join(config, 'installed.json')
+        installed = json.load(open(installed_file))
+        app = args[1]
+        manifest = os.path.join(os.path.dirname(config), f'fake-manifest-{app}.json')
+        names = json.load(open(manifest)) if os.path.exists(manifest) else None
+        if args[0] == 'list-files':
+            # cli.py list_files: the installed manifest, read locally; with none on disk,
+            # load_manifest(None) raises and legendary exits non-zero.
+            if app not in installed or names is None: sys.exit(1)
+            print(json.dumps([dict(filename=n, sha_hash='00', install_tags=[], file_size=0, flags=0) for n in names]))
+            sys.exit(0)
+        # core.py uninstall_game, utils.py delete_filelist: the manifest's files, the folders they
+        # leave empty, the root only if nothing else is in it (os.rmdir), then the record.
+        if app not in installed: sys.exit(0)
+        root = installed[app]['install_path']
+        dirs = set()
+        for n in names or []:
+            d = os.path.dirname(n)
+            while d: dirs.add(d); d = os.path.dirname(d)
+            try: os.remove(os.path.join(root, n))
+            except OSError: pass
+        for d in sorted(dirs, key=len, reverse=True) + ['']:
+            try: os.rmdir(os.path.join(root, d))
+            except OSError: pass
+        del installed[app]
+        json.dump(installed, open(installed_file, 'w'))
+        sys.exit(0)
     assert args[0] == 'sync-saves', args
     app = args[1]
     flags = set(args[2:])

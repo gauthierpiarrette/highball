@@ -609,24 +609,77 @@ extension EpicSaves {
         return usable(savePath(app))
     }
 
+    /// How an uninstall tells the files the game wrote in its install folder from the ones
+    /// legendary put down.
+    public struct GameFiles: Sendable, Equatable {
+        /// The files legendary's installed manifests name there (the game's and its DLC's, which
+        /// share the folder), lowercased: Windows names ignore case. nil when it had none.
+        public let installed: Set<String>?
+        /// When Highball installed the game and ran legendary over it (no firstSetup for an
+        /// install from before the history was kept).
+        public let history: GameInstallHistory
+
+        /// A file no manifest names is the game's; so is one changed after Highball installed the
+        /// game outside legendary's runs (a config the game rewrote).
+        public func isGameWritten(_ relativePath: String, changed: Date?) -> Bool {
+            if let installed, !installed.contains(relativePath.lowercased()) { return true }
+            return history.isGameWritten(changed ?? .distantPast)
+        }
+    }
+
+    /// What tells the game's files in its install folder apart: legendary's manifests, while the
+    /// game is installed, and the install history. nil when there is neither, and then nothing
+    /// in the install folder can be copied as the game's.
+    public func gameFiles(_ app: String, install: URL, prefix: URL) -> GameFiles? {
+        let history = Self.history(app: app, driveC: prefix.appending(path: "drive_c"))
+        let installed = manifestFiles(app, install: install)
+        guard installed != nil || history.firstSetup != nil else { return nil }
+        return GameFiles(installed: installed, history: history)
+    }
+
+    /// The files legendary's manifests name in the install folder, for the game and every DLC
+    /// legendary records in the same folder. nil when any of them can't be listed, or names none
+    /// of the files on disk (an encrypted manifest lists obfuscated names), so the installer's
+    /// files are never taken for the game's.
+    func manifestFiles(_ app: String, install: URL) -> Set<String>? {
+        let path = install.standardizedFileURL.path
+        let sharing = (store.installRecords() ?? [:]).filter { URL(fileURLWithPath: $0.value).standardizedFileURL.path == path }.keys
+        let onDisk = Set(SaveBackups.files(in: install).map { SaveBackups.relativePath($0, in: install).lowercased() })
+        var names = Set<String>()
+        for each in Set(sharing).union([app]).sorted() {
+            guard let files = try? store.installedFiles(each) else { return nil }
+            let listed = Set(files.map { $0.replacingOccurrences(of: "\\", with: "/").lowercased() })
+            guard !listed.isDisjoint(with: onDisk) else { return nil }
+            names.formUnion(listed)
+        }
+        return names
+    }
+
     /// Before an uninstall, copies as kept backups (never pruned): the save folder's files the
     /// catalog's include and exclude lists pick, when `saveFolder` is given, and every file the
-    /// game wrote in its install folder since Highball installed it there, outside the runs that
-    /// installed over it (history), leaving out the save folder. Never installed through Highball
-    /// here: no install-folder copy. Returns what was kept, each with where it came from; throws
-    /// when a copy fails, and the uninstall must then stop.
+    /// game wrote in its install folder (gameFiles), leaving out the save folder. Nothing tells
+    /// them apart: no install-folder copy. Returns what was kept, each with where it came from;
+    /// throws when a copy fails, and the uninstall must then stop.
     public func backUpForUninstall(_ app: String, install: URL, prefix: URL, saveFolder: URL?) throws -> [KeptSaves.Entry] {
+        try backUpForUninstall(app, install: install, prefix: prefix, saveFolder: saveFolder,
+                               gameFiles: gameFiles(app, install: install, prefix: prefix))
+    }
+
+    /// The same, with what gameFiles found (an uninstall asks first when it is nil).
+    public func backUpForUninstall(_ app: String, install: URL, prefix: URL, saveFolder: URL?,
+                                   gameFiles: GameFiles?) throws -> [KeptSaves.Entry] {
         var kept: [KeptSaves.Entry] = []
         if let saveFolder,
            let copy = try backups.backUpLocal(saveFolder, into: backupFolder(app, Self.savesName, install: install),
                                               filter: catalog(app)?.filter ?? .everything, kept: true) {
             kept.append(KeptSaves.Entry(name: Self.savesName, folder: saveFolder, backup: copy, install: install, environment: prefix))
         }
-        let history = Self.history(app: app, driveC: prefix.appending(path: "drive_c"))
-        guard history.firstSetup != nil else { return kept }
+        guard let gameFiles else { return kept }
         let skipped = saveFolder.map { $0.standardizedFileURL.path + "/" }
-        let written = try SaveBackups.files(in: install, writtenPer: history).filter { file in
-            skipped.map { !file.standardizedFileURL.path.hasPrefix($0) } ?? true
+        let written = try SaveBackups.walk(install).filter { file in
+            guard skipped.map({ !file.standardizedFileURL.path.hasPrefix($0) }) ?? true else { return false }
+            let changed = try? file.resolvingSymlinksInPath().resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            return gameFiles.isGameWritten(SaveBackups.relativePath(file, in: install), changed: changed)
         }
         if !written.isEmpty,
            let copy = try backups.backUpLocal(install, into: backupFolder(app, Self.gameFolderName, install: install), kept: true, only: written) {
@@ -638,17 +691,36 @@ extension EpicSaves {
     /// For a player who asked for the saves to go with the game: deletes the save folder (only
     /// the files the include and exclude lists pick, when the catalog has them) when, links
     /// followed, it lies inside the environment's drive_c and neither holds nor sits inside
-    /// Highball's save-backups or the install folder (which the uninstall removes anyway).
+    /// Highball's save-backups, nor holds the install folder. One inside the install folder is
+    /// deleted too: legendary deletes only the files it installed, so the saves stay otherwise.
     /// Returns whether it was deleted.
     public func removeSaves(_ app: String, folder: URL, install: URL, prefix: URL) -> Bool {
+        let inInstall = Self.isInside(folder, roots: [install]) && Self.components(folder) != Self.components(install)
         guard FileManager.default.fileExists(atPath: folder.path),
-              SaveBackups.mayDelete(folder, driveC: prefix.appending(path: "drive_c"), sparing: [backups.root, install]) else { return false }
+              SaveBackups.mayDelete(folder, driveC: prefix.appending(path: "drive_c"),
+                                    sparing: inInstall ? [backups.root] : [backups.root, install]) else { return false }
         let filter = catalog(app)?.filter ?? .everything
         if filter.isEverything { return (try? FileManager.default.removeItem(at: folder)) != nil }
         for file in SaveBackups.files(in: folder, matching: filter) {
             guard (try? FileManager.default.removeItem(at: file)) != nil else { return false }
         }
         return true
+    }
+
+    /// legendary leaves an uninstalled game's folder behind when anything it didn't install is in
+    /// it (a log, a config, a save), and installing the game there again then fails. Once its
+    /// record is gone and what was worth keeping is copied, the folder goes too, but only one at
+    /// least two levels inside the environment's drive_c, never under its users or windows
+    /// folders, holding no game legendary still has installed, and never Highball's
+    /// save-backups. Whether it was removed.
+    public func removeLeftover(_ install: URL, prefix: URL, stillInstalled: [URL]) -> Bool {
+        let driveC = prefix.appending(path: "drive_c")
+        let inside = Self.components(install).dropFirst(Self.components(driveC).count).map { $0.lowercased() }
+        guard FileManager.default.fileExists(atPath: install.path), inside.count >= 2,
+              !["users", "windows"].contains(inside[0]),
+              !stillInstalled.contains(where: { Self.isInside($0, roots: [install]) }),
+              SaveBackups.mayDelete(install, driveC: driveC, sparing: [backups.root]) else { return false }
+        return (try? FileManager.default.removeItem(at: install)) != nil
     }
 
     var keptSavesFile: KeptSavesFile { KeptSavesFile(url: store.configDir.deletingLastPathComponent().appending(path: "epic-kept-saves.json")) }

@@ -93,6 +93,27 @@ final class EpicUninstallSavesTests: XCTestCase {
     }
 
     /// A save folder that can't be read stops the removal.
+    /// legendary leaves the game's folder when it holds files it didn't install, and a reinstall
+    /// there fails: once the record is gone the folder goes, but never a shared one.
+    func testTheLeftoverFolderGoesButNeverASharedOne() throws {
+        let prefix = FileManager.default.temporaryDirectory.appending(path: "leftover-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: prefix) }
+        let driveC = prefix.appending(path: "drive_c")
+        let games = driveC.appending(path: "Program Files/Epic Games")
+        let game = games.appending(path: "Game"), other = games.appending(path: "Other")
+        for folder in [game, other, driveC.appending(path: "users/someone/Game")] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data("x".utf8).write(to: folder.appending(path: "save.dat"))
+        }
+        let saves = EpicSaves(store: EpicStore(paths: HighballPaths(home: prefix.appending(path: "home"))))
+        XCTAssertFalse(saves.removeLeftover(games, prefix: prefix, stillInstalled: [other]), "holds a game still installed")
+        XCTAssertFalse(saves.removeLeftover(driveC.appending(path: "Program Files"), prefix: prefix, stillInstalled: []), "a folder every game shares")
+        XCTAssertFalse(saves.removeLeftover(driveC.appending(path: "users/someone/Game"), prefix: prefix, stillInstalled: []), "a user folder")
+        XCTAssertTrue(saves.removeLeftover(game, prefix: prefix, stillInstalled: [other]))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: game.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: other.appending(path: "save.dat").path))
+    }
+
     func testAFailedCopyThrows() throws {
         try write("save", to: folder.appending(path: "Sub/slot1.sav"))
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: folder.appending(path: "Sub").path)

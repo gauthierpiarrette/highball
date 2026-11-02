@@ -167,6 +167,36 @@ public struct EpicStore: Sendable {
         return try JSONDecoder().decode([InstalledGame].self, from: Data(out.utf8))
     }
 
+    /// Legendary's own install records (installed.json in its config folder), app name to install
+    /// path, read without running it. Empty when legendary has installed nothing; nil when the
+    /// file is there but can't be read.
+    public func installRecords() -> [String: String]? {
+        let file = configDir.appending(path: "installed.json")
+        guard FileManager.default.fileExists(atPath: file.path) else { return [:] }
+        guard let data = try? Data(contentsOf: file),
+              let all = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        return all.mapValues { (($0 as? [String: Any])?["install_path"] as? String) ?? "" }
+    }
+
+    /// Whether legendary still records the game as installed; nil when its records can't be
+    /// read. An uninstall is done when the record is gone: legendary deletes the files its
+    /// manifest names, then removes the folder only if nothing else is left in it (core.py
+    /// `uninstall_game`, `delete_filelist`), so a log, a config or a save keeps the folder.
+    public func isRecorded(_ appName: String) -> Bool? {
+        installRecords().map { $0[appName] != nil }
+    }
+
+    /// The files legendary installed for a game, by its installed manifest, as paths relative to
+    /// the install folder. Read locally, with no sign-in, while the game is installed (cli.py
+    /// `list_files` loads the installed manifest unless asked to download one). Throws when
+    /// legendary has no manifest for it.
+    public func installedFiles(_ appName: String) throws -> [String] {
+        struct File: Decodable { let filename: String }
+        let out = try capture(Self.listFilesArguments(appName: appName))
+        return try JSONDecoder().decode([File].self, from: Data(out.utf8)).map(\.filename)
+    }
+    static func listFilesArguments(appName: String) -> [String] { ["list-files", appName, "--json"] }
+
     /// Legendary's install records, app name to path, keeping only the ones whose folder still
     /// exists. Legendary never notices a removed environment or a deleted game folder, and a
     /// record it keeps showed Guardians of the Galaxy as installed after its bottle was gone (#63).
