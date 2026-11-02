@@ -7,6 +7,8 @@ struct GameDetailView: View {
     let passedItem: LibraryItem
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var storeDetails: SteamGameDetails?
+    /// The registry's ActiveUser for the game's environment, as last read (accountNote).
+    @State private var activeUserRead: ActiveUserRead?
     @State private var loadingDetails = true
     @State private var expandedDescription = false
     @State private var selectedGalleryURL: URL?
@@ -68,6 +70,36 @@ struct GameDetailView: View {
 
     private var storeAppID: Int? { item.steamAppID }
 
+    private struct ActiveUserRead: Equatable {
+        let bottle: String
+        let user: UInt64?
+    }
+
+    /// What the ActiveUser task depends on: the Steam game's environment, whether its Steam runs,
+    /// and whether more than one account uses it.
+    private struct AccountWatch: Equatable {
+        let bottle: String?
+        let running: Bool
+        let severalAccounts: Bool
+    }
+
+    private var accountWatch: AccountWatch {
+        let name = item.source == .steam && item.steamAppID != nil ? item.bottleName : nil
+        return AccountWatch(bottle: name, running: name.map { state.steamClients.contains($0) } ?? false,
+                            severalAccounts: name.map { (state.steamAccountsByBottle[$0]?.count ?? 0) > 1 } ?? false)
+    }
+
+    /// Who installed this Steam game, and whether Steam is signed in, or signed in last, to an
+    /// account that may not have it: "is signed in" only while that Steam runs, and an account
+    /// the Account row counts as having the game is never warned about.
+    private func accountNote(_ owners: SteamAccounts.Owners?) -> SteamAccounts.GameNote? {
+        guard item.source == .steam, let name = item.bottleName, let read = activeUserRead, read.bottle == name else { return nil }
+        return SteamAccounts.note(installedBy: state.steamInstaller(for: item),
+                                  accounts: state.steamAccountsByBottle[name] ?? [], activeUser: read.user,
+                                  steamRunning: state.steamClients.contains(name),
+                                  owners: owners?.reason == .unknown ? nil : owners?.accounts)
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ScrollViewReader { scroll in
@@ -121,6 +153,22 @@ struct GameDetailView: View {
             guard !Task.isCancelled else { return }
             storeDetails = details
             loadingDetails = false
+        }
+        // Which account Steam is signed in to, for accountNote. Only that is read here: the install
+        // records and accounts are already in the app's state. Read with more than one account
+        // only, again every few seconds while Steam runs (switching accounts happens in Steam),
+        // and once more when it starts or quits.
+        .task(id: accountWatch) {
+            let watch = accountWatch
+            guard let name = watch.bottle, watch.severalAccounts,
+                  let bottle = state.bottles.first(where: { $0.name == name }) else { return }
+            while !Task.isCancelled {
+                let user = await Task.detached { SteamAccounts.signedIn(bottleURL: bottle.url) }.value
+                let read = ActiveUserRead(bottle: name, user: user)
+                if read != activeUserRead { activeUserRead = read }
+                guard watch.running else { return }
+                try? await Task.sleep(for: .seconds(5))
+            }
         }
     }
 
@@ -271,6 +319,23 @@ struct GameDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             row(L("Source"), item.source == .steam ? "Steam" : item.source == .epic ? "Epic Games"
                 : item.source == .gog ? "GOG" : item.source == .battlenet ? "Battle.net" : L("Windows program"))
+            let owners = state.steamOwners(for: item)
+            if let owners, (state.steamAccountsByBottle[item.bottleName ?? ""]?.count ?? 0) > 1 { steamAccountRow(owners) }
+            if let note = accountNote(owners) {
+                VStack(alignment: .leading, spacing: 6) {
+                    row(L("Installed by"), note.installedBy.displayName)
+                    if let other = note.otherAccount {
+                        Label(String(format: note.signedInNow
+                                     ? L("Steam is signed in as %@. That account may not have access to this game.")
+                                     : L("Steam last signed in as %@. That account may not have access to this game."),
+                                     other.displayName),
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(HB.amber)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.leading, Self.rowLabelWidth + 12)   // under the row's value
+                    }
+                }
+            }
             if item.sizeOnDisk > 0 {
                 row(L("Size on disk"), ByteCountFormatter.string(fromByteCount: item.sizeOnDisk, countStyle: .file))
             }
@@ -796,9 +861,49 @@ struct GameDetailView: View {
         .padding(.top, 6)
     }
 
+    /// Whose Steam game this is, by profile name, and why Highball thinks so; the menu sets it.
+    /// Shown with more than one account on its Steam, also when Highball has no sign of whose it is
+    /// (SteamAccounts.Owners), so the player can say.
+    private func steamAccountRow(_ owners: SteamAccounts.Owners) -> some View {
+        // The accounts of this game's own Steam: another environment's are no answer here.
+        let accounts = state.steamAccountsByBottle[item.bottleName ?? ""] ?? []
+        let names = owners.reason == .unknown ? [L("Any account")]
+            : owners.accounts.compactMap { state.steamAccountName($0) }.sorted()
+        let why: String = switch owners.reason {
+        case .chosen: L("set by you")
+        case .installed: L("installed it")
+        case .added: L("signed in when it was added")
+        case .unknown: L("no sign of whose it is")
+        }
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(L("Account")).font(.caption).foregroundStyle(.secondary).frame(width: Self.rowLabelWidth, alignment: .leading)
+            Menu {
+                // A checkmark on the player's own pick.
+                let picked = owners.reason == .chosen ? owners.accounts : nil
+                ForEach(accounts, id: \.id) { account in
+                    Button { state.setSteamOwners([account.id], for: item) } label: {
+                        if picked == [account.id] { Label(account.displayName, systemImage: "checkmark") } else { Text(account.displayName) }
+                    }
+                }
+                Button { state.setSteamOwners(Set(accounts.map(\.id)), for: item) } label: {
+                    if accounts.count > 1, picked == Set(accounts.map(\.id)) { Label(L("Every account here"), systemImage: "checkmark") } else { Text(L("Every account here")) }
+                }
+                Divider()
+                Button(L("Let Highball guess")) { state.setSteamOwners(nil, for: item) }
+            } label: {
+                Text(names.joined(separator: ", ")).font(.callout)
+            }
+            .menuStyle(.button).buttonStyle(.plain).fixedSize()
+            .help(L("Whose Steam game this is. Highball goes by who installed it and who was signed in when it appeared; pick one to set it."))
+            Text(why).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    static let rowLabelWidth: CGFloat = 110
+
     private func row(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+            Text(label).font(.caption).foregroundStyle(.secondary).frame(width: Self.rowLabelWidth, alignment: .leading)
             Text(value).font(.callout).textSelection(.enabled)
         }
     }
