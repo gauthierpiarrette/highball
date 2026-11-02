@@ -289,8 +289,6 @@ final class EpicMacBuildTests: XCTestCase {
     /// A switch between builds drops only legendary's record first, so it can be put back.
     func testABuildSwitchKeepsTheOldFilesUntilTheNewBuildIsIn() {
         XCTAssertEqual(EpicStore.keepFilesUninstallArguments(appName: "A"), ["uninstall", "A", "-y", "--keep-files", "--skip-uninstaller"])
-        XCTAssertEqual(EpicStore.importArguments(appName: "A", path: "/x/A", platform: "Windows"),
-                       ["import", "A", "/x/A", "--platform", "Windows", "--with-dlcs", "--disable-check"])
     }
 
     func testTheFallBackToWindowsIsSeen() {

@@ -1342,6 +1342,7 @@ final class AppState {
         loadLibraryCache()
         rebuildLibrary()
         steamOwnedRefresh()
+        finishEpicSwitches()
         epicRefresh()
         gogRefresh()
         maybeAutoUpdateEngine()
@@ -3734,21 +3735,32 @@ final class AppState {
         return { [self] download in
             let steps = EpicBuildSwitch.Steps(
                 hasNewBuild: hasNewBuild,
+                // legendary's record of the old build is kept aside first (EpicStore.saveRecord),
+                // so the undo puts it back from disk: no sign-in, no network, either build.
                 dropOldRecord: oldPath.map { _ in { [self] in
                     stage = removing
+                    try await Task.detached { try store.saveRecord(app) }.value
                     let status = try await Task.detached { try store.forgetRecordKeepingFiles(app, onLine: log) }.value
-                    guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall --keep-files", status: status, output: "see the log above") }
+                    guard status == 0 else {
+                        _ = try? await Task.detached { try store.restoreSavedRecord(app) }.value
+                        throw HighballError.processFailed(command: "legendary uninstall --keep-files", status: status, output: "see the log above")
+                    }
                 } },
                 install: download,
                 restoreOldRecord: { [self] in
                     guard let oldPath else { return }
-                    let status = try await Task.detached { try store.restoreRecord(app, path: oldPath, platform: oldPlatform, onLine: log) }.value
-                    appendLog(status == 0 ? "\(item.title): the \(oldPlatform) version is back as it was"
-                                          : "\(item.title): could not record the \(oldPlatform) version again (legendary import exited with \(status)); its files are still in \(oldPath)")
+                    do {
+                        let back = try await Task.detached { try store.restoreSavedRecord(app) }.value
+                        appendLog(back ? "\(item.title): the \(oldPlatform) version is back as it was"
+                                       : "\(item.title): legendary records the game already, so its record was left as it is")
+                    } catch {
+                        appendLog("\(item.title): could not put the \(oldPlatform) version's record back yet (\(error.localizedDescription)); its files are still in \(oldPath), and Highball finishes this when it next opens")
+                    }
                     epicRefresh()
                 },
                 deleteOldFiles: { [self] in
                     guard let oldPath else { return }
+                    store.discardSavedRecord(app)
                     let folder = URL(fileURLWithPath: oldPath, isDirectory: true)
                     guard EpicBuildSwitch.isSafeToDelete(folder, roots: roots) else {
                         appendLog("\(item.title): left the old \(oldPlatform) files in \(oldPath), outside Highball's game folders")
@@ -3760,6 +3772,23 @@ final class AppState {
                 })
             do { try await EpicBuildSwitch.run(steps) } catch EpicBuildSwitch.Failure.noNewBuild {
                 throw HighballError.failed(L("Epic lists a Mac version of this game, but has no Mac build to download for your account, so nothing was changed."))
+            }
+        }
+    }
+
+    @ObservationIgnored private var epicSwitchesFinished = false
+
+    /// Completes the undo of a build switch Highball quit in the middle of (EpicStore.switchesInFlight):
+    /// the old build's record goes back from where the switch kept it. Once, at launch.
+    private func finishEpicSwitches() {
+        guard !epicSwitchesFinished else { return }
+        epicSwitchesFinished = true
+        let store = epicStore
+        for app in store.switchesInFlight() {
+            do {
+                if try store.restoreSavedRecord(app) { appendLog("\(app): a switch between Epic builds did not finish, so the old build is back as it was") }
+            } catch {
+                appendLog("\(app): a switch between Epic builds did not finish, and its old record could not go back yet (\(error.localizedDescription)); Highball tries again when it next opens")
             }
         }
     }
