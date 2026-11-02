@@ -637,6 +637,12 @@ final class AppState {
     /// it the native build goes first.
     func play(_ item: LibraryItem, renderer: Renderer? = nil, windowsBuild: Bool = false) {
         if prefersMacBuild(item), renderer == nil, !windowsBuild { playOnMac(item); return }
+        // One build at a time: the Mac build Highball started is still running, and both would
+        // sign in to the same store client and upload the same saves.
+        if macGameProcesses[item.id] != nil {
+            fail(HighballError.failed(String(format: L("%@ is running as its Mac version. Quit it first."), item.title)))
+            return
+        }
         guard let bottleName = item.bottleName,
               let found = bottles.first(where: { $0.name == bottleName }) else { return }
         var bottle = found
@@ -4116,7 +4122,9 @@ final class AppState {
 
     private struct LibraryCache: Codable {
         struct EpicGame: Codable {
-            var appName: String, title: String, artworkWide: URL?, artworkTall: URL?, listsMac: Bool
+            var appName: String, title: String, artworkWide: URL?, artworkTall: URL?
+            /// Optional: a cache written before Mac listings were kept has none, and is read, not thrown away.
+            var listsMac: Bool?
             var cloudSaves: Bool?
         }
         var epicOwned: [EpicGame] = []
@@ -4142,7 +4150,7 @@ final class AppState {
               let cache = try? JSONDecoder().decode(LibraryCache.self, from: Data(contentsOf: libraryCacheFile)) else { return }
         if epicStore.isAuthenticated {
             epicOwned = cache.epicOwned.map {
-                var game = EpicStore.Game(app_name: $0.appName, app_title: $0.title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall, listsMac: $0.listsMac)
+                var game = EpicStore.Game(app_name: $0.appName, app_title: $0.title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall, listsMac: $0.listsMac ?? false)
                 game.cloudSaves = $0.cloudSaves ?? false
                 return game
             }
@@ -4257,6 +4265,11 @@ final class AppState {
             fail(HighballError.failed("\(item.title) is already running."))
             return
         }
+        // Nor beside the Windows build's session: one build at a time.
+        if runningSessions.contains(where: { $0.libraryID == item.id }) {
+            fail(HighballError.failed(String(format: L("%@ is running as its Windows version. Quit it first."), item.title)))
+            return
+        }
         let game = mac.asInstalledGame
         let store = gogStore
         let useComet = gogSignedIn && gogSettings.cometOff[id] == nil
@@ -4347,16 +4360,34 @@ final class AppState {
     /// How GOG syncs each GOG game's saves (GOGSaves.CloudSetup), asked once a session per game.
     @ObservationIgnored private var gogCloudSetups: [String: GOGSaves.CloudSetup] = [:]
 
-    /// How an installed GOG game's saves sync, for its page; nil when GOG could not be asked.
+    /// Why gogCloudSetup has no answer for a game: not found in its environment, no client id
+    /// (GOG keeps no cloud saves for it), or GOG did not answer.
+    enum GOGCloudMiss: Error { case notFound, noClientID, unreachable }
+    @ObservationIgnored private var gogCloudMisses: [String: GOGCloudMiss] = [:]
+
+    /// Why the last gogCloudSetup for the game came back empty; nil once it has an answer.
+    func gogCloudMiss(for item: LibraryItem) -> GOGCloudMiss? { item.gogID.flatMap { gogCloudMisses[$0] } }
+
+    /// How an installed GOG game's saves sync, for its page; nil when there is no answer (gogCloudMiss says why).
     func gogCloudSetup(for item: LibraryItem) async -> GOGSaves.CloudSetup? {
         guard let id = item.gogID else { return nil }
         if let known = gogCloudSetups[id] { return known }
         let windows = bottles.first { $0.name == item.bottleName }.flatMap { gogInstalled(item, in: $0) }
-        guard let game = windows ?? gogMacInstalled[id]?.asInstalledGame else { return nil }
+        guard let game = windows ?? gogMacInstalled[id]?.asInstalledGame else {
+            gogCloudMisses[id] = .notFound
+            return nil
+        }
         let saves = GOGSaves(store: gogStore)
-        let setup = await Task.detached { saves.clientID(for: game).flatMap { try? saves.cloudSetup(clientID: $0) } }.value
-        if let setup { gogCloudSetups[id] = setup }
-        return setup
+        let answer = await Task.detached { () -> Result<GOGSaves.CloudSetup, GOGCloudMiss> in
+            do {
+                guard let client = try saves.lookUpClientID(for: game) else { return .failure(.noClientID) }
+                return .success(try saves.cloudSetup(clientID: client))
+            } catch { return .failure(.unreachable) }
+        }.value
+        switch answer {
+        case .success(let setup): gogCloudSetups[id] = setup; gogCloudMisses[id] = nil; return setup
+        case .failure(let miss): gogCloudMisses[id] = miss; return nil
+        }
     }
 
     /// The Mac build's cloud-save folders, empty when it has none or GOG cannot say.
@@ -4793,8 +4824,10 @@ final class AppState {
         default:
             return nil
         }
-        if let estimate { downloadEstimates[key] = estimate; downloadEstimatesFetched[key] = Date(); saveDownloadEstimates() }
-        return estimate ?? (refresh ? downloadEstimates[key] : nil)
+        // An answer with neither size (GOG's info without them) says nothing: never kept as the size.
+        let answer = estimate.flatMap { $0.download != nil || $0.disk != nil ? $0 : nil }
+        if let answer { downloadEstimates[key] = answer; downloadEstimatesFetched[key] = Date(); saveDownloadEstimates() }
+        return answer ?? (refresh ? downloadEstimates[key] : nil)
     }
 
     private static func estimateKey(_ item: LibraryItem, mac: Bool) -> String { "\(item.id)|\(mac ? "mac" : "windows")" }
