@@ -22,6 +22,9 @@ struct LibraryView: View {
     /// that read as a bug (highball#257).
     @AppStorage("library.installedOnly") private var installedOnly = false
     @AppStorage("library.verifiedOnly") private var verifiedOnly = false
+    /// Steam games of one account only, under the Steam filter: "" all, else a 64-bit Steam ID
+    /// (AppState.steamOwners).
+    @AppStorage("library.steamAccount") private var steamAccount = ""
     @AppStorage("library.macOnly") private var macOnly = false
     /// Shows the games the player hid, and only them, so one can be brought back (highball#445).
     /// Not kept across starts: a library that opened on its hidden games alone would look emptied.
@@ -39,9 +42,13 @@ struct LibraryView: View {
     }
 
     private var filtered: [LibraryItem] {
-        shown.filter { item in
+        let account = activeSteamAccount   // once, not per item
+        return shown.filter { item in
             if let sourceFilter, item.source != sourceFilter { return false }
             if installedOnly && !item.installedAnywhere { return false }
+            // A game with no sign of whose it is is every account's (`.unknown`), so it stays, as
+            // does one Highball cannot place (Steam for Mac's, or before the accounts are read).
+            if let account, let owners = state.steamOwners(for: item), !owners.accounts.contains(account) { return false }
             // A native Mac version from any store: Steam's (MacSteamBuild), or one GOG or Epic lists.
             if macOnly && state.macSteamBuild(for: item) == nil && !item.macListed && !item.installedOnMac { return false }
             if verifiedOnly {
@@ -132,6 +139,8 @@ struct LibraryView: View {
         HStack(spacing: 8) {
             FilterChip(label: L("All"), on: sourceFilter == nil) { sourceFilter = nil }
             FilterChip(label: "Steam", on: sourceFilter == .steam) { sourceFilter = .steam }
+            // Steam's own sub-filter, with more than one Steam account on this Mac: whose games.
+            if sourceFilter == .steam, state.steamAccounts.count > 1 { steamAccountMenu }
             FilterChip(label: "Epic", on: sourceFilter == .epic) { sourceFilter = .epic }
             FilterChip(label: "GOG", on: sourceFilter == .gog) { sourceFilter = .gog }
             // Only once Battle.net has installed something: most libraries never have a game from it.
@@ -238,6 +247,43 @@ struct LibraryView: View {
         .frame(width: 250, height: 230, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 12).fill(HB.card))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(accent ? HB.amber.opacity(0.5) : HB.cardStroke))
+    }
+}
+
+extension LibraryView {
+    /// The account filter in force: only under the Steam filter, so other stores' games never mix
+    /// in; nil when it is off, or when what was picked no longer applies (one account left, or the
+    /// picked one gone), so a stale choice never empties the library.
+    var activeSteamAccount: UInt64? {
+        guard sourceFilter == .steam, state.steamAccounts.count > 1, let id = UInt64(steamAccount) else { return nil }
+        return state.steamAccountName(id) != nil ? id : nil
+    }
+
+    private var steamAccountLabel: String {
+        activeSteamAccount.flatMap { state.steamAccountName($0) } ?? L("All Steam accounts")
+    }
+
+    var steamAccountMenu: some View {
+        Menu {
+            Button(L("All Steam accounts")) { steamAccount = "" }
+            Divider()
+            ForEach(state.steamAccounts, id: \.id) { account in
+                Button(account.displayName) { steamAccount = String(account.id) }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "person.crop.circle").font(.system(size: 11, weight: .semibold))
+                Text(steamAccountLabel)
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+            }
+            .font(.system(size: 12.5, weight: .semibold))
+            .padding(.horizontal, 12).padding(.vertical, 4)
+            .background(Capsule().fill(activeSteamAccount == nil ? HB.card : HB.amber))
+            .overlay(Capsule().stroke(activeSteamAccount == nil ? HB.cardStroke : HB.amber))
+            .foregroundStyle(activeSteamAccount == nil ? .secondary : Color(red: 0.13, green: 0.08, blue: 0.01))
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .help(L("Steam games of one account on this Mac: the one that installed them, or was signed in when they appeared. A game with no sign of whose it is shows under every account."))
     }
 }
 

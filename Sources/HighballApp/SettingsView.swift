@@ -135,12 +135,7 @@ struct EnvironmentsPane: View {
                 }
             }
             .sheet(isPresented: $showCreate) { CreateBottleSheet() }
-            .confirmationDialog("Delete environment \"\(pendingDelete ?? "")\"? This removes its Windows drive and everything installed in it, games included.",
-                                isPresented: .init(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-                                titleVisibility: .visible) {
-                Button(L("Delete"), role: .destructive) { if let n = pendingDelete { state.deleteBottle(n) }; pendingDelete = nil }
-                Button(L("Cancel"), role: .cancel) { pendingDelete = nil }
-            }
+            .deleteEnvironmentDialog(pendingDelete, isPresented: .init(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }))
             #if DEBUG
             // HB_DEBUG_SETTINGS="<environment>" (see ContentView) lands on that environment's page.
             .task {

@@ -289,6 +289,9 @@ final class AppState {
     var libraryStore: LibraryStore { LibraryStore(paths: paths) }
 
     func rebuildLibrary() {
+        steamInstallers = gamesByBottle.mapValues { games in
+            Dictionary(games.compactMap { game in game.lastOwner.map { (game.appid, $0) } }, uniquingKeysWith: { a, _ in a })
+        }
         customNames = nameStore.names()
         carryOverGOGCoveredPins()
         libraryItems = LibraryIndex.build(bottles: bottles, steamByBottle: gamesByBottle,
@@ -308,6 +311,120 @@ final class AppState {
         refreshMacFlags()
         if sizePrefetch == nil, libraryItems.contains(where: { $0.source == .gog || $0.source == .epic }) { prefetchDownloadSizes() }
     }
+
+    // MARK: Whose Steam games
+
+    /// The accounts that have signed in to each environment's Steam, newest sign-in first.
+    var steamAccountsByBottle: [String: [SteamAccount]] = [:] {
+        didSet { steamAccountIDsByBottle = steamAccountsByBottle.mapValues { Set($0.map(\.id)) } }
+    }
+    @ObservationIgnored private var steamAccountIDsByBottle: [String: Set<UInt64>] = [:]
+    /// Every account across them, once each, sorted by display name.
+    private(set) var steamAccounts: [SteamAccount] = [] {
+        didSet { steamAccountIDs = Set(steamAccounts.map(\.id)) }
+    }
+    @ObservationIgnored private var steamAccountIDs: Set<UInt64> = []
+    /// Games that appeared while only one account had signed in to their Steam: that account's
+    /// (SteamAccounts.earlyArrivals).
+    var steamEarlyArrivals: [Int: UInt64] = [:] {
+        didSet { mergeSteamArrivals() }
+    }
+    /// Which account each game is put down to arriving with: what Highball saw arrive, else what
+    /// the first sign-ins imply. Merged when either changes, not for every tile the account
+    /// filter looks at.
+    private var steamAddedBy: [Int: UInt64] = [:]
+    /// Who installed each Steam game, per environment, from the install records' LastOwner:
+    /// built with the library, so the account filter looks it up rather than scanning.
+    @ObservationIgnored private var steamInstallers: [String: [Int: UInt64]] = [:]
+    /// Kept on disk (steam-accounts.json): which account was signed in when a game first
+    /// appeared, the owners the player chose, and the games already seen in each environment.
+    private var steamBook = SteamBook() {
+        didSet { mergeSteamArrivals() }   // rare: loaded, a game noted, a choice set
+    }
+
+    private func mergeSteamArrivals() {
+        // What Highball saw arrive wins over what the first sign-ins imply.
+        steamAddedBy = steamBook.added.merging(steamEarlyArrivals) { seen, _ in seen }
+    }
+
+    private struct SteamBook: Codable {
+        var added: [Int: UInt64] = [:]
+        var chosen: [Int: Set<UInt64>] = [:]
+        /// Per environment, so one added later gets its own first look instead of its whole
+        /// library being put down to whoever is signed in.
+        var seen: [String: Set<Int>] = [:]
+
+        init() {}
+
+        // Each field optional on read: an earlier file kept `seen` for every environment at once,
+        // and dropping it only means one more first look, which marks and puts down nothing.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            added = (try? c.decodeIfPresent([Int: UInt64].self, forKey: .added)) ?? [:]
+            chosen = (try? c.decodeIfPresent([Int: Set<UInt64>].self, forKey: .chosen)) ?? [:]
+            seen = (try? c.decodeIfPresent([String: Set<Int>].self, forKey: .seen)) ?? [:]
+        }
+    }
+
+    private var steamBookFile: URL { paths.home.appending(path: "steam-accounts.json") }
+    @ObservationIgnored private var steamBookLoaded = false
+
+    private func loadSteamBook() {
+        guard !steamBookLoaded else { return }
+        steamBookLoaded = true
+        steamBook = (try? JSONDecoder().decode(SteamBook.self, from: Data(contentsOf: steamBookFile))) ?? SteamBook()
+    }
+
+    private func saveSteamBook() {
+        try? JSONEncoder().encode(steamBook).write(to: steamBookFile, options: .atomic)
+    }
+
+    /// Games appearing for the first time are put down to the account signed in to the Steam
+    /// they appeared in (SteamAccounts.noteArrivals).
+    private func noteNewSteamGames(_ appIDsByBottle: [String: Set<Int>], signedIn: [String: UInt64]) {
+        loadSteamBook()
+        var book = steamBook
+        var changed = false
+        for (bottle, appIDs) in appIDsByBottle.sorted(by: { $0.key < $1.key }) {
+            var seen = book.seen[bottle] ?? []
+            if SteamAccounts.noteArrivals(appIDs, signedIn: signedIn[bottle], firstLook: book.seen[bottle] == nil,
+                                          seen: &seen, added: &book.added) || book.seen[bottle] == nil {
+                book.seen[bottle] = seen
+                changed = true
+            }
+        }
+        guard changed else { return }
+        steamBook = book
+        saveSteamBook()
+    }
+
+    /// Whose a Steam game is, as far as this Mac can tell (SteamAccounts.owners), among the
+    /// accounts of its environment's Steam; every one of them when there is no sign (`.unknown`).
+    /// nil with fewer than two accounts across this Mac, for a game outside an environment
+    /// (Steam for Mac's) and for one that is not Steam's.
+    func steamOwners(for item: LibraryItem) -> SteamAccounts.Owners? {
+        guard item.source == .steam, steamAccountIDs.count > 1, let appID = item.steamAppID,
+              let present = item.bottleName.flatMap({ steamAccountIDsByBottle[$0] }), !present.isEmpty else { return nil }
+        return SteamAccounts.owners(appID: appID, installedBy: steamInstaller(for: item), added: steamAddedBy,
+                                    chosen: steamBook.chosen, present: present)
+    }
+
+    /// Who installed a Steam game: its own environment's record first (a second copy elsewhere
+    /// may have another installer), else any environment's.
+    func steamInstaller(for item: LibraryItem) -> UInt64? {
+        guard let appID = item.steamAppID else { return nil }
+        return item.bottleName.flatMap { steamInstallers[$0]?[appID] } ?? steamInstallers.values.lazy.compactMap { $0[appID] }.first
+    }
+
+    /// The player's own answer to whose a game is; nil goes back to Highball's guess.
+    func setSteamOwners(_ accounts: Set<UInt64>?, for item: LibraryItem) {
+        guard let appID = item.steamAppID else { return }
+        loadSteamBook()
+        steamBook.chosen[appID] = accounts
+        saveSteamBook()
+    }
+
+    func steamAccountName(_ id: UInt64) -> String? { steamAccounts.first { $0.id == id }?.displayName }
 
     // MARK: Games kept out of the library (highball#445)
 
@@ -453,7 +570,7 @@ final class AppState {
     /// The verified fix recipe for a library item, if the db has one (db entry id == recipe id).
     func fixRecipe(for item: LibraryItem) -> HighballKit.Recipe? {
         guard let entry = gameDB.entry(for: item),
-              let recipe = Self.recipe(entry.id), recipe.kind == .game else { return nil }
+              let recipe = Self.recipe(entry.id).map({ routed($0, for: item) }), recipe.kind == .game else { return nil }
         // A recipe pinned to an engine this install does not see (a line still in preview) is not
         // offered: the game page and Play stay as they were before the recipe existed.
         let defaults = UserDefaults.standard
@@ -468,9 +585,36 @@ final class AppState {
     /// pinned to a hidden engine), for what Play checks before anything else. An opt-in recipe stays the page's
     /// business, as everywhere.
     func gameRecipe(for item: LibraryItem) -> HighballKit.Recipe? {
-        guard let entry = gameDB.entry(for: item), let recipe = Self.recipe(entry.id), recipe.kind == .game, !recipe.isOptIn
+        guard let entry = gameDB.entry(for: item), let recipe = Self.recipe(entry.id).map({ routed($0, for: item) }),
+              recipe.kind == .game, !recipe.isOptIn
         else { return nil }
         return recipe
+    }
+
+    /// The recipe the environment `item` plays in goes by (Recipe.routed).
+    private func routed(_ recipe: HighballKit.Recipe, for item: LibraryItem) -> HighballKit.Recipe {
+        recipe.routed(onEngine: bottles.first { $0.name == item.bottleName }?.settings.engineID)
+    }
+
+    /// The preview route a game's recipe offers (Recipe.previewRoute) where this Mac can run it and the game does not
+    /// play on it already, with the newest revision of its line.
+    func routeOffer(for item: LibraryItem) -> (recipe: HighballKit.Recipe, manifest: EngineManifest)? {
+        guard let entry = gameDB.entry(for: item), let base = Self.recipe(entry.id), base.kind == .game, !base.isOptIn,
+              let route = base.route, let pin = route.engine,
+              !routed(base, for: item).isPreviewRoute else { return nil }
+        let revisions = Self.bundledManifests.filter { EngineManifest.line(of: $0.id) == EngineManifest.line(of: pin) && $0.runs(onMacOS: EngineManifest.currentMacOS) }
+        guard let manifest = revisions.max(by: { (EngineManifest.revision(of: $0.id) ?? 0) < (EngineManifest.revision(of: $1.id) ?? 0) }) else { return nil }
+        return (route, manifest)
+    }
+
+    /// Games Play has asked about their preview route: the ask comes once, the game page can ask again.
+    static let previewRouteAskedKey = "previewRouteAsked"
+    static func firstPreviewRouteAsk(game: String) -> Bool {
+        var asked = UserDefaults.standard.stringArray(forKey: previewRouteAskedKey) ?? []
+        guard !asked.contains(game) else { return false }
+        asked.append(game)
+        UserDefaults.standard.set(asked, forKey: previewRouteAskedKey)
+        return true
     }
 
     /// The preview engine a game's recipe pins while this Mac does not see it (EngineChannels.previewToOffer): Play
@@ -508,6 +652,11 @@ final class AppState {
            let floor = recipe.engineMacOSFloor(bundled: Self.bundledManifests),
            !(engine(for: bottle).map { EngineManifest.isAtOrAfter(current: $0.manifest.id, wanted: id) } ?? false) {
             pendingMacOS = (recipe, floor, item, bottle, renderer)
+            return
+        }
+        // A game with a second route on a preview engine: the player chooses once, and the answer stands.
+        if let offer = routeOffer(for: item), Self.firstPreviewRouteAsk(game: offer.recipe.id) {
+            pendingPreview = (offer.recipe, bottle, offer.manifest, item, renderer)
             return
         }
         // A recipe pinned to a preview engine this Mac does not see yet: before 0.10.19 Play launched the game here
@@ -594,7 +743,10 @@ final class AppState {
                 pendingD3DMetal = (item, bottle, engine)
                 return
             case .notShipped:
-                let instead = Renderer.fallback(for: wanted, in: engine)
+                // The mode the game's recipe names comes first: the per-game mode a player chose on another route
+                // follows the game to an engine that lacks it (D3DMetal, on the native arm64 line).
+                let named = fixRecipe(for: item)?.renderer.flatMap { $0.availability(in: engine) == .available ? $0 : nil }
+                let instead = named ?? Renderer.fallback(for: wanted, in: engine)
                 appendLog("\(item.title): \(wanted.unavailableReason(in: engine) ?? "") Playing with \(GamePageCopy.plainName(instead)).")
                 renderer = instead
             }
@@ -730,8 +882,29 @@ final class AppState {
         let bottles = self.bottles
         Task.detached { [weak self] in
             let owned = Dictionary(bottles.map { ($0.name, SteamOwnedLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
-            await MainActor.run {
-                guard let self, owned != self.steamOwnedByBottle else { return }
+            // Whose games, per environment's Steam: its accounts (newest sign-in first), the games
+            // that appeared while only one of them had signed in, and who is signed in now, else
+            // who signed in last.
+            var accountsByBottle: [String: [SteamAccount]] = [:], early: [Int: UInt64] = [:], signedIn: [String: UInt64] = [:]
+            for bottle in bottles {
+                guard let root = SteamLibrary.steamRoot(of: bottle) else { continue }
+                let known = SteamAccounts.known(steamRoot: root)
+                accountsByBottle[bottle.name] = known
+                let appeared = Dictionary((owned[bottle.name] ?? []).compactMap { g in g.cachedAt.map { (g.appid, $0) } }, uniquingKeysWith: min)
+                early.merge(SteamAccounts.earlyArrivals(appeared, firstSignIns: SteamAccounts.firstSignIns(steamRoot: root))) { a, _ in a }
+                signedIn[bottle.name] = SteamAccounts.signedIn(bottleURL: bottle.url) ?? known.first?.id
+            }
+            await MainActor.run { [accountsByBottle, early, signedIn] in
+                guard let self else { return }
+                if accountsByBottle != self.steamAccountsByBottle {
+                    self.steamAccountsByBottle = accountsByBottle
+                    var seen = Set<UInt64>()
+                    self.steamAccounts = accountsByBottle.values.joined().filter { seen.insert($0.id).inserted }
+                        .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+                }
+                if early != self.steamEarlyArrivals { self.steamEarlyArrivals = early }
+                self.noteNewSteamGames(owned.mapValues { Set($0.map(\.appid)) }, signedIn: signedIn)
+                guard owned != self.steamOwnedByBottle else { return }
                 self.steamOwnedByBottle = owned
                 self.steamCloudAppIDs = Set(owned.values.joined().filter(\.steamCloud).map(\.appid))
                 self.macAppInfoByAppID = Dictionary(owned.values.joined().map { ($0.appid, $0.macBuild) },
@@ -1687,6 +1860,12 @@ final class AppState {
         pendingPreview = nil
         Self.optInPreview(pending.manifest.id)
         appendLog("\(pending.item.title): the \(pending.manifest.id) preview engine is offered on this Mac from now on")
+        // A route lives beside the recipe, so nothing further in Play would ask for its engine.
+        if pending.recipe.isPreviewRoute {
+            pendingEngine = (pending.recipe, pending.bottle, pending.manifest, pending.item,
+                             environmentFit(for: pending.recipe, besides: pending.bottle, item: pending.item))
+            return
+        }
         play(pending.item, renderer: pending.renderer)
     }
 
@@ -1694,6 +1873,11 @@ final class AppState {
     func playWithoutPreview() {
         guard let pending = pendingPreview else { return }
         pendingPreview = nil
+        if pending.recipe.isPreviewRoute {
+            appendLog("\(pending.item.title): staying on its current route, without the \(pending.manifest.id) preview engine.")
+            play(pending.item, renderer: pending.renderer)
+            return
+        }
         appendLog("\(pending.item.title): its fix needs the \(pending.manifest.id) preview engine; playing without it.")
         launch(pending.item, in: pending.bottle, renderer: pending.renderer)
     }
@@ -2005,8 +2189,31 @@ final class AppState {
         }
     }
 
+    /// The recipe being applied now, and where, from its first step to its last. A component's
+    /// Installed check can pass long before the run ends: winetricks puts .NET Framework 4.8's
+    /// clr.dll in place early, then runs Microsoft's compiler services for many minutes.
+    var applyingRecipe: (id: String, bottle: String)?
+
+    /// Whether `component` is being installed in `bottle` now: applied itself, or pulled in by the
+    /// recipe being applied (a game's fix that requires .NET Framework 4.8) and not yet done. A new
+    /// environment's setup runs its recipes without this, so it is not covered.
+    func isApplying(_ component: HighballKit.Recipe, in bottle: Bottle) -> Bool {
+        guard let applying = applyingRecipe, applying.bottle == bottle.name else { return false }
+        if applying.id == component.id { return true }
+        guard !bottle.settings.recipes.contains(component.id) else { return false }
+        // Through `requires` at any depth, as RecipeRunner applies them.
+        var pending = [applying.id], seen = Set<String>()
+        while let id = pending.popLast() {
+            guard seen.insert(id).inserted, let requires = Self.recipe(id)?.requires else { continue }
+            if requires.contains(component.id) { return true }
+            pending += requires
+        }
+        return false
+    }
+
     func applyRecipe(_ id: String, to bottle: Bottle, then done: DoneState? = nil) {
-        guard let engine = engine(for: bottle), let recipe = Self.recipe(id) else { return }
+        guard let engine = engine(for: bottle),
+              let recipe = Self.recipe(id)?.routed(onEngine: bottle.settings.engineID) else { return }
         if let wanted = recipe.engineToOffer(current: engine.manifest, known: Self.knownManifests) {
             pendingEngine = (recipe, bottle, wanted, nil, nil); return
         }
@@ -2015,7 +2222,9 @@ final class AppState {
         }
         runBusy("Installing \(recipe.title)",
                 done: done ?? DoneState(title: String(format: L("%@ installed"), recipe.title), ctaTitle: nil, cta: nil),
-                stop: .killBottleThenRepair(bottle, label: L("Stop and repair"))) { [self] in
+                stop: .killBottleThenRepair(bottle, label: L("Stop and repair")),
+                cleanup: { [weak self] in self?.applyingRecipe = nil }) { [self] in
+            applyingRecipe = (recipe.id, bottle.name)
             var runner = RecipeRunner(paths: paths, engine: engine, bottle: bottle)
             let notes = try await runner.apply(recipe, resolve: { Self.recipe($0) }) { line in Task { @MainActor in self.appendLog(line) } }
             for n in notes { await MainActor.run { self.appendLog("note: \(n)") } }
@@ -2929,7 +3138,9 @@ final class AppState {
         }
     }
 
-    func deleteBottle(_ name: String) {
+    /// Deletes an environment. With `keepSaves` its save folders are copied into Highball's
+    /// save backups first, and a copy that fails stops the delete.
+    func deleteBottle(_ name: String, keepSaves: Bool) {
         // The row and its Delete item stay on screen for the whole operation, so without this a
         // second click started a second delete and the loser reported "missing" for a delete that
         // was in fact succeeding.
@@ -2939,17 +3150,24 @@ final class AppState {
                 cleanup: { [weak self] in self?.deletingBottles.remove(name) }) { [self] in
             let store = bottleStore
             let killer = killerFor(name)
+            let environment = paths.bottle(name), backups = paths.saveBackups
             // Stop the bottle before anything moves: `wineserver -k` resolves the prefix by path,
             // so after the rename it exits 1 and leaves the server running. It is a synchronous
             // wineserver call that measured 2.3 s against a live server, so it belongs off the
             // main actor with the purge rather than in front of it, freezing the window.
             // A prefix can be tens of GB, and the old delete ran the whole walk on the main
             // actor — 985 ms for 20,841 entries, minutes for a big Steam bottle.
-            let leftovers = try await Task.detached {
+            // The saves are copied after the stop, so nothing is still writing them.
+            let (kept, leftovers) = try await Task.detached {
                 killer?()
-                return try store.delete(name)
+                let kept = keepSaves ? try EnvironmentSaves.keep(environment: environment, name: name, backups: backups) : nil
+                return (kept, try store.delete(name))
             }.value
             await MainActor.run {
+                if keepSaves {
+                    self.appendLog(kept.map { "kept the saves of '\(name)' in \($0.folder.path) (\(ByteCountFormatter.string(fromByteCount: $0.bytes, countStyle: .file)))" }
+                                   ?? "'\(name)' held no saves to keep")
+                }
                 if self.selectedBottle == name { self.selectedBottle = nil }
                 guard let first = leftovers.first else { return }
                 self.errorIsPartialSuccess = true
@@ -4993,7 +5211,8 @@ final class AppState {
     }
 
     func offeredEngines(for bottle: Bottle) -> [EngineStore.OfferedEngine] {
-        EngineStore.offeredEngines(installed: engines, known: Self.knownManifests, current: bottle.settings.engineID)
+        EngineStore.offeredEngines(installed: engines, known: Self.knownManifests, current: bottle.settings.engineID,
+                                   allRevisions: UserDefaults.standard.bool(forKey: EngineStore.showOlderRevisionsKey))
     }
 
     /// Moves a bottle to an engine by id, installing it first when it is only known from a

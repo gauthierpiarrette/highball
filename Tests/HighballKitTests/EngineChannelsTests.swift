@@ -76,6 +76,27 @@ final class EngineChannelsTests: XCTestCase {
         return try JSONDecoder().decode(Recipe.self, from: Data(json.utf8))
     }
 
+    /// Forza Horizon 6's route moved from arm64-kk r1 to r2 (2026-11-01): an environment on the route is offered the new
+    /// revision the way one on a pinned preview recipe is, and one on the recipe's other route is not.
+    func testAnEnvironmentOnARouteIsOfferedItsNewerRevision() throws {
+        let r1 = try manifest(id: "arm64-line-r1", channel: "preview")
+        let r2 = try manifest(id: "arm64-line-r2", channel: "preview")
+        let x64 = try manifest(id: "x64-line-r18", channel: nil)
+        let json = #"""
+        {"id":"game","kind":"game","title":"Game","renderer":"d3dmetal","engine":"x64-line-r18",
+         "steps":[{"type":"environment","name":"OLD","value":"1"}],
+         "previewRoute":{"engine":"arm64-line-r2","renderer":"vkd3d",
+           "steps":[{"type":"environment","name":"NEW","value":"1"}]}}
+        """#
+        let game = try JSONDecoder().decode(Recipe.self, from: Data(json.utf8))
+        let route = game.routed(onEngine: r1.id)
+        XCTAssertTrue(route.isPreviewRoute)
+        XCTAssertFalse(route.isOptIn, "Play's move ask skips opt-in recipes")
+        XCTAssertEqual(route.previewRevisionToOffer(current: r1, known: [r1, r2, x64], macOS: "27.0")?.id, "arm64-line-r2")
+        XCTAssertNil(game.routed(onEngine: r2.id).previewRevisionToOffer(current: r2, known: [r1, r2, x64], macOS: "27.0"))
+        XCTAssertNil(game.routed(onEngine: x64.id).previewRevisionToOffer(current: x64, known: [r1, r2, x64], macOS: "27.0"))
+    }
+
     /// Microsoft Flight Simulator 2024 set up on r3 while its recipe now pins r5 (2026-10-19): the environment runs the
     /// line already, so Play offers the move rather than the preview ask or a launch on r3.
     func testAnEnvironmentOnAnEarlierPreviewRevisionIsOfferedThePinnedOne() throws {
