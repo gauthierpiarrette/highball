@@ -307,7 +307,6 @@ final class AppState {
         sortLibraryByDisplayTitle()
         if let deferred = deferredPlayLink { resolvePlayLink(deferred.request) }
         refreshMacFlags()
-        if sizePrefetch == nil, libraryItems.contains(where: { $0.source == .gog || $0.source == .epic }) { prefetchDownloadSizes() }
     }
 
     // MARK: Whose Steam games
@@ -893,7 +892,7 @@ final class AppState {
                 self.noteNewSteamGames(owned.mapValues { Set($0.map(\.appid)) }, signedIn: signedIn)
                 guard owned != self.steamOwnedByBottle else { return }
                 self.steamOwnedByBottle = owned
-                self.steamCloudAppIDs = Set(owned.values.joined().filter(\.steamCloud).map(\.appid))
+                self.steamCloudByAppID = Dictionary(owned.values.joined().map { ($0.appid, $0.steamCloud) }, uniquingKeysWith: { a, b in a || b })
                 self.macAppInfoByAppID = Dictionary(owned.values.joined().map { ($0.appid, $0.macBuild) },
                                                     uniquingKeysWith: { a, _ in a })
                 self.rebuildLibrary()
@@ -3703,9 +3702,13 @@ final class AppState {
         gogLoading = gogSignedIn && gogGames.isEmpty
         let signedIn = gogSignedIn
         let installedIDs = Set(gogInstalledByBottle.values.joined().map(\.id))
+        let shown = gogGames
         Task.detached { [store = gogStore] in
             GOGComet(store: store).removeStaleTokens()
-            var games = signedIn ? ((try? await store.ownedGames()) ?? []) : []
+            // nil when GOG could not answer (offline, GOG down): the list shown, the one saved last
+            // time, stays, as Epic's does, rather than shrinking to the installed games.
+            let owned: [GOGStore.Game]? = signedIn ? (try? await store.ownedGames()) : []
+            var games = owned ?? shown
             // A GOG game in an environment that the account list does not name still gets its
             // title, cover and database match.
             let known = Set(games.map(\.id))
@@ -3717,7 +3720,10 @@ final class AppState {
                 guard let self else { return }
                 self.gogFetchInFlight = false
                 self.gogLoading = false
-                if found != self.gogGames { self.gogGames = found; self.rebuildLibrary(); self.saveLibraryCache() }
+                guard found != self.gogGames else { return }
+                self.gogGames = found
+                self.rebuildLibrary()
+                if owned != nil { self.saveLibraryCache() }
             }
         }
     }
@@ -3881,8 +3887,9 @@ final class AppState {
         }
     }
 
-    /// Steam games Steam Cloud keeps saves for (OwnedSteamGame.steamCloud).
-    var steamCloudAppIDs: Set<Int> = []
+    /// Whether Steam Cloud keeps each owned Steam game's saves (OwnedSteamGame.steamCloud), for the
+    /// games an environment's Steam has listed; a game not here is one Highball cannot say about.
+    var steamCloudByAppID: [Int: Bool] = [:]
 
     /// How GOG syncs each GOG game's saves (GOGSaves.CloudSetup), asked once a session per game.
     @ObservationIgnored private var gogCloudSetups: [String: GOGSaves.CloudSetup] = [:]
@@ -4308,29 +4315,6 @@ final class AppState {
     /// A native Mac version the store offers: Steam's (MacSteamBuild), or one GOG or Epic lists.
     func offersMacVersion(_ item: LibraryItem) -> Bool {
         item.installedOnMac || (item.source == .steam ? macSteamBuild(for: item) != nil : item.macListed)
-    }
-
-    private var sizePrefetch: Task<Void, Never>?
-
-    /// Once a session, in the background: the sizes of GOG and Epic games not installed yet, so a
-    /// page has them before it is opened. One store question at a time (each takes seconds and
-    /// holds the GOG sign-in file), none while a game runs or a task holds the progress bar, and
-    /// none for sizes saved this week. Steam needs none: its sizes are read from disk at once.
-    private func prefetchDownloadSizes() {
-        sizePrefetch = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(30))   // after the libraries have come in
-            guard let self else { return }
-            for item in libraryItems where !item.installed && (item.source == .gog || item.source == .epic) {
-                for mac in [false] + (offersMacVersion(item) && !item.installedOnMac ? [true] : []) where savedEstimate(for: item, mac: mac) == nil {
-                    while busy || !runningSessions.isEmpty {
-                        try? await Task.sleep(for: .seconds(30))
-                        if Task.isCancelled { return }
-                    }
-                    if Task.isCancelled { return }
-                    _ = await downloadEstimate(for: item, mac: mac)
-                }
-            }
-        }
     }
 
     /// An installed game's folder and saves as they are on disk now.

@@ -320,7 +320,7 @@ struct GameDetailView: View {
             if hasMacVersion {
                 row(L("Size (Mac)"), macSize)
             }
-            if item.source == .steam || item.source == .epic || (item.source == .gog && item.installedAnywhere) { cloudSavesRow }
+            if item.source == .steam || item.source == .epic || (item.source == .gog && item.installedAnywhere), !cloudSaveLines.isEmpty { cloudSavesRow }
             if let saves = sizes?.saves {
                 row(item.source == .steam ? L("Steam Cloud saves") : L("Saves"), Self.bytes(saves))
             }
@@ -510,9 +510,11 @@ struct GameDetailView: View {
     private var cloudSaveLines: [String] {
         switch item.source {
         case .steam:
-            return [item.steamAppID.map(state.steamCloudAppIDs.contains) == true
-                    ? L("Steam syncs this game's saves with Steam Cloud, for whichever account plays it.")
-                    : L("This game keeps its saves on this Mac.")]
+            // Nothing until an environment's Steam has listed the game: a Steam for Mac game, or
+            // the moment before the owned refresh lands, is one Highball cannot say about.
+            guard let cloud = item.steamAppID.flatMap({ state.steamCloudByAppID[$0] }) else { return [] }
+            return [cloud ? L("Steam syncs this game's saves with Steam Cloud, for whichever account plays it.")
+                          : L("This game keeps its saves on this Mac.")]
         case .epic:
             return [state.epicOwned.first { $0.app_name == item.epicAppName }?.cloudSaves == true
                     ? L("Epic's cloud keeps this game's saves when Epic's own launcher plays it. Played from Highball, they stay on this Mac.")
