@@ -426,7 +426,8 @@ enum L10n {
             "La synchronisation du jeu : certains jeux envoient eux-mêmes leurs sauvegardes au cloud GOG, par le kit de GOG. Avec Highball, cela fonctionne quand comet tourne à côté du jeu, et le jeu l’indique quand il synchronise, comme Cyberpunk 2077.",
         "Folders this game syncs": "Dossiers synchronisés par ce jeu",
         "Steam syncs this game's saves with Steam Cloud, for whichever account plays it.": "Steam synchronise les sauvegardes de ce jeu avec Steam Cloud, pour le compte qui y joue.",
-        "This game keeps its saves on this Mac.": "Ce jeu garde ses sauvegardes sur ce Mac.",
+        "This game keeps its own saves, on this Mac or with its publisher's service.": "Ce jeu gère lui-même ses sauvegardes, sur ce Mac ou avec le service de son éditeur.",
+        "GOG keeps no cloud saves for this game.": "GOG ne garde aucune sauvegarde dans le cloud pour ce jeu.",
         "Epic's cloud keeps this game's saves when Epic's own launcher plays it. Played from Highball, they stay on this Mac.":
             "Le cloud d’Epic garde les sauvegardes de ce jeu quand le lanceur d’Epic y joue. Lancées depuis Highball, elles restent sur ce Mac.",
         "How Steam Cloud works": "Comment fonctionne Steam Cloud",
@@ -436,6 +437,8 @@ enum L10n {
         "Epic's launcher syncs a game's saves with Epic's cloud when the game sets a cloud save folder. Highball plays Epic games through legendary, and their saves stay on this Mac.":
             "Le lanceur d’Epic synchronise les sauvegardes d’un jeu avec le cloud d’Epic quand le jeu définit un dossier de sauvegarde en ligne. Highball lance les jeux Epic par legendary, et leurs sauvegardes restent sur ce Mac.",
         "This Mac version is 32-bit, which current macOS can't run.": "Cette version Mac est en 32 bits, que les macOS récents ne lancent plus.",
+        "Highball's game database says this Mac version is not the one to play: the Windows version is.":
+            "La base de jeux de Highball indique que cette version Mac n’est pas celle à lancer : c’est la version Windows.",
         "Switch to the Windows version…": "Passer à la version Windows…",
         "Switch to the Windows version": "Passer à la version Windows",
         "Switch %@ to the Windows version?": "Passer %@ à la version Windows ?",
@@ -491,6 +494,8 @@ enum L10n {
         "Highball could not tell which folder is this game's alone, so it leaves the files where they are.":
             "Highball ne sait pas quel dossier appartient à ce seul jeu, donc il laisse les fichiers où ils sont.",
         "Quit %@ first: it is running.": "Quittez d’abord %@ : le jeu est en cours d’exécution.",
+        "%@ is running as its Mac version. Quit it first.": "%@ est lancé dans sa version Mac. Quittez-le d’abord.",
+        "%@ is running as its Windows version. Quit it first.": "%@ est lancé dans sa version Windows. Quittez-le d’abord.",
         "Built for Apple silicon: runs natively.": "Conçue pour Apple silicon : tourne en natif.",
         "Built for Intel Macs: runs through Rosetta.": "Conçue pour les Mac Intel : tourne via Rosetta.",
         "A 32-bit build, which current macOS can't run. Play the Windows version instead.":

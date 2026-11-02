@@ -637,6 +637,12 @@ final class AppState {
     /// it the native build goes first.
     func play(_ item: LibraryItem, renderer: Renderer? = nil, windowsBuild: Bool = false) {
         if prefersMacBuild(item), renderer == nil, !windowsBuild { playOnMac(item); return }
+        // One build at a time: the Mac build Highball started is still running, and both would
+        // sign in to the same store client and upload the same saves.
+        if macGameProcesses[item.id] != nil {
+            fail(HighballError.failed(String(format: L("%@ is running as its Mac version. Quit it first."), item.title)))
+            return
+        }
         guard let bottleName = item.bottleName,
               let found = bottles.first(where: { $0.name == bottleName }) else { return }
         var bottle = found
@@ -1343,8 +1349,7 @@ final class AppState {
         loadLibraryCache()
         rebuildLibrary()
         steamOwnedRefresh()
-        finishEpicSwitches()
-        epicRefresh()
+        finishEpicSwitches { [self] in epicRefresh() }
         gogRefresh()
         maybeAutoUpdateEngine()
         if gameDB.byAppID.isEmpty {
@@ -3761,15 +3766,9 @@ final class AppState {
                 },
                 deleteOldFiles: { [self] in
                     guard let oldPath else { return }
-                    store.discardSavedRecord(app)
-                    let folder = URL(fileURLWithPath: oldPath, isDirectory: true)
-                    guard EpicBuildSwitch.isSafeToDelete(folder, roots: roots) else {
-                        appendLog("\(item.title): left the old \(oldPlatform) files in \(oldPath), outside Highball's game folders")
-                        return
-                    }
-                    do { try await Task.detached { try FileManager.default.removeItem(at: folder) }.value } catch {
-                        appendLog("\(item.title): could not delete the old \(oldPlatform) files in \(oldPath): \(error.localizedDescription)")
-                    }
+                    stage = removing
+                    let result = await Task.detached { store.deleteOldBuild(app, at: oldPath, roots: roots) }.value
+                    appendLog(Self.oldBuildDeletionLine(item.title, platform: oldPlatform, path: oldPath, result))
                 })
             do { try await EpicBuildSwitch.run(steps) } catch EpicBuildSwitch.Failure.noNewBuild {
                 throw HighballError.failed(L("Epic lists a Mac version of this game, but has no Mac build to download for your account, so nothing was changed."))
@@ -3785,28 +3784,56 @@ final class AppState {
         bottles.map { $0.driveC.appending(path: "Games", directoryHint: .isDirectory) } + [GOGStore.macGamesDir]
     }
 
-    /// Completes the undo of a build switch Highball quit in the middle of (EpicStore.switchesInFlight):
-    /// the old build's record goes back from where the switch kept it. Once, at launch.
-    private func finishEpicSwitches() {
-        guard !epicSwitchesFinished else { return }
+    /// Completes a build switch Highball quit in the middle of (EpicStore.switchesInFlight), off
+    /// the main thread, then runs `then` (the Epic refresh, so it sees a record put back): the old
+    /// build's record goes back from where the switch kept it, or, when legendary records the new
+    /// build in another folder, the old build's files go as legendary's uninstall deletes them
+    /// (EpicStore.finishSwitch, deleteOldBuild). Once, at launch.
+    private func finishEpicSwitches(then: @escaping @MainActor () -> Void) {
+        guard !epicSwitchesFinished else { then(); return }
         epicSwitchesFinished = true
-        let store = epicStore
-        for app in store.switchesInFlight() {
-            let oldPath = store.savedInstallPath(app)
-            do {
-                if try store.restoreSavedRecord(app) {
-                    appendLog("\(app): a switch between Epic builds did not finish, so the old build is back as it was")
-                } else if let oldPath, !((try? store.installedGames()) ?? []).contains(where: { $0.install_path == oldPath }),
-                          EpicBuildSwitch.isSafeToDelete(URL(fileURLWithPath: oldPath, isDirectory: true), roots: epicInstallRoots),
-                          FileManager.default.fileExists(atPath: oldPath) {
-                    // The new build was in when Highball quit, before the old files went: they go now,
-                    // off the main thread (a game is tens of thousands of files).
-                    appendLog("\(app): a switch between Epic builds finished as Highball quit; deleting the old build's files in \(oldPath)")
-                    Task.detached { try? FileManager.default.removeItem(atPath: oldPath) }
+        let store = epicStore, roots = epicInstallRoots
+        Task { [self] in
+            let lines = await Task.detached { () -> [String] in
+                var lines: [String] = []
+                for app in store.switchesInFlight() {
+                    do {
+                        switch try store.finishSwitch(app) {
+                        case .restored:
+                            lines.append("\(app): a switch between Epic builds did not finish, so the old build is back as it was")
+                        case .deleteOldBuild(let oldPath):
+                            lines.append("\(app): a switch between Epic builds finished as Highball quit; deleting the old build's files in \(oldPath)")
+                            lines.append(Self.oldBuildDeletionLine(app, platform: nil, path: oldPath,
+                                                                   store.deleteOldBuild(app, at: oldPath, roots: roots)))
+                        case .unreadable:
+                            lines.append("\(app): a switch between Epic builds did not finish, and legendary's installed.json could not be read, so nothing was changed; Highball tries again when it next opens")
+                        case .leftAsItWas:
+                            break
+                        }
+                    } catch {
+                        lines.append("\(app): a switch between Epic builds did not finish, and its old record could not go back yet (\(error.localizedDescription)); Highball tries again when it next opens")
+                    }
                 }
-            } catch {
-                appendLog("\(app): a switch between Epic builds did not finish, and its old record could not go back yet (\(error.localizedDescription)); Highball tries again when it next opens")
-            }
+                return lines
+            }.value
+            lines.forEach(appendLog)
+            then()
+        }
+    }
+
+    /// The log line for an old build's files after a switch (EpicStore.deleteOldBuild).
+    nonisolated static func oldBuildDeletionLine(_ name: String, platform: String?, path: String,
+                                                 _ result: EpicStore.OldBuildDeletion) -> String {
+        let build = platform.map { "old \($0) files" } ?? "old build's files"
+        switch result {
+        case .deleted(let files, 0):
+            return "\(name): deleted the \(build) in \(path) (\(files) files from its manifest; anything else the game wrote there stays)"
+        case .deleted(let files, let failed):
+            return "\(name): deleted \(files) of the \(build) in \(path); \(failed) could not be deleted and stay there"
+        case .outsideGameFolders:
+            return "\(name): left the \(build) in \(path), outside Highball's game folders"
+        case .noFileList(let why):
+            return "\(name): left the \(build) in \(path): legendary could not list them (\(why)), so nothing there was deleted"
         }
     }
 
@@ -4181,7 +4208,9 @@ final class AppState {
 
     private struct LibraryCache: Codable {
         struct EpicGame: Codable {
-            var appName: String, title: String, artworkWide: URL?, artworkTall: URL?, listsMac: Bool
+            var appName: String, title: String, artworkWide: URL?, artworkTall: URL?
+            /// Optional: a cache written before Mac listings were kept has none, and is read, not thrown away.
+            var listsMac: Bool?
             var cloudSaves: Bool?
         }
         var epicOwned: [EpicGame] = []
@@ -4207,7 +4236,7 @@ final class AppState {
               let cache = try? JSONDecoder().decode(LibraryCache.self, from: Data(contentsOf: libraryCacheFile)) else { return }
         if epicStore.isAuthenticated {
             epicOwned = cache.epicOwned.map {
-                var game = EpicStore.Game(app_name: $0.appName, app_title: $0.title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall, listsMac: $0.listsMac)
+                var game = EpicStore.Game(app_name: $0.appName, app_title: $0.title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall, listsMac: $0.listsMac ?? false)
                 game.cloudSaves = $0.cloudSaves ?? false
                 return game
             }
@@ -4322,6 +4351,11 @@ final class AppState {
             fail(HighballError.failed("\(item.title) is already running."))
             return
         }
+        // Nor beside the Windows build's session: one build at a time.
+        if runningSessions.contains(where: { $0.libraryID == item.id }) {
+            fail(HighballError.failed(String(format: L("%@ is running as its Windows version. Quit it first."), item.title)))
+            return
+        }
         let game = mac.asInstalledGame
         let store = gogStore
         let useComet = gogSignedIn && gogSettings.cometOff[id] == nil
@@ -4413,16 +4447,34 @@ final class AppState {
     /// How GOG syncs each GOG game's saves (GOGSaves.CloudSetup), asked once a session per game.
     @ObservationIgnored private var gogCloudSetups: [String: GOGSaves.CloudSetup] = [:]
 
-    /// How an installed GOG game's saves sync, for its page; nil when GOG could not be asked.
+    /// Why gogCloudSetup has no answer for a game: not found in its environment, no client id
+    /// (GOG keeps no cloud saves for it), or GOG did not answer.
+    enum GOGCloudMiss: Error { case notFound, noClientID, unreachable }
+    @ObservationIgnored private var gogCloudMisses: [String: GOGCloudMiss] = [:]
+
+    /// Why the last gogCloudSetup for the game came back empty; nil once it has an answer.
+    func gogCloudMiss(for item: LibraryItem) -> GOGCloudMiss? { item.gogID.flatMap { gogCloudMisses[$0] } }
+
+    /// How an installed GOG game's saves sync, for its page; nil when there is no answer (gogCloudMiss says why).
     func gogCloudSetup(for item: LibraryItem) async -> GOGSaves.CloudSetup? {
         guard let id = item.gogID else { return nil }
         if let known = gogCloudSetups[id] { return known }
         let windows = bottles.first { $0.name == item.bottleName }.flatMap { gogInstalled(item, in: $0) }
-        guard let game = windows ?? gogMacInstalled[id]?.asInstalledGame else { return nil }
+        guard let game = windows ?? gogMacInstalled[id]?.asInstalledGame else {
+            gogCloudMisses[id] = .notFound
+            return nil
+        }
         let saves = GOGSaves(store: gogStore)
-        let setup = await Task.detached { saves.clientID(for: game).flatMap { try? saves.cloudSetup(clientID: $0) } }.value
-        if let setup { gogCloudSetups[id] = setup }
-        return setup
+        let answer = await Task.detached { () -> Result<GOGSaves.CloudSetup, GOGCloudMiss> in
+            do {
+                guard let client = try saves.lookUpClientID(for: game) else { return .failure(.noClientID) }
+                return .success(try saves.cloudSetup(clientID: client))
+            } catch { return .failure(.unreachable) }
+        }.value
+        switch answer {
+        case .success(let setup): gogCloudSetups[id] = setup; gogCloudMisses[id] = nil; return setup
+        case .failure(let miss): gogCloudMisses[id] = miss; return nil
+        }
     }
 
     /// The Mac build's cloud-save folders, empty when it has none or GOG cannot say.
@@ -4859,8 +4911,10 @@ final class AppState {
         default:
             return nil
         }
-        if let estimate { downloadEstimates[key] = estimate; downloadEstimatesFetched[key] = Date(); saveDownloadEstimates() }
-        return estimate ?? (refresh ? downloadEstimates[key] : nil)
+        // An answer with neither size (GOG's info without them) says nothing: never kept as the size.
+        let answer = estimate.flatMap { $0.download != nil || $0.disk != nil ? $0 : nil }
+        if let answer { downloadEstimates[key] = answer; downloadEstimatesFetched[key] = Date(); saveDownloadEstimates() }
+        return answer ?? (refresh ? downloadEstimates[key] : nil)
     }
 
     private static func estimateKey(_ item: LibraryItem, mac: Bool) -> String { "\(item.id)|\(mac ? "mac" : "windows")" }

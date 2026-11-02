@@ -564,15 +564,23 @@ struct GameDetailView: View {
             // the moment before the owned refresh lands, is one Highball cannot say about.
             guard let cloud = item.steamAppID.flatMap({ state.steamCloudByAppID[$0] }) else { return [] }
             return [cloud ? L("Steam syncs this game's saves with Steam Cloud, for whichever account plays it.")
-                          : L("This game keeps its saves on this Mac.")]
+                          : L("This game keeps its own saves, on this Mac or with its publisher's service.")]
         case .epic:
-            return [state.epicOwned.first { $0.app_name == item.epicAppName }?.cloudSaves == true
+            // Nothing until Epic's library lists the game, as for Steam.
+            guard let game = state.epicOwned.first(where: { $0.app_name == item.epicAppName }) else { return [] }
+            return [game.cloudSaves
                     ? L("Epic's cloud keeps this game's saves when Epic's own launcher plays it. Played from Highball, they stay on this Mac.")
-                    : L("This game keeps its saves on this Mac.")]
+                    : L("This game keeps its own saves, on this Mac or with its publisher's service.")]
         default: break
         }
         guard cloudSetupAsked else { return [L("Checking…")] }
-        guard let setup = cloudSetup, let id = item.gogID else { return [L("Highball could not reach GOG to see how this game saves.")] }
+        guard let setup = cloudSetup, let id = item.gogID else {
+            switch state.gogCloudMiss(for: item) {
+            case .noClientID: return [L("GOG keeps no cloud saves for this game.")]
+            case .notFound: return []
+            case .unreachable, nil: return [L("Highball could not reach GOG to see how this game saves.")]
+            }
+        }
         let syncing = !state.gogSettings.cloudSavesOff.contains(id)
         func line(_ folders: [GOGSaves.Location], synced: String, own: String) -> String {
             folders.isEmpty ? own : syncing ? synced : L("Kept on this Mac: Sync saves with GOG, under Game settings, syncs them.")
@@ -714,8 +722,9 @@ struct GameDetailView: View {
                 .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                 .disabled(state.macPlayUnavailable(item))
                 if item.installed {
+                    // Not while the Mac build Highball started runs: one build at a time.
                     Button(L("Play the Windows version")) { commitTypedArguments(); state.play(item, windowsBuild: true) }
-                        .controlSize(.large).disabled(state.busy || blocked)
+                        .controlSize(.large).disabled(state.busy || blocked || state.isRunningNow(item))
                 } else {
                     Text(item.source == .steam ? L("Starts through Steam for Mac.") : L("Opens the Mac version, without Wine."))
                         .font(.callout).foregroundStyle(.secondary)
@@ -725,7 +734,7 @@ struct GameDetailView: View {
                     primaryActionLabel(L("Play"), symbol: "play.fill")
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
-                .disabled(state.busy || blocked)
+                .disabled(state.busy || blocked || state.isRunningNow(item))
                 if item.installedOnMac {
                     // The row put the Windows build first (a Mac build missing content); the Mac one stays a click away.
                     Button(L("Play on Mac")) { commitTypedArguments(); state.playOnMac(item) }.controlSize(.large)
@@ -753,9 +762,13 @@ struct GameDetailView: View {
                     }
                 }
             } else if item.source == .epic, item.installedOnMac {
-                // Epic keeps one build per game, and this Mac one does not run (32-bit): the way
-                // out is the Windows build, which takes its place.
-                Text(L("This Mac version is 32-bit, which current macOS can't run.")).font(.callout).foregroundStyle(HB.warn)
+                // Epic keeps one build per game, and this Mac one is not played (32-bit, or the
+                // database row says it is not the one to play): the way out is the Windows build,
+                // which takes its place.
+                Text(item.epicAppName.flatMap { state.epicMacArch[$0] } == .only32Bit
+                     ? L("This Mac version is 32-bit, which current macOS can't run.")
+                     : L("Highball's game database says this Mac version is not the one to play: the Windows version is."))
+                    .font(.callout).foregroundStyle(HB.warn)
                 Button(L("Switch to the Windows version…")) { state.pendingEpicWindowsSwitch = item }
                     .controlSize(.large).disabled(state.busy || state.isRunningNow(item))
             } else if item.source == .epic || item.source == .gog {
