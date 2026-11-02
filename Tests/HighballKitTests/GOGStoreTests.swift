@@ -248,7 +248,7 @@ final class GOGStoreTests: XCTestCase {
     func testSaveSyncArgumentsAndConflictLine() {
         let location = GOGSaves.Location(name: "saves", template: "")
         let down = GOGSaves.arguments(folder: URL(fileURLWithPath: "/s"), id: "1", location: location, timestamp: "0", direction: .download)
-        XCTAssertEqual(down, ["save-sync", "/s", "1", "--os", "windows", "--ts", "0", "--name", "saves", "--skip-upload"])
+        XCTAssertEqual(down, ["save-sync", "/s", "1", "--os", "windows", "--ts", "0", "--name", "saves", "--debug", "--skip-upload"])
         XCTAssertEqual(GOGSaves.arguments(folder: URL(fileURLWithPath: "/s"), id: "1", location: location, timestamp: "5", direction: .upload).last, "--skip-download")
         XCTAssertEqual(GOGSaves.arguments(folder: URL(fileURLWithPath: "/s"), id: "1", location: location, timestamp: "5", direction: .forceDownload).last, "--force-download")
         XCTAssertTrue(GOGSaves.isConflict("[SAVES] WARNING: Files in conflict force downloading or uploading of files"))

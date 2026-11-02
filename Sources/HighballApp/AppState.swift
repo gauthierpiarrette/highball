@@ -1525,6 +1525,9 @@ final class AppState {
         if let h = ProgressParser.hint(for: line) { stageHint = h }
     }
 
+    /// Set by a busy operation that ends by handing over to a question instead of its done row.
+    private var busyDoneOverride: DoneState?
+
     /// Runs one long operation on the activity strip. The strip is the surface: the log sheet
     /// opens only from its Details button (or `showLogSheet` for the rare case that needs it).
     private func runBusy(_ title: String, expected: String? = nil, showLogSheet: Bool = false,
@@ -1534,7 +1537,7 @@ final class AppState {
         // first and end it early when the second finishes (found in review, 2026-09-04).
         guard !busy else { return }
         busy = true; busyTitle = title; stage = ""; stageHint = ""; logLines = []; showLog = showLogSheet
-        busyStartedAt = Date(); busyExpected = expected; lastOutputAt = nil; doneState = nil
+        busyStartedAt = Date(); busyExpected = expected; lastOutputAt = nil; doneState = nil; busyDoneOverride = nil
         busyStop = stop; busyProgress = nil; transferRate = nil; transferSamples = []; stopRequested = false
         busyTask = Task {
             // On failure, dismiss the log sheet ourselves: SwiftUI defers the error alert
@@ -1542,7 +1545,7 @@ final class AppState {
             // and hid the alert until the user clicked Close (issues #27/#28).
             do {
                 try await work()
-                let d = done ?? DoneState(title: L("Done"), ctaTitle: nil, cta: nil)
+                let d = busyDoneOverride ?? done ?? DoneState(title: L("Done"), ctaTitle: nil, cta: nil)
                 doneState = d.silent ? nil : d
             } catch {
                 showLog = false
@@ -1570,6 +1573,14 @@ final class AppState {
                 repairBottle(fresh)
             }
         }
+    }
+
+    /// Throws once the player pressed Stop. For a step after detached work, which runs on through
+    /// a cancel: checked on the main task, and on `stopRequested` too, since a Stop that kills the
+    /// environment first cancels only once the kill returns.
+    private func checkStopped() throws {
+        try Task.checkCancellation()
+        if stopRequested { throw CancellationError() }
     }
 
     /// The strip's Stop button. What it does depends on the operation (see `BusyStop`); the
@@ -2459,8 +2470,8 @@ final class AppState {
         }
     }
 
-    /// Carries out the route the ask offered.
-    func uninstallConfirmed() {
+    /// Carries out the route the ask offered. `deleteSaves`: a GOG game's saves go with it.
+    func uninstallConfirmed(deleteSaves: Bool = false) {
         guard let (item, route) = pendingUninstall else { return }
         pendingUninstall = nil
         guard let bottleName = item.bottleName, let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
@@ -2496,7 +2507,7 @@ final class AppState {
                 await MainActor.run { self.refresh() }
             }
         case let .gog(id):
-            gogUninstall(id: id, title: item.title, in: bottle)
+            gogUninstall(id: id, title: item.title, in: bottle, deleteSaves: deleteSaves)
         case .windowsUninstaller:
             openUninstaller(in: bottle)
         case .none:
@@ -3705,6 +3716,7 @@ final class AppState {
     /// The disk half of `gogRefresh`: goggame-<id>.info files under each environment's install
     /// folders. Runs on every install-record change, like Steam's.
     private func refreshGOGInstalls() {
+        defer { offerKeptGOGSaves() }
         let found = Dictionary(bottles.map { ($0.name, GOGStore.installedGames(driveC: $0.driveC)) }, uniquingKeysWith: { a, _ in a })
         let store = gogStore
         for game in found.values.joined() { store.adoptManifest(for: game) }
@@ -3816,6 +3828,10 @@ final class AppState {
         runBusy(String(format: L("Updating %@"), item.title), expected: L("a large download; you can leave it running"),
                 stop: .cancelTask(label: L("Stop")), cleanup: { [weak self] in self?.gogInstallControl = nil }) { [self] in
             let store = gogStore
+            // What changes in the game's folder while the update and its setup run is the patch's,
+            // not saves (GOGStore.InstallHistory).
+            let start = Date()
+            defer { GOGStore.recordUpdate(for: game, driveC: bottle.driveC, start: start, end: Date()) }
             try await store.ensureInstalled()
             let info = try await Task.detached { try store.info(game.id) }.value
             let language = GOGStore.language(for: info.languages)
@@ -3948,7 +3964,7 @@ final class AppState {
                 let info = try? await Task.detached { try store.info(game.id) }.value
                 try await gogRunSetup(game, title: item.title, in: bottle, language: GOGStore.language(for: info?.languages ?? []))
             }
-            let saveFolders = useSaves ? await gogSaveLocations(game, in: bottle) : []
+            let saveFolders = useSaves ? (await gogSaveLocations(game, in: bottle) ?? []) : []
             for (location, folder) in saveFolders {
                 stage = L("Bringing your saves down from GOG")
                 try await gogSync(game, title: item.title, location: location, folder: folder, direction: .download, beforePlay: true)
@@ -4033,7 +4049,8 @@ final class AppState {
                 guard let self, !saveFolders.isEmpty else { return }
                 Task { @MainActor in
                     for (location, folder) in saveFolders {
-                        try? await self.gogSync(game, title: item.title, location: location, folder: folder, direction: .upload, beforePlay: false)
+                        _ = try? await self.gogSync(game, title: item.title, location: location, folder: folder, direction: .upload,
+                                                    beforePlay: false)
                     }
                 }
             }
@@ -4137,15 +4154,24 @@ final class AppState {
         AchievementToast.shared.show(sample)
     }
 
-    /// The game's cloud-save folders in this environment, empty when it has none or GOG cannot say.
-    private func gogSaveLocations(_ game: GOGStore.InstalledGame, in bottle: Bottle) async -> [(GOGSaves.Location, URL)] {
+    /// The game's cloud-save locations. Returns an empty array for a game without cloud saves
+    /// (no client id, or no configuration at GOG), and nil when GOG couldn't be reached. Both
+    /// lookups can need GOG: an offline install's client id comes from its build manifest.
+    private func gogCloudLocations(_ game: GOGStore.InstalledGame) async -> [GOGSaves.Location]? {
         let saves = GOGSaves(store: gogStore)
-        // Both can reach GOG (an offline install's client id comes from its build manifest).
-        let locations = await Task.detached { () -> [GOGSaves.Location]? in
-            guard let client = saves.clientID(for: game) else { return nil }
-            return (try? saves.locations(clientID: client)) ?? nil
+        return await Task.detached { () -> [GOGSaves.Location]? in
+            do {
+                guard let client = try saves.lookUpClientID(for: game) else { return [] }
+                return try saves.locations(clientID: client) ?? []
+            } catch { return nil }
         }.value
-        return (locations ?? []).compactMap { location in
+    }
+
+    /// The game's cloud-save folders in this environment: empty for a game without cloud saves,
+    /// nil when GOG couldn't be reached.
+    private func gogSaveLocations(_ game: GOGStore.InstalledGame, in bottle: Bottle) async -> [(GOGSaves.Location, URL)]? {
+        guard let locations = await gogCloudLocations(game) else { return nil }
+        return locations.compactMap { location in
             guard let folder = GOGSaves.resolve(location.template, game: game, driveC: bottle.driveC) else {
                 appendLog("\(game.title): cloud saves at \(location.template) have no folder here, skipping that one")
                 return nil
@@ -4163,18 +4189,27 @@ final class AppState {
     }
 
     /// One sync, asking the player on a conflict. Before Play the launch waits for the answer;
-    /// after the game it is asked whenever the player is back.
+    /// after the game it is asked whenever the player is back. Returns true when the local and
+    /// cloud saves end up in sync.
+    @discardableResult
     private func gogSync(_ game: GOGStore.InstalledGame, title: String, location: GOGSaves.Location, folder: URL,
-                         direction: GOGSaves.Direction, beforePlay: Bool) async throws {
+                         direction: GOGSaves.Direction, beforePlay: Bool) async throws -> Bool {
         let saves = GOGSaves(store: gogStore)
         let outcome = await Task.detached { saves.sync(game, location: location, folder: folder, direction: direction) { line in
             Task { @MainActor in self.appendLog(line) }
         } }.value
         switch outcome {
         case .synced:
-            return
+            return true
+        case .refused:
+            // Before Play: this Mac's saves are newer, and the upload after the game takes them.
+            // After the game: GOG's cloud is newer and this Mac's saves didn't change, so there was
+            // nothing to upload; the download before the next Play brings the cloud's down.
+            if !beforePlay { appendLog("\(title): GOG's cloud has newer saves, so nothing was uploaded; they come down before the next Play") }
+            return false
         case let .failed(why):
             appendLog("\(title): cloud saves did not sync (\(why)); \(beforePlay ? "playing with the saves on this Mac" : "they stay on this Mac until the next sync")")
+            return false
         case .conflict:
             let choice: GOGSaveConflict.Choice = await withCheckedContinuation { continuation in
                 // One question at a time: an earlier one still open (another game's) is answered
@@ -4191,10 +4226,16 @@ final class AppState {
             case .keepMac: forced = .forceUpload
             case .skip:
                 appendLog("\(title): cloud saves left as they are this time")
-                return
+                return false
             }
-            let again = await Task.detached { saves.sync(game, location: location, folder: folder, direction: forced) }.value
-            appendLog("\(title): cloud saves \(again == .synced ? (choice == .useCloud ? "replaced with GOG's copy" : "uploaded from this Mac") : "did not sync")")
+            // The backup made before the side the player picked replaces the other is kept for good.
+            let again = await Task.detached { saves.sync(game, location: location, folder: folder, direction: forced, keepBackups: true) }.value
+            switch again {
+            case .synced: appendLog("\(title): cloud saves \(choice == .useCloud ? "replaced with GOG's copy" : "uploaded from this Mac"), a copy of what was replaced kept first")
+            case let .failed(why): appendLog("\(title): cloud saves did not sync (\(why))")
+            case .conflict, .refused: appendLog("\(title): cloud saves did not sync")
+            }
+            return again == .synced
         }
     }
 
@@ -4215,14 +4256,145 @@ final class AppState {
         rebuildLibrary()   // a program added by hand shows its own tile only while the GOG tile plays another
     }
 
-    /// Removes a GOG game from an environment: its own uninstaller first when an offline installer
-    /// left one (it cleans the registry), then the folder, then what gogdl kept about it.
-    private func gogUninstall(id: String, title: String, in bottle: Bottle) {
+    /// A GOG game the player is asked about before it is removed, because some of its saves
+    /// can't be backed up first. Nothing is removed until the player agrees.
+    struct GOGRemovalWithoutBackup {
+        let id: String
+        let title: String
+        let bottle: Bottle
+        /// What can still be backed up, and the locations that can't; nil when GOG couldn't be
+        /// reached to say where the saves are.
+        let plan: GOGSaves.UninstallPlan?
+        /// Nothing dates the install (GOGStore.history), so the files the game wrote in its folder
+        /// can't be told from the installer's and none are copied.
+        var gameFolderUncopied = false
+    }
+    var gogRemovalWithoutBackup: GOGRemovalWithoutBackup?
+
+    /// Saves an uninstall kept, offered to a new install of the game (GOGSaves.KeptSaves).
+    struct GOGSavesToPutBack {
+        let game: GOGStore.InstalledGame
+        let title: String
+        let kept: GOGSaves.KeptSaves
+    }
+    var gogSavesToPutBack: GOGSavesToPutBack?
+
+    /// Installs whose put-back question was answered Not now: asked again the next time Highball
+    /// starts, not in this run.
+    private var gogPutBackLater: Set<String> = []
+
+    /// Offers, once per install, to put back saves an uninstall kept of the same game. Only once
+    /// Highball has set the install up (its setup could replace what is put back) and while the
+    /// game isn't running.
+    private func offerKeptGOGSaves() {
+        guard gogSavesToPutBack == nil else { return }
+        let saves = GOGSaves(store: gogStore)
+        let all = saves.keptSaves()   // one read, not one per installed game
+        guard !all.isEmpty else { return }
+        for bottle in bottles {
+            for game in gogInstalledByBottle[bottle.name] ?? [] {
+                guard let kept = GOGSaves.toOffer(all[game.id], to: game),
+                      !gogPutBackLater.contains(game.folder.standardizedFileURL.path),
+                      !gogStore.hasManifest(game) || GOGStore.setupDone(for: game, driveC: bottle.driveC),
+                      !runningSessions.contains(where: { $0.libraryID == "gog:\(game.id)" && $0.bottleName == bottle.name }) else { continue }
+                gogSavesToPutBack = GOGSavesToPutBack(game: game, title: game.title, kept: kept)
+                return
+            }
+        }
+    }
+
+    enum PutBackAnswer { case putBack, notNow, dontAskAgain }
+
+    /// The answer to the put-back question. Not now asks again the next time Highball starts;
+    /// the other two answer that install for good.
+    func gogPutBackSaves(_ answer: PutBackAnswer) {
+        guard let pending = gogSavesToPutBack else { return }
+        gogSavesToPutBack = nil
+        let saves = GOGSaves(store: gogStore)
+        if answer == .notNow {
+            gogPutBackLater.insert(pending.game.folder.standardizedFileURL.path)
+        } else {
+            saves.markAsked(pending.game)
+        }
+        guard answer == .putBack else { offerKeptGOGSaves(); return }
+        Task {
+            do {
+                let count = try await Task.detached { try saves.putBack(pending.kept, into: pending.game) }.value
+                appendLog("\(pending.title): \(count) saved file\(count == 1 ? "" : "s") put back from \(pending.kept.date.formatted()), what was there copied to save-backups first")
+            } catch {
+                fail(HighballError.failed(String(format: L("Highball could not put back all of %@'s saves: %@"), pending.title, error.localizedDescription)))
+            }
+            offerKeptGOGSaves()
+        }
+    }
+
+    /// The player agreed to remove the game although some of its saves can't be backed up.
+    func gogRemoveWithoutBackup() {
+        guard let pending = gogRemovalWithoutBackup else { return }
+        gogRemovalWithoutBackup = nil
+        appendLog("\(pending.title): removing it without a backup of every save, as asked")
+        gogUninstall(id: pending.id, title: pending.title, in: pending.bottle, agreed: pending)
+    }
+
+    /// Removes a GOG game from an environment: backs up its saves inside the game's folder (the
+    /// cloud-save folders, and what the game wrote there since Highball set it up), runs the
+    /// game's own uninstaller when an offline installer left one (it cleans the registry), then
+    /// deletes the folder and what gogdl kept about the game. When some saves can't be backed up
+    /// (GOG unreachable, a location Highball can't resolve, or nothing dates the install so the
+    /// game's own files in its folder can't be told apart), the player is asked first
+    /// (gogRemovalWithoutBackup); `agreed` is their go-ahead. `deleteSaves` copies nothing and
+    /// also deletes the game's save folders elsewhere in the environment.
+    private func gogUninstall(id: String, title: String, in bottle: Bottle, deleteSaves: Bool = false,
+                              agreed: GOGRemovalWithoutBackup? = nil) {
         guard let game = gogInstalledByBottle[bottle.name]?.first(where: { $0.id == id }) else { return }
         let store = gogStore
+        let others = gogInstalledByBottle.filter { $0.key != bottle.name }.values.joined().filter { $0.id == id }.map(\.folder)
         runBusy(String(format: L("Removing %@"), title),
                 done: DoneState(title: String(format: L("%@ removed"), title), ctaTitle: nil, cta: nil),
                 stop: .killBottle(bottle, label: L("Stop"))) { [self] in
+            // The game folder copy tells the game's files from the installer's by when the install
+            // was set up or installed; with neither, Keep can't copy them and must say so.
+            let datable = GOGSaves.canTellGameFiles(game, driveC: bottle.driveC)
+            let plan: GOGSaves.UninstallPlan
+            if let agreed {
+                plan = agreed.plan ?? GOGSaves.UninstallPlan()
+            } else {
+                stage = L("Finding the game's saves")
+                let found = await gogCloudLocations(game).map { GOGSaves.uninstallPlan($0, game: game, driveC: bottle.driveC) }
+                if deleteSaves {
+                    plan = found ?? GOGSaves.UninstallPlan()
+                    if found == nil { appendLog("\(title): GOG couldn't be reached, so save folders outside the game's folder stay") }
+                } else if let found, found.cannotBackUp.isEmpty, datable {
+                    plan = found
+                } else {
+                    gogRemovalWithoutBackup = GOGRemovalWithoutBackup(id: id, title: title, bottle: bottle, plan: found,
+                                                                      gameFolderUncopied: !datable)
+                    busyDoneOverride = .handedOff   // the question takes over; nothing was removed
+                    return
+                }
+                try checkStopped()
+            }
+            // Saves inside the game's folder would be deleted with it, so back them up before
+            // anything runs, and stop if a backup fails. These backups are never pruned.
+            let saves = GOGSaves(store: store)
+            var kept: [(name: String, folder: URL, backup: URL)] = []
+            if !deleteSaves {
+                stage = L("Keeping a copy of the game's saves")
+                for (location, folder) in plan.backUp {
+                    if let copy = try await Task.detached(operation: { try saves.backUpLocal(game, location: location, folder: folder, kept: true) }).value {
+                        appendLog("\(title): saves inside the game's folder copied to \(copy.path)")
+                        kept.append((location.name, folder, copy))
+                    }
+                    try checkStopped()   // a detached copy runs on through a Stop: nothing is removed after one
+                }
+                let skipping = plan.backUp.map(\.folder)
+                if let copy = try await Task.detached(operation: { try saves.backUpGameFolder(game, driveC: bottle.driveC, skipping: skipping) }).value {
+                    let (files, bytes) = GOGSaves.contents(of: copy)
+                    appendLog("\(title): \(files) file\(files == 1 ? "" : "s") the game wrote in its folder (\(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))) copied to \(copy.path)")
+                    kept.append((GOGSaves.gameFolder.name, game.folder, copy))
+                }
+            }
+            try checkStopped()
             let uninstaller = game.folder.appending(path: "unins000.exe")
             if FileManager.default.fileExists(atPath: uninstaller.path), let engine = engine(for: bottle) {
                 stage = L("Running the game's own uninstaller")
@@ -4240,6 +4412,14 @@ final class AppState {
             store.forget(id, otherInstallsRemain: elsewhere)
             GOGSaves(store: store).forget(game)
             try? FileManager.default.removeItem(at: GOGStore.setupMarker(for: game, driveC: bottle.driveC))
+            try? FileManager.default.removeItem(at: GOGStore.historyFile(for: game, driveC: bottle.driveC))
+            if deleteSaves {
+                let (removed, leftAlone) = saves.removeSaves(plan, game: game, driveC: bottle.driveC)
+                for folder in removed { appendLog("\(title): saves at \(folder.path) deleted, as asked") }
+                for folder in leftAlone { appendLog("\(title): saves at \(folder.path) left in place: they are outside this environment, or hold other things Highball keeps") }
+            }
+            // Recorded once the folder is gone, so this install is never offered its own saves.
+            saves.keep(kept, of: game, otherInstalls: others)
             appendLog("\(title): removed from \(bottle.name)")
             refreshInstalledGames()   // the tile leaves now, not at the next folder watch
         }

@@ -55,6 +55,14 @@ final class UninstallTests: XCTestCase {
         XCTAssertTrue(text.contains("delete the environment"), text)
     }
 
+    /// A GOG removal offers two answers, and the message says what each does to the saves.
+    func testTheGOGMessageSaysWhatEachAnswerDoesToTheSaves() {
+        let text = Uninstall.confirmation(route: .gog(id: "1"), sizeOnDisk: 0)
+        XCTAssertTrue(text.contains("Keep save data first copies your saves"), text)
+        XCTAssertTrue(text.contains("Delete save data too copies nothing"), text)
+        XCTAssertTrue(text.contains("GOG's cloud stay there either way"), text)
+    }
+
     func testTheReasonIsWhatAnUnroutableGameShows() {
         let route = Uninstall.route(for: item(.steam))
         guard case let .none(reason) = route else { return XCTFail("expected none") }
