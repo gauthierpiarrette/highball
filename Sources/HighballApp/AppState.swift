@@ -3703,9 +3703,13 @@ final class AppState {
         gogLoading = gogSignedIn && gogGames.isEmpty
         let signedIn = gogSignedIn
         let installedIDs = Set(gogInstalledByBottle.values.joined().map(\.id))
+        let shown = gogGames
         Task.detached { [store = gogStore] in
             GOGComet(store: store).removeStaleTokens()
-            var games = signedIn ? ((try? await store.ownedGames()) ?? []) : []
+            // nil when GOG could not answer (offline, GOG down): the list shown, the one saved last
+            // time, stays, as Epic's does, rather than shrinking to the installed games.
+            let owned: [GOGStore.Game]? = signedIn ? (try? await store.ownedGames()) : []
+            var games = owned ?? shown
             // A GOG game in an environment that the account list does not name still gets its
             // title, cover and database match.
             let known = Set(games.map(\.id))
@@ -3717,7 +3721,10 @@ final class AppState {
                 guard let self else { return }
                 self.gogFetchInFlight = false
                 self.gogLoading = false
-                if found != self.gogGames { self.gogGames = found; self.rebuildLibrary(); self.saveLibraryCache() }
+                guard found != self.gogGames else { return }
+                self.gogGames = found
+                self.rebuildLibrary()
+                if owned != nil { self.saveLibraryCache() }
             }
         }
     }
