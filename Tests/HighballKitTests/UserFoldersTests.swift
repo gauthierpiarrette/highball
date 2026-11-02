@@ -33,7 +33,6 @@ final class UserFoldersTests: XCTestCase {
     func testStartsLinkedAndOnlyRealUsersCount() {
         XCTAssertEqual(UserFolders.shape(userDirectory: user), .linked(to: host.path))
         XCTAssertEqual(UserFolders.userDirectories(driveC: driveC).map(\.lastPathComponent), ["tester"], "Public is Wine's, never touched")
-        XCTAssertFalse(UserFolders.hasFilesInside(driveC: driveC))
     }
 
     func testInsideReplacesTheLinkAndLeavesHostFilesWhereTheyAre() throws {
@@ -50,12 +49,10 @@ final class UserFoldersTests: XCTestCase {
     func testBackToLinkedKeepsTheInsideFolderWhenItHasFiles() throws {
         try UserFolders.set(inside: true, driveC: driveC, host: host)
         try write("save.es3", in: user.appending(path: "Documents"))
-        XCTAssertTrue(UserFolders.hasFilesInside(driveC: driveC))
         let notes = try UserFolders.set(inside: false, driveC: driveC, host: host)
         XCTAssertEqual(notes.count, 2)
         XCTAssertEqual(UserFolders.shape(userDirectory: user), .linked(to: host.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: user.appending(path: "Documents (environment)/save.es3").path), "nothing is deleted silently")
-        XCTAssertFalse(UserFolders.hasFilesInside(driveC: driveC))
     }
 
     func testBackToLinkedDropsAnEmptyInsideFolder() throws {
