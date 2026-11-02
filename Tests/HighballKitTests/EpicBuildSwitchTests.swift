@@ -135,6 +135,9 @@ final class EpicBuildSwitchTests: XCTestCase {
     func testARecordLegendaryHasIsLeftAsItIs() throws {
         let (store, config) = try legendaryHome()
         try store.saveRecord("Garlic")
+        let oldPath = try installed(config)["Garlic"]?["install_path"] as? String
+        XCTAssertNotNil(oldPath)
+        XCTAssertEqual(store.savedInstallPath("Garlic"), oldPath, "the old build's folder, for deleting it at launch")
         var games = try installed(config)
         games["Garlic"] = ["app_name": "Garlic", "install_path": "/U/Applications/Highball Games/Garlic", "platform": "Mac", "version": "1.0-m"]
         games["GarlicDLC"] = nil
