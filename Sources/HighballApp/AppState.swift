@@ -893,7 +893,7 @@ final class AppState {
                 self.noteNewSteamGames(owned.mapValues { Set($0.map(\.appid)) }, signedIn: signedIn)
                 guard owned != self.steamOwnedByBottle else { return }
                 self.steamOwnedByBottle = owned
-                self.steamCloudAppIDs = Set(owned.values.joined().filter(\.steamCloud).map(\.appid))
+                self.steamCloudByAppID = Dictionary(owned.values.joined().map { ($0.appid, $0.steamCloud) }, uniquingKeysWith: { a, b in a || b })
                 self.macAppInfoByAppID = Dictionary(owned.values.joined().map { ($0.appid, $0.macBuild) },
                                                     uniquingKeysWith: { a, _ in a })
                 self.rebuildLibrary()
@@ -3888,8 +3888,9 @@ final class AppState {
         }
     }
 
-    /// Steam games Steam Cloud keeps saves for (OwnedSteamGame.steamCloud).
-    var steamCloudAppIDs: Set<Int> = []
+    /// Whether Steam Cloud keeps each owned Steam game's saves (OwnedSteamGame.steamCloud), for the
+    /// games an environment's Steam has listed; a game not here is one Highball cannot say about.
+    var steamCloudByAppID: [Int: Bool] = [:]
 
     /// How GOG syncs each GOG game's saves (GOGSaves.CloudSetup), asked once a session per game.
     @ObservationIgnored private var gogCloudSetups: [String: GOGSaves.CloudSetup] = [:]
