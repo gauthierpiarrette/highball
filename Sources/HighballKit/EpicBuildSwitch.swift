@@ -125,6 +125,13 @@ extension EpicStore {
         return restored
     }
 
+    /// Where the old build of a switch still in flight was installed, from its kept record.
+    public func savedInstallPath(_ appName: String) -> String? {
+        guard let data = try? Data(contentsOf: savedRecordFolder(appName).appending(path: "record.json")),
+              let entries = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        return (entries[appName] as? [String: Any])?["install_path"] as? String
+    }
+
     /// Forgets a kept record once the new build is in.
     public func discardSavedRecord(_ appName: String) {
         try? FileManager.default.removeItem(at: savedRecordFolder(appName))

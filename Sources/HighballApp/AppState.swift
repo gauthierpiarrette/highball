@@ -3730,7 +3730,7 @@ final class AppState {
         -> @MainActor (_ download: @escaping @MainActor () async throws -> Void) async throws -> Void {
         let store = epicStore
         let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
-        let roots = bottles.map { $0.driveC.appending(path: "Games", directoryHint: .isDirectory) } + [GOGStore.macGamesDir]
+        let roots = epicInstallRoots
         let removing = oldPlatform == "Mac" ? String(format: L("Removing the Mac version of %@"), item.title)
                                             : String(format: L("Removing the Windows version of %@"), item.title)
         return { [self] download in
@@ -3779,6 +3779,12 @@ final class AppState {
 
     @ObservationIgnored private var epicSwitchesFinished = false
 
+    /// The folders Highball installs Epic builds into: an old build's files are deleted only from
+    /// inside one of them (EpicBuildSwitch.isSafeToDelete).
+    private var epicInstallRoots: [URL] {
+        bottles.map { $0.driveC.appending(path: "Games", directoryHint: .isDirectory) } + [GOGStore.macGamesDir]
+    }
+
     /// Completes the undo of a build switch Highball quit in the middle of (EpicStore.switchesInFlight):
     /// the old build's record goes back from where the switch kept it. Once, at launch.
     private func finishEpicSwitches() {
@@ -3786,8 +3792,18 @@ final class AppState {
         epicSwitchesFinished = true
         let store = epicStore
         for app in store.switchesInFlight() {
+            let oldPath = store.savedInstallPath(app)
             do {
-                if try store.restoreSavedRecord(app) { appendLog("\(app): a switch between Epic builds did not finish, so the old build is back as it was") }
+                if try store.restoreSavedRecord(app) {
+                    appendLog("\(app): a switch between Epic builds did not finish, so the old build is back as it was")
+                } else if let oldPath, !((try? store.installedGames()) ?? []).contains(where: { $0.install_path == oldPath }),
+                          EpicBuildSwitch.isSafeToDelete(URL(fileURLWithPath: oldPath, isDirectory: true), roots: epicInstallRoots),
+                          FileManager.default.fileExists(atPath: oldPath) {
+                    // The new build was in when Highball quit, before the old files went: they go now,
+                    // off the main thread (a game is tens of thousands of files).
+                    appendLog("\(app): a switch between Epic builds finished as Highball quit; deleting the old build's files in \(oldPath)")
+                    Task.detached { try? FileManager.default.removeItem(atPath: oldPath) }
+                }
             } catch {
                 appendLog("\(app): a switch between Epic builds did not finish, and its old record could not go back yet (\(error.localizedDescription)); Highball tries again when it next opens")
             }
