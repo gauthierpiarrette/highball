@@ -250,11 +250,43 @@ final class EpicBuildSwitchTests: XCTestCase {
 
     /// highball#609: an old build's folder went whole, saves and mods with it. Now only what its
     /// manifests list goes, then the folders that leaves empty, as legendary's uninstall does.
-    func testOnlyTheOldBuildsListedFilesAreDeleted() throws {
+    /// A finished switch as deleteOldBuild meets it: the old build's record kept aside, and
+    /// legendary recording the new build in another folder.
+    private func switched(_ store: EpicStore, _ config: URL) throws {
+        let file = config.appending(path: "installed.json")
+        var games = try installed(config)
+        if games["Garlic"]?["platform"] as? String == "Mac" { games = oldGames ?? games }   // back to the old record first
+        oldGames = games
+        try JSONSerialization.data(withJSONObject: games).write(to: file)
+        try store.saveRecord("Garlic")
+        games["Garlic"] = ["app_name": "Garlic", "install_path": "/U/Applications/Highball Games/Garlic", "platform": "Mac", "version": "1.0-m"]
+        games["GarlicDLC"] = nil
+        try JSONSerialization.data(withJSONObject: games).write(to: file)
+    }
+    private var oldGames: [String: [String: Any]]?
+
+    /// legendary still recording the game in the old folder (its uninstall didn't drop the record,
+    /// another legendary holding its lock), or records that can't be read: nothing is deleted.
+    func testTheFolderLegendaryStillRecordsIsNeverDeleted() throws {
         let (store, config) = try legendaryHome()
         try fakeLegendary(store)
         let (root, folder) = try oldBuild(store, config)
         try store.saveRecord("Garlic")
+        XCTAssertEqual(store.recordsGame("Garlic"), true)
+        XCTAssertEqual(store.deleteOldBuild("Garlic", at: folder.path, roots: [root]), .stillRecorded)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appending(path: "GAME.EXE").path))
+        try Data("{not json".utf8).write(to: config.appending(path: "installed.json"))
+        XCTAssertNil(store.recordsGame("Garlic"))
+        XCTAssertEqual(store.deleteOldBuild("Garlic", at: folder.path, roots: [root]), .recordsUnreadable)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appending(path: "GAME.EXE").path))
+        XCTAssertEqual(store.switchesInFlight(), ["Garlic"], "the kept record stays for the next launch")
+    }
+
+    func testOnlyTheOldBuildsListedFilesAreDeleted() throws {
+        let (store, config) = try legendaryHome()
+        try fakeLegendary(store)
+        let (root, folder) = try oldBuild(store, config)
+        try switched(store, config)
         XCTAssertEqual(store.deleteOldBuild("Garlic", at: folder.path, roots: [root]), .deleted(files: 4, failed: 0))
         let fm = FileManager.default
         for gone in ["GAME.EXE", "Data/Pak0.pak", "Data/Movies", "DLC"] {
@@ -274,7 +306,7 @@ final class EpicBuildSwitchTests: XCTestCase {
         let fm = FileManager.default
         try fm.removeItem(at: folder.appending(path: "Saved"))
         try fm.removeItem(at: folder.appending(path: "Data/mods"))
-        try store.saveRecord("Garlic")
+        try switched(store, config)
         XCTAssertEqual(store.deleteOldBuild("Garlic", at: folder.path, roots: [root]), .deleted(files: 4, failed: 0))
         XCTAssertFalse(fm.fileExists(atPath: folder.path))
         XCTAssertTrue(fm.fileExists(atPath: root.path))
@@ -286,18 +318,18 @@ final class EpicBuildSwitchTests: XCTestCase {
         let (store, config) = try legendaryHome()
         try fakeLegendary(store, fails: true)
         let (root, folder) = try oldBuild(store, config)
-        try store.saveRecord("Garlic")
+        try switched(store, config)
         guard case .noFileList = store.deleteOldBuild("Garlic", at: folder.path, roots: [root]) else { return XCTFail("listed") }
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appending(path: "GAME.EXE").path))
         XCTAssertEqual(store.switchesInFlight(), [])
 
         try fakeLegendary(store)
-        try store.saveRecord("Garlic")
+        try switched(store, config)
         try FileManager.default.removeItem(at: store.paths.home.appending(path: "epic-switch/Garlic/manifests/Garlic_Windows_1.0-w.manifest"))
         guard case .noFileList = store.deleteOldBuild("Garlic", at: folder.path, roots: [root]) else { return XCTFail("listed") }
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appending(path: "GAME.EXE").path))
 
-        try store.saveRecord("Garlic")
+        try switched(store, config)
         XCTAssertEqual(store.deleteOldBuild("Garlic", at: folder.path, roots: [folder]), .outsideGameFolders)
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appending(path: "GAME.EXE").path))
     }

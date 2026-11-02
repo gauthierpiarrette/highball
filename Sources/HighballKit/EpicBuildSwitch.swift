@@ -238,6 +238,18 @@ extension EpicStore {
         case outsideGameFolders
         /// legendary could not list the old build's files: nothing was deleted.
         case noFileList(String)
+        /// legendary still records the game in that folder (its uninstall didn't drop the record,
+        /// another legendary holding its lock): it is the installed build, and nothing was deleted.
+        case stillRecorded
+        /// legendary's installed.json could not be read, so nothing says the folder is free:
+        /// nothing was deleted, and the kept record stays for the next launch.
+        case recordsUnreadable
+    }
+
+    /// Whether legendary records the game; nil when its installed.json can't be read. Read
+    /// locally, no legendary run.
+    public func recordsGame(_ appName: String) -> Bool? {
+        do { return try Self.readInstalledIfThere(configDir)?[appName] != nil } catch { return nil }
     }
 
     /// Deletes an old build's files once a switch is done, the way legendary's own uninstall does
@@ -248,6 +260,12 @@ extension EpicStore {
     /// (EpicBuildSwitch.isSafeToDelete) or when the list cannot be had. The kept record goes
     /// afterwards either way.
     public func deleteOldBuild(_ appName: String, at oldPath: String, roots: [URL]) -> OldBuildDeletion {
+        // The folder legendary records as the game is the installed build, never an old one.
+        let installed: [String: Any]
+        do { installed = try Self.readInstalledIfThere(configDir) ?? [:] } catch { return .recordsUnreadable }
+        if let now = (installed[appName] as? [String: Any])?["install_path"] as? String, Self.samePath(now, oldPath) {
+            return .stillRecorded
+        }
         defer { discardSavedRecord(appName) }
         let folder = URL(fileURLWithPath: oldPath, isDirectory: true)
         guard EpicBuildSwitch.isSafeToDelete(folder, roots: roots) else { return .outsideGameFolders }
