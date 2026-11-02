@@ -3987,7 +3987,11 @@ final class AppState {
             // Before Play: this Mac's saves are newer, and the upload after the game takes them.
             // After the game: GOG's cloud is newer and this Mac's saves didn't change, so there was
             // nothing to upload; the download before the next Play brings the cloud's down.
-            if !beforePlay { appendLog("\(title): GOG's cloud has newer saves, so nothing was uploaded; they come down before the next Play") }
+            if beforePlay {
+                appendLog("\(title): this Mac has newer saves than GOG's cloud, so nothing was downloaded; they go up after the game")
+            } else {
+                appendLog("\(title): GOG's cloud has newer saves, so nothing was uploaded; they come down before the next Play")
+            }
             return false
         case let .failed(why):
             appendLog("\(title): cloud saves did not sync (\(why)); \(beforePlay ? "playing with the saves on this Mac" : "they stay on this Mac until the next sync")")
