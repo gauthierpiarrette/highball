@@ -3894,15 +3894,33 @@ final class AppState {
     /// How GOG syncs each GOG game's saves (GOGSaves.CloudSetup), asked once a session per game.
     @ObservationIgnored private var gogCloudSetups: [String: GOGSaves.CloudSetup] = [:]
 
-    /// How an installed GOG game's saves sync, for its page; nil when GOG could not be asked.
+    /// Why gogCloudSetup has no answer for a game: not found in its environment, no client id
+    /// (GOG keeps no cloud saves for it), or GOG did not answer.
+    enum GOGCloudMiss: Error { case notFound, noClientID, unreachable }
+    @ObservationIgnored private var gogCloudMisses: [String: GOGCloudMiss] = [:]
+
+    /// Why the last gogCloudSetup for the game came back empty; nil once it has an answer.
+    func gogCloudMiss(for item: LibraryItem) -> GOGCloudMiss? { item.gogID.flatMap { gogCloudMisses[$0] } }
+
+    /// How an installed GOG game's saves sync, for its page; nil when there is no answer (gogCloudMiss says why).
     func gogCloudSetup(for item: LibraryItem) async -> GOGSaves.CloudSetup? {
         guard let id = item.gogID else { return nil }
         if let known = gogCloudSetups[id] { return known }
-        guard let game = bottles.first(where: { $0.name == item.bottleName }).flatMap({ gogInstalled(item, in: $0) }) else { return nil }
+        guard let game = bottles.first(where: { $0.name == item.bottleName }).flatMap({ gogInstalled(item, in: $0) }) else {
+            gogCloudMisses[id] = .notFound
+            return nil
+        }
         let saves = GOGSaves(store: gogStore)
-        let setup = await Task.detached { saves.clientID(for: game).flatMap { try? saves.cloudSetup(clientID: $0) } }.value
-        if let setup { gogCloudSetups[id] = setup }
-        return setup
+        let answer = await Task.detached { () -> Result<GOGSaves.CloudSetup, GOGCloudMiss> in
+            do {
+                guard let client = try saves.lookUpClientID(for: game) else { return .failure(.noClientID) }
+                return .success(try saves.cloudSetup(clientID: client))
+            } catch { return .failure(.unreachable) }
+        }.value
+        switch answer {
+        case .success(let setup): gogCloudSetups[id] = setup; gogCloudMisses[id] = nil; return setup
+        case .failure(let miss): gogCloudMisses[id] = miss; return nil
+        }
     }
 
     /// Updates a game gogdl installed to GOG's newest build, then runs its setup again.
@@ -4294,8 +4312,10 @@ final class AppState {
         default:
             return nil
         }
-        if let estimate { downloadEstimates[key] = estimate; downloadEstimatesFetched[key] = Date(); saveDownloadEstimates() }
-        return estimate ?? (refresh ? downloadEstimates[key] : nil)
+        // An answer with neither size (GOG's info without them) says nothing: never kept as the size.
+        let answer = estimate.flatMap { $0.download != nil || $0.disk != nil ? $0 : nil }
+        if let answer { downloadEstimates[key] = answer; downloadEstimatesFetched[key] = Date(); saveDownloadEstimates() }
+        return answer ?? (refresh ? downloadEstimates[key] : nil)
     }
 
     private static func estimateKey(_ item: LibraryItem, mac: Bool) -> String { "\(item.id)|\(mac ? "mac" : "windows")" }

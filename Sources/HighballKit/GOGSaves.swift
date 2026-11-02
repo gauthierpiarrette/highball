@@ -22,7 +22,10 @@ public struct GOGSaves: Sendable {
     /// The client id cloud storage is keyed by: the info file's, else the manifest gogdl kept
     /// (Control's info file has none; its manifest does), else GOG's latest build manifest for an
     /// install with neither (an offline installer, a gogdl install from elsewhere), remembered.
-    public func clientID(for game: GOGStore.InstalledGame) -> String? {
+    public func clientID(for game: GOGStore.InstalledGame) -> String? { (try? lookUpClientID(for: game)) ?? nil }
+
+    /// clientID(for:), telling GOG having none for the game (nil) from GOG not answering (throws).
+    public func lookUpClientID(for game: GOGStore.InstalledGame) throws -> String? {
         if let id = game.clientID, !id.isEmpty { return id }
         if let data = try? Data(contentsOf: store.installManifest(game)),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -30,7 +33,7 @@ public struct GOGSaves: Sendable {
         let cacheFile = store.dir.appending(path: "client-ids.json")
         var cache = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: cacheFile))) ?? [:]
         if let id = cache[game.id] { return id }
-        guard let id = try? Self.publishedClientID(productID: game.id) else { return nil }
+        guard let id = try Self.publishedClientID(productID: game.id) else { return nil }
         cache[game.id] = id
         try? JSONEncoder().encode(cache).write(to: cacheFile, options: .atomic)
         return id
