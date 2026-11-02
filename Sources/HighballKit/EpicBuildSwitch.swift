@@ -304,6 +304,10 @@ extension EpicStore {
             let parent = file.deletingLastPathComponent().resolvingSymlinksInPath().path.lowercased()
             let base = root.path.lowercased()
             guard parent == base || parent.hasPrefix(base.hasSuffix("/") ? base : base + "/") else { continue }
+            // A manifest names files: a folder at that name is someone else's, and stays.
+            var isFolder: ObjCBool = false
+            if (try? fm.destinationOfSymbolicLink(atPath: file.path)) == nil,
+               fm.fileExists(atPath: file.path, isDirectory: &isFolder), isFolder.boolValue { continue }
             do { try fm.removeItem(at: file); deleted += 1 } catch { failed += 1 }
         }
         for dir in dirs.sorted(by: { $0.count > $1.count }) {
