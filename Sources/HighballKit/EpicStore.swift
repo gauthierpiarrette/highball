@@ -187,15 +187,40 @@ public struct EpicStore: Sendable {
     }
 
     /// The files legendary installed for a game, by its installed manifest, as paths relative to
-    /// the install folder. Read locally, with no sign-in, while the game is installed (cli.py
-    /// `list_files` loads the installed manifest unless asked to download one). Throws when
-    /// legendary has no manifest for it.
+    /// the install folder. Read offline, with no sign-in, from the manifest file legendary keeps
+    /// for the installed version (`list-files --manifest`): `list-files <app>` signs in and
+    /// downloads one in 0.21.0, since `main()` always sets a platform. Throws when legendary has
+    /// no manifest for it.
     public func installedFiles(_ appName: String) throws -> [String] {
+        guard let manifest = installedManifest(appName) else {
+            throw HighballError.failed("legendary has no manifest for \(appName)")
+        }
         struct File: Decodable { let filename: String }
-        let out = try capture(Self.listFilesArguments(appName: appName))
+        let out = try capture(Self.listFilesArguments(manifest: manifest))
         return try JSONDecoder().decode([File].self, from: Data(out.utf8)).map(\.filename)
     }
-    static func listFilesArguments(appName: String) -> [String] { ["list-files", appName, "--json"] }
+    static func listFilesArguments(manifest: URL) -> [String] { ["list-files", "--manifest", manifest.path, "--json"] }
+
+    /// The manifest file legendary keeps for a game's installed version, nil when there is none.
+    func installedManifest(_ appName: String) -> URL? {
+        guard let data = try? Data(contentsOf: configDir.appending(path: "installed.json")),
+              let all = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let entry = all[appName] as? [String: Any] else { return nil }
+        return Self.manifestNames(appName, entry: entry)
+            .map { configDir.appending(path: "manifests/\($0)") }
+            .first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// The names legendary saves an installed version's manifest under (lgndry.py
+    /// `_get_manifest_filename`): with its platform, or without it for an older install.
+    static func manifestNames(_ appName: String, entry: [String: Any]) -> [String] {
+        guard let version = entry["version"] as? String else { return [] }
+        let platform = entry["platform"] as? String ?? "Windows"
+        return ["\(appName)_\(platform)_\(version)", "\(appName)_\(version)"].map { cleanFilename($0) + ".manifest" }
+    }
+
+    /// legendary's clean_filename: the characters a file name cannot hold, dropped.
+    static func cleanFilename(_ name: String) -> String { name.filter { !"<>:\"/\\|?*".contains($0) } }
 
     /// Legendary's install records, app name to path, keeping only the ones whose folder still
     /// exists. Legendary never notices a removed environment or a deleted game folder, and a

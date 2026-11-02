@@ -42,7 +42,8 @@ final class EpicFakeLegendaryTests: XCTestCase {
     }
 
     private func installed(savePath: String?) throws {
-        let game: [String: Any] = ["app_name": app, "title": "Game", "install_path": install.path, "save_path": savePath ?? NSNull()]
+        let game: [String: Any] = ["app_name": app, "title": "Game", "install_path": install.path, "save_path": savePath ?? NSNull(),
+                                    "version": "1.0", "platform": "Windows"]
         try JSONSerialization.data(withJSONObject: [app: game]).write(to: config.appending(path: "installed.json"))
     }
     private func write(_ text: String, to url: URL, at date: Date) throws {
@@ -276,7 +277,10 @@ final class EpicFakeLegendaryTests: XCTestCase {
     }
 
     private func manifest(_ app: String, _ names: [String]) throws {
-        try JSONSerialization.data(withJSONObject: names).write(to: home.appending(path: "fake-manifest-\(app).json"))
+        // Where legendary keeps the installed version's manifest; the stand-in's is a JSON list.
+        let file = config.appending(path: "manifests/\(app)_Windows_1.0.manifest")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: names).write(to: file)
     }
     private func relative(_ backup: URL) -> [String] { SaveBackups.files(in: backup).map { SaveBackups.relativePath($0, in: backup) } }
 
@@ -285,8 +289,8 @@ final class EpicFakeLegendaryTests: XCTestCase {
     /// manifest names is the game's. With no manifest, or one whose names aren't on disk (an
     /// encrypted one lists obfuscated names), and no history, nothing tells them apart.
     func testKeepCopiesWhatNoManifestNames() throws {
-        let game: [String: Any] = ["app_name": app, "title": "Game", "install_path": install.path]
-        let dlc: [String: Any] = ["app_name": "GameDLC", "title": "DLC", "install_path": install.path]
+        let game: [String: Any] = ["app_name": app, "title": "Game", "install_path": install.path, "version": "1.0", "platform": "Windows"]
+        let dlc: [String: Any] = ["app_name": "GameDLC", "title": "DLC", "install_path": install.path, "version": "1.0", "platform": "Windows"]
         try JSONSerialization.data(withJSONObject: [app: game, "GameDLC": dlc]).write(to: config.appending(path: "installed.json"))
         let old = dayAgo.addingTimeInterval(-86_400)
         for name in ["Game.exe", "Data/base.pak", "DLC/extra.pak", "Config/Default.ini"] {
@@ -352,15 +356,16 @@ final class EpicFakeLegendaryTests: XCTestCase {
         config = os.environ['LEGENDARY_CONFIG_PATH']
         installed_file = os.path.join(config, 'installed.json')
         installed = json.load(open(installed_file))
-        app = args[1]
-        manifest = os.path.join(os.path.dirname(config), f'fake-manifest-{app}.json')
-        names = json.load(open(manifest)) if os.path.exists(manifest) else None
         if args[0] == 'list-files':
-            # cli.py list_files: the installed manifest, read locally; with none on disk,
-            # load_manifest(None) raises and legendary exits non-zero.
-            if app not in installed or names is None: sys.exit(1)
+            # cli.py list_files: --manifest reads that file offline. Without it, main() has set a
+            # platform, so legendary signs in and downloads one, which fails here.
+            if '--manifest' not in args: sys.exit(1)
+            names = json.load(open(args[args.index('--manifest') + 1]))
             print(json.dumps([dict(filename=n, sha_hash='00', install_tags=[], file_size=0, flags=0) for n in names]))
             sys.exit(0)
+        app = args[1]
+        manifest = os.path.join(config, 'manifests', f'{app}_Windows_1.0.manifest')
+        names = json.load(open(manifest)) if os.path.exists(manifest) else None
         # core.py uninstall_game, utils.py delete_filelist: the manifest's files, the folders they
         # leave empty, the root only if nothing else is in it (os.rmdir), then the record.
         if app not in installed: sys.exit(0)
