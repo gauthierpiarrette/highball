@@ -4314,7 +4314,12 @@ final class AppState {
 
     /// A native Mac version the store offers: Steam's (MacSteamBuild), or one GOG or Epic lists.
     func offersMacVersion(_ item: LibraryItem) -> Bool {
-        item.installedOnMac || (item.source == .steam ? macSteamBuild(for: item) != nil : item.macListed)
+        item.installedOnMac || (item.source == .steam ? macSteamBuild(for: item) != nil : macListed(item))
+    }
+
+    /// GOG or Epic lists a Mac version and the database row does not say otherwise (StoreMacBuild).
+    func macListed(_ item: LibraryItem) -> Bool {
+        StoreMacBuild.listed(item.macListed, entry: gameDB.entry(for: item))
     }
 
     /// An installed game's folder and saves as they are on disk now.
