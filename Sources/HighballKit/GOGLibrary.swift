@@ -540,8 +540,8 @@ extension GOGStore {
         driveC.appending(path: "highball/gog-setup/\(game.id).history.json")
     }
 
-    /// An install set up before the history was kept falls back to the marker's date for its
-    /// first setup. One Highball never set up (an offline installer's: no manifest, so no setup
+    /// An install set up before the history was kept falls back to the earliest of its marker's,
+    /// info file's and folder's dates for its first setup (storedHistory). One Highball never set up (an offline installer's: no manifest, so no setup
     /// and no marker) falls back to when its goggame-<id>.info file landed on this disk, which
     /// the install wrote. nil firstSetup: none of them exists, so nothing tells the game's files
     /// from the installer's.
@@ -551,13 +551,18 @@ extension GOGStore {
         return history
     }
 
-    /// The history file, or the marker's date. Not the info file's: setup and updates record
-    /// from this, and setup runs after gogdl wrote the info file, so what it put down would
-    /// count as the game's.
+    /// The history file, or for an install set up before it was kept (a marker, no history) the
+    /// earliest of the marker's date, the info file's and the game folder's creation: setup
+    /// rewrote the marker on every update before the history was kept, so the marker alone would
+    /// leave out saves written before the last update. That can also count files an old update
+    /// rewrote, which only copies more. Not the info file's for an install with no marker: setup
+    /// and updates record from this, and setup runs after gogdl wrote the info file, so what it
+    /// put down would count as the game's.
     private static func storedHistory(for game: InstalledGame, driveC: URL) -> InstallHistory {
         var history = InstallHistory.read(historyFile(for: game, driveC: driveC)) ?? InstallHistory()
-        if history.firstSetup == nil {
-            history.firstSetup = try? setupMarker(for: game, driveC: driveC).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        if history.firstSetup == nil,
+           let marked = try? setupMarker(for: game, driveC: driveC).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate {
+            history.firstSetup = [marked, installedDate(of: game)].compactMap { $0 }.min()
         }
         return history
     }

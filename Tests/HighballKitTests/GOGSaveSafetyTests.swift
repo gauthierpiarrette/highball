@@ -279,6 +279,30 @@ final class GOGSaveSafetyTests: XCTestCase {
         XCTAssertEqual(GOGStore.history(for: game, driveC: driveC).firstSetup, marked, "the marker's old date, read before it is rewritten")
     }
 
+    /// An install updated before the history was kept: the update rewrote the marker, so a save
+    /// written beside the exe before it is older than the marker. The install counts from the
+    /// earliest of the marker, the info file and the folder, so Keep still copies that save.
+    func testAnInstallUpdatedBeforeTheHistoryCountsFromItsEarliestDate() throws {
+        let saves = GOGSaves(store: GOGStore(paths: HighballPaths(home: root.appending(path: "home"))))
+        let driveC = root.appending(path: "drive_c")
+        let game = GOGStore.InstalledGame(id: "7", title: "Game", folder: driveC.appending(path: "GOG Games/Game"), buildID: "b2", clientID: nil, dlcIDs: [], tasks: [])
+        let installed = Date().addingTimeInterval(-86400 * 30)
+        let updated = Date().addingTimeInterval(-86400)
+        let info = game.folder.appending(path: "goggame-7.info")
+        try write(#"{"gameId":"7","name":"Game"}"#, to: info, dated: updated)
+        try FileManager.default.setAttributes([.creationDate: installed], ofItemAtPath: info.path)
+        try FileManager.default.setAttributes([.creationDate: installed], ofItemAtPath: game.folder.path)
+        try write("b2", to: GOGStore.setupMarker(for: game, driveC: driveC), dated: updated)
+        try write("exe", to: game.folder.appending(path: "game.exe"), dated: installed.addingTimeInterval(-86400))
+        try write("save", to: game.folder.appending(path: "slot1.sav"), dated: installed.addingTimeInterval(86400))
+        XCTAssertEqual(GOGStore.history(for: game, driveC: driveC).firstSetup, installed)
+        let copy = try XCTUnwrap(try saves.backUpGameFolder(game, driveC: driveC))
+        XCTAssertEqual(try GOGSaves.files(in: copy).map { GOGSaves.relativePath(of: $0, in: copy) }, ["slot1.sav"])
+        // The next setup stores that date, not the marker's.
+        GOGStore.markSetupDone(for: game, driveC: driveC)
+        XCTAssertEqual(GOGStore.history(for: game, driveC: driveC).firstSetup, installed)
+    }
+
     /// An offline installer's game (no manifest, so never set up and no marker) counts from when
     /// its goggame-<id>.info file was created, or its folder if earlier (a patch rewrites the
     /// info file). The installer's files, dated when they were built, and its records at the top
