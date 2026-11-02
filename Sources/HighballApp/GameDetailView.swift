@@ -496,6 +496,8 @@ struct GameDetailView: View {
                     if let note = Self.archNote(game.arch) {
                         Text(note).font(.callout).foregroundStyle(game.arch == .only32Bit ? HB.warn : .secondary)
                     }
+                    Text(L("Highball can't update the Mac version yet: for a newer build, remove it and install it again."))
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 10) {
                         Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([game.app ?? game.folder]) }
                         Button(L("Move the Mac version to the Trash…")) { state.pendingGOGMacTrash = item }.disabled(state.busy || state.isRunningNow(item))
