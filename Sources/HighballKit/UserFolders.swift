@@ -86,12 +86,4 @@ public enum UserFolders {
         try userDirectories(driveC: driveC).flatMap { try set(inside: inside, userDirectory: $0, host: host) }
     }
 
-    /// True when a user directory holds a Documents folder inside with something in it: what a
-    /// deletion would take with it.
-    public static func hasFilesInside(driveC: URL) -> Bool {
-        userDirectories(driveC: driveC).contains { dir in
-            guard shape(userDirectory: dir) == .inside else { return false }
-            return !((try? FileManager.default.contentsOfDirectory(atPath: dir.appending(path: folder).path)) ?? []).isEmpty
-        }
-    }
 }

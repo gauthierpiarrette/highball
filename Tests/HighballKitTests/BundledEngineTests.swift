@@ -35,6 +35,8 @@ final class BundledEngineTests: XCTestCase {
         XCTAssertFalse(arm64.isEmpty)
         for m in arm64 {
             XCTAssertFalse(m.runs(onMacOS: "26.4.9"), "\(m.id) says it runs below macOS 26.5")
+            // The KosmicKrisp line asks for more: its driver has only been measured on macOS 27.
+            if EngineManifest.line(of: m.id) == "arm64-kk-wine11.18" { XCTAssertEqual(m.minMacOS, "27.0"); continue }
             XCTAssertTrue(m.runs(onMacOS: "26.5"), "\(m.id) refuses macOS 26.5")
         }
     }

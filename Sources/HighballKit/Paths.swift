@@ -164,6 +164,9 @@ public struct HighballPaths: Sendable {
     /// than `~/.Trash` so the move is always same-filesystem — `rename(2)` cannot cross one,
     /// and Finder could not empty an undeletable prefix anyway.
     public var trash: URL { home.appending(path: ".trash", directoryHint: .isDirectory) }
+    /// Copies of game saves Highball made before deleting something that held them, made on
+    /// demand and never cleared by Highball.
+    public var saveBackups: URL { home.appending(path: "save-backups", directoryHint: .isDirectory) }
 
     public func engine(_ id: String) -> URL { engines.appending(path: id, directoryHint: .isDirectory) }
     public func bottle(_ name: String) -> URL { bottles.appending(path: name, directoryHint: .isDirectory) }
@@ -417,10 +420,10 @@ public enum BugReport {
     /// launch header, the backend banner and the effective configuration; the tail carries how the
     /// run ended. A plain `suffix` would drop exactly the head — the content this function exists
     /// to preserve — and keep the MoltenVK spam, reinstating the failure it was written to fix.
-    static func trim(_ lines: [String]) -> String {
+    static func trim(_ lines: [String], budget: Int = maxDigestCharacters) -> String {
         let whole = lines.joined(separator: "\n")
-        guard whole.count > maxDigestCharacters else { return whole }
-        let headBudget = maxDigestCharacters * 2 / 3
+        guard whole.count > budget else { return whole }
+        let headBudget = budget * 2 / 3
         var head: [String] = [], used = 0
         for line in lines {
             if used + line.count + 1 > headBudget, !head.isEmpty { break }
@@ -428,7 +431,7 @@ public enum BugReport {
         }
         var tail: [String] = [], tailUsed = 0
         for line in lines[head.count...].reversed() {
-            if used + tailUsed + line.count + 1 > maxDigestCharacters { break }
+            if used + tailUsed + line.count + 1 > budget { break }
             tail.append(line); tailUsed += line.count + 1
         }
         let dropped = lines.count - head.count - tail.count
@@ -529,13 +532,22 @@ public enum BugReport {
             ]
             return comps.url!
         }
-        // Shrink from the tail until the encoded URL fits: the head holds the launch header, the
-        // backend banner and the effective configuration, which are what triage reads first.
+        // Shrink from the middle until the encoded URL fits, as `trim` does: the head holds the launch
+        // header and the configuration, the tail how the run ended. Cutting the tail here lost the
+        // crash from reports whose digest was long (highball#618, cut 50 repeats before the end).
         var result = url(log: logDigest)
         while result.absoluteString.count > maxURLCharacters, logDigest.count > 400 {
-            logDigest = String(logDigest.prefix(logDigest.count * 3 / 4))
+            logDigest = shortened(logDigest)
             result = url(log: logDigest)
         }
         return result
+    }
+
+    /// `text` at about three quarters of its length, both ends kept. Always shorter, so the caller's
+    /// loop ends: a text of a few long lines `trim` can't cut between loses its end instead.
+    static func shortened(_ text: String) -> String {
+        let budget = text.count * 3 / 4
+        let cut = trim(text.components(separatedBy: "\n"), budget: budget)
+        return cut.count < text.count ? cut : String(text.prefix(budget))
     }
 }
