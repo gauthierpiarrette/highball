@@ -545,9 +545,9 @@ final class AppState {
 
     /// Play on Mac leads for this item (see MacSteamBuild.leads).
     func prefersMacBuild(_ item: LibraryItem) -> Bool {
-        // A GOG Mac build leads once installed, unless it is one macOS no longer runs.
         if item.source == .gog {
-            return item.installedOnMac && item.gogID.flatMap { gogMacInstalled[$0] }?.arch != .only32Bit
+            return StoreMacBuild.leads(entry: gameDB.entry(for: item), installedOnMac: item.installedOnMac,
+                                       arch: item.gogID.flatMap { gogMacInstalled[$0] }?.arch)
         }
         return MacSteamBuild.leads(entry: gameDB.entry(for: item), installedOnMac: item.installedOnMac,
                             appInfo: item.steamAppID.flatMap { macAppInfoByAppID[$0] })

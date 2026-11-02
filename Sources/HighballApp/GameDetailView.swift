@@ -216,7 +216,7 @@ struct GameDetailView: View {
                 .textSelection(.enabled)
             if let macBuild {
                 macBlock(macBuild)
-            } else if state.macListed(item), item.source == .gog || item.source == .epic {
+            } else if state.macListed(item) || item.installedOnMac, item.source == .gog || item.source == .epic {
                 storeMacBlock
             } else if let outdated = GamePageCopy.outdatedMacBuild(appInfo: item.steamAppID.flatMap { state.macAppInfoByAppID[$0] }, entry: entry) {
                 Label(L(outdated), systemImage: "apple.logo").font(.callout).foregroundStyle(.secondary)
@@ -714,7 +714,7 @@ struct GameDetailView: View {
                          : L("Its anti-cheat does not run on macOS."))
                         .font(.callout).foregroundStyle(.secondary)
                 }
-            } else if item.source == .gog, item.macListed, !item.installedOnMac {
+            } else if item.source == .gog, state.macListed(item), !item.installedOnMac {
                 // A Mac version is listed: that's the install on offer, the Windows one a click away.
                 VStack(alignment: .leading, spacing: 6) {
                     VStack(alignment: .leading, spacing: 10) {
