@@ -50,7 +50,7 @@ struct LibraryView: View {
             // does one Highball cannot place (Steam for Mac's, or before the accounts are read).
             if let account, let owners = state.steamOwners(for: item), !owners.accounts.contains(account) { return false }
             // A native Mac version from any store: Steam's (MacSteamBuild), or one GOG or Epic lists.
-            if macOnly && state.macSteamBuild(for: item) == nil && !item.macListed && !item.installedOnMac { return false }
+            if macOnly && state.macSteamBuild(for: item) == nil && !state.macListed(item) && !item.installedOnMac { return false }
             if verifiedOnly {
                 guard state.gameDB.entry(for: item)?.status == "verified-local" else { return false }
             }
@@ -352,7 +352,7 @@ struct LibraryTile: View {
                         }
                         .transition(.opacity)
                     }
-                    SourceBadge(source: item.source, mac: state.macSteamBuild(for: item), macListed: item.macListed,
+                    SourceBadge(source: item.source, mac: state.macSteamBuild(for: item), macListed: state.macListed(item),
                                 macInstalled: item.source == .gog && item.installedOnMac)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .padding(6)

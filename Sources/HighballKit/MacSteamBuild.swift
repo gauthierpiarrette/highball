@@ -52,6 +52,16 @@ public enum MacSteamBuild: Equatable, Sendable {
     }
 }
 
+/// A Mac build GOG's or Epic's catalog lists (LibraryItem.macListed), weighed the way MacSteamBuild
+/// weighs Steam's: the database row first, so one saying `"available": false` (a Mac port that no
+/// longer runs, or one missing content, highball#223) keeps the badge and the page on the Windows build.
+public enum StoreMacBuild {
+    /// Whether the store's listing counts.
+    public static func listed(_ storeLists: Bool, entry: GameDBEntry?) -> Bool {
+        storeLists && entry?.nativeMac?.available != false
+    }
+}
+
 /// What Steam's app data says about a game's Mac build, read the way Steam for Mac reads it.
 /// Steam marks a build that runs on current macOS with `macos64` or `macosapplesilicon` in
 /// `common.osextended` (Cyberpunk 2077 and Lies of P carry only the second), and a macOS launch

@@ -207,7 +207,7 @@ struct GameDetailView: View {
                 .textSelection(.enabled)
             if let macBuild {
                 macBlock(macBuild)
-            } else if item.macListed, item.source == .gog || item.source == .epic {
+            } else if state.macListed(item), item.source == .gog || item.source == .epic {
                 storeMacBlock
             } else if let outdated = GamePageCopy.outdatedMacBuild(appInfo: item.steamAppID.flatMap { state.macAppInfoByAppID[$0] }, entry: entry) {
                 Label(L(outdated), systemImage: "apple.logo").font(.callout).foregroundStyle(.secondary)
