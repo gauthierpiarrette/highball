@@ -425,7 +425,8 @@ enum L10n {
             "La synchronisation du jeu : certains jeux envoient eux-mêmes leurs sauvegardes au cloud GOG, par le kit de GOG. Avec Highball, cela fonctionne quand comet tourne à côté du jeu, et le jeu l’indique quand il synchronise, comme Cyberpunk 2077.",
         "Folders this game syncs": "Dossiers synchronisés par ce jeu",
         "Steam syncs this game's saves with Steam Cloud, for whichever account plays it.": "Steam synchronise les sauvegardes de ce jeu avec Steam Cloud, pour le compte qui y joue.",
-        "This game keeps its saves on this Mac.": "Ce jeu garde ses sauvegardes sur ce Mac.",
+        "This game keeps its own saves, on this Mac or with its publisher's service.": "Ce jeu gère lui-même ses sauvegardes, sur ce Mac ou avec le service de son éditeur.",
+        "GOG keeps no cloud saves for this game.": "GOG ne garde aucune sauvegarde dans le cloud pour ce jeu.",
         "Epic's cloud keeps this game's saves when Epic's own launcher plays it. Played from Highball, they stay on this Mac.":
             "Le cloud d’Epic garde les sauvegardes de ce jeu quand le lanceur d’Epic y joue. Lancées depuis Highball, elles restent sur ce Mac.",
         "How Steam Cloud works": "Comment fonctionne Steam Cloud",
