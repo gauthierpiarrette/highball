@@ -307,7 +307,6 @@ final class AppState {
         sortLibraryByDisplayTitle()
         if let deferred = deferredPlayLink { resolvePlayLink(deferred.request) }
         refreshMacFlags()
-        if sizePrefetch == nil, libraryItems.contains(where: { $0.source == .gog || $0.source == .epic }) { prefetchDownloadSizes() }
     }
 
     // MARK: Whose Steam games
@@ -4316,29 +4315,6 @@ final class AppState {
     /// A native Mac version the store offers: Steam's (MacSteamBuild).
     func offersMacVersion(_ item: LibraryItem) -> Bool {
         item.installedOnMac || (item.source == .steam && macSteamBuild(for: item) != nil)
-    }
-
-    private var sizePrefetch: Task<Void, Never>?
-
-    /// Once a session, in the background: the sizes of GOG and Epic games not installed yet, so a
-    /// page has them before it is opened. One store question at a time (each takes seconds and
-    /// holds the GOG sign-in file), none while a game runs or a task holds the progress bar, and
-    /// none for sizes saved this week. Steam needs none: its sizes are read from disk at once.
-    private func prefetchDownloadSizes() {
-        sizePrefetch = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(30))   // after the libraries have come in
-            guard let self else { return }
-            for item in libraryItems where !item.installed && (item.source == .gog || item.source == .epic) {
-                for mac in [false] + (offersMacVersion(item) && !item.installedOnMac ? [true] : []) where savedEstimate(for: item, mac: mac) == nil {
-                    while busy || !runningSessions.isEmpty {
-                        try? await Task.sleep(for: .seconds(30))
-                        if Task.isCancelled { return }
-                    }
-                    if Task.isCancelled { return }
-                    _ = await downloadEstimate(for: item, mac: mac)
-                }
-            }
-        }
     }
 
     /// An installed game's folder and saves as they are on disk now.
