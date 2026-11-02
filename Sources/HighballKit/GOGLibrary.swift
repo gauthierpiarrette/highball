@@ -534,20 +534,7 @@ extension GOGStore {
     /// When Highball first set an install up in the environment and when it updated it, so an
     /// uninstall can tell the files the game wrote from the ones the installer and the patches
     /// put down (GOGSaves.backUpGameFolder). Kept next to the setup marker.
-    public struct InstallHistory: Codable, Sendable, Equatable {
-        public struct Window: Codable, Sendable, Equatable {
-            public let start: Date
-            public let end: Date
-        }
-        public var firstSetup: Date?
-        public var updates: [Window] = []
-
-        /// Written by the game: changed after the first setup, and not while an update ran.
-        public func isGameWritten(_ changed: Date) -> Bool {
-            guard let firstSetup, changed > firstSetup else { return false }
-            return !updates.contains { $0.start <= changed && changed <= $0.end }
-        }
-    }
+    public typealias InstallHistory = GameInstallHistory
 
     public static func historyFile(for game: InstalledGame, driveC: URL) -> URL {
         driveC.appending(path: "highball/gog-setup/\(game.id).history.json")
@@ -568,8 +555,7 @@ extension GOGStore {
     /// from this, and setup runs after gogdl wrote the info file, so what it put down would
     /// count as the game's.
     private static func storedHistory(for game: InstalledGame, driveC: URL) -> InstallHistory {
-        var history = (try? Data(contentsOf: historyFile(for: game, driveC: driveC)))
-            .flatMap { try? JSONDecoder().decode(InstallHistory.self, from: $0) } ?? InstallHistory()
+        var history = InstallHistory.read(historyFile(for: game, driveC: driveC)) ?? InstallHistory()
         if history.firstSetup == nil {
             history.firstSetup = try? setupMarker(for: game, driveC: driveC).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
         }
@@ -588,9 +574,7 @@ extension GOGStore {
     }
 
     private static func save(_ history: InstallHistory, for game: InstalledGame, driveC: URL) {
-        let url = historyFile(for: game, driveC: driveC)
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? JSONEncoder().encode(history).write(to: url, options: .atomic)
+        history.write(to: historyFile(for: game, driveC: driveC))
     }
 
     /// An update ran from `start` to `end`: what changed in the game's folder then is the patch's.

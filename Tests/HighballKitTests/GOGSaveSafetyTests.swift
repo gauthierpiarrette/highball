@@ -69,7 +69,7 @@ final class GOGSaveSafetyTests: XCTestCase {
         let folder = root.appending(path: "Hidden")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try Data("x".utf8).write(to: folder.appending(path: ".save"))
-        XCTAssertEqual(try GOGSaves.files(in: folder).map(\.lastPathComponent), [".save"])
+        XCTAssertEqual(GOGSaves.files(in: folder).map(\.lastPathComponent), [".save"])
     }
 
     /// gogdl walks into a linked folder and writes through a linked file, so the copy holds what
@@ -122,6 +122,20 @@ final class GOGSaveSafetyTests: XCTestCase {
         XCTAssertLessThan(abs(made.timeIntervalSinceNow), 60)
         XCTAssertFalse(FileManager.default.fileExists(atPath: copy.appending(path: ".highball-backup").path), "nothing of Highball's inside the copy")
         XCTAssertTrue(FileManager.default.fileExists(atPath: GOGSaves.fingerprintFile(of: copy).path))
+    }
+
+    /// The Cloud saves setting says when this install last synced: the newest of its locations'
+    /// timestamps, never another install's or another game's.
+    func testLastSyncedIsThisInstallsNewest() throws {
+        let (saves, game, location, _) = try fixture()
+        let (_, other, _, _) = try fixture(install: "Other")
+        XCTAssertNil(saves.lastSynced(game))
+        let profiles = GOGSaves.Location(name: "profiles", template: "")
+        let all: [String: String] = [saves.key(game, location): "1793000000.5", saves.key(game, profiles): "1793000100",
+                                     saves.key(other, location): "1799999999", "2.saves@\(game.folder.standardizedFileURL.path)": "1799999999"]
+        try FileManager.default.createDirectory(at: saves.timestampsFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(all).write(to: saves.timestampsFile)
+        XCTAssertEqual(saves.lastSynced(game), Date(timeIntervalSince1970: 1793000100))
     }
 
     func testARefusalMovesNothing() {
@@ -245,7 +259,7 @@ final class GOGSaveSafetyTests: XCTestCase {
         try write("after it", to: game.folder.appending(path: "SAVES/slot2.sav"), dated: setUp.addingTimeInterval(3000))
         try write("cloud", to: game.folder.appending(path: "cloud/a.sav"), dated: setUp.addingTimeInterval(600))
         let copy = try XCTUnwrap(try saves.backUpGameFolder(game, driveC: driveC, skipping: [game.folder.appending(path: "cloud")]))
-        XCTAssertEqual(try GOGSaves.files(in: copy).map { GOGSaves.relativePath(of: $0, in: copy) }, ["SAVES/slot1.sav", "SAVES/slot2.sav"])
+        XCTAssertEqual(GOGSaves.files(in: copy).map { GOGSaves.relativePath(of: $0, in: copy) }, ["SAVES/slot1.sav", "SAVES/slot2.sav"])
         XCTAssertTrue(GOGSaves.isKept(copy))
         XCTAssertEqual(GOGSaves.contents(of: copy).files, 2)
         XCTAssertEqual(GOGSaves.contents(of: copy).bytes, 25)

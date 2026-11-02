@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import os
 
@@ -164,13 +163,9 @@ public struct GOGSaves: Sendable {
     /// save-backups or the game's folder is left alone too. Returns what was removed and what
     /// was left for that reason.
     public func removeSaves(_ plan: UninstallPlan, game: GOGStore.InstalledGame, driveC: URL) -> (removed: [URL], leftAlone: [URL]) {
-        func path(_ url: URL) -> String { url.resolvingSymlinksInPath().standardizedFileURL.path }
-        func overlap(_ a: String, _ b: String) -> Bool { a == b || a.hasPrefix(b + "/") || b.hasPrefix(a + "/") }
-        let keep = [path(backupsDir), path(game.folder)], environment = path(driveC) + "/"
         var removed: [URL] = [], leftAlone: [URL] = []
         for folder in plan.outside.map(\.folder) where FileManager.default.fileExists(atPath: folder.path) {
-            let real = path(folder)
-            guard real.hasPrefix(environment), !keep.contains(where: { overlap(real, $0) }) else { leftAlone.append(folder); continue }
+            guard SaveBackups.mayDelete(folder, driveC: driveC, sparing: [backupsDir, game.folder]) else { leftAlone.append(folder); continue }
             if (try? FileManager.default.removeItem(at: folder)) != nil { removed.append(folder) }
         }
         return (removed, leftAlone)
@@ -193,140 +188,53 @@ public struct GOGSaves: Sendable {
 
     // MARK: Backups
 
-    /// Backups taken before a sync could replace saves, stored at
-    /// save-backups/<game id>-<location>-<install>/<date>-<mac|cloud>/. gogdl syncs both ways and
-    /// deletes whatever the other side lacks: a download deletes local files missing from the
-    /// cloud, and an upload deletes cloud files missing locally. The newest `keep` backups per
-    /// install and location are kept.
-    public var backupsDir: URL { store.dir.deletingLastPathComponent().appending(path: "save-backups", directoryHint: .isDirectory) }
-    static let keep = 10
+    /// Backups taken before a sync could replace saves (SaveBackups), stored at
+    /// save-backups/<game id>-<location>-<install>/<date>-<mac|cloud>[-kept]/. gogdl syncs both
+    /// ways and deletes whatever the other side lacks: a download deletes local files missing
+    /// from the cloud, and an upload deletes cloud files missing locally.
+    public var backups: SaveBackups { SaveBackups(root: store.dir.deletingLastPathComponent().appending(path: "save-backups", directoryHint: .isDirectory)) }
+    public var backupsDir: URL { backups.root }
 
     /// The backup folder for one install and location. The install is part of the name (sync
     /// history is per install too), so a second copy of the game never rotates out the first
     /// one's backups.
     func backupsFolder(_ game: GOGStore.InstalledGame, _ location: Location) -> URL {
-        // FNV-1a of the install path: short and stable across runs.
-        let hash = game.folder.standardizedFileURL.path.utf8.reduce(UInt64(0xcbf2_9ce4_8422_2325)) { ($0 ^ UInt64($1)) &* 0x100_0000_01b3 }
-        return backupsDir.appending(path: "\(game.id)-\(location.name)-\(String(hash, radix: 16).prefix(8))", directoryHint: .isDirectory)
+        backups.folder("\(game.id)-\(location.name)", install: game.folder)
     }
 
-    private func newBackup(in dir: URL, label: String) -> URL {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let stamp = formatter.string(from: Date()).replacingOccurrences(of: ":", with: "")
-        var name = "\(stamp)-\(label)", n = 1
-        while FileManager.default.fileExists(atPath: dir.appending(path: name).path) { n += 1; name = "\(stamp)-\(label)-\(n)" }
-        return dir.appending(path: name, directoryHint: .isDirectory)
-    }
-
-    /// Every file a sync touches, as gogdl walks a folder (create_directory_map): hidden files
-    /// too, and into a linked folder, since its os.path.isdir follows links. A folder reached
-    /// twice through links is walked once. Throws for a folder inside it that can't be read: its
-    /// saves would go uncopied. A folder that isn't there holds nothing.
-    static func files(in folder: URL) throws -> [URL] {
-        guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
-        var files: [URL] = [], walked = Set<String>()
-        func walk(_ dir: URL) throws {
-            guard walked.insert(dir.resolvingSymlinksInPath().path).inserted else { return }
-            for name in try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted() {
-                let item = dir.appending(path: name)
-                var isFolder: ObjCBool = false
-                if FileManager.default.fileExists(atPath: item.path, isDirectory: &isFolder), isFolder.boolValue { try walk(item) } else { files.append(item) }
-            }
-        }
-        try walk(folder)
-        return files
-    }
-
-    /// Where a file from files(in:) sits under `folder`, as gogdl names it: by the path walked,
-    /// not where a link leads.
-    static func relativePath(of file: URL, in folder: URL) -> String {
-        String(file.standardizedFileURL.path.dropFirst(folder.standardizedFileURL.path.count + 1))
-    }
-
-    /// A digest of a folder's files: each one's path, size and last change. When it matches a
-    /// backup's, a new backup would be a duplicate.
-    static func fingerprint(_ folder: URL, files chosen: [URL]? = nil) -> String {
-        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey]
-        let lines = (chosen ?? (try? files(in: folder)) ?? []).map { file -> String in
-            let values = try? file.resolvingSymlinksInPath().resourceValues(forKeys: keys)
-            return "\(relativePath(of: file, in: folder))\t\(values?.fileSize ?? 0)\t\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)"
-        }
-        return "mac " + digest(lines)
-    }
+    typealias BackupKind = SaveBackups.Kind
+    static func kind(of backup: URL) -> BackupKind? { SaveBackups.kind(of: backup) }
+    static func isKept(_ backup: URL) -> Bool { SaveBackups.isKept(backup) }
+    static func files(in folder: URL) -> [URL] { SaveBackups.files(in: folder) }
+    /// files(in:), throwing for a folder inside it that can't be read: its saves would go uncopied.
+    static func walk(_ folder: URL) throws -> [URL] { try SaveBackups.walk(folder) }
+    static func relativePath(of file: URL, in folder: URL) -> String { SaveBackups.relativePath(file, in: folder) }
+    static func fingerprint(_ folder: URL) -> String { SaveBackups.fingerprint(folder) }
+    static func fingerprintFile(of backup: URL) -> URL { SaveBackups.fingerprintFile(of: backup) }
+    func backups(in dir: URL) -> [URL] { backups.backups(in: dir) }
 
     /// A digest of a location's files in GOG's cloud: each one's path and hash.
     static func fingerprint(cloud listing: [CloudFile], location: Location) -> String {
         let own = listing.filter { $0.hash != deletedMark && $0.name.hasPrefix(location.name + "/") }
-        return "cloud " + digest(own.map { "\($0.name)\t\($0.hash)" })
+        return "cloud " + SaveBackups.digest(own.map { "\($0.name)\t\($0.hash)" })
     }
 
-    private static func digest(_ lines: [String]) -> String {
-        SHA256.hash(data: Data(lines.sorted().joined(separator: "\n").utf8)).map { String(format: "%02x", $0) }.joined()
-    }
-
-    /// What a backup holds: the Mac's saves or GOG's cloud's.
-    enum BackupKind: String, Sendable { case mac, cloud }
-
-    /// Backups are named <date>-<kind>[-kept]. Kept backups (made before an uninstall, or before
-    /// the player picked a side in a conflict) are never pruned; the others are pruned per kind.
-    static func kind(of backup: URL) -> BackupKind? {
-        let name = backup.lastPathComponent
-        return name.contains("-cloud") ? .cloud : name.contains("-mac") ? .mac : nil
-    }
-    static func isKept(_ backup: URL) -> Bool { backup.lastPathComponent.contains("-kept") }
-
-    /// The newest backup of that kind when it holds exactly `fingerprint`. A kept backup asked
-    /// for when the match isn't kept yet turns the match into a kept one instead of copying again.
-    private func reuse(in dir: URL, kind: BackupKind, fingerprint: String, kept: Bool) -> URL? {
-        guard let newest = backups(in: dir).first(where: { Self.kind(of: $0) == kind }),
-              (try? String(contentsOf: Self.fingerprintFile(of: newest), encoding: .utf8)) == fingerprint else { return nil }
-        guard kept, !Self.isKept(newest) else { return newest }
-        let promoted = dir.appending(path: newest.lastPathComponent + "-kept", directoryHint: .isDirectory)
-        guard (try? FileManager.default.moveItem(at: newest, to: promoted)) != nil else { return nil }
-        try? FileManager.default.moveItem(at: Self.fingerprintFile(of: newest), to: Self.fingerprintFile(of: promoted))
-        return promoted
-    }
-
-    /// Backs up the local saves before something could replace or delete them. Returns the
-    /// newest Mac backup when nothing has changed since it, or nil when there is nothing to back
-    /// up. `kept` backups are never pruned. `only` limits it to some of the folder's files, as
-    /// files(in:) names them. Throws if the backup fails, leaving no partial copy behind; the
-    /// caller must then stop.
+    /// Backs up the local saves before something could replace or delete them
+    /// (SaveBackups.backUpLocal). `kept` backups are never pruned. `only` limits it to some of
+    /// the folder's files, as files(in:) names them.
     @discardableResult
     public func backUpLocal(_ game: GOGStore.InstalledGame, location: Location, folder: URL, kept: Bool = false,
                             only: [URL]? = nil) throws -> URL? {
-        let files = try only ?? Self.files(in: folder)
-        guard !files.isEmpty else { return nil }
-        let dir = backupsFolder(game, location)
-        let fingerprint = Self.fingerprint(folder, files: files)
-        if let same = reuse(in: dir, kind: .mac, fingerprint: fingerprint, kept: kept) { return same }
-        let target = try finish(newBackup(in: dir, label: kept ? "mac-kept" : "mac")) { partial in
-            // What a link points at, not the link: gogdl writes through it, so a download replaces
-            // the file it points to. A link to nothing holds nothing to keep.
-            for file in files {
-                let source = file.resolvingSymlinksInPath()
-                guard FileManager.default.fileExists(atPath: source.path) else { continue }
-                let copy = partial.appending(path: Self.relativePath(of: file, in: folder))
-                try FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try FileManager.default.copyItem(at: source, to: copy)
-            }
-        }
-        try? fingerprint.write(to: Self.fingerprintFile(of: target), atomically: true, encoding: .utf8)
-        return target
+        try backups.backUpLocal(folder, into: backupsFolder(game, location), kept: kept, only: only)
     }
 
     /// Where the files a game wrote in its own folder are backed up (backUpGameFolder). Not a
     /// location GOG names, so a game without cloud saves has one too.
     public static let gameFolder = Location(name: "game-folder", template: "<?INSTALL?>")
 
-    /// The files under `folder` the game wrote, by the install's history, links counted by what
-    /// they point at.
+    /// The files under `folder` the game wrote, by the install's history (SaveBackups).
     static func files(in folder: URL, writtenPer history: GOGStore.InstallHistory) throws -> [URL] {
-        try files(in: folder).filter { file in
-            let changed = try? file.resolvingSymlinksInPath().resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-            return history.isGameWritten(changed ?? .distantPast)
-        }
+        try SaveBackups.files(in: folder, writtenPer: history)
     }
 
     /// Before an uninstall, backs up (kept) every file the game wrote in its own folder: changed
@@ -366,17 +274,7 @@ public struct GOGSaves: Sendable {
     }
 
     /// How many files a backup holds and their size, for the log.
-    public static func contents(of backup: URL) -> (files: Int, bytes: Int64) {
-        let all = (try? files(in: backup)) ?? []
-        let bytes = all.reduce(Int64(0)) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
-        return (all.count, bytes)
-    }
-
-    /// Stored next to the backup rather than inside it, so restoring a backup by hand never puts
-    /// this file in the game's folder, where gogdl would upload it with the saves.
-    static func fingerprintFile(of backup: URL) -> URL {
-        backup.deletingLastPathComponent().appending(path: backup.lastPathComponent + ".fingerprint")
-    }
+    public static func contents(of backup: URL) -> (files: Int, bytes: Int64) { SaveBackups.contents(of: backup) }
 
     /// GOG's whole cloud listing for the game, from a gogdl run that can't move anything: an
     /// empty folder and a location name no cloud file starts with, so gogdl finds no files on
@@ -406,26 +304,21 @@ public struct GOGSaves: Sendable {
         let dir = backupsFolder(game, location)
         if let listing = try listCloud(game) {
             guard !Self.ownFiles(for: location, in: listing).isEmpty else { return nil }
-            if let same = reuse(in: dir, kind: .cloud, fingerprint: Self.fingerprint(cloud: listing, location: location), kept: kept) {
+            if let same = backups.reuse(in: dir, kind: .cloud, fingerprint: Self.fingerprint(cloud: listing, location: location), kept: kept) {
                 return same
             }
         }
-        let fingerprint = OSAllocatedUnfairLock<String?>(initialState: nil)
         do {
-            let target = try finish(newBackup(in: dir, label: kept ? "cloud-kept" : "cloud")) { partial in
+            return try backups.backUp(into: dir, kind: .cloud, kept: kept) { partial in
                 try FileManager.default.createDirectory(at: partial, withIntermediateDirectories: true)
                 let result = try run(game, location: location, folder: partial, timestamp: "0", direction: .forceDownload)
                 let missing = result.listing.map { Self.ownFiles(for: location, in: $0).filter { !FileManager.default.fileExists(atPath: partial.appending(path: $0).path) } } ?? []
                 guard result.status == 0, Self.unexplainedFailures(result, location: location, folder: partial, since: 0) == 0, missing.isEmpty else {
                     throw HighballError.failed("gogdl could not copy all of GOG's cloud saves (status \(result.status))")
                 }
-                guard !(try Self.files(in: partial)).isEmpty else { throw NothingToBackUp() }
-                fingerprint.withLock { $0 = result.listing.map { Self.fingerprint(cloud: $0, location: location) } }
+                guard !Self.files(in: partial).isEmpty else { throw NothingToBackUp() }
+                return result.listing.map { Self.fingerprint(cloud: $0, location: location) }
             }
-            if let value = fingerprint.withLock({ $0 }) {
-                try? value.write(to: Self.fingerprintFile(of: target), atomically: true, encoding: .utf8)
-            }
-            return target
         } catch is NothingToBackUp {
             return nil
         }
@@ -437,53 +330,6 @@ public struct GOGSaves: Sendable {
     static func isDownloadFailure(_ line: String) -> Bool { line.contains("Downloading file failed") }
     /// Any other error gogdl logs and continues past, such as a failed upload.
     static func isFailure(_ line: String) -> Bool { isDownloadFailure(line) || line.contains(" ERROR: ") }
-
-    /// Fills a backup under a ".partial" name and renames it only once complete, so a failed
-    /// backup never sits among the real ones. Then prunes that kind's backups to the newest
-    /// `keep`, never removing this one or a kept one.
-    private func finish(_ target: URL, fill: (URL) throws -> Void) throws -> URL {
-        let dir = target.deletingLastPathComponent()
-        removeStalePartials(in: dir)
-        let partial = dir.appending(path: target.lastPathComponent + ".partial", directoryHint: .isDirectory)
-        do {
-            try fill(partial)
-            try FileManager.default.moveItem(at: partial, to: target)
-            // A copied folder keeps the source's creation date, often years old. Date the backup
-            // now so pruning keeps the newest ones.
-            try FileManager.default.setAttributes([.creationDate: Date()], ofItemAtPath: target.path)
-        } catch {
-            try? FileManager.default.removeItem(at: partial)
-            throw error
-        }
-        let kind = Self.kind(of: target)
-        // Compare by name: the same folder can appear under both /var and /private/var.
-        let rotating = backups(in: dir).filter {
-            $0.lastPathComponent != target.lastPathComponent && Self.kind(of: $0) == kind && !Self.isKept($0)
-        }
-        for old in rotating.dropFirst(Self.keep - 1) {
-            try? FileManager.default.removeItem(at: old)
-            try? FileManager.default.removeItem(at: Self.fingerprintFile(of: old))
-        }
-        return target
-    }
-
-    /// A backup left half-filled by a crash or a forced quit: older than an hour, so no sync
-    /// running now is still filling it.
-    private func removeStalePartials(in dir: URL) {
-        let all = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey])) ?? []
-        for partial in all where partial.pathExtension == "partial" {
-            let made = (try? partial.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-            if made < Date().addingTimeInterval(-3600) { try? FileManager.default.removeItem(at: partial) }
-        }
-    }
-
-    /// A location's complete backups, newest first by creation date rather than by name, so a
-    /// clock that was once wrong never gets today's backup pruned as the oldest.
-    func backups(in dir: URL) -> [URL] {
-        let all = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.creationDateKey])) ?? []
-        func made(_ url: URL) -> Date { (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast }
-        return all.filter { !["partial", "fingerprint"].contains($0.pathExtension) }.sorted { made($0) > made($1) }
-    }
 
     // MARK: Locations sharing a prefix
 
@@ -623,6 +469,15 @@ public struct GOGSaves: Sendable {
         }
     }
 
+    /// When this install's saves last synced with GOG, across its locations: gogdl's timestamp,
+    /// written when a sync moved or matched files (a refusal or a failure keeps the old one).
+    /// nil when it never has.
+    public func lastSynced(_ game: GOGStore.InstalledGame) -> Date? {
+        let suffix = "@\(game.folder.standardizedFileURL.path)"
+        return timestamps().filter { $0.key.hasPrefix(game.id + ".") && $0.key.hasSuffix(suffix) }
+            .compactMap { Double($0.value).flatMap { $0 > 0 ? Date(timeIntervalSince1970: $0) : nil } }.max()
+    }
+
     /// Per install, not per game: the same game in two environments has two sets of saves, each
     /// with its own last sync.
     func key(_ game: GOGStore.InstalledGame, _ location: Location) -> String {
@@ -719,59 +574,33 @@ public struct GOGSaves: Sendable {
     // MARK: Putting saves back
 
     /// What an uninstall kept of a game's saves, so installing it again can put them back.
-    public struct KeptSaves: Codable, Sendable, Equatable {
-        public struct Entry: Codable, Sendable, Equatable {
-            /// The location's name, or gameFolder's.
-            public let name: String
-            /// Where its files sat, relative to the game's folder; empty for the folder itself.
-            public let path: String
-            public let backup: URL
-        }
-        public var date: Date
-        public var entries: [Entry]
-        /// Install folders already asked, whatever the answer: never asked again.
-        public var asked: [String]
-    }
+    public typealias KeptSaves = HighballKit.KeptSaves
 
-    var keptSavesFile: URL { store.dir.appending(path: "kept-saves.json") }
+    var keptSavesFile: KeptSavesFile { KeptSavesFile(url: store.dir.appending(path: "kept-saves.json")) }
 
     /// Every game's kept saves, by game id.
-    public func keptSaves() -> [String: KeptSaves] {
-        (try? JSONDecoder().decode([String: KeptSaves].self, from: Data(contentsOf: keptSavesFile))) ?? [:]
-    }
-
-    private static let keptSavesLock = NSLock()
-    private func updateKeptSaves(_ change: (inout [String: KeptSaves]) -> Void) {
-        Self.keptSavesLock.withLock {
-            var all = keptSaves()
-            change(&all)
-            store.secureDirectory()
-            try? JSONEncoder().encode(all).write(to: keptSavesFile, options: .atomic)
-        }
-    }
+    public func keptSaves() -> [String: KeptSaves] { keptSavesFile.all() }
 
     /// Remembers the backups an uninstall kept of `game`, each with the folder it came from, in
-    /// place of what an earlier uninstall kept: a location this one had nothing for never brings
-    /// back an older copy. `otherInstalls` (copies of the game still in other environments) are never asked: they
-    /// still have their own saves.
+    /// place of what an earlier uninstall kept (KeptSavesFile.keep). `otherInstalls` (copies of
+    /// the game still in other environments) are never asked: they still have their own saves.
     public func keep(_ backups: [(name: String, folder: URL, backup: URL)], of game: GOGStore.InstalledGame,
                      otherInstalls: [URL]) {
         let entries = backups.map { KeptSaves.Entry(name: $0.name, path: $0.folder == game.folder ? "" : Self.relativePath(of: $0.folder, in: game.folder),
                                                     backup: $0.backup) }
-        updateKeptSaves { all in
-            all[game.id] = entries.isEmpty ? nil : KeptSaves(date: Date(), entries: entries, asked: otherInstalls.map(\.standardizedFileURL.path))
-        }
+        store.secureDirectory()
+        keptSavesFile.keep(entries, for: game.id, otherInstalls: otherInstalls)
     }
 
     /// The install was asked about putting saves back: it is not asked again.
     public func markAsked(_ game: GOGStore.InstalledGame) {
-        updateKeptSaves { $0[game.id]?.asked.append(game.folder.standardizedFileURL.path) }
+        store.secureDirectory()
+        keptSavesFile.markAsked(game.id, install: game.folder)
     }
 
     /// The kept saves to offer this install: nil when there are none or it was asked already.
     public static func toOffer(_ kept: KeptSaves?, to game: GOGStore.InstalledGame) -> KeptSaves? {
-        guard let kept, !kept.asked.contains(game.folder.standardizedFileURL.path) else { return nil }
-        return kept
+        KeptSavesFile.toOffer(kept, install: game.folder)
     }
 
     /// Puts kept saves back into an install of the game: each backup's files to the same place
@@ -783,22 +612,9 @@ public struct GOGSaves: Sendable {
     public func putBack(_ kept: KeptSaves, into game: GOGStore.InstalledGame) throws -> Int {
         var count = 0
         for entry in kept.entries {
-            let target = entry.path.isEmpty ? game.folder : game.folder.appending(path: entry.path)
-            let files = try Self.files(in: entry.backup).map { ($0, Self.relativePath(of: $0, in: entry.backup)) }
-            let there = files.map { target.appending(path: $0.1) }.filter { FileManager.default.fileExists(atPath: $0.path) }
-            if !there.isEmpty {
+            guard let target = entry.folder(install: game.folder, environment: nil) else { continue }
+            count += try SaveBackups.putBack(entry.backup, into: target, redate: entry.name == Self.gameFolder.name) { there in
                 try backUpLocal(game, location: Location(name: entry.name, template: ""), folder: target, kept: true, only: there)
-            }
-            for (file, path) in files {
-                // Through a link, as gogdl writes.
-                let copy = target.appending(path: path).resolvingSymlinksInPath()
-                try FileManager.default.createDirectory(at: copy.deletingLastPathComponent(), withIntermediateDirectories: true)
-                if FileManager.default.fileExists(atPath: copy.path) { try FileManager.default.removeItem(at: copy) }
-                try FileManager.default.copyItem(at: file, to: copy)
-                if entry.name == Self.gameFolder.name {
-                    try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: copy.path)
-                }
-                count += 1
             }
         }
         return count

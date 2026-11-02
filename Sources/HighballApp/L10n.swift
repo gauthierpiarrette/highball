@@ -208,6 +208,7 @@ enum L10n {
             "Ce lien a expiré ou a déjà servi. Cliquez à nouveau sur Ouvrir la connexion GOG : GOG vous donne aussitôt un nouveau lien, souvent sans redemander votre mot de passe.",
         "Achievements": "Succès",
         "Cloud saves": "Sauvegardes dans le cloud",
+        "Last synced: %@": "Dernière synchronisation : %@",
         "Sync saves with GOG": "Synchroniser les sauvegardes avec GOG",
         "Achievements and stats (comet)": "Succès et statistiques (comet)",
         "comet stands in for GOG Galaxy while the game runs, so achievements, stats and play time reach your GOG account. If the game won't start with it, Highball starts it again without.":
@@ -229,6 +230,26 @@ enum L10n {
         "Decide later": "Décider plus tard",
         "The saves on this Mac and the ones in GOG's cloud have both changed since they were last synced, or haven't been synced from this install yet, so neither was copied.":
             "Les sauvegardes de ce Mac et celles du cloud GOG ont toutes deux changé depuis leur dernière synchronisation, ou n’ont pas encore été synchronisées depuis cette installation : aucune n’a été copiée.",
+        "Use Epic's cloud saves": "Utiliser les sauvegardes du cloud Epic",
+        "This Mac and Epic's cloud both have saves for this game, and Highball hasn't synced them before, so it can't tell which to keep. Nothing was copied or replaced.":
+            "Ce Mac et le cloud Epic ont tous deux des sauvegardes de ce jeu, et Highball ne les a encore jamais synchronisées : il ne peut pas savoir lesquelles garder. Rien n’a été copié ni remplacé.",
+        "The saves on this Mac and the ones in Epic's cloud have both changed since they were last synced. Nothing was copied or replaced.":
+            "Les sauvegardes de ce Mac et celles du cloud Epic ont toutes changé depuis leur dernière synchronisation. Rien n’a été copié ni remplacé.",
+        "Decide later plays with this Mac's saves and doesn't upload them afterwards; Highball asks again next time.":
+            "Décider plus tard joue avec les sauvegardes de ce Mac sans les envoyer ensuite ; Highball redemandera la prochaine fois.",
+        "Decide later leaves both as they are; Highball asks again next time you play.":
+            "Décider plus tard laisse les deux telles quelles ; Highball redemandera à la prochaine partie.",
+        "Use Epic's cloud saves replaces this Mac's, after backing them up to %@. Keep this Mac's saves uploads them as Epic's newest save, which your other devices then download.":
+            "Utiliser les sauvegardes du cloud Epic remplace celles de ce Mac, après les avoir sauvegardées dans %@. Garder les sauvegardes de ce Mac les envoie comme sauvegarde la plus récente d’Epic, que vos autres appareils téléchargeront ensuite.",
+        "Highball couldn't bring %@'s saves down from Epic (%@), so it put this Mac's saves back as they were.":
+            "Highball n’a pas pu récupérer les sauvegardes de %@ depuis Epic (%@) : il a remis celles de ce Mac telles qu’elles étaient.",
+        "The game didn't start. Try again, or turn off Sync saves with Epic on the game's page to play with this Mac's saves.":
+            "Le jeu n’a pas été lancé. Réessayez, ou désactivez Synchroniser avec Epic sur la page du jeu pour jouer avec les sauvegardes de ce Mac.",
+        "Saves sync from %@.": "Les sauvegardes se synchronisent depuis %@.",
+        "Bringing your saves down from Epic": "Récupération de vos sauvegardes depuis Epic",
+        "Sync saves with Epic": "Synchroniser avec Epic",
+        "Before Play, newer saves come down from Epic's cloud, after this Mac's are backed up; when the game ends, this Mac's go back up. If both changed since the last sync, Highball asks which to keep.":
+            "Avant de jouer, les sauvegardes plus récentes arrivent du cloud Epic, après une copie de celles de ce Mac ; quand le jeu se termine, celles de ce Mac y repartent. Si les deux ont changé depuis la dernière synchronisation, Highball demande lesquelles garder.",
         "Use GOG's cloud saves replaces this Mac's; Keep this Mac's saves replaces the cloud's. Either way, a copy of what gets replaced is kept first, in %@.":
             "Utiliser les sauvegardes du cloud GOG remplace celles de ce Mac ; Garder les sauvegardes de ce Mac remplace celles du cloud. Dans les deux cas, une copie de ce qui est remplacé est d’abord conservée dans %@.",
         "Remove %@ without a copy of every save?": "Supprimer %@ sans copie de toutes ses sauvegardes ?",
@@ -238,7 +259,11 @@ enum L10n {
         "Put back your saves from %@?": "Remettre vos sauvegardes du %@ ?",
         "Put them back": "Les remettre",
         "Don't ask again": "Ne plus demander",
+        "Remove %@ without a copy of its folder?": "Supprimer %@ sans copie de son dossier ?",
+        "Highball can't tell which files in %@'s folder the game wrote: the Epic tools have no file list for it, and it was installed before Highball kept a record of installs. Its save folder is copied to save-backups first when Highball can find it, but any other save the game kept in its folder is deleted with it. Saves in Epic's cloud are not affected.":
+            "Highball ne peut pas savoir quels fichiers du dossier de %@ le jeu a écrits : les outils Epic n’en ont pas la liste, et il a été installé avant que Highball ne garde une trace des installations. Son dossier de sauvegardes est d’abord copié dans save-backups quand Highball le trouve, mais toute autre sauvegarde que le jeu gardait dans son dossier est supprimée avec lui. Les sauvegardes dans le cloud Epic ne sont pas touchées.",
         "Highball kept %@'s saves when it was removed. Put them back copies them into the game's folder; anything already there is copied to save-backups first. Not now asks again the next time Highball starts.": "Highball a gardé les sauvegardes de %@ lors de sa suppression. Les remettre les copie dans le dossier du jeu ; ce qui s’y trouve déjà est d’abord copié dans save-backups. Pas maintenant redemandera au prochain lancement de Highball.",
+        "Highball kept %@'s saves when it was removed. Put them back copies them to where they were; anything already there is copied to save-backups first. Not now asks again the next time Highball starts.": "Highball a gardé les sauvegardes de %@ lors de sa suppression. Les remettre les copie là où elles étaient ; ce qui s’y trouve déjà est d’abord copié dans save-backups. Pas maintenant redemandera au prochain lancement de Highball.",
         "Highball couldn't reach GOG to find out where %@ keeps its saves, and can't tell which files in the game's folder the game wrote, because nothing records when it was installed. So nothing in the game's folder is copied first, and saves there are deleted with it. Saves already in GOG's cloud are not affected. To keep its save folders, cancel and try again once GOG can be reached.":
             "Highball n’a pas pu joindre GOG pour savoir où %@ garde ses sauvegardes, et ne peut pas savoir quels fichiers du dossier du jeu le jeu a écrits, car rien n’indique quand il a été installé. Rien dans le dossier du jeu n’est donc copié d’abord, et les sauvegardes qui s’y trouvent sont supprimées avec lui. Les sauvegardes déjà dans le cloud GOG ne sont pas touchées. Pour garder ses dossiers de sauvegarde, annulez et réessayez quand GOG est joignable.",
         "Highball can't tell which files in %@'s folder the game wrote, because nothing records when it was installed. Only the save folders GOG names are copied to save-backups first; any other save the game kept in its folder is deleted with it. Saves already in GOG's cloud are not affected.":
