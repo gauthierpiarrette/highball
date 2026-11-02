@@ -524,7 +524,7 @@ extension GOGStore {
     public static func markSetupDone(for game: InstalledGame, driveC: URL) {
         // Read before the marker is rewritten: an install from before the history falls back
         // to the marker's old date.
-        var history = history(for: game, driveC: driveC)
+        var history = storedHistory(for: game, driveC: driveC)
         if history.firstSetup == nil { history.firstSetup = Date() }
         save(history, for: game, driveC: driveC)
         let url = setupMarker(for: game, driveC: driveC)
@@ -554,14 +554,37 @@ extension GOGStore {
     }
 
     /// An install set up before the history was kept falls back to the marker's date for its
-    /// first setup.
+    /// first setup. One Highball never set up (an offline installer's: no manifest, so no setup
+    /// and no marker) falls back to when its goggame-<id>.info file landed on this disk, which
+    /// the install wrote. nil firstSetup: none of them exists, so nothing tells the game's files
+    /// from the installer's.
     public static func history(for game: InstalledGame, driveC: URL) -> InstallHistory {
+        var history = storedHistory(for: game, driveC: driveC)
+        if history.firstSetup == nil { history.firstSetup = installedDate(of: game) }
+        return history
+    }
+
+    /// The history file, or the marker's date. Not the info file's: setup and updates record
+    /// from this, and setup runs after gogdl wrote the info file, so what it put down would
+    /// count as the game's.
+    private static func storedHistory(for game: InstalledGame, driveC: URL) -> InstallHistory {
         var history = (try? Data(contentsOf: historyFile(for: game, driveC: driveC)))
             .flatMap { try? JSONDecoder().decode(InstallHistory.self, from: $0) } ?? InstallHistory()
         if history.firstSetup == nil {
             history.firstSetup = try? setupMarker(for: game, driveC: driveC).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
         }
         return history
+    }
+
+    /// When the install wrote the game's goggame-<id>.info file: when the file was created, or
+    /// the game's folder if that is earlier (a patch rewrites the file, never the folder). Its
+    /// modification date only when the disk keeps no creation dates: an offline installer gives
+    /// the files it unpacks the date they were built, before the install.
+    static func installedDate(of game: InstalledGame) -> Date? {
+        let info = game.folder.appending(path: "goggame-\(game.id).info")
+        guard let values = try? info.resourceValues(forKeys: [.contentModificationDateKey, .creationDateKey]) else { return nil }
+        let folderCreated = try? game.folder.resourceValues(forKeys: [.creationDateKey]).creationDate
+        return [values.creationDate, folderCreated].compactMap { $0 }.min() ?? values.contentModificationDate
     }
 
     private static func save(_ history: InstallHistory, for game: InstalledGame, driveC: URL) {
@@ -572,7 +595,7 @@ extension GOGStore {
 
     /// An update ran from `start` to `end`: what changed in the game's folder then is the patch's.
     public static func recordUpdate(for game: InstalledGame, driveC: URL, start: Date, end: Date) {
-        var history = history(for: game, driveC: driveC)
+        var history = storedHistory(for: game, driveC: driveC)
         history.updates.append(.init(start: start, end: end))
         save(history, for: game, driveC: driveC)
     }

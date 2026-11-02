@@ -265,6 +265,38 @@ final class GOGSaveSafetyTests: XCTestCase {
         XCTAssertEqual(GOGStore.history(for: game, driveC: driveC).firstSetup, marked, "the marker's old date, read before it is rewritten")
     }
 
+    /// An offline installer's game (no manifest, so never set up and no marker) counts from when
+    /// its goggame-<id>.info file was created, or its folder if earlier (a patch rewrites the
+    /// info file). The installer's files, dated when they were built, and its records at the top
+    /// of the folder aren't the game's. With no info file nothing dates it, and Keep can't copy.
+    func testAnOfflineInstallCountsFromItsInfoFile() throws {
+        let saves = GOGSaves(store: GOGStore(paths: HighballPaths(home: root.appending(path: "home"))))
+        let driveC = root.appending(path: "drive_c")
+        let game = GOGStore.InstalledGame(id: "7", title: "Game", folder: driveC.appending(path: "GOG Games/Game"), buildID: nil, clientID: nil, dlcIDs: [], tasks: [])
+        try FileManager.default.createDirectory(at: game.folder, withIntermediateDirectories: true)
+        XCTAssertFalse(GOGSaves.canTellGameFiles(game, driveC: driveC), "no info file: nothing dates the install")
+        XCTAssertNil(try saves.backUpGameFolder(game, driveC: driveC))
+        let installed = Date().addingTimeInterval(-86400)
+        let built = installed.addingTimeInterval(-86400 * 300)
+        let info = game.folder.appending(path: "goggame-7.info")
+        try write(#"{"gameId":"7","name":"Game"}"#, to: info, dated: built)
+        try FileManager.default.setAttributes([.creationDate: installed], ofItemAtPath: info.path)
+        try FileManager.default.setAttributes([.creationDate: installed.addingTimeInterval(60)], ofItemAtPath: game.folder.path)
+        XCTAssertEqual(GOGStore.history(for: game, driveC: driveC).firstSetup, installed, "the info file's creation, not its built date")
+        XCTAssertTrue(GOGSaves.canTellGameFiles(game, driveC: driveC))
+        try write("exe", to: game.folder.appending(path: "game.exe"), dated: built)
+        try write("uninstaller", to: game.folder.appending(path: "unins000.dat"), dated: installed.addingTimeInterval(5))
+        try write("save", to: game.folder.appending(path: "save/slot1.sav"), dated: installed.addingTimeInterval(3600))
+        let copy = try XCTUnwrap(try saves.backUpGameFolder(game, driveC: driveC))
+        XCTAssertEqual(try GOGSaves.files(in: copy).map { GOGSaves.relativePath(of: $0, in: copy) }, ["save/slot1.sav"])
+        // A patch rewrites the info file; the folder still dates the install.
+        try FileManager.default.setAttributes([.creationDate: installed.addingTimeInterval(7200)], ofItemAtPath: info.path)
+        XCTAssertEqual(GOGStore.history(for: game, driveC: driveC).firstSetup, installed.addingTimeInterval(60))
+        // Setup records its own date, never the info file's: what setup puts down isn't the game's.
+        GOGStore.markSetupDone(for: game, driveC: driveC)
+        XCTAssertGreaterThan(try XCTUnwrap(GOGStore.history(for: game, driveC: driveC).firstSetup), Date().addingTimeInterval(-60))
+    }
+
     /// Deleting saves with the game removes the folders GOG names elsewhere, and never a whole or
     /// shared folder, Highball's save-backups (even through a link), or one holding the game.
     func testDeletingSavesLeavesSharedFoldersAndBackupsAlone() throws {
