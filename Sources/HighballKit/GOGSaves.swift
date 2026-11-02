@@ -383,11 +383,13 @@ public struct GOGSaves: Sendable {
     /// empty folder and a location name no cloud file starts with, so gogdl finds no files on
     /// either side and only logs the listing (saves.py `sync`). nil when gogdl logged none
     /// (it logs none when GOG has no cloud storage for the game at all).
-    func listCloud(_ game: GOGStore.InstalledGame) throws -> [CloudFile]? {
+    /// `os` is the build's ("windows" or "osx"): gogdl asks GOG for that build, and a Mac-only
+    /// game has no Windows one.
+    func listCloud(_ game: GOGStore.InstalledGame, os: String = "windows") throws -> [CloudFile]? {
         let empty = FileManager.default.temporaryDirectory.appending(path: "highball-listing-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: empty) }
-        let nothing = Location(name: "highball-listing-only-\(UUID().uuidString)", template: "")
+        let nothing = Location(name: "highball-listing-only-\(UUID().uuidString)", template: "", os: os)
         let result = try run(game, location: nothing, folder: empty, timestamp: "0", direction: .download)
         guard result.status == 0, result.downloadFailures + result.otherFailures == 0 else {
             throw HighballError.failed("gogdl could not list GOG's cloud saves (status \(result.status))")
@@ -405,7 +407,7 @@ public struct GOGSaves: Sendable {
     @discardableResult
     public func backUpCloud(_ game: GOGStore.InstalledGame, location: Location, kept: Bool = false) throws -> URL? {
         let dir = backupsFolder(game, location)
-        if let listing = try listCloud(game) {
+        if let listing = try listCloud(game, os: location.os) {
             guard !Self.ownFiles(for: location, in: listing).isEmpty else { return nil }
             if let same = backups.reuse(in: dir, kind: .cloud, fingerprint: Self.fingerprint(cloud: listing, location: location), kept: kept) {
                 return same
