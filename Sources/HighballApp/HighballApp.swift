@@ -572,10 +572,11 @@ private extension View {
                // the next game's question, which an answer may already have raised.
                isPresented: .init(get: { state.gogSavesToPutBack != nil }, set: { _ in }),
                presenting: state.gogSavesToPutBack) { _ in
-            Button(L("Put them back")) { state.gogPutBackSaves(true) }.keyboardShortcut(.defaultAction)
-            Button(L("Not now"), role: .cancel) { state.gogPutBackSaves(false) }
+            Button(L("Put them back")) { state.gogPutBackSaves(.putBack) }.keyboardShortcut(.defaultAction)
+            Button(L("Not now"), role: .cancel) { state.gogPutBackSaves(.notNow) }
+            Button(L("Don't ask again")) { state.gogPutBackSaves(.dontAskAgain) }
         } message: { pending in
-            Text(String(format: L("Highball kept %@'s saves when it was removed. Put them back copies them into the game's folder; anything already there is copied to save-backups first."), pending.title))
+            Text(String(format: L("Highball kept %@'s saves when it was removed. Put them back copies them into the game's folder; anything already there is copied to save-backups first. Not now asks again the next time Highball starts."), pending.title))
         }
     }
 
@@ -586,10 +587,11 @@ private extension View {
                // As GOG's: the buttons answer, the dismissal never answers the next game's question.
                isPresented: .init(get: { state.epicSavesToPutBack != nil }, set: { _ in }),
                presenting: state.epicSavesToPutBack) { _ in
-            Button(L("Put them back")) { state.epicPutBackSaves(true) }.keyboardShortcut(.defaultAction)
-            Button(L("Not now"), role: .cancel) { state.epicPutBackSaves(false) }
+            Button(L("Put them back")) { state.epicPutBackSaves(.putBack) }.keyboardShortcut(.defaultAction)
+            Button(L("Not now"), role: .cancel) { state.epicPutBackSaves(.notNow) }
+            Button(L("Don't ask again")) { state.epicPutBackSaves(.dontAskAgain) }
         } message: { pending in
-            Text(String(format: L("Highball kept %@'s saves when it was removed. Put them back copies them to where they were; anything already there is copied to save-backups first."), pending.title))
+            Text(String(format: L("Highball kept %@'s saves when it was removed. Put them back copies them to where they were; anything already there is copied to save-backups first. Not now asks again the next time Highball starts."), pending.title))
         }
     }
 
@@ -602,9 +604,21 @@ private extension View {
             Button(L("Remove anyway"), role: .destructive) { state.gogRemoveWithoutBackup() }
             Button(L("Cancel"), role: .cancel) { state.gogRemovalWithoutBackup = nil }
         } message: { pending in
-            Text(pending.plan == nil
-                 ? String(format: L("Highball couldn't reach GOG to find out where %@ keeps its saves, so the save folders GOG names inside the game's folder are deleted with it. Files the game changed in its folder since you first played it are still copied to save-backups first, and saves already in GOG's cloud are not affected. To keep every save, cancel and try again once GOG can be reached."), pending.title)
-                 : String(format: L("GOG says %@ keeps some of its saves directly in the game's folder, which Highball can't copy as one save folder. Files the game changed in its folder since you first played it are still copied to save-backups first, along with its other save folders, and saves already in GOG's cloud are not affected."), pending.title))
+            Text(Self.removalWithoutBackupMessage(pending))
+        }
+    }
+
+    /// What is and isn't copied first, in the case the removal is in.
+    static func removalWithoutBackupMessage(_ pending: AppState.GOGRemovalWithoutBackup) -> String {
+        switch (pending.plan == nil, pending.gameFolderUncopied) {
+        case (true, false):
+            String(format: L("Highball couldn't reach GOG to find out where %@ keeps its saves, so the save folders GOG names inside the game's folder are deleted with it. Files the game changed in its folder since you first played it are still copied to save-backups first, and saves already in GOG's cloud are not affected. To keep every save, cancel and try again once GOG can be reached."), pending.title)
+        case (false, false):
+            String(format: L("GOG says %@ keeps some of its saves directly in the game's folder, which Highball can't copy as one save folder. Files the game changed in its folder since you first played it are still copied to save-backups first, along with its other save folders, and saves already in GOG's cloud are not affected."), pending.title)
+        case (true, true):
+            String(format: L("Highball couldn't reach GOG to find out where %@ keeps its saves, and can't tell which files in the game's folder the game wrote, because nothing records when it was installed. So nothing in the game's folder is copied first, and saves there are deleted with it. Saves already in GOG's cloud are not affected. To keep its save folders, cancel and try again once GOG can be reached."), pending.title)
+        case (false, true):
+            String(format: L("Highball can't tell which files in %@'s folder the game wrote, because nothing records when it was installed. Only the save folders GOG names are copied to save-backups first; any other save the game kept in its folder is deleted with it. Saves already in GOG's cloud are not affected."), pending.title)
         }
     }
 

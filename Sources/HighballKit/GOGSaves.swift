@@ -238,20 +238,39 @@ public struct GOGSaves: Sendable {
     }
 
     /// Before an uninstall, backs up (kept) every file the game wrote in its own folder: changed
-    /// after Highball first set it up there and outside its updates (GOGStore.InstallHistory),
-    /// which is where a game without cloud saves often keeps them. Files under `skipping` (the
-    /// locations backed up on their own) are left out. nil when Highball never set the game up
-    /// in this environment, or it wrote nothing. Throws if the backup fails; the uninstall must
-    /// then stop.
+    /// after Highball first set it up there (or, never set up, after it was installed) and
+    /// outside its updates (GOGStore.InstallHistory), which is where a game without cloud saves
+    /// often keeps them. Files under `skipping` (the locations backed up on their own) and the
+    /// install's own records are left out. nil when nothing dates the install, or the game wrote
+    /// nothing. Throws if the backup fails; the uninstall must then stop.
     public func backUpGameFolder(_ game: GOGStore.InstalledGame, driveC: URL, skipping: [URL] = []) throws -> URL? {
         let history = GOGStore.history(for: game, driveC: driveC)
         guard history.firstSetup != nil else { return nil }
         let skipped = skipping.map { $0.standardizedFileURL.path + "/" }
+        let top = game.folder.standardizedFileURL.path + "/"
         let written = try Self.files(in: game.folder, writtenPer: history).filter { file in
-            !skipped.contains { file.standardizedFileURL.path.hasPrefix($0) }
+            let path = file.standardizedFileURL.path
+            return !skipped.contains { path.hasPrefix($0) } && !Self.isInstallerRecord(path, in: top)
         }
         guard !written.isEmpty else { return nil }
         return try backUpLocal(game, location: Self.gameFolder, folder: game.folder, kept: true, only: written)
+    }
+
+    /// Whether backUpGameFolder can tell the files the game wrote from the installer's: something
+    /// dates the install. When it can't, an uninstall that keeps saves must say so first.
+    public static func canTellGameFiles(_ game: GOGStore.InstalledGame, driveC: URL) -> Bool {
+        GOGStore.history(for: game, driveC: driveC).firstSetup != nil
+    }
+
+    /// The uninstaller's and GOG's own records at the top of the game's folder (unins000.dat,
+    /// goggame-<id>.info, …): written by the install, not the game, and putting an old one back
+    /// into a new install would break its uninstaller.
+    static func isInstallerRecord(_ path: String, in top: String) -> Bool {
+        guard path.hasPrefix(top) else { return false }
+        let rest = path.dropFirst(top.count)
+        guard !rest.contains("/") else { return false }
+        let name = rest.lowercased()
+        return name.hasPrefix("unins") || name.hasPrefix("goggame-")
     }
 
     /// How many files a backup holds and their size, for the log.
