@@ -142,7 +142,13 @@ public enum GamePageCopy {
                                 : "Leave the optional \(recipe.title) fix alone; it is under Game settings for when the notes say your Mac needs it",
                                 done: applied))
         } else if let recipe {
+            // A route's list of switches says nothing to a reader as 28 lines (Forza Horizon 6's emulator switches).
+            let variables = recipe.steps.filter { if case .environment = $0 { return true } else { return false } }.count
+            if variables > 6 {
+                items.append(WillDo(text: "Set \(variables) emulator and graphics variables for this game", done: applied))
+            }
             for step in recipe.steps {
+                if variables > 6, case .environment = step { continue }
                 guard let text = describe(step) else { continue }
                 items.append(WillDo(text: text, cost: applied ? nil : step.slowHint, done: applied))
             }
@@ -232,6 +238,7 @@ public enum GamePageCopy {
         case .pin: return nil
         case let .note(text): return text
         case let .dllOverride(v): return "Set the Windows library override \(v)"
+        case let .frameCap(n): return "Cap the frame rate at \(n)"
         case let .dxvkConfig(exe, _): return "Configure DXVK for \(exe)"
         }
     }

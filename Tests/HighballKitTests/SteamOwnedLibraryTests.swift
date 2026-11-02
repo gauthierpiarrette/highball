@@ -155,6 +155,20 @@ final class SteamOwnedLibraryTests: XCTestCase {
         XCTAssertEqual(dsr.capsuleImage.host, "cdn.akamai.steamstatic.com", "no local art: the CDN")
     }
 
+    /// When a game first appeared in the library: when the client made its librarycache folder
+    /// (SteamAccounts.earlyArrivals).
+    func testCachedAtIsWhenTheLibraryCacheFolderWasMade() throws {
+        let root = try steamRoot(owned: [1145360, 570940], appinfo: appinfo(apps))
+        let made = Date(timeIntervalSince1970: 1_600_000_000)
+        try FileManager.default.setAttributes([.creationDate: made],
+                                              ofItemAtPath: root.appending(path: "appcache/librarycache/570940").path)
+        let games = SteamOwnedLibrary.games(steamRoot: root)
+        let dsr = try XCTUnwrap(games.first { $0.appid == 570940 }?.cachedAt)
+        XCTAssertEqual(dsr.timeIntervalSince1970, made.timeIntervalSince1970, accuracy: 1)
+        let hades = try XCTUnwrap(games.first { $0.appid == 1145360 }?.cachedAt)
+        XCTAssertGreaterThan(hades, made, "a folder made just now")
+    }
+
     func testNothingBeforeFirstSignIn() throws {
         XCTAssertEqual(SteamOwnedLibrary.games(steamRoot: try steamRoot(owned: [], appinfo: nil)), [])
         XCTAssertEqual(SteamOwnedLibrary.games(steamRoot: try steamRoot(owned: [570940], appinfo: nil)), [])
