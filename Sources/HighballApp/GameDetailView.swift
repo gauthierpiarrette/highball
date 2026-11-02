@@ -17,6 +17,9 @@ struct GameDetailView: View {
     /// How this GOG game's saves sync, per version; asked when the page opens.
     @State private var cloudSetup: GOGSaves.CloudSetup?
     @State private var cloudSetupAsked = false
+    /// The installed Mac build's cloud-save locations Highball syncs: the ones resolveMac gives a
+    /// folder, as the play sync does (gogMacSaveLocations). The others are left alone.
+    @State private var macSyncedSaves: [GOGSaves.Location] = []
     @State private var showCloudHelp = false
     @State private var loadingDetails = true
     @State private var expandedDescription = false
@@ -147,9 +150,15 @@ struct GameDetailView: View {
             loadingDetails = false
         }
         .task(id: "\(item.id)|\(item.installed)|\(item.installedOnMac)|cloud") {
-            cloudSetup = nil; cloudSetupAsked = false
+            cloudSetup = nil; cloudSetupAsked = false; macSyncedSaves = []
             guard item.source == .gog, item.installedAnywhere else { return }
-            cloudSetup = await state.gogCloudSetup(for: item)
+            let setup = await state.gogCloudSetup(for: item)
+            if let setup, let mac = item.gogID.flatMap({ state.gogMacInstalled[$0] }) {
+                macSyncedSaves = await Task.detached {
+                    setup.mac.filter { GOGSaves.resolveMac($0.template, installFolder: mac.folder, gameID: mac.id) != nil }
+                }.value
+            }
+            cloudSetup = setup
             cloudSetupAsked = true
         }
         // How much room it takes: the store's estimate before an install, the folders after.
@@ -207,7 +216,7 @@ struct GameDetailView: View {
                 .textSelection(.enabled)
             if let macBuild {
                 macBlock(macBuild)
-            } else if item.macListed, item.source == .gog || item.source == .epic {
+            } else if state.macListed(item) || item.installedOnMac, item.source == .gog || item.source == .epic {
                 storeMacBlock
             } else if let outdated = GamePageCopy.outdatedMacBuild(appInfo: item.steamAppID.flatMap { state.macAppInfoByAppID[$0] }, entry: entry) {
                 Label(L(outdated), systemImage: "apple.logo").font(.callout).foregroundStyle(.secondary)
@@ -320,7 +329,7 @@ struct GameDetailView: View {
             if hasMacVersion {
                 row(L("Size (Mac)"), macSize)
             }
-            if item.source == .steam || item.source == .epic || (item.source == .gog && item.installedAnywhere) { cloudSavesRow }
+            if item.source == .steam || item.source == .epic || (item.source == .gog && item.installedAnywhere), !cloudSaveLines.isEmpty { cloudSavesRow }
             if let saves = sizes?.saves {
                 row(item.source == .steam ? L("Steam Cloud saves") : L("Saves"), Self.bytes(saves))
             }
@@ -487,6 +496,8 @@ struct GameDetailView: View {
                     if let note = Self.archNote(game.arch) {
                         Text(note).font(.callout).foregroundStyle(game.arch == .only32Bit ? HB.warn : .secondary)
                     }
+                    Text(L("Highball can't update the Mac version yet: for a newer build, remove it and install it again."))
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 10) {
                         Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([game.app ?? game.folder]) }
                         Button(L("Move the Mac version to the Trash…")) { state.pendingGOGMacTrash = item }.disabled(state.busy || state.isRunningNow(item))
@@ -547,9 +558,11 @@ struct GameDetailView: View {
     private var cloudSaveLines: [String] {
         switch item.source {
         case .steam:
-            return [item.steamAppID.map(state.steamCloudAppIDs.contains) == true
-                    ? L("Steam syncs this game's saves with Steam Cloud, for whichever account plays it.")
-                    : L("This game keeps its saves on this Mac.")]
+            // Nothing until an environment's Steam has listed the game: a Steam for Mac game, or
+            // the moment before the owned refresh lands, is one Highball cannot say about.
+            guard let cloud = item.steamAppID.flatMap({ state.steamCloudByAppID[$0] }) else { return [] }
+            return [cloud ? L("Steam syncs this game's saves with Steam Cloud, for whichever account plays it.")
+                          : L("This game keeps its saves on this Mac.")]
         case .epic:
             return [state.epicOwned.first { $0.app_name == item.epicAppName }?.cloudSaves == true
                     ? L("Epic's cloud keeps this game's saves when Epic's own launcher plays it. Played from Highball, they stay on this Mac.")
@@ -568,8 +581,11 @@ struct GameDetailView: View {
                               own: L("The game handles the Windows version's saves; some games sync them with GOG's cloud themselves while comet runs.")))
         }
         if item.installedOnMac {
-            lines.append(line(setup.mac, synced: L("The Mac version's saves sync with GOG's cloud before and after you play."),
-                              own: L("The game handles the Mac version's saves; some games sync them with GOG's cloud themselves while comet runs.")))
+            // GOG names Mac folders none of which is clearly the game's own: nothing syncs them.
+            lines.append(!setup.mac.isEmpty && macSyncedSaves.isEmpty
+                ? L("GOG names a folder for the Mac version's saves that other apps may share, so Highball does not sync it: the saves stay on this Mac.")
+                : line(macSyncedSaves, synced: L("The Mac version's saves sync with GOG's cloud before and after you play."),
+                       own: L("The game handles the Mac version's saves; some games sync them with GOG's cloud themselves while comet runs.")))
         }
         return lines
     }
@@ -605,7 +621,7 @@ struct GameDetailView: View {
                 .font(.callout).foregroundStyle(.secondary)
             Text(L("The game's own sync: some games send their saves to GOG's cloud themselves, through GOG's game kit. With Highball that works while comet runs beside the game, and the game says so when it syncs, as Cyberpunk 2077 does."))
                 .font(.callout).foregroundStyle(.secondary)
-            let folders = (cloudSetup.map { (item.installed ? $0.windows : []) + (item.installedOnMac ? $0.mac : []) } ?? []).map(\.template)
+            let folders = ((cloudSetup.map { item.installed ? $0.windows : [] } ?? []) + (item.installedOnMac ? macSyncedSaves : [])).map(\.template)
             if !folders.isEmpty {
                 Text(L("Folders this game syncs")).font(.caption.weight(.semibold)).padding(.top, 2)
                 ForEach(folders, id: \.self) { Text(verbatim: $0).font(.caption.monospaced()).textSelection(.enabled) }
@@ -718,7 +734,7 @@ struct GameDetailView: View {
                          : L("Its anti-cheat does not run on macOS."))
                         .font(.callout).foregroundStyle(.secondary)
                 }
-            } else if item.source == .gog || item.source == .epic, item.macListed, !item.installedOnMac {
+            } else if item.source == .gog || item.source == .epic, state.macListed(item), !item.installedOnMac {
                 // A Mac version is listed: that's the install on offer, the Windows one a click away.
                 VStack(alignment: .leading, spacing: 6) {
                     VStack(alignment: .leading, spacing: 10) {

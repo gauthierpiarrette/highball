@@ -223,4 +223,25 @@ final class MacSteamBuildTests: XCTestCase {
         let curated = try entry(#"{"id":"x","title":"X","steam_appid":1,"status":"community","nativeMac":{"available":true,"where":"Steam"}}"#)
         XCTAssertNil(GamePageCopy.outdatedMacBuild(appInfo: .only32Bit, entry: curated), "a row about the Mac version decides")
     }
+
+    // MARK: Mac builds GOG and Epic list
+
+    /// A row saying the Mac build is not the one to play outranks the store's listing, as for Steam.
+    func testRowSayingNoOutranksAStoreListing() throws {
+        let isaac = try entry(#"{"id":"the-binding-of-isaac-rebirth","title":"Isaac","steam_appid":250900,"status":"community","nativeMac":{"available":false,"where":"Steam"}}"#)
+        let cyberpunk = try entry(#"{"id":"cyberpunk-2077","title":"Cyberpunk 2077","steam_appid":1091500,"status":"community","nativeMac":{"available":true,"where":"Steam, Mac App Store, GOG, Epic"}}"#)
+        XCTAssertFalse(StoreMacBuild.listed(true, entry: isaac))
+        XCTAssertTrue(StoreMacBuild.listed(true, entry: cyberpunk))
+        XCTAssertTrue(StoreMacBuild.listed(true, entry: nil))
+        XCTAssertFalse(StoreMacBuild.listed(false, entry: cyberpunk), "a row does not make a listing")
+    }
+
+    func testInstalledStoreMacBuildLeadsUnlessTheRowOrItsExecutableSaysNo() throws {
+        let isaac = try entry(#"{"id":"the-binding-of-isaac-rebirth","title":"Isaac","steam_appid":250900,"status":"community","nativeMac":{"available":false,"where":"Steam"}}"#)
+        XCTAssertTrue(StoreMacBuild.leads(entry: nil, installedOnMac: true, arch: .native))
+        XCTAssertTrue(StoreMacBuild.leads(entry: nil, installedOnMac: true, arch: nil))
+        XCTAssertFalse(StoreMacBuild.leads(entry: isaac, installedOnMac: true, arch: .native), "the row outranks the install")
+        XCTAssertFalse(StoreMacBuild.leads(entry: nil, installedOnMac: true, arch: .only32Bit))
+        XCTAssertFalse(StoreMacBuild.leads(entry: nil, installedOnMac: false, arch: .native))
+    }
 }
