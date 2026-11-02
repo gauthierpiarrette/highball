@@ -3812,7 +3812,9 @@ final class AppState {
 
     private struct LibraryCache: Codable {
         struct EpicGame: Codable {
-            var appName: String, title: String, artworkWide: URL?, artworkTall: URL?, listsMac: Bool
+            var appName: String, title: String, artworkWide: URL?, artworkTall: URL?
+            /// Optional: a cache written before Mac listings were kept has none, and is read, not thrown away.
+            var listsMac: Bool?
             var cloudSaves: Bool?
         }
         var epicOwned: [EpicGame] = []
@@ -3836,7 +3838,7 @@ final class AppState {
               let cache = try? JSONDecoder().decode(LibraryCache.self, from: Data(contentsOf: libraryCacheFile)) else { return }
         if epicStore.isAuthenticated {
             epicOwned = cache.epicOwned.map {
-                var game = EpicStore.Game(app_name: $0.appName, app_title: $0.title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall, listsMac: $0.listsMac)
+                var game = EpicStore.Game(app_name: $0.appName, app_title: $0.title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall, listsMac: $0.listsMac ?? false)
                 game.cloudSaves = $0.cloudSaves ?? false
                 return game
             }
