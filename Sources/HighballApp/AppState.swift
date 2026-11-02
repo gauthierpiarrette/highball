@@ -3750,6 +3750,12 @@ final class AppState {
                         _ = try? await Task.detached { try store.restoreSavedRecord(app) }.value
                         throw HighballError.processFailed(command: "legendary uninstall --keep-files", status: status, output: "see the log above")
                     }
+                    // legendary exits 0 without touching its records when another legendary holds
+                    // its lock: the switch goes on only once the record is really gone.
+                    guard await Task.detached(operation: { store.recordsGame(app) }).value == false else {
+                        _ = try? await Task.detached { try store.restoreSavedRecord(app) }.value
+                        throw HighballError.failed(String(format: L("The Epic tools didn't let go of %@'s installed version (another of their tasks may be running), so nothing was changed. Try again in a moment."), item.title))
+                    }
                 } },
                 install: download,
                 restoreOldRecord: { [self] in
@@ -3760,6 +3766,10 @@ final class AppState {
                                        : "\(item.title): legendary records the game already, so its record was left as it is")
                     } catch {
                         appendLog("\(item.title): could not put the \(oldPlatform) version's record back yet (\(error.localizedDescription)); its files are still in \(oldPath), and Highball finishes this when it next opens")
+                        epicRefresh()
+                        // The alert says this, not only the download's error: the game is missing
+                        // from Epic's list until the next launch puts it back.
+                        throw HighballError.failed(String(format: L("The switch didn't finish, and the %@ version couldn't be put back yet, so %@ is missing from Epic's list until Highball next opens. Its files are still in %@."), oldPlatform, item.title, oldPath))
                     }
                     epicRefresh()
                 },
@@ -3833,6 +3843,10 @@ final class AppState {
             return "\(name): left the \(build) in \(path), outside Highball's game folders"
         case .noFileList(let why):
             return "\(name): left the \(build) in \(path): legendary could not list them (\(why)), so nothing there was deleted"
+        case .stillRecorded:
+            return "\(name): left the \(build) in \(path): legendary still records the game there, so it is the installed build"
+        case .recordsUnreadable:
+            return "\(name): left the \(build) in \(path): legendary's install records could not be read; Highball looks again when it next opens"
         }
     }
 

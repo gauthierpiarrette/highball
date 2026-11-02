@@ -537,7 +537,7 @@ private extension View {
             Button(L("Switch to the Mac version")) { state.pendingEpicMacSwitch = nil; state.epicInstallMac(item, replacingWindows: true) }
             Button(L("Cancel"), role: .cancel) { state.pendingEpicMacSwitch = nil }
         } message: { _ in
-            Text(L("Epic keeps one version of a game installed at a time, so the Mac version downloads and the Windows version is removed once it is in. Stop the download, or should it fail, and the Windows version stays. Your Highball settings for the game stay."))
+            Text(L("Epic keeps one version of a game installed at a time, so the Mac version downloads and the Windows version is removed once it is in. Stop the download, or should it fail, and the Windows version stays. Only the files Epic installed for the old version are removed: saves and settings the game keeps in its folder stay, and so do your Highball settings for the game."))
         }
         .alert(state.pendingEpicWindowsSwitch.map { String(format: L("Switch %@ to the Windows version?"), $0.title) } ?? "",
                isPresented: .init(get: { state.pendingEpicWindowsSwitch != nil }, set: { if !$0 { state.pendingEpicWindowsSwitch = nil } }),
@@ -545,7 +545,7 @@ private extension View {
             Button(L("Switch to the Windows version")) { state.pendingEpicWindowsSwitch = nil; state.epicSwitchToWindows(item) }
             Button(L("Cancel"), role: .cancel) { state.pendingEpicWindowsSwitch = nil }
         } message: { _ in
-            Text(L("Epic keeps one version of a game installed at a time, so the Windows version downloads into your environment and the Mac version is removed once it is in. Stop the download, or should it fail, and the Mac version stays."))
+            Text(L("Epic keeps one version of a game installed at a time, so the Windows version downloads into your environment and the Mac version is removed once it is in. Stop the download, or should it fail, and the Mac version stays. Only the files Epic installed for the old version are removed: saves and settings the game keeps in its folder stay."))
         }
         .alert(state.pendingEpicMacUninstall.map { String(format: L("Remove the Mac version of %@?"), $0.title) } ?? "",
                isPresented: .init(get: { state.pendingEpicMacUninstall != nil }, set: { if !$0 { state.pendingEpicMacUninstall = nil } }),

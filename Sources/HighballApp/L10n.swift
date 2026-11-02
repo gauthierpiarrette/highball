@@ -442,8 +442,12 @@ enum L10n {
         "Switch to the Windows version…": "Passer à la version Windows…",
         "Switch to the Windows version": "Passer à la version Windows",
         "Switch %@ to the Windows version?": "Passer %@ à la version Windows ?",
-        "Epic keeps one version of a game installed at a time, so the Windows version downloads into your environment and the Mac version is removed once it is in. Stop the download, or should it fail, and the Mac version stays.":
-            "Epic n’installe qu’une version d’un jeu à la fois : la version Windows est téléchargée dans votre environnement, puis la version Mac est supprimée une fois la nouvelle en place. Si vous arrêtez le téléchargement, ou s’il échoue, la version Mac reste.",
+        "The Epic tools didn't let go of %@'s installed version (another of their tasks may be running), so nothing was changed. Try again in a moment.":
+            "Les outils d’Epic n’ont pas libéré la version installée de %@ (une autre de leurs tâches est peut-être en cours), donc rien n’a été modifié. Réessayez dans un instant.",
+        "The switch didn't finish, and the %@ version couldn't be put back yet, so %@ is missing from Epic's list until Highball next opens. Its files are still in %@.":
+            "Le changement n’a pas abouti et la version %@ n’a pas encore pu être remise en place : %@ n’apparaît plus dans la liste d’Epic jusqu’à la prochaine ouverture de Highball. Ses fichiers sont toujours dans %@.",
+        "Epic keeps one version of a game installed at a time, so the Windows version downloads into your environment and the Mac version is removed once it is in. Stop the download, or should it fail, and the Mac version stays. Only the files Epic installed for the old version are removed: saves and settings the game keeps in its folder stay.":
+            "Epic n’installe qu’une version d’un jeu à la fois : la version Windows est téléchargée dans votre environnement, puis la version Mac est supprimée une fois la nouvelle en place. Si vous arrêtez le téléchargement, ou s’il échoue, la version Mac reste. Seuls les fichiers installés par Epic pour l’ancienne version sont supprimés : les sauvegardes et réglages que le jeu garde dans son dossier restent.",
         "Highball could not find the Mac version of %@ to open.": "Highball ne trouve pas la version Mac de %@ à ouvrir.",
         "The Mac version of %@ did not start: %@": "La version Mac de %@ n’a pas démarré : %@",
         "Removing the Windows version of %@": "Suppression de la version Windows de %@",
@@ -451,8 +455,8 @@ enum L10n {
         "Switch %@ to the Mac version?": "Passer %@ à la version Mac ?",
         "Switch to the Mac version": "Passer à la version Mac",
         "Switch to the Mac version…": "Passer à la version Mac…",
-        "Epic keeps one version of a game installed at a time, so the Mac version downloads and the Windows version is removed once it is in. Stop the download, or should it fail, and the Windows version stays. Your Highball settings for the game stay.":
-            "Epic n’installe qu’une version d’un jeu à la fois : la version Mac est téléchargée, puis la version Windows est supprimée une fois la nouvelle en place. Si vous arrêtez le téléchargement, ou s’il échoue, la version Windows reste. Vos réglages Highball pour ce jeu sont conservés.",
+        "Epic keeps one version of a game installed at a time, so the Mac version downloads and the Windows version is removed once it is in. Stop the download, or should it fail, and the Windows version stays. Only the files Epic installed for the old version are removed: saves and settings the game keeps in its folder stay, and so do your Highball settings for the game.":
+            "Epic n’installe qu’une version d’un jeu à la fois : la version Mac est téléchargée, puis la version Windows est supprimée une fois la nouvelle en place. Si vous arrêtez le téléchargement, ou s’il échoue, la version Windows reste. Seuls les fichiers installés par Epic pour l’ancienne version sont supprimés : les sauvegardes et réglages que le jeu garde dans son dossier restent, tout comme vos réglages Highball pour ce jeu.",
         "Asking Epic about the Mac version": "Demande des informations sur la version Mac à Epic",
         "Highball could not ask Epic whether a Mac build of this game is there to download, so nothing was changed. Check your connection, then try again.":
             "Highball n’a pas pu demander à Epic si une version Mac de ce jeu est disponible au téléchargement, donc rien n’a été modifié. Vérifiez votre connexion, puis réessayez.",
