@@ -1342,8 +1342,7 @@ final class AppState {
         loadLibraryCache()
         rebuildLibrary()
         steamOwnedRefresh()
-        finishEpicSwitches()
-        epicRefresh()
+        finishEpicSwitches { [self] in epicRefresh() }
         gogRefresh()
         maybeAutoUpdateEngine()
         if gameDB.byAppID.isEmpty {
@@ -3760,15 +3759,9 @@ final class AppState {
                 },
                 deleteOldFiles: { [self] in
                     guard let oldPath else { return }
-                    store.discardSavedRecord(app)
-                    let folder = URL(fileURLWithPath: oldPath, isDirectory: true)
-                    guard EpicBuildSwitch.isSafeToDelete(folder, roots: roots) else {
-                        appendLog("\(item.title): left the old \(oldPlatform) files in \(oldPath), outside Highball's game folders")
-                        return
-                    }
-                    do { try await Task.detached { try FileManager.default.removeItem(at: folder) }.value } catch {
-                        appendLog("\(item.title): could not delete the old \(oldPlatform) files in \(oldPath): \(error.localizedDescription)")
-                    }
+                    stage = removing
+                    let result = await Task.detached { store.deleteOldBuild(app, at: oldPath, roots: roots) }.value
+                    appendLog(Self.oldBuildDeletionLine(item.title, platform: oldPlatform, path: oldPath, result))
                 })
             do { try await EpicBuildSwitch.run(steps) } catch EpicBuildSwitch.Failure.noNewBuild {
                 throw HighballError.failed(L("Epic lists a Mac version of this game, but has no Mac build to download for your account, so nothing was changed."))
@@ -3784,28 +3777,56 @@ final class AppState {
         bottles.map { $0.driveC.appending(path: "Games", directoryHint: .isDirectory) } + [GOGStore.macGamesDir]
     }
 
-    /// Completes the undo of a build switch Highball quit in the middle of (EpicStore.switchesInFlight):
-    /// the old build's record goes back from where the switch kept it. Once, at launch.
-    private func finishEpicSwitches() {
-        guard !epicSwitchesFinished else { return }
+    /// Completes a build switch Highball quit in the middle of (EpicStore.switchesInFlight), off
+    /// the main thread, then runs `then` (the Epic refresh, so it sees a record put back): the old
+    /// build's record goes back from where the switch kept it, or, when legendary records the new
+    /// build in another folder, the old build's files go as legendary's uninstall deletes them
+    /// (EpicStore.finishSwitch, deleteOldBuild). Once, at launch.
+    private func finishEpicSwitches(then: @escaping @MainActor () -> Void) {
+        guard !epicSwitchesFinished else { then(); return }
         epicSwitchesFinished = true
-        let store = epicStore
-        for app in store.switchesInFlight() {
-            let oldPath = store.savedInstallPath(app)
-            do {
-                if try store.restoreSavedRecord(app) {
-                    appendLog("\(app): a switch between Epic builds did not finish, so the old build is back as it was")
-                } else if let oldPath, !((try? store.installedGames()) ?? []).contains(where: { $0.install_path == oldPath }),
-                          EpicBuildSwitch.isSafeToDelete(URL(fileURLWithPath: oldPath, isDirectory: true), roots: epicInstallRoots),
-                          FileManager.default.fileExists(atPath: oldPath) {
-                    // The new build was in when Highball quit, before the old files went: they go now,
-                    // off the main thread (a game is tens of thousands of files).
-                    appendLog("\(app): a switch between Epic builds finished as Highball quit; deleting the old build's files in \(oldPath)")
-                    Task.detached { try? FileManager.default.removeItem(atPath: oldPath) }
+        let store = epicStore, roots = epicInstallRoots
+        Task { [self] in
+            let lines = await Task.detached { () -> [String] in
+                var lines: [String] = []
+                for app in store.switchesInFlight() {
+                    do {
+                        switch try store.finishSwitch(app) {
+                        case .restored:
+                            lines.append("\(app): a switch between Epic builds did not finish, so the old build is back as it was")
+                        case .deleteOldBuild(let oldPath):
+                            lines.append("\(app): a switch between Epic builds finished as Highball quit; deleting the old build's files in \(oldPath)")
+                            lines.append(Self.oldBuildDeletionLine(app, platform: nil, path: oldPath,
+                                                                   store.deleteOldBuild(app, at: oldPath, roots: roots)))
+                        case .unreadable:
+                            lines.append("\(app): a switch between Epic builds did not finish, and legendary's installed.json could not be read, so nothing was changed; Highball tries again when it next opens")
+                        case .leftAsItWas:
+                            break
+                        }
+                    } catch {
+                        lines.append("\(app): a switch between Epic builds did not finish, and its old record could not go back yet (\(error.localizedDescription)); Highball tries again when it next opens")
+                    }
                 }
-            } catch {
-                appendLog("\(app): a switch between Epic builds did not finish, and its old record could not go back yet (\(error.localizedDescription)); Highball tries again when it next opens")
-            }
+                return lines
+            }.value
+            lines.forEach(appendLog)
+            then()
+        }
+    }
+
+    /// The log line for an old build's files after a switch (EpicStore.deleteOldBuild).
+    nonisolated static func oldBuildDeletionLine(_ name: String, platform: String?, path: String,
+                                                 _ result: EpicStore.OldBuildDeletion) -> String {
+        let build = platform.map { "old \($0) files" } ?? "old build's files"
+        switch result {
+        case .deleted(let files, 0):
+            return "\(name): deleted the \(build) in \(path) (\(files) files from its manifest; anything else the game wrote there stays)"
+        case .deleted(let files, let failed):
+            return "\(name): deleted \(files) of the \(build) in \(path); \(failed) could not be deleted and stay there"
+        case .outsideGameFolders:
+            return "\(name): left the \(build) in \(path), outside Highball's game folders"
+        case .noFileList(let why):
+            return "\(name): left the \(build) in \(path): legendary could not list them (\(why)), so nothing there was deleted"
         }
     }
 

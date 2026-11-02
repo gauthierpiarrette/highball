@@ -107,7 +107,8 @@ extension EpicStore {
             return false
         }
         let restored = try Self.withInstalledLock(configDir) { () throws -> Bool in
-            var installed = (try? Self.readInstalled(configDir)) ?? [:]
+            // No installed.json is legendary with no games; one that cannot be read is not written over.
+            var installed = try Self.readInstalledIfThere(configDir) ?? [:]
             guard installed[appName] == nil else { return false }
             let manifests = configDir.appending(path: "manifests", directoryHint: .isDirectory)
             try fm.createDirectory(at: manifests, withIntermediateDirectories: true)
@@ -144,6 +145,13 @@ extension EpicStore {
             .map(\.lastPathComponent).sorted()
     }
 
+    /// installed.json, or nil when legendary has none yet. Throws when it is there and cannot be read.
+    static func readInstalledIfThere(_ configDir: URL) throws -> [String: Any]? {
+        let file = configDir.appending(path: "installed.json")
+        guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+        return try readInstalled(configDir)
+    }
+
     static func readInstalled(_ configDir: URL) throws -> [String: Any] {
         let data = try Data(contentsOf: configDir.appending(path: "installed.json"))
         guard let installed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -176,5 +184,148 @@ extension EpicStore {
         }
         defer { flock(fd, LOCK_UN) }
         return try body()
+    }
+}
+
+// MARK: Finishing a switch, and the old build's files
+
+extension EpicStore {
+    /// What launch found for a switch Highball quit in the middle of (switchesInFlight).
+    public enum UnfinishedSwitch: Equatable, Sendable {
+        /// legendary had no record of the game: the old build's record went back.
+        case restored
+        /// legendary records the new build in another folder: the old build's files are to go
+        /// (deleteOldBuild), from this folder. The kept record stays until they have.
+        case deleteOldBuild(String)
+        /// legendary still records the old build where it was (Highball quit before its record
+        /// was dropped), or nothing was kept: the kept copy is dropped and nothing else changes.
+        case leftAsItWas
+        /// installed.json could not be read: nothing was changed, and the next launch tries again.
+        case unreadable
+    }
+
+    /// Completes a switch Highball quit in the middle of, from legendary's installed.json read
+    /// directly (no legendary run). The old files are named for deletion only when legendary
+    /// records the game in a different folder than the kept record's, so a build still installed
+    /// is never taken for a leftover.
+    public func finishSwitch(_ appName: String) throws -> UnfinishedSwitch {
+        let installed: [String: Any]
+        do { installed = try Self.readInstalledIfThere(configDir) ?? [:] } catch { return .unreadable }
+        guard let current = installed[appName] as? [String: Any] else {
+            return try restoreSavedRecord(appName) ? .restored : .leftAsItWas
+        }
+        if let old = savedInstallPath(appName), let now = current["install_path"] as? String,
+           !Self.samePath(old, now) {
+            return .deleteOldBuild(old)
+        }
+        discardSavedRecord(appName)
+        return .leftAsItWas
+    }
+
+    static func samePath(_ a: String, _ b: String) -> Bool {
+        func norm(_ p: String) -> String {
+            URL(fileURLWithPath: p, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath().path.lowercased()
+        }
+        return norm(a) == norm(b)
+    }
+
+    /// How deleting an old build's files went.
+    public enum OldBuildDeletion: Equatable, Sendable {
+        /// The files the old build's manifests list were deleted, then the folders left empty.
+        /// `failed`, the listed files that were there and could not be deleted.
+        case deleted(files: Int, failed: Int)
+        /// The folder is not inside one of Highball's game folders: nothing was deleted.
+        case outsideGameFolders
+        /// legendary could not list the old build's files: nothing was deleted.
+        case noFileList(String)
+    }
+
+    /// Deletes an old build's files once a switch is done, the way legendary's own uninstall does
+    /// (lfs/utils.py delete_filelist): only the files the old build's manifests list, from the
+    /// copies the switch kept (saveRecord), read offline by `legendary list-files --manifest`,
+    /// then the folders that leaves empty, the build's folder last. Saves, settings and mods the
+    /// game wrote beside its files stay. Nothing is deleted outside Highball's game folders
+    /// (EpicBuildSwitch.isSafeToDelete) or when the list cannot be had. The kept record goes
+    /// afterwards either way.
+    public func deleteOldBuild(_ appName: String, at oldPath: String, roots: [URL]) -> OldBuildDeletion {
+        defer { discardSavedRecord(appName) }
+        let folder = URL(fileURLWithPath: oldPath, isDirectory: true)
+        guard EpicBuildSwitch.isSafeToDelete(folder, roots: roots) else { return .outsideGameFolders }
+        let files: [String]
+        do { files = try oldBuildFiles(appName) } catch { return .noFileList(error.localizedDescription) }
+        let (deleted, failed) = Self.deleteFileList(files, in: folder)
+        return .deleted(files: deleted, failed: failed)
+    }
+
+    /// The files the kept manifests of a switch's old build list: the game's and those of its DLC
+    /// sharing its folder. Throws without the game's own manifest or when legendary fails.
+    func oldBuildFiles(_ appName: String) throws -> [String] {
+        let folder = savedRecordFolder(appName)
+        guard let data = try? Data(contentsOf: folder.appending(path: "record.json")),
+              let entries = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw HighballError.failed("no kept record of \(appName)'s old build")
+        }
+        func manifest(_ app: String) -> URL? {
+            Self.manifestNames(app, entry: entries[app] as? [String: Any] ?? [:])
+                .map { folder.appending(path: "manifests/\($0)") }
+                .first { FileManager.default.fileExists(atPath: $0.path) }
+        }
+        guard let own = manifest(appName) else { throw HighballError.failed("the old build's manifest was not kept") }
+        var files: [String] = []
+        for file in [own] + entries.keys.filter({ $0 != appName }).sorted().compactMap(manifest) {
+            files += try Self.manifestFilenames(capture(["list-files", "--manifest", file.path, "--json"]))
+        }
+        return files
+    }
+
+    /// The `filename`s of `legendary list-files --json`.
+    static func manifestFilenames(_ json: String) throws -> [String] {
+        guard let list = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]] else {
+            throw HighballError.failed("legendary list-files did not print a list")
+        }
+        return list.compactMap { $0["filename"] as? String }
+    }
+
+    /// legendary's delete_filelist with its delete_root_directory: each listed file is deleted
+    /// (found without case, as legendary's case_insensitive_file_search does), then every folder
+    /// the list names and the build's folder itself, deepest first, each only when empty. A name
+    /// that would leave the folder is skipped. The files deleted and the ones that could not be.
+    static func deleteFileList(_ filenames: [String], in folder: URL) -> (deleted: Int, failed: Int) {
+        let fm = FileManager.default
+        let root = folder.standardizedFileURL.resolvingSymlinksInPath()
+        var deleted = 0, failed = 0
+        var dirs = Set<String>()
+        for name in filenames {
+            let parts = name.replacingOccurrences(of: "\\", with: "/").split(separator: "/").map(String.init)
+                .filter { $0 != "." }
+            guard !parts.isEmpty, !parts.contains("..") else { continue }
+            for i in 1..<parts.count { dirs.insert(parts[..<i].joined(separator: "/")) }
+            guard let file = findIgnoringCase(parts, in: root) else { continue }
+            let parent = file.deletingLastPathComponent().resolvingSymlinksInPath().path.lowercased()
+            let base = root.path.lowercased()
+            guard parent == base || parent.hasPrefix(base.hasSuffix("/") ? base : base + "/") else { continue }
+            do { try fm.removeItem(at: file); deleted += 1 } catch { failed += 1 }
+        }
+        for dir in dirs.sorted(by: { $0.count > $1.count }) {
+            if let url = findIgnoringCase(dir.split(separator: "/").map(String.init), in: root) { rmdir(url.path) }
+        }
+        rmdir(root.path)
+        return (deleted, failed)
+    }
+
+    /// A path under `root` matched one name at a time, exactly first, then without case.
+    private static func findIgnoringCase(_ parts: [String], in root: URL) -> URL? {
+        let fm = FileManager.default
+        var url = root
+        for part in parts {
+            let exact = url.appending(path: part)
+            if (try? exact.checkResourceIsReachable()) == true || (try? fm.destinationOfSymbolicLink(atPath: exact.path)) != nil {
+                url = exact; continue
+            }
+            guard let match = (try? fm.contentsOfDirectory(atPath: url.path))?.first(where: { $0.lowercased() == part.lowercased() })
+            else { return nil }
+            url = url.appending(path: match)
+        }
+        return url
     }
 }
