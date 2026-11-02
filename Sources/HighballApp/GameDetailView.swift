@@ -518,6 +518,8 @@ struct GameDetailView: View {
                     if let note = Self.archNote(arch) {
                         Text(note).font(.callout).foregroundStyle(arch == .only32Bit ? HB.warn : .secondary)
                     }
+                    Text(L("Highball can't update the Mac version yet: for a newer build, remove it and install it again."))
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 10) {
                         Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([folder]) }
                         Button(L("Remove the Mac version…")) { state.pendingEpicMacUninstall = item }.disabled(state.busy || state.isRunningNow(item))
