@@ -16,6 +16,8 @@
 # Usage: Scripts/game-smoke.sh            (the whole table)
 #        Scripts/game-smoke.sh 730 4465480 (only these appids)
 set -u
+# Its verdict is the captures, so a run asked to take none has nothing to judge with.
+[ "${HB_NO_CAPTURE:-}" = 1 ] && { echo "game smoke skipped: captures are off (HB_NO_CAPTURE)"; exit 3; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HB="$ROOT/.build/debug/highball"; [ -x "$HB" ] || swift build --package-path "$ROOT" >/dev/null
 H="$HOME/Library/Application Support/Highball"

@@ -10,11 +10,15 @@
 # (a long benchmark run, worth it when the engine or a renderer changed).
 #
 # Needs the screen unlocked: the smokes launch the app and look at its windows.
-# Usage: Scripts/gate.sh [--with-render]
+# --no-capture: nothing is imaged, not even the app's own window, for a run on a Mac someone is
+# using (owner, 2026-11-03). The window checks still count windows, and game-smoke, which judges
+# a game by its captures, is skipped.
+# Usage: Scripts/gate.sh [--with-render] [--no-capture]
 set -uo pipefail
 cd "$(dirname "$0")/.."
 OUT=private/gate; mkdir -p "$OUT"
-WITH_RENDER=0; [ "${1:-}" = "--with-render" ] && WITH_RENDER=1
+WITH_RENDER=0
+for a in "$@"; do case $a in --with-render) WITH_RENDER=1 ;; --no-capture) export HB_NO_CAPTURE=1 ;; esac; done
 # This Mac's display sleeps after two minutes idle and the session locks with it; every smoke
 # that looks at a window then sees nothing (2026-09-18, three gate runs). Hold the display for
 # as long as this gate runs.
@@ -77,6 +81,7 @@ HB_JSON="$json" HB_COMMIT="$COMMIT" HB_PASSED="$passed" python3 - "$OUT/latest.j
 import json, os, sys, time
 json.dump({"passed": os.environ['HB_PASSED'] == 'true', "epoch": int(time.time()), "date": time.strftime('%Y-%m-%d'),
            "commit": os.environ['HB_COMMIT'], "required": ["unit", "upgrade", "firstrun", "launch-window"],
+           "captures": os.environ.get('HB_NO_CAPTURE') != '1',
            "checks": json.loads(os.environ['HB_JSON'])}, open(sys.argv[1], 'w'), indent=2)
 PY
 if [ $passed = true ]; then echo "GATE PASSED for ${COMMIT:0:7} ($OUT/latest.json)"; else echo "GATE FAILED for ${COMMIT:0:7}: see $OUT/*.log"; exit 1; fi

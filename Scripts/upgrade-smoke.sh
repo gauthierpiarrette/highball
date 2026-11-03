@@ -121,9 +121,13 @@ if [ "$SCREEN" = 1 ]; then
     fi
   fi
   sleep 4
-  screencapture -x "$ROOT/private/upgrade-smoke/library.png" 2>/dev/null || true
+  if [ "${HB_NO_CAPTURE:-}" = 1 ]; then
+    echo "   window appeared (no capture asked)"
+  else
+    screencapture -x "$ROOT/private/upgrade-smoke/library.png" 2>/dev/null || true
+    echo "   window appeared; capture at private/upgrade-smoke/library.png (look: the game should show, not 'prepare an environment')"
+  fi
   kill "$pid" 2>/dev/null || true
-  echo "   window appeared; capture at private/upgrade-smoke/library.png (look: the game should show, not 'prepare an environment')"
 fi
 
 record true

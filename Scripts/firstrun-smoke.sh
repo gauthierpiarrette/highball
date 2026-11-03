@@ -47,7 +47,7 @@ if [ "${1:-}" = "--screen" ]; then
   sleep 1; pid=$(pgrep -n -f "dist/Highball.app/Contents/MacOS/Highball")
   n=0; until "$WL" 2>/dev/null | grep -E "pid=$pid" | grep -q on=true || [ $n -ge 20 ]; do sleep 1; n=$((n+1)); done
   sleep 4; id=$("$WL" 2>/dev/null | grep -E "pid=$pid" | grep on=true | head -1 | awk '{print $1}')
-  [ -n "$id" ] && screencapture -x -l "$id" "$OUT/onboarding.png" && echo "   onboarding capture: private/firstrun-smoke/onboarding.png (should offer Get Started, not an empty library)"
+  [ -n "$id" ] && [ "${HB_NO_CAPTURE:-}" != 1 ] && screencapture -x -l "$id" "$OUT/onboarding.png" && echo "   onboarding capture: private/firstrun-smoke/onboarding.png (should offer Get Started, not an empty library)"
   kill "$pid" 2>/dev/null
 fi
 python3 -c "import json,time;json.dump({'passed':True,'epoch':int(time.time()),'date':time.strftime('%Y-%m-%d'),'screen':'${1:-}'=='--screen'},open('$OUT/latest.json','w'),indent=2)"
