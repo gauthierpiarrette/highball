@@ -64,14 +64,15 @@ public struct EpicStore: Sendable {
     }
 
     /// Runs legendary streaming each output line (installs are long and progress matters).
-    /// `control` lets the caller stop it the way Ctrl-C in a terminal does.
+    /// `control` lets the caller stop it the way Ctrl-C in a terminal does; `extra` adds to its
+    /// environment (WINEPREFIX, for a save folder legendary resolves inside an environment).
     @discardableResult
-    public func runStreaming(_ args: [String], control: LegendaryControl? = nil,
+    public func runStreaming(_ args: [String], control: LegendaryControl? = nil, environment extra: [String: String] = [:],
                              onLine: (@Sendable (String) -> Void)? = nil) throws -> Int32 {
         let p = Process()
         p.executableURL = binary
         p.arguments = args
-        p.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
+        p.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }.merging(extra) { $1 }
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = pipe
@@ -172,7 +173,7 @@ public struct EpicStore: Sendable {
         public let install_path: String?
         /// legendary's record of the installed size, in bytes.
         public var install_size: Int64? = nil
-        /// Where the game keeps the saves legendary syncs, once it has synced them.
+        /// Where the game keeps the saves legendary syncs, once it has resolved it (EpicSaves).
         public var save_path: String? = nil
         /// "Windows" or "Mac": which build legendary installed (one per game).
         public var platform: String? = nil
@@ -188,6 +189,61 @@ public struct EpicStore: Sendable {
         let out = try capture(["list-installed", "--json"])
         return try JSONDecoder().decode([InstalledGame].self, from: Data(out.utf8))
     }
+
+    /// Legendary's own install records (installed.json in its config folder), app name to install
+    /// path, read without running it. Empty when legendary has installed nothing; nil when the
+    /// file is there but can't be read.
+    public func installRecords() -> [String: String]? {
+        let file = configDir.appending(path: "installed.json")
+        guard FileManager.default.fileExists(atPath: file.path) else { return [:] }
+        guard let data = try? Data(contentsOf: file),
+              let all = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        return all.mapValues { (($0 as? [String: Any])?["install_path"] as? String) ?? "" }
+    }
+
+    /// Whether legendary still records the game as installed; nil when its records can't be
+    /// read. An uninstall is done when the record is gone: legendary deletes the files its
+    /// manifest names, then removes the folder only if nothing else is left in it (core.py
+    /// `uninstall_game`, `delete_filelist`), so a log, a config or a save keeps the folder.
+    public func isRecorded(_ appName: String) -> Bool? {
+        installRecords().map { $0[appName] != nil }
+    }
+
+    /// The files legendary installed for a game, by its installed manifest, as paths relative to
+    /// the install folder. Read offline, with no sign-in, from the manifest file legendary keeps
+    /// for the installed version (`list-files --manifest`): `list-files <app>` signs in and
+    /// downloads one in 0.21.0, since `main()` always sets a platform. Throws when legendary has
+    /// no manifest for it.
+    public func installedFiles(_ appName: String) throws -> [String] {
+        guard let manifest = installedManifest(appName) else {
+            throw HighballError.failed("legendary has no manifest for \(appName)")
+        }
+        struct File: Decodable { let filename: String }
+        let out = try capture(Self.listFilesArguments(manifest: manifest))
+        return try JSONDecoder().decode([File].self, from: Data(out.utf8)).map(\.filename)
+    }
+    static func listFilesArguments(manifest: URL) -> [String] { ["list-files", "--manifest", manifest.path, "--json"] }
+
+    /// The manifest file legendary keeps for a game's installed version, nil when there is none.
+    func installedManifest(_ appName: String) -> URL? {
+        guard let data = try? Data(contentsOf: configDir.appending(path: "installed.json")),
+              let all = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let entry = all[appName] as? [String: Any] else { return nil }
+        return Self.manifestNames(appName, entry: entry)
+            .map { configDir.appending(path: "manifests/\($0)") }
+            .first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// The names legendary saves an installed version's manifest under (lgndry.py
+    /// `_get_manifest_filename`): with its platform, or without it for an older install.
+    static func manifestNames(_ appName: String, entry: [String: Any]) -> [String] {
+        guard let version = entry["version"] as? String else { return [] }
+        let platform = entry["platform"] as? String ?? "Windows"
+        return ["\(appName)_\(platform)_\(version)", "\(appName)_\(version)"].map { cleanFilename($0) + ".manifest" }
+    }
+
+    /// legendary's clean_filename: the characters a file name cannot hold, dropped.
+    static func cleanFilename(_ name: String) -> String { name.filter { !"<>:\"/\\|?*".contains($0) } }
 
     /// Legendary's install records, app name to path, keeping only the ones whose folder still
     /// exists. Legendary never notices a removed environment or a deleted game folder, and a

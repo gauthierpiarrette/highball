@@ -160,17 +160,6 @@ extension EpicStore {
         return installed
     }
 
-    /// The names legendary 0.21.0 gives an entry's manifest (LGDLFS._get_manifest_filename): with
-    /// the platform, or the older form without it, which it falls back to.
-    static func manifestNames(_ appName: String, entry: [String: Any]) -> [String] {
-        guard let version = entry["version"] as? String else { return [] }
-        let platform = entry["platform"] as? String ?? "Windows"
-        return ["\(appName)_\(platform)_\(version)", "\(appName)_\(version)"].map { cleanFilename($0) + ".manifest" }
-    }
-
-    /// legendary's clean_filename: the characters a file name cannot hold, dropped.
-    static func cleanFilename(_ name: String) -> String { name.filter { !"<>:\"/\\|?*".contains($0) } }
-
     /// Runs `body` holding legendary's lock on its install data (installed.json.lock, the
     /// filelock flock every legendary takes before it changes installed.json), so a legendary
     /// still running cannot write over what is put back. Throws when one holds it.
