@@ -142,6 +142,22 @@ final class GOGStoreTests: XCTestCase {
         return dir
     }
 
+    /// highball#600: Games is a symlink to a folder on an external drive. The install is found,
+    /// and its folder stays under the environment's Games.
+    func testGamesFolderThatIsASymlinkIsListed() throws {
+        let top = FileManager.default.temporaryDirectory.appending(path: "gog-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: top) }
+        let driveC = top.appending(path: "drive_c"), external = top.appending(path: "external/Games")
+        try FileManager.default.createDirectory(at: driveC, withIntermediateDirectories: true)
+        _ = try makeGame(external, folder: "Ghostrunner", infos: [
+            "goggame-1957528513.info": #"{"gameId":"1957528513","rootGameId":"1957528513","name":"Ghostrunner"}"#,
+        ])
+        try FileManager.default.createSymbolicLink(at: driveC.appending(path: "Games"), withDestinationURL: external)
+        let games = GOGStore.installedGames(driveC: driveC)
+        XCTAssertEqual(games.map(\.id), ["1957528513"])
+        XCTAssertEqual(games.first?.folder.path, driveC.appending(path: "Games/Ghostrunner").path)
+    }
+
     /// Ghostrunner as gogdl installed it, with its DLC's info file beside the game's, and Control
     /// from an offline installer in GOG's default folder: both found, with the DLC attached.
     func testInstalledGamesComeFromInfoFiles() throws {

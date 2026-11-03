@@ -215,12 +215,16 @@ extension GOGStore {
     /// Every GOG game installed in the environment: a folder directly under an install root that
     /// holds goggame-<id>.info files. The base game is the file whose id is its own root id; the
     /// others are its DLC. A folder gogdl is still downloading into (.gogdl-resume) is skipped.
+    /// A root that is a symlink, such as Games moved to an external drive, is listed where it
+    /// points, which FileManager doesn't do for a link: those installs never turned to Play
+    /// (highball#600). Games keep their path under the root.
     public static func installedGames(driveC: URL) -> [InstalledGame] {
         let fm = FileManager.default
         var games: [InstalledGame] = []
         for root in installRoots(driveC: driveC) {
-            let folders = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
-            for folder in folders where (try? folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+            let found = (try? fm.contentsOfDirectory(at: root.resolvingSymlinksInPath(), includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+            for entry in found where (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                let folder = root.appending(path: entry.lastPathComponent, directoryHint: .isDirectory)
                 if fm.fileExists(atPath: folder.appending(path: ".gogdl-resume").path) { continue }
                 if let game = installedGame(in: folder) { games.append(game) }
             }
