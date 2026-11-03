@@ -222,12 +222,16 @@ extension GOGStore {
     /// Every GOG game installed in the environment: a folder directly under an install root that
     /// holds goggame-<id>.info files. The base game is the file whose id is its own root id; the
     /// others are its DLC. A folder gogdl is still downloading into (.gogdl-resume) is skipped.
+    /// A root that is a symlink, such as Games moved to an external drive, is listed where it
+    /// points, which FileManager doesn't do for a link: those installs never turned to Play
+    /// (highball#600). Games keep their path under the root.
     public static func installedGames(driveC: URL) -> [InstalledGame] {
         let fm = FileManager.default
         var games: [InstalledGame] = []
         for root in installRoots(driveC: driveC) {
-            let folders = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
-            for folder in folders where (try? folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+            let found = (try? fm.contentsOfDirectory(at: root.resolvingSymlinksInPath(), includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+            for entry in found where (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                let folder = root.appending(path: entry.lastPathComponent, directoryHint: .isDirectory)
                 if fm.fileExists(atPath: folder.appending(path: ".gogdl-resume").path) { continue }
                 if let game = installedGame(in: folder) { games.append(game) }
             }
@@ -541,8 +545,65 @@ extension GOGStore {
         (try? String(contentsOf: setupMarker(for: game, driveC: driveC), encoding: .utf8)) == (game.buildID ?? "")
     }
     public static func markSetupDone(for game: InstalledGame, driveC: URL) {
+        // Read before the marker is rewritten: an install from before the history falls back
+        // to the marker's old date.
+        var history = storedHistory(for: game, driveC: driveC)
+        if history.firstSetup == nil { history.firstSetup = Date() }
+        save(history, for: game, driveC: driveC)
         let url = setupMarker(for: game, driveC: driveC)
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? (game.buildID ?? "").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// When Highball first set an install up in the environment and when it updated it, so an
+    /// uninstall can tell the files the game wrote from the ones the installer and the patches
+    /// put down (GOGSaves.backUpGameFolder). Kept next to the setup marker.
+    public typealias InstallHistory = GameInstallHistory
+
+    public static func historyFile(for game: InstalledGame, driveC: URL) -> URL {
+        driveC.appending(path: "highball/gog-setup/\(game.id).history.json")
+    }
+
+    /// An install set up before the history was kept falls back to the marker's date for its
+    /// first setup. One Highball never set up (an offline installer's: no manifest, so no setup
+    /// and no marker) falls back to when its goggame-<id>.info file landed on this disk, which
+    /// the install wrote. nil firstSetup: none of them exists, so nothing tells the game's files
+    /// from the installer's.
+    public static func history(for game: InstalledGame, driveC: URL) -> InstallHistory {
+        var history = storedHistory(for: game, driveC: driveC)
+        if history.firstSetup == nil { history.firstSetup = installedDate(of: game) }
+        return history
+    }
+
+    /// The history file, or the marker's date. Not the info file's: setup and updates record
+    /// from this, and setup runs after gogdl wrote the info file, so what it put down would
+    /// count as the game's.
+    private static func storedHistory(for game: InstalledGame, driveC: URL) -> InstallHistory {
+        var history = InstallHistory.read(historyFile(for: game, driveC: driveC)) ?? InstallHistory()
+        if history.firstSetup == nil {
+            history.firstSetup = try? setupMarker(for: game, driveC: driveC).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        }
+        return history
+    }
+
+    /// When the install wrote the game's goggame-<id>.info file: when the file was created, or
+    /// the game's folder if that is earlier (a patch rewrites the file, never the folder). Its
+    /// modification date only when the disk keeps no creation dates: an offline installer gives
+    /// the files it unpacks the date they were built, before the install.
+    static func installedDate(of game: InstalledGame) -> Date? {
+        let info = game.folder.appending(path: "goggame-\(game.id).info")
+        guard let values = try? info.resourceValues(forKeys: [.contentModificationDateKey, .creationDateKey]) else { return nil }
+        let folderCreated = try? game.folder.resourceValues(forKeys: [.creationDateKey]).creationDate
+        return [values.creationDate, folderCreated].compactMap { $0 }.min() ?? values.contentModificationDate
+    }
+
+    private static func save(_ history: InstallHistory, for game: InstalledGame, driveC: URL) {
+        history.write(to: historyFile(for: game, driveC: driveC))
+    }
+
+    /// An update ran from `start` to `end`: what changed in the game's folder then is the patch's.
+    public static func recordUpdate(for game: InstalledGame, driveC: URL, start: Date, end: Date) {
+        var history = storedHistory(for: game, driveC: driveC)
+        history.updates.append(.init(start: start, end: end))
+        save(history, for: game, driveC: driveC)
     }
 }

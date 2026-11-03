@@ -7,14 +7,17 @@ import os
 /// The three Settings tabs, so a deep link can select one.
 enum SettingsTab: Hashable { case environments, engine, troubleshooting }
 
-/// A GOG cloud-save conflict: this Mac's saves and GOG's both changed since the last sync, so
-/// gogdl moved nothing and the player picks which copy wins (GOGSaves).
+/// A cloud-save conflict: this Mac's saves and the cloud's both changed since the last sync, so
+/// nothing moved and the player picks which copy wins (GOGSaves, EpicSaves).
 struct GOGSaveConflict: Identifiable {
     enum Choice { case useCloud, keepMac, skip }
     let id = UUID()
     let title: String
     /// Asked before Play (the launch waits) or after the game ended.
     let beforePlay: Bool
+    /// An Epic game's (EpicSaves), and whether it is the first sync of saves on both sides.
+    var epic = false
+    var firstSync = false
     let resolve: (Choice) -> Void
 }
 
@@ -1278,6 +1281,7 @@ final class AppState {
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.epicFetchInFlight = false
+                defer { self.offerKeptEpicSaves() }
                 guard self.applyEpicInstalls(installed) else { return }
                 self.forgetProgramExecutables()
                 self.rebuildLibrary()
@@ -1528,6 +1532,9 @@ final class AppState {
         if let h = ProgressParser.hint(for: line) { stageHint = h }
     }
 
+    /// Set by a busy operation that ends by handing over to a question instead of its done row.
+    private var busyDoneOverride: DoneState?
+
     /// Runs one long operation on the activity strip. The strip is the surface: the log sheet
     /// opens only from its Details button (or `showLogSheet` for the rare case that needs it).
     private func runBusy(_ title: String, expected: String? = nil, showLogSheet: Bool = false,
@@ -1537,7 +1544,7 @@ final class AppState {
         // first and end it early when the second finishes (found in review, 2026-09-04).
         guard !busy else { return }
         busy = true; busyTitle = title; stage = ""; stageHint = ""; logLines = []; showLog = showLogSheet
-        busyStartedAt = Date(); busyExpected = expected; lastOutputAt = nil; doneState = nil
+        busyStartedAt = Date(); busyExpected = expected; lastOutputAt = nil; doneState = nil; busyDoneOverride = nil
         busyStop = stop; busyProgress = nil; transferRate = nil; transferSamples = []; stopRequested = false
         busyTask = Task {
             // On failure, dismiss the log sheet ourselves: SwiftUI defers the error alert
@@ -1545,7 +1552,7 @@ final class AppState {
             // and hid the alert until the user clicked Close (issues #27/#28).
             do {
                 try await work()
-                let d = done ?? DoneState(title: L("Done"), ctaTitle: nil, cta: nil)
+                let d = busyDoneOverride ?? done ?? DoneState(title: L("Done"), ctaTitle: nil, cta: nil)
                 doneState = d.silent ? nil : d
             } catch {
                 showLog = false
@@ -1573,6 +1580,14 @@ final class AppState {
                 repairBottle(fresh)
             }
         }
+    }
+
+    /// Throws once the player pressed Stop. For a step after detached work, which runs on through
+    /// a cancel: checked on the main task, and on `stopRequested` too, since a Stop that kills the
+    /// environment first cancels only once the kill returns.
+    private func checkStopped() throws {
+        try Task.checkCancellation()
+        if stopRequested { throw CancellationError() }
     }
 
     /// The strip's Stop button. What it does depends on the operation (see `BusyStop`); the
@@ -2462,8 +2477,8 @@ final class AppState {
         }
     }
 
-    /// Carries out the route the ask offered.
-    func uninstallConfirmed() {
+    /// Carries out the route the ask offered. `deleteSaves`: a GOG or Epic game's saves go with it.
+    func uninstallConfirmed(deleteSaves: Bool = false) {
         guard let (item, route) = pendingUninstall else { return }
         pendingUninstall = nil
         guard let bottleName = item.bottleName, let bottle = bottles.first(where: { $0.name == bottleName }) else { return }
@@ -2490,16 +2505,9 @@ final class AppState {
                 }
             }
         case let .epic(appName):
-            appendLog("\(item.title): asking the Epic tools to uninstall it")
-            let store = EpicStore(paths: paths)
-            runBusy(String(format: L("Removing %@"), item.title),
-                    done: DoneState(title: String(format: L("%@ removed"), item.title), ctaTitle: nil, cta: nil),
-                    stop: .cancelTask(label: L("Stop"))) { [self] in
-                _ = try store.uninstall(appName) { line in Task { @MainActor in self.appendLog(line) } }
-                await MainActor.run { self.refresh() }
-            }
+            epicUninstall(appName, title: item.title, in: bottle, deleteSaves: deleteSaves)
         case let .gog(id):
-            gogUninstall(id: id, title: item.title, in: bottle)
+            gogUninstall(id: id, title: item.title, in: bottle, deleteSaves: deleteSaves)
         case .windowsUninstaller:
             openUninstaller(in: bottle)
         case .none:
@@ -2884,11 +2892,16 @@ final class AppState {
     /// Work a launch leaves for the end of its session (a GOG game's comet and save upload).
     @ObservationIgnored private var sessionEndActions: [UUID: (SessionRecord) -> Void] = [:]
 
+    /// An Epic game's save upload, for the end of its session: apart from sessionEndActions, which
+    /// gogStartComet reads as GOG sessions with a comet.
+    @ObservationIgnored private var epicSessionEnds: [UUID: () -> Void] = [:]
+
     private func endSession(_ session: GameSession, reason: String) {
         guard runningSessions.contains(session) else { return }
         runningSessions.removeAll { $0.id == session.id }
         defer {
             if let action = sessionEndActions.removeValue(forKey: session.id), let record = lastEndedSession { action(record) }
+            epicSessionEnds.removeValue(forKey: session.id)?()
         }
         discordEnvironments[session.id] = nil
         if runningSessions.isEmpty { stopDiscordWatch() }
@@ -3519,6 +3532,7 @@ final class AppState {
                 self.epicFetchInFlight = false
                 self.rebuildLibrary()   // Epic results arrive after refresh(); fold them in
                 if owned != nil { self.saveLibraryCache() }
+                self.offerKeptEpicSaves()
             }
         }
     }
@@ -3546,6 +3560,9 @@ final class AppState {
             let refused = try await Task.detached {
                 try store.move(appName, from: path, into: dest) { line in Task { @MainActor in self.appendLog(line) } }
             }.value
+            if refused == nil, let from = bottles.first(where: { EpicStore.isInstalled(path: path, inDriveC: $0.driveC) }) {
+                EpicSaves.moveHistory(app: appName, from: from.driveC, to: dest.driveC)
+            }
             await MainActor.run { self.epicRefresh() }
             if let refused { throw HighballError.failed(String(format: L("%@ could not move. %@"), item.title, refused)) }
         }
@@ -3572,17 +3589,28 @@ final class AppState {
             epicDownloadTotal = nil
             let refused = OSAllocatedUnfairLock(initialState: false)
             let failure = OSAllocatedUnfairLock<String?>(initialState: nil)
+            // What changes in the game's folder while legendary installs or updates it is
+            // legendary's, not saves (EpicSaves.historyFile).
+            let start = Date()
             // Stop cancels this task, and the cancellation reaches legendary as a Ctrl-C, which
             // keeps the download's progress for the next Install.
-            let status = try await withTaskCancellationHandler {
-                try await Task.detached {
-                    try store.install(game.app_name, into: bottle, control: control) { line in
-                        if EpicStore.refusedForLock(line) { refused.withLock { $0 = true } }
-                        if let why = EpicStore.installFailure(line) { failure.withLock { if $0 == nil { $0 = why } } }
-                        Task { @MainActor in self.appendLog(line); self.reportEpicDownload(line) }
-                    }
-                }.value
-            } onCancel: { control.stop() }
+            let status: Int32
+            do {
+                status = try await withTaskCancellationHandler {
+                    try await Task.detached {
+                        try store.install(game.app_name, into: bottle, control: control) { line in
+                            if EpicStore.refusedForLock(line) { refused.withLock { $0 = true } }
+                            if let why = EpicStore.installFailure(line) { failure.withLock { if $0 == nil { $0 = why } } }
+                            Task { @MainActor in self.appendLog(line); self.reportEpicDownload(line) }
+                        }
+                    }.value
+                } onCancel: { control.stop() }
+            } catch {
+                EpicSaves.recordInstall(app: game.app_name, driveC: bottle.driveC, start: start, end: Date(), finished: false)
+                throw error
+            }
+            EpicSaves.recordInstall(app: game.app_name, driveC: bottle.driveC, start: start, end: Date(),
+                                    finished: status == 0 && !refused.withLock({ $0 }) && !Task.isCancelled)
             try Task.checkCancellation()
             if refused.withLock({ $0 }) {
                 throw HighballError.failed(L("Another Epic download is still running, and legendary installs one game at a time. If Highball shows none, one started before Highball last quit is still going, so quit legendary in Activity Monitor and press Install again."))
@@ -3607,6 +3635,168 @@ final class AppState {
         return true
     }
 
+    /// An Epic game the player is asked about before it is removed: nothing tells the files the
+    /// game wrote in its install folder from legendary's (no manifest, and installed before
+    /// Highball kept a history), so Keep can't copy them. Nothing is removed until they agree.
+    struct EpicRemovalWithoutCopy {
+        let app: String
+        let title: String
+        let bottle: Bottle
+    }
+    var epicRemovalWithoutCopy: EpicRemovalWithoutCopy?
+
+    /// The player agreed to remove the Epic game without a copy of its install folder.
+    func epicRemoveWithoutCopy() {
+        guard let pending = epicRemovalWithoutCopy else { return }
+        epicRemovalWithoutCopy = nil
+        appendLog("\(pending.title): removing it without a copy of what it wrote in its folder, as asked")
+        epicUninstall(pending.app, title: pending.title, in: pending.bottle, deleteSaves: false, agreed: true)
+    }
+
+    /// Removes an Epic game through legendary, so its library stays right. Keep save data (the
+    /// default) first copies, as kept backups, the game's Epic save folder and every file the game
+    /// wrote in its install folder (EpicSaves.gameFiles), and stops if a copy fails; a later
+    /// install is offered them back. When nothing tells the game's files apart, the player is
+    /// asked first (epicRemovalWithoutCopy); `agreed` is their go-ahead. `deleteSaves` copies
+    /// nothing and also deletes the save folder when it lies inside the environment
+    /// (EpicSaves.removeSaves). What follows the uninstall waits for legendary's record of the
+    /// game to be gone, not the folder: legendary leaves the folder when the game wrote files in it.
+    private func epicUninstall(_ app: String, title: String, in bottle: Bottle, deleteSaves: Bool, agreed: Bool = false) {
+        let store = epicStore
+        let install = epicInstalls[app].map { URL(fileURLWithPath: $0, isDirectory: true) }
+        // Resolving the save folder runs legendary's sync-saves (moving nothing), which a player
+        // who turned Sync saves with Epic off didn't ask for.
+        let resolve = !epicCloudSavesOff.contains(app)
+        runBusy(String(format: L("Removing %@"), title),
+                done: DoneState(title: String(format: L("%@ removed"), title), ctaTitle: nil, cta: nil),
+                stop: .cancelTask(label: L("Stop"))) { [self] in
+            let saves = EpicSaves(store: store), prefix = bottle.url
+            let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
+            var saveFolder: URL?
+            var kept: [KeptSaves.Entry] = []
+            if let install, EpicStore.isInstalled(path: install.path, inDriveC: bottle.driveC) {
+                stage = L("Finding the game's saves")
+                saveFolder = await Task.detached { saves.uninstallSaveFolder(app, install: install, prefix: prefix, resolve: resolve, onLine: log) }.value
+                try checkStopped()
+                if !deleteSaves {
+                    let gameFiles = await Task.detached { saves.gameFiles(app, install: install, prefix: prefix) }.value
+                    try checkStopped()
+                    if gameFiles == nil, !agreed {
+                        epicRemovalWithoutCopy = EpicRemovalWithoutCopy(app: app, title: title, bottle: bottle)
+                        busyDoneOverride = .handedOff   // the question takes over; nothing was removed
+                        return
+                    }
+                    // These would go with the game, so they are copied before anything runs, and a
+                    // failed copy stops the removal. Never pruned.
+                    stage = L("Keeping a copy of the game's saves")
+                    kept = try await Task.detached {
+                        try saves.backUpForUninstall(app, install: install, prefix: prefix, saveFolder: saveFolder, gameFiles: gameFiles)
+                    }.value
+                    try checkStopped()   // a detached copy runs on through a Stop: nothing is removed after one
+                    for entry in kept {
+                        let (files, bytes) = SaveBackups.contents(of: entry.backup)
+                        let what = entry.name == EpicSaves.gameFolderName ? "the game wrote in its folder" : "in its save folder"
+                        appendLog("\(title): \(files) file\(files == 1 ? "" : "s") \(what) (\(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))) copied to \(entry.backup.path)")
+                    }
+                }
+            }
+            try checkStopped()
+            appendLog("\(title): asking the Epic tools to uninstall it")
+            _ = try await Task.detached { try store.uninstall(app, onLine: log) }.value
+            // legendary's records unreadable: the folder vanishing is all there is to go by.
+            let uninstalled = store.isRecorded(app).map { !$0 } ?? install.map { !FileManager.default.fileExists(atPath: $0.path) } ?? false
+            if install != nil, !uninstalled {
+                appendLog("\(title): the Epic tools still list it as installed, so no saves were kept or deleted")
+            }
+            if let install, uninstalled {
+                EpicSaves.forgetHistory(app: app, driveC: bottle.driveC)
+                if deleteSaves, let saveFolder {
+                    if saves.removeSaves(app, folder: saveFolder, install: install, prefix: prefix) {
+                        appendLog("\(title): saves at \(saveFolder.path) deleted, as asked")
+                    } else if FileManager.default.fileExists(atPath: saveFolder.path) {
+                        appendLog("\(title): saves at \(saveFolder.path) left in place: they are outside this environment, or hold other things Highball keeps")
+                    }
+                } else if deleteSaves {
+                    appendLog("\(title): Highball found no save folder for it to delete, so no saves outside the game's folder were deleted")
+                }
+                // Recorded once legendary's record is gone, so this install is never offered its own saves.
+                saves.keep(kept, of: app)
+                // What legendary didn't install keeps its folder, which a reinstall there can't use.
+                if FileManager.default.fileExists(atPath: install.path) {
+                    // legendary's own records, read locally and off the main actor; when they can't
+                    // be read, nothing tells whether another game is inside, so the folder stays.
+                    let prefix = bottle.url
+                    let removed = await Task.detached { () -> Bool? in
+                        guard let records = store.installRecords() else { return nil }
+                        let others = records.values.filter { !$0.isEmpty }.map { URL(fileURLWithPath: $0) }
+                        return saves.removeLeftover(install, prefix: prefix, stillInstalled: others)
+                    }.value
+                    switch removed {
+                    case true?: appendLog("\(title): removed the folder the Epic tools left at \(install.path)")
+                    case false?: appendLog("\(title): the Epic tools left \(install.path), with files they didn't install; Highball leaves it, as it holds more than this game")
+                    case nil: appendLog("\(title): the Epic tools left \(install.path); Highball couldn't read their install records, so it leaves the folder")
+                    }
+                }
+            }
+            await MainActor.run { self.refresh() }
+        }
+    }
+
+    /// Saves an uninstall kept, offered to a new install of the game (EpicSaves.keep).
+    struct EpicSavesToPutBack {
+        let app: String
+        let title: String
+        let install: URL
+        let bottle: Bottle
+        let kept: KeptSaves
+    }
+    var epicSavesToPutBack: EpicSavesToPutBack?
+
+    /// Installs whose put-back question was answered Not now, as GOG's (gogPutBackLater).
+    private var epicPutBackLater: Set<String> = []
+
+    /// Offers, once per install, to put back saves an uninstall kept of the same game. Only for
+    /// an install Highball made (EpicSaves.history), and while the game isn't running.
+    private func offerKeptEpicSaves() {
+        guard epicSavesToPutBack == nil else { return }
+        let all = EpicSaves(store: epicStore).keptSaves()   // one read, not one per installed game
+        guard !all.isEmpty else { return }
+        for (app, path) in epicInstalls.sorted(by: { $0.key < $1.key }) {
+            let install = URL(fileURLWithPath: path, isDirectory: true)
+            guard let bottle = bottles.first(where: { EpicStore.isInstalled(path: path, inDriveC: $0.driveC) }),
+                  let kept = KeptSavesFile.toOffer(all[app], install: install),
+                  !epicPutBackLater.contains(install.standardizedFileURL.path),
+                  EpicSaves.history(app: app, driveC: bottle.driveC).firstSetup != nil,
+                  !runningSessions.contains(where: { $0.libraryID == "epic:\(app)" }) else { continue }
+            let title = epicOwned.first { $0.app_name == app }?.app_title ?? app
+            epicSavesToPutBack = EpicSavesToPutBack(app: app, title: title, install: install, bottle: bottle, kept: kept)
+            return
+        }
+    }
+
+    /// The answer to the put-back question, as GOG's: Not now asks again the next time Highball
+    /// starts, the other two answer that install for good.
+    func epicPutBackSaves(_ answer: PutBackAnswer) {
+        guard let pending = epicSavesToPutBack else { return }
+        epicSavesToPutBack = nil
+        let saves = EpicSaves(store: epicStore)
+        if answer == .notNow {
+            epicPutBackLater.insert(pending.install.standardizedFileURL.path)
+        } else {
+            saves.markAsked(pending.app, install: pending.install)
+        }
+        guard answer == .putBack else { offerKeptEpicSaves(); return }
+        Task {
+            do {
+                let count = try await Task.detached { try saves.putBack(pending.kept, app: pending.app, install: pending.install, prefix: pending.bottle.url) }.value
+                appendLog("\(pending.title): \(count) saved file\(count == 1 ? "" : "s") put back from \(pending.kept.date.formatted()), what was there copied to save-backups first")
+            } catch {
+                fail(HighballError.failed(String(format: L("Highball could not put back all of %@'s saves: %@"), pending.title, error.localizedDescription)))
+            }
+            offerKeptEpicSaves()
+        }
+    }
+
     /// Quitting the app stops an Epic download the way Stop does, so it never runs on alone,
     /// holding legendary's install lock with nothing on screen to stop it (highball#323).
     func stopEpicInstall() { epicInstallControl?.stop() }
@@ -3626,10 +3816,21 @@ final class AppState {
         }
         let folder = epicInstalls[game.app_name].map { URL(fileURLWithPath: $0, isDirectory: true) }
         runBusy("Starting \(game.app_title)", done: .handedOff, stop: .killBottle(bottle, label: L("Stop"))) { [self] in
-            let store = epicStore
+            let store = epicStore, app = game.app_name
             await removeMacMetadataFiles(from: folder, of: game.app_title)
-            // Fresh single-use token, fetched off the main thread right before launch.
-            let info = try await Task.detached { try store.launchInfo(game.app_name) }.value
+            // Saves come down from Epic's cloud first, where the game keeps them there and the
+            // player hasn't turned it off (EpicSaves). They go back up after the game only when
+            // this check left the two sides safe to upload over.
+            var uploadAfter = false
+            if epicSignedIn, !epicCloudSavesOff.contains(app), let folder,
+               await Task.detached(operation: { EpicSaves(store: store).supportsCloudSaves(app) }).value {
+                stage = L("Bringing your saves down from Epic")
+                uploadAfter = try await epicSync(game, install: folder, in: bottle, direction: .download, beforePlay: true)
+            }
+            try Task.checkCancellation()
+            // A fresh single-use token, fetched off the main thread after the sync (which may
+            // wait on a question) and right before launch.
+            let info = try await Task.detached { try store.launchInfo(app) }.value
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             let box = LaunchOutcome()
             let log = logLine(box)
@@ -3668,10 +3869,104 @@ final class AppState {
                                                        alternateEngine: self.alternateEngine(for: bottle))
             }
             guard handedOff else { return }
-            beginSession(GameSession(title: game.app_title, bottleName: bottle.name, appid: nil, markers: markers,
-                                     renderer: (renderer ?? bottle.settings.renderer).rawValue, libraryID: "epic:\(game.app_name)",
-                                     startNotice: row?.startNotice, startNoticeMinutes: row?.startNoticeMinutes), processList: box.processList)
+            let session = GameSession(title: game.app_title, bottleName: bottle.name, appid: nil, markers: markers,
+                                      renderer: (renderer ?? bottle.settings.renderer).rawValue, libraryID: "epic:\(game.app_name)",
+                                      startNotice: row?.startNotice, startNoticeMinutes: row?.startNoticeMinutes)
+            if uploadAfter, let folder {
+                epicSessionEnds[session.id] = { [weak self] in
+                    Task { @MainActor in _ = try? await self?.epicSync(game, install: folder, in: bottle, direction: .upload, beforePlay: false) }
+                }
+            }
+            beginSession(session, processList: box.processList)
         }
+    }
+
+    // MARK: Epic cloud saves
+
+    static let epicCloudSavesOffKey = "epicCloudSavesOff"
+    /// Epic games the player turned cloud saves off for, by app name.
+    var epicCloudSavesOff = Set(UserDefaults.standard.stringArray(forKey: epicCloudSavesOffKey) ?? []) {
+        didSet { UserDefaults.standard.set(epicCloudSavesOff.sorted(), forKey: Self.epicCloudSavesOffKey) }
+    }
+
+    func epicSetCloudSaves(_ on: Bool, for app: String) {
+        if on { epicCloudSavesOff.remove(app) } else { epicCloudSavesOff.insert(app) }
+    }
+
+    /// Counts the GOG and Epic syncs that worked, so a game page shows a new last-synced time
+    /// as soon as one ends, also the upload after a session.
+    var savesSynced = 0
+
+    /// One Epic sync, asking the player when both sides changed (EpicSaves). Returns true when the
+    /// saves end up in step, or when only the other direction has work left, so an upload after
+    /// the game may follow; false when the player chose to decide later or the sync failed, so
+    /// nothing goes up afterwards. A download that failed partway has the Mac's saves put back
+    /// from their backup: before Play that throws, so the game never starts on them.
+    @discardableResult
+    private func epicSync(_ game: EpicStore.Game, install: URL, in bottle: Bottle?, direction: EpicSaves.Direction,
+                          beforePlay: Bool) async throws -> Bool {
+        let saves = EpicSaves(store: epicStore)
+        let title = game.app_title, app = game.app_name, prefix = bottle?.url
+        let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
+        let outcome = await Task.detached { saves.sync(app, install: install, prefix: prefix, direction: direction, onLine: log) }.value
+        switch outcome {
+        case .synced:
+            savesSynced += 1
+            return true
+        case .left:
+            appendLog(beforePlay ? "\(title): this Mac's saves are newer than Epic's cloud; they go up after you play"
+                                 : "\(title): Epic's cloud has newer saves from elsewhere; they come down before you next play")
+            return true
+        case let .failed(why):
+            appendLog("\(title): Epic cloud saves did not sync (\(why)); \(beforePlay ? "playing with this Mac's saves, which won't be uploaded afterwards" : "they stay on this Mac until the next sync")")
+            return false
+        case let .restored(why):
+            try epicRestored(title, why: why, beforePlay: beforePlay)
+            return false
+        case let .conflict(firstSync):
+            let choice: GOGSaveConflict.Choice = await withCheckedContinuation { continuation in
+                if let pending = gogSaveConflict {
+                    appendLog("\(pending.title): cloud saves left as they are this time (\(title) needed the question)")
+                    resolveGOGSaveConflict(.skip)
+                }
+                gogSaveConflict = GOGSaveConflict(title: title, beforePlay: beforePlay, epic: true, firstSync: firstSync) { continuation.resume(returning: $0) }
+            }
+            let forced: EpicSaves.Direction
+            switch choice {
+            case .useCloud: forced = .forceDownload
+            case .keepMac: forced = .forceUpload
+            case .skip:
+                appendLog("\(title): Epic cloud saves left as they are; \(beforePlay ? "this Mac's saves won't be uploaded after this session, and " : "")Highball asks again next time")
+                return false
+            }
+            // The player picked a side: the backup of what it replaces is kept, never pruned.
+            let again = await Task.detached { saves.sync(app, install: install, prefix: prefix, direction: forced, keepBackups: true, onLine: log) }.value
+            switch again {
+            case .synced:
+                savesSynced += 1
+                appendLog("\(title): \(choice == .useCloud ? "Epic's cloud saves replaced this Mac's, after a backup of them" : "Epic's cloud now has this Mac's saves as its newest")")
+                return true
+            case let .restored(why):
+                try epicRestored(title, why: why, beforePlay: beforePlay)
+                return false
+            case let .failed(why):
+                appendLog("\(title): Epic cloud saves did not sync (\(why))")
+                return false
+            case .left, .conflict:
+                appendLog("\(title): Epic cloud saves did not sync")
+                return false
+            }
+        }
+    }
+
+    /// A download that failed partway, with the Mac's saves put back: before Play it stops the
+    /// launch, after the game the player hears about it.
+    private func epicRestored(_ title: String, why: String, beforePlay: Bool) throws {
+        let message = String(format: L("Highball couldn't bring %@'s saves down from Epic (%@), so it put this Mac's saves back as they were."), title, why)
+        if beforePlay {
+            throw HighballError.failed(message + " " + L("The game didn't start. Try again, or turn off Sync saves with Epic on the game's page to play with this Mac's saves."))
+        }
+        fail(HighballError.failed(message))
     }
 
     /// Copies the bundled EpicGamesLauncher.exe stand-in into the game folder when it is missing
@@ -3731,6 +4026,7 @@ final class AppState {
     /// The disk half of `gogRefresh`: goggame-<id>.info files under each environment's install
     /// folders. Runs on every install-record change, like Steam's.
     private func refreshGOGInstalls() {
+        defer { offerKeptGOGSaves() }
         let found = Dictionary(bottles.map { ($0.name, GOGStore.installedGames(driveC: $0.driveC)) }, uniquingKeysWith: { a, _ in a })
         let store = gogStore
         for game in found.values.joined() { store.adoptManifest(for: game) }
@@ -3932,6 +4228,10 @@ final class AppState {
         runBusy(String(format: L("Updating %@"), item.title), expected: L("a large download; you can leave it running"),
                 stop: .cancelTask(label: L("Stop")), cleanup: { [weak self] in self?.gogInstallControl = nil }) { [self] in
             let store = gogStore
+            // What changes in the game's folder while the update and its setup run is the patch's,
+            // not saves (GOGStore.InstallHistory).
+            let start = Date()
+            defer { GOGStore.recordUpdate(for: game, driveC: bottle.driveC, start: start, end: Date()) }
             try await store.ensureInstalled()
             let info = try await Task.detached { try store.info(game.id) }.value
             let language = GOGStore.language(for: info.languages)
@@ -4064,7 +4364,7 @@ final class AppState {
                 let info = try? await Task.detached { try store.info(game.id) }.value
                 try await gogRunSetup(game, title: item.title, in: bottle, language: GOGStore.language(for: info?.languages ?? []))
             }
-            let saveFolders = useSaves ? await gogSaveLocations(game, in: bottle) : []
+            let saveFolders = useSaves ? (await gogSaveLocations(game, in: bottle) ?? []) : []
             for (location, folder) in saveFolders {
                 stage = L("Bringing your saves down from GOG")
                 try await gogSync(game, title: item.title, location: location, folder: folder, direction: .download, beforePlay: true)
@@ -4149,7 +4449,8 @@ final class AppState {
                 guard let self, !saveFolders.isEmpty else { return }
                 Task { @MainActor in
                     for (location, folder) in saveFolders {
-                        try? await self.gogSync(game, title: item.title, location: location, folder: folder, direction: .upload, beforePlay: false)
+                        _ = try? await self.gogSync(game, title: item.title, location: location, folder: folder, direction: .upload,
+                                                    beforePlay: false)
                     }
                 }
             }
@@ -4392,15 +4693,24 @@ final class AppState {
         }
     }
 
-    /// The game's cloud-save folders in this environment, empty when it has none or GOG cannot say.
-    private func gogSaveLocations(_ game: GOGStore.InstalledGame, in bottle: Bottle) async -> [(GOGSaves.Location, URL)] {
+    /// The game's cloud-save locations. Returns an empty array for a game without cloud saves
+    /// (no client id, or no configuration at GOG), and nil when GOG couldn't be reached. Both
+    /// lookups can need GOG: an offline install's client id comes from its build manifest.
+    private func gogCloudLocations(_ game: GOGStore.InstalledGame) async -> [GOGSaves.Location]? {
         let saves = GOGSaves(store: gogStore)
-        // Both can reach GOG (an offline install's client id comes from its build manifest).
-        let locations = await Task.detached { () -> [GOGSaves.Location]? in
-            guard let client = saves.clientID(for: game) else { return nil }
-            return (try? saves.locations(clientID: client)) ?? nil
+        return await Task.detached { () -> [GOGSaves.Location]? in
+            do {
+                guard let client = try saves.lookUpClientID(for: game) else { return [] }
+                return try saves.locations(clientID: client) ?? []
+            } catch { return nil }
         }.value
-        return (locations ?? []).compactMap { location in
+    }
+
+    /// The game's cloud-save folders in this environment: empty for a game without cloud saves,
+    /// nil when GOG couldn't be reached.
+    private func gogSaveLocations(_ game: GOGStore.InstalledGame, in bottle: Bottle) async -> [(GOGSaves.Location, URL)]? {
+        guard let locations = await gogCloudLocations(game) else { return nil }
+        return locations.compactMap { location in
             guard let folder = GOGSaves.resolve(location.template, game: game, driveC: bottle.driveC) else {
                 appendLog("\(game.title): cloud saves at \(location.template) have no folder here, skipping that one")
                 return nil
@@ -4418,18 +4728,32 @@ final class AppState {
     }
 
     /// One sync, asking the player on a conflict. Before Play the launch waits for the answer;
-    /// after the game it is asked whenever the player is back.
+    /// after the game it is asked whenever the player is back. Returns true when the local and
+    /// cloud saves end up in sync.
+    @discardableResult
     private func gogSync(_ game: GOGStore.InstalledGame, title: String, location: GOGSaves.Location, folder: URL,
-                         direction: GOGSaves.Direction, beforePlay: Bool) async throws {
+                         direction: GOGSaves.Direction, beforePlay: Bool) async throws -> Bool {
         let saves = GOGSaves(store: gogStore)
         let outcome = await Task.detached { saves.sync(game, location: location, folder: folder, direction: direction) { line in
             Task { @MainActor in self.appendLog(line) }
         } }.value
         switch outcome {
         case .synced:
-            return
+            savesSynced += 1
+            return true
+        case .refused:
+            // Before Play: this Mac's saves are newer, and the upload after the game takes them.
+            // After the game: GOG's cloud is newer and this Mac's saves didn't change, so there was
+            // nothing to upload; the download before the next Play brings the cloud's down.
+            if beforePlay {
+                appendLog("\(title): this Mac has newer saves than GOG's cloud, so nothing was downloaded; they go up after the game")
+            } else {
+                appendLog("\(title): GOG's cloud has newer saves, so nothing was uploaded; they come down before the next Play")
+            }
+            return false
         case let .failed(why):
             appendLog("\(title): cloud saves did not sync (\(why)); \(beforePlay ? "playing with the saves on this Mac" : "they stay on this Mac until the next sync")")
+            return false
         case .conflict:
             let choice: GOGSaveConflict.Choice = await withCheckedContinuation { continuation in
                 // One question at a time: an earlier one still open (another game's) is answered
@@ -4446,10 +4770,18 @@ final class AppState {
             case .keepMac: forced = .forceUpload
             case .skip:
                 appendLog("\(title): cloud saves left as they are this time")
-                return
+                return false
             }
-            let again = await Task.detached { saves.sync(game, location: location, folder: folder, direction: forced) }.value
-            appendLog("\(title): cloud saves \(again == .synced ? (choice == .useCloud ? "replaced with GOG's copy" : "uploaded from this Mac") : "did not sync")")
+            // The backup made before the side the player picked replaces the other is kept for good.
+            let again = await Task.detached { saves.sync(game, location: location, folder: folder, direction: forced, keepBackups: true) }.value
+            switch again {
+            case .synced:
+                savesSynced += 1
+                appendLog("\(title): cloud saves \(choice == .useCloud ? "replaced with GOG's copy" : "uploaded from this Mac"), a copy of what was replaced kept first")
+            case let .failed(why): appendLog("\(title): cloud saves did not sync (\(why))")
+            case .conflict, .refused: appendLog("\(title): cloud saves did not sync")
+            }
+            return again == .synced
         }
     }
 
@@ -4470,14 +4802,145 @@ final class AppState {
         rebuildLibrary()   // a program added by hand shows its own tile only while the GOG tile plays another
     }
 
-    /// Removes a GOG game from an environment: its own uninstaller first when an offline installer
-    /// left one (it cleans the registry), then the folder, then what gogdl kept about it.
-    private func gogUninstall(id: String, title: String, in bottle: Bottle) {
+    /// A GOG game the player is asked about before it is removed, because some of its saves
+    /// can't be backed up first. Nothing is removed until the player agrees.
+    struct GOGRemovalWithoutBackup {
+        let id: String
+        let title: String
+        let bottle: Bottle
+        /// What can still be backed up, and the locations that can't; nil when GOG couldn't be
+        /// reached to say where the saves are.
+        let plan: GOGSaves.UninstallPlan?
+        /// Nothing dates the install (GOGStore.history), so the files the game wrote in its folder
+        /// can't be told from the installer's and none are copied.
+        var gameFolderUncopied = false
+    }
+    var gogRemovalWithoutBackup: GOGRemovalWithoutBackup?
+
+    /// Saves an uninstall kept, offered to a new install of the game (GOGSaves.KeptSaves).
+    struct GOGSavesToPutBack {
+        let game: GOGStore.InstalledGame
+        let title: String
+        let kept: GOGSaves.KeptSaves
+    }
+    var gogSavesToPutBack: GOGSavesToPutBack?
+
+    /// Installs whose put-back question was answered Not now: asked again the next time Highball
+    /// starts, not in this run.
+    private var gogPutBackLater: Set<String> = []
+
+    /// Offers, once per install, to put back saves an uninstall kept of the same game. Only once
+    /// Highball has set the install up (its setup could replace what is put back) and while the
+    /// game isn't running.
+    private func offerKeptGOGSaves() {
+        guard gogSavesToPutBack == nil else { return }
+        let saves = GOGSaves(store: gogStore)
+        let all = saves.keptSaves()   // one read, not one per installed game
+        guard !all.isEmpty else { return }
+        for bottle in bottles {
+            for game in gogInstalledByBottle[bottle.name] ?? [] {
+                guard let kept = GOGSaves.toOffer(all[game.id], to: game),
+                      !gogPutBackLater.contains(game.folder.standardizedFileURL.path),
+                      !gogStore.hasManifest(game) || GOGStore.setupDone(for: game, driveC: bottle.driveC),
+                      !runningSessions.contains(where: { $0.libraryID == "gog:\(game.id)" && $0.bottleName == bottle.name }) else { continue }
+                gogSavesToPutBack = GOGSavesToPutBack(game: game, title: game.title, kept: kept)
+                return
+            }
+        }
+    }
+
+    enum PutBackAnswer { case putBack, notNow, dontAskAgain }
+
+    /// The answer to the put-back question. Not now asks again the next time Highball starts;
+    /// the other two answer that install for good.
+    func gogPutBackSaves(_ answer: PutBackAnswer) {
+        guard let pending = gogSavesToPutBack else { return }
+        gogSavesToPutBack = nil
+        let saves = GOGSaves(store: gogStore)
+        if answer == .notNow {
+            gogPutBackLater.insert(pending.game.folder.standardizedFileURL.path)
+        } else {
+            saves.markAsked(pending.game)
+        }
+        guard answer == .putBack else { offerKeptGOGSaves(); return }
+        Task {
+            do {
+                let count = try await Task.detached { try saves.putBack(pending.kept, into: pending.game) }.value
+                appendLog("\(pending.title): \(count) saved file\(count == 1 ? "" : "s") put back from \(pending.kept.date.formatted()), what was there copied to save-backups first")
+            } catch {
+                fail(HighballError.failed(String(format: L("Highball could not put back all of %@'s saves: %@"), pending.title, error.localizedDescription)))
+            }
+            offerKeptGOGSaves()
+        }
+    }
+
+    /// The player agreed to remove the game although some of its saves can't be backed up.
+    func gogRemoveWithoutBackup() {
+        guard let pending = gogRemovalWithoutBackup else { return }
+        gogRemovalWithoutBackup = nil
+        appendLog("\(pending.title): removing it without a backup of every save, as asked")
+        gogUninstall(id: pending.id, title: pending.title, in: pending.bottle, agreed: pending)
+    }
+
+    /// Removes a GOG game from an environment: backs up its saves inside the game's folder (the
+    /// cloud-save folders, and what the game wrote there since Highball set it up), runs the
+    /// game's own uninstaller when an offline installer left one (it cleans the registry), then
+    /// deletes the folder and what gogdl kept about the game. When some saves can't be backed up
+    /// (GOG unreachable, a location Highball can't resolve, or nothing dates the install so the
+    /// game's own files in its folder can't be told apart), the player is asked first
+    /// (gogRemovalWithoutBackup); `agreed` is their go-ahead. `deleteSaves` copies nothing and
+    /// also deletes the game's save folders elsewhere in the environment.
+    private func gogUninstall(id: String, title: String, in bottle: Bottle, deleteSaves: Bool = false,
+                              agreed: GOGRemovalWithoutBackup? = nil) {
         guard let game = gogInstalledByBottle[bottle.name]?.first(where: { $0.id == id }) else { return }
         let store = gogStore
+        let others = gogInstalledByBottle.filter { $0.key != bottle.name }.values.joined().filter { $0.id == id }.map(\.folder)
         runBusy(String(format: L("Removing %@"), title),
                 done: DoneState(title: String(format: L("%@ removed"), title), ctaTitle: nil, cta: nil),
                 stop: .killBottle(bottle, label: L("Stop"))) { [self] in
+            // The game folder copy tells the game's files from the installer's by when the install
+            // was set up or installed; with neither, Keep can't copy them and must say so.
+            let datable = GOGSaves.canTellGameFiles(game, driveC: bottle.driveC)
+            let plan: GOGSaves.UninstallPlan
+            if let agreed {
+                plan = agreed.plan ?? GOGSaves.UninstallPlan()
+            } else {
+                stage = L("Finding the game's saves")
+                let found = await gogCloudLocations(game).map { GOGSaves.uninstallPlan($0, game: game, driveC: bottle.driveC) }
+                if deleteSaves {
+                    plan = found ?? GOGSaves.UninstallPlan()
+                    if found == nil { appendLog("\(title): GOG couldn't be reached, so save folders outside the game's folder stay") }
+                } else if let found, found.cannotBackUp.isEmpty, datable {
+                    plan = found
+                } else {
+                    gogRemovalWithoutBackup = GOGRemovalWithoutBackup(id: id, title: title, bottle: bottle, plan: found,
+                                                                      gameFolderUncopied: !datable)
+                    busyDoneOverride = .handedOff   // the question takes over; nothing was removed
+                    return
+                }
+                try checkStopped()
+            }
+            // Saves inside the game's folder would be deleted with it, so back them up before
+            // anything runs, and stop if a backup fails. These backups are never pruned.
+            let saves = GOGSaves(store: store)
+            var kept: [(name: String, folder: URL, backup: URL)] = []
+            if !deleteSaves {
+                stage = L("Keeping a copy of the game's saves")
+                for (location, folder) in plan.backUp {
+                    if let copy = try await Task.detached(operation: { try saves.backUpLocal(game, location: location, folder: folder, kept: true) }).value {
+                        appendLog("\(title): saves inside the game's folder copied to \(copy.path)")
+                        kept.append((location.name, folder, copy))
+                    }
+                    try checkStopped()   // a detached copy runs on through a Stop: nothing is removed after one
+                }
+                let skipping = plan.backUp.map(\.folder)
+                if let copy = try await Task.detached(operation: { try saves.backUpGameFolder(game, driveC: bottle.driveC, skipping: skipping) }).value {
+                    let (files, bytes) = GOGSaves.contents(of: copy)
+                    appendLog("\(title): \(files) file\(files == 1 ? "" : "s") the game wrote in its folder (\(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))) copied to \(copy.path)")
+                    kept.append((GOGSaves.gameFolder.name, game.folder, copy))
+                }
+            }
+            try checkStopped()
             let uninstaller = game.folder.appending(path: "unins000.exe")
             if FileManager.default.fileExists(atPath: uninstaller.path), let engine = engine(for: bottle) {
                 stage = L("Running the game's own uninstaller")
@@ -4495,6 +4958,14 @@ final class AppState {
             store.forget(id, otherInstallsRemain: elsewhere)
             GOGSaves(store: store).forget(game)
             try? FileManager.default.removeItem(at: GOGStore.setupMarker(for: game, driveC: bottle.driveC))
+            try? FileManager.default.removeItem(at: GOGStore.historyFile(for: game, driveC: bottle.driveC))
+            if deleteSaves {
+                let (removed, leftAlone) = saves.removeSaves(plan, game: game, driveC: bottle.driveC)
+                for folder in removed { appendLog("\(title): saves at \(folder.path) deleted, as asked") }
+                for folder in leftAlone { appendLog("\(title): saves at \(folder.path) left in place: they are outside this environment, or hold other things Highball keeps") }
+            }
+            // Recorded once the folder is gone, so this install is never offered its own saves.
+            saves.keep(kept, of: game, otherInstalls: others)
             appendLog("\(title): removed from \(bottle.name)")
             refreshInstalledGames()   // the tile leaves now, not at the next folder watch
         }
