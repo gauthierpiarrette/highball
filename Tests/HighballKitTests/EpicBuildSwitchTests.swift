@@ -3,16 +3,22 @@ import XCTest
 
 /// Replacing an Epic build: the old one stays recoverable until the new one is in.
 final class EpicBuildSwitchTests: XCTestCase {
-    final class Log: @unchecked Sendable { var steps: [String] = [] }
+    /// The steps run on another task while a test watches them, so reads and writes take the lock.
+    final class Log: @unchecked Sendable {
+        private let lock = NSLock()
+        private var recorded: [String] = []
+        var steps: [String] { lock.withLock { recorded } }
+        func add(_ step: String) { lock.withLock { recorded.append(step) } }
+    }
 
     private func steps(_ log: Log, hasNew: Bool = true, replacing: Bool = true,
                        install: @escaping () async throws -> Void = {}) -> EpicBuildSwitch.Steps {
         EpicBuildSwitch.Steps(
-            hasNewBuild: { log.steps.append("check"); return hasNew },
-            dropOldRecord: replacing ? { log.steps.append("drop") } : nil,
-            install: { log.steps.append("install"); try await install() },
-            restoreOldRecord: { log.steps.append("restore") },
-            deleteOldFiles: { log.steps.append("delete") })
+            hasNewBuild: { log.add("check"); return hasNew },
+            dropOldRecord: replacing ? { log.add("drop") } : nil,
+            install: { log.add("install"); try await install() },
+            restoreOldRecord: { log.add("restore") },
+            deleteOldFiles: { log.add("delete") })
     }
 
     func testTheOldFilesGoOnlyOnceTheNewBuildIsIn() async throws {
@@ -43,9 +49,9 @@ final class EpicBuildSwitchTests: XCTestCase {
         let started = AsyncStream<Void>.makeStream()
         let task = Task {
             try await EpicBuildSwitch.run(EpicBuildSwitch.Steps(
-                hasNewBuild: { log.steps.append("check"); started.continuation.yield(); try? await Task.sleep(for: .milliseconds(200)); return true },
-                dropOldRecord: { log.steps.append("drop") }, install: { log.steps.append("install") },
-                restoreOldRecord: { log.steps.append("restore") }, deleteOldFiles: { log.steps.append("delete") }))
+                hasNewBuild: { log.add("check"); started.continuation.yield(); try? await Task.sleep(for: .milliseconds(200)); return true },
+                dropOldRecord: { log.add("drop") }, install: { log.add("install") },
+                restoreOldRecord: { log.add("restore") }, deleteOldFiles: { log.add("delete") }))
         }
         for await _ in started.stream { break }
         task.cancel()
