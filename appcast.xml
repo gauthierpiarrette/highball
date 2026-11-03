@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.10.25</title>
+      <description><![CDATA[Forza Horizon 6 about 20% faster on its native engine and no controller crash, saves kept on uninstall, Steam accounts]]></description>
+      <pubDate>Tue, 03 Nov 2026 19:03:48 +0100</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.10.25/Highball-0.10.25.zip" sparkle:version="0.10.25" sparkle:shortVersionString="0.10.25" sparkle:edSignature="32aLDfLFoWgogE43wZz+5XLuoJxIK6EDiz7HuGYgzK3R9yTr0FvZTZ3qqeyLTM6quv+VWhO6WHce9BwH81DzCg==" length="8959045" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.10.24</title>
       <description><![CDATA[Forza Horizon 6 can run on a native Apple silicon engine, without the hitch every second]]></description>
       <pubDate>Sun, 01 Nov 2026 10:43:06 +0100</pubDate>
