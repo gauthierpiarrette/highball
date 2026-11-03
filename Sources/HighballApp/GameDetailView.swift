@@ -617,9 +617,11 @@ struct GameDetailView: View {
         case .epic:
             // Nothing until Epic's library lists the game, as for Steam.
             guard let game = state.epicOwned.first(where: { $0.app_name == item.epicAppName }) else { return [] }
-            return [game.cloudSaves
-                    ? L("Epic's cloud keeps this game's saves when Epic's own launcher plays it. Played from Highball, they stay on this Mac.")
-                    : L("This game keeps its own saves, on this Mac or with its publisher's service.")]
+            guard game.cloudSaves else { return [L("This game keeps its own saves, on this Mac or with its publisher's service.")] }
+            // Highball syncs a Windows build's saves (EpicSaves); the toggle and sign-in decide.
+            let syncing = !item.installedOnMac && state.epicSignedIn && !state.epicCloudSavesOff.contains(game.app_name)
+            return [syncing ? L("This game's saves sync with Epic's cloud before and after you play.")
+                            : L("Epic's cloud keeps this game's saves when Epic's own launcher plays it. Played from Highball, they stay on this Mac.")]
         default: break
         }
         guard cloudSetupAsked else { return [L("Checking…")] }
@@ -662,7 +664,9 @@ struct GameDetailView: View {
         case .epic:
             VStack(alignment: .leading, spacing: 10) {
                 Text(L("How Epic's cloud saves work")).font(.headline)
-                Text(L("Epic's launcher syncs a game's saves with Epic's cloud when the game sets a cloud save folder. Highball plays Epic games through legendary, and their saves stay on this Mac."))
+                Text(L("Epic's launcher syncs a game's saves with Epic's cloud when the game sets a cloud save folder."))
+                    .font(.callout).foregroundStyle(.secondary)
+                Text(L("Highball does the same for a Windows version: before Play, newer saves come down, after this Mac's are backed up; when the game ends, this Mac's go back up. If both changed since the last sync, Highball asks which to keep."))
                     .font(.callout).foregroundStyle(.secondary)
             }
             .padding(16).frame(width: 380, alignment: .leading)

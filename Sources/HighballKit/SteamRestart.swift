@@ -103,6 +103,11 @@ public enum SteamRestart {
         for (key, what) in inherited where (live[key] == "1") != (wanted[key] == "1") {
             reasons.append("it runs with \(what) \(live[key] == "1" ? "on" : "off") and the game wants it \(wanted[key] == "1" ? "on" : "off")")
         }
+        // Wine re-executes a 32-bit program through the x87 sidecar when it starts, and the game
+        // inherits the variable from the client.
+        if live["ROSETTA_X87_PATH"] != wanted["ROSETTA_X87_PATH"] {
+            reasons.append("it runs with the x87 sidecar \(live["ROSETTA_X87_PATH"] == nil ? "off" : "on") and the game wants it \(wanted["ROSETTA_X87_PATH"] == nil ? "off" : "on")")
+        }
         // Frame generation is a family of LSFGM_ variables the shim reads when the game starts,
         // so a toggle flipped while the client runs would otherwise leave the game where the
         // client was (highball#109 follow-up). Any difference in the family restarts the client.
