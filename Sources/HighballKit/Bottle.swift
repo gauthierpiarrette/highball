@@ -923,6 +923,14 @@ public struct Bottle: Sendable {
             let inserted = (env["DYLD_INSERT_LIBRARIES"] ?? "").split(separator: ":").map(String.init)
             env["DYLD_INSERT_LIBRARIES"] = ([lib.path] + inserted.filter { $0 != lib.path }).joined(separator: ":")
         }
+        // Old 32-bit games do their maths on the x87 unit, which Rosetta runs slowly. A game's recipe
+        // asks for athei's x87sidecar with HB_X87SIDECAR=1, and it applies only where the engine
+        // ships the sidecar and runs under Rosetta. Never on for everything: the sidecar relies on
+        // how Rosetta lays out its translations, and checks that at each start (highball#165).
+        env.removeValue(forKey: "ROSETTA_X87_PATH")
+        if env["HB_X87SIDECAR"] == "1", engine.manifest.requiresRosetta, let sidecar = engine.x87Sidecar {
+            env["ROSETTA_X87_PATH"] = sidecar.path
+        }
         // A recipe's value can depend on this Mac (a video memory budget from its memory), and an engine's or a recipe's
         // on this environment (a driver's shader cache kept inside it, and gone with it).
         return env.mapValues { MacVariables.expand($0).replacingOccurrences(of: "${environment}", with: url.path) }
