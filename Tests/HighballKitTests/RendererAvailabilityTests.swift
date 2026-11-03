@@ -160,6 +160,23 @@ final class RendererAvailabilityTests: XCTestCase {
         XCTAssertNil(fine.note)
     }
 
+    /// A game's recipe asks for athei's x87sidecar with HB_X87SIDECAR=1 (highball#165), and the
+    /// launch gets ROSETTA_X87_PATH only where the engine ships the sidecar.
+    func testTheX87SidecarIsSetOnlyForAGameThatAsksAndAnEngineThatShipsIt() throws {
+        let e = try engine(accepted: false)
+        var asks = bottle(renderer: .dxmt)
+        asks.settings.environment = ["HB_X87SIDECAR": "1"]
+        XCTAssertNil(try asks.environment(engine: e)["ROSETTA_X87_PATH"], "no sidecar in this engine")
+        let tool = e.root.appending(path: "x87sidecar/x87sidecar")
+        try FileManager.default.createDirectory(at: tool.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: tool.path, contents: Data(), attributes: [.posixPermissions: 0o755])
+        XCTAssertEqual(try asks.environment(engine: e)["ROSETTA_X87_PATH"], tool.path)
+        XCTAssertNil(try bottle(renderer: .dxmt).environment(engine: e)["ROSETTA_X87_PATH"], "a game that doesn't ask")
+        var stale = bottle(renderer: .dxmt)
+        stale.settings.environment = ["ROSETTA_X87_PATH": "/somewhere/else"]
+        XCTAssertNil(try stale.environment(engine: e)["ROSETTA_X87_PATH"], "only the switch sets it")
+    }
+
     func testEnvironmentFollowsTheDegradedRendererInsteadOfThrowing() throws {
         let e = try engine(accepted: false)
         let env = try bottle(renderer: .d3dmetal).environment(engine: e)
