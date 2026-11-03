@@ -1,4 +1,4 @@
-/* audiobuf: loaded into Wine's processes with DYLD_INSERT_LIBRARIES, it does three things.
+/* audiobuf: loaded into Wine's processes with DYLD_INSERT_LIBRARIES, it does four things.
  *
  * It caps the I/O buffer of each audio unit Wine starts at 5 ms (half of Wine's 10 ms shared-mode period). The device
  * otherwise moves its whole buffer at once, 512 frames, 10.7 ms at 48 kHz, more than a period. For output, a game that
@@ -24,13 +24,22 @@
  * priority 0 until it runs again, so on a busy Mac the clock woke games late, up to 29 ms, and their sound ran dry
  * (highball#444). The Wine 11 engines run it at a fixed high priority, which a busy Mac still delayed.
  *
- * HB_AUDIOLIMIT=0 turns the limiter off, HB_AUDIORT=0 the real-time clock. HB_AUDIOBUF_DEBUG=1 logs each unit, each
- * clock made real time and, every 10 s of sound, the frames limited.
+ * It keeps a game on the Mac's output when the Mac changes it. Wine binds each stream's unit to the device that was the
+ * default when the stream opened and never listens for a change, so a game went on playing to the speakers after
+ * AirPods connected (highball#460). The library listens for the change and moves each unit that was on Wine's default
+ * to the new one, also a stream opened later, because Wine keeps the default its process started with. The device is
+ * set on the running unit and the stream goes on after a gap of 0.3 to 0.5 s (measured on Wine 10, AirPods and a
+ * MacBook's speakers). A unit on any other device stays there: the game picked it. Microphones stay where they are.
+ *
+ * HB_AUDIOLIMIT=0 turns the limiter off, HB_AUDIORT=0 the real-time clock, HB_AUDIOFOLLOW=0 the move to the Mac's new
+ * output. HB_AUDIOBUF_DEBUG=1 logs each unit, each clock made real time, each move and, every 10 s of sound, the
+ * frames limited.
  *
  * Shipped as an engine component, whose Wine has no source to patch for the Sikarugir builds.
  * Build: Scripts/build-audiobuf.sh */
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreAudio/CoreAudio.h>
+#include <dispatch/dispatch.h>
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <mach/thread_policy.h>
@@ -154,10 +163,9 @@ static int is_capture(AudioUnit unit)
     return in_on && !out_on;
 }
 
-static OSStatus hb_AudioUnitInitialize(AudioUnit unit)
+static void cap_io_buffer(AudioUnit unit, int capture)
 {
     AudioStreamBasicDescription hw;
-    int capture = is_capture(unit);
     UInt32 hw_size = sizeof(hw), cur = 0, cur_size = sizeof(cur);
     if (AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat, capture ? kAudioUnitScope_Input : kAudioUnitScope_Output,
                              capture ? 1 : 0, &hw, &hw_size) == noErr
@@ -171,9 +179,81 @@ static OSStatus hb_AudioUnitInitialize(AudioUnit unit)
                         (unsigned)cur, (unsigned)frames, hw.mSampleRate, (int)st);
         }
     }
+}
+
+static AudioUnit followers[MAX_UNITS];
+static pthread_mutex_t followers_lock = PTHREAD_MUTEX_INITIALIZER;
+static AudioDeviceID wine_default;      /* the default when this process first opened a stream, which Wine keeps using */
+
+static AudioDeviceID default_output(void)
+{
+    AudioObjectPropertyAddress a = { kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+    AudioDeviceID dev = kAudioObjectUnknown;
+    UInt32 size = sizeof(dev);
+    return AudioObjectGetPropertyData(kAudioObjectSystemObject, &a, 0, NULL, &size, &dev) == noErr ? dev : kAudioObjectUnknown;
+}
+
+static AudioDeviceID unit_device(AudioUnit unit)
+{
+    AudioDeviceID dev = kAudioObjectUnknown;
+    UInt32 size = sizeof(dev);
+    AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &dev, &size);
+    return dev;
+}
+
+static void move_unit(AudioUnit unit, AudioDeviceID to)
+{
+    AudioDeviceID from = unit_device(unit);
+    if (to == kAudioObjectUnknown || from == to) return;
+    OSStatus st = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &to, sizeof(to));
+    if (debug()) fprintf(stderr, "audiofollow: unit %p device %u -> %u, status %d\n", (void *)unit, (unsigned)from, (unsigned)to, (int)st);
+    if (st == noErr) cap_io_buffer(unit, 0);                  /* the size is per device, and the new device starts at its own */
+}
+
+/* Runs on a queue of our own, so a move does not hold up Core Audio's notification thread. */
+static void default_changed(void)
+{
+    AudioDeviceID to = default_output();
+    pthread_mutex_lock(&followers_lock);
+    for (int i = 0; i < MAX_UNITS; i++) if (followers[i]) move_unit(followers[i], to);
+    pthread_mutex_unlock(&followers_lock);
+}
+
+static void follow_default(AudioUnit unit)
+{
+    const char *off = getenv("HB_AUDIOFOLLOW");
+    if (off && off[0] == '0') return;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        AudioObjectPropertyAddress a = { kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+        wine_default = default_output();
+        AudioObjectAddPropertyListenerBlock(kAudioObjectSystemObject, &a, dispatch_queue_create("highball.audiofollow", NULL),
+                                            ^(UInt32 n, const AudioObjectPropertyAddress *addrs) { default_changed(); });
+    });
+    if (unit_device(unit) != wine_default) return;
+    pthread_mutex_lock(&followers_lock);
+    for (int i = 0; i < MAX_UNITS; i++) if (!followers[i]) { followers[i] = unit; break; }
+    move_unit(unit, default_output());                        /* a stream opened after a change starts on the new output */
+    pthread_mutex_unlock(&followers_lock);
+}
+
+static OSStatus hb_AudioUnitInitialize(AudioUnit unit)
+{
+    int capture = is_capture(unit);
+    if (!capture) follow_default(unit);
+    cap_io_buffer(unit, capture);
     OSStatus r = AudioUnitInitialize(unit);
     if (r == noErr) add_limiter(unit);
     return r;
+}
+
+/* Wine disposes of a unit without uninitializing it. */
+static OSStatus hb_AudioComponentInstanceDispose(AudioComponentInstance unit)
+{
+    pthread_mutex_lock(&followers_lock);
+    for (int i = 0; i < MAX_UNITS; i++) if (followers[i] == unit) followers[i] = NULL;
+    pthread_mutex_unlock(&followers_lock);
+    return AudioComponentInstanceDispose(unit);
 }
 
 /* Wine starts one clock thread per audio stream, at THREAD_PRIORITY_TIME_CRITICAL, to wake the stream's client every
@@ -223,5 +303,6 @@ __attribute__((used)) static const struct { const void *replacement; const void 
     __attribute__((section("__DATA,__interpose"))) = {
     { (const void *)hb_AudioUnitInitialize, (const void *)AudioUnitInitialize },
     { (const void *)hb_AudioUnitUninitialize, (const void *)AudioUnitUninitialize },
+    { (const void *)hb_AudioComponentInstanceDispose, (const void *)AudioComponentInstanceDispose },
     { (const void *)hb_pthread_setname_np, (const void *)pthread_setname_np },
 };
