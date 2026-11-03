@@ -638,6 +638,14 @@ public struct InstalledEngine: Sendable {
         let lib = frameworksDir.appending(path: "libhbaudiobuf.dylib")
         return FileManager.default.fileExists(atPath: lib.path) ? lib : nil
     }
+    /// athei's x87sidecar (MIT), when the engine ships it as a component. Wine re-executes a
+    /// 32-bit program through it when ROSETTA_X87_PATH names it (the Wine 11 engines' patch 0012,
+    /// cooperative attach, no entitlements), and it compiles the program's x87 maths much faster
+    /// than Rosetta does: Tale of Wuxia's maps went from 4.4 to 45 fps (highball-db#352).
+    public var x87Sidecar: URL? {
+        let tool = root.appending(path: "x87sidecar/x87sidecar")
+        return FileManager.default.isExecutableFile(atPath: tool.path) ? tool : nil
+    }
     public var renderersDir: URL { root.appending(path: "renderers", directoryHint: .isDirectory) }
     public var wineBinary: URL { engineDir.appending(path: "bin/wine") }
     public var wineserverBinary: URL { engineDir.appending(path: "bin/wineserver") }
