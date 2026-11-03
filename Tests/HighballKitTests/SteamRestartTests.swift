@@ -128,6 +128,16 @@ final class SteamRestartTests: XCTestCase {
         XCTAssertEqual(SteamRestart.rendererName(ofLive: [:]), "wined3d")
     }
 
+    /// The x87 sidecar is chosen when a 32-bit program starts, and the game inherits the variable
+    /// from the client, so a client started without it is restarted for a game that asks for it.
+    func testAClientWithoutTheX87SidecarIsRestartedForAGameThatWantsIt() {
+        let base = ["WINEDLLPATH_PREPEND": "/e/dxmt", "WINEMSYNC": "1"]
+        var wanted = base; wanted["ROSETTA_X87_PATH"] = "/e/x87sidecar/x87sidecar"
+        XCTAssertNotNil(SteamRestart.reason(live: base, wanted: wanted, wantedRenderer: "dxmt"))
+        XCTAssertNotNil(SteamRestart.reason(live: wanted, wanted: base, wantedRenderer: "dxmt"))
+        XCTAssertNil(SteamRestart.reason(live: wanted, wanted: wanted, wantedRenderer: "dxmt"))
+    }
+
     /// The audio buffer library loads when a process starts and the game inherits it from the
     /// client, so a client running without it is restarted for a launch that wants it (highball#127).
     func testAClientWithoutTheAudioLibraryIsRestartedForALaunchThatWantsIt() {

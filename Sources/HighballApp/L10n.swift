@@ -480,8 +480,9 @@ enum L10n {
         "Steam syncs a game's saves with Steam Cloud itself, before and after you play, for the account signed in to Steam. Highball starts the game through Steam, so nothing changes. The Steam Cloud saves row is Steam's copy on this Mac.":
             "Steam synchronise lui-même les sauvegardes d’un jeu avec Steam Cloud, avant et après chaque partie, pour le compte connecté à Steam. Highball lance le jeu par Steam, rien ne change donc. La ligne Sauvegardes Steam Cloud montre la copie de Steam sur ce Mac.",
         "How Epic's cloud saves work": "Comment fonctionnent les sauvegardes en ligne d’Epic",
-        "Epic's launcher syncs a game's saves with Epic's cloud when the game sets a cloud save folder. Highball plays Epic games through legendary, and their saves stay on this Mac.":
-            "Le lanceur d’Epic synchronise les sauvegardes d’un jeu avec le cloud d’Epic quand le jeu définit un dossier de sauvegarde en ligne. Highball lance les jeux Epic par legendary, et leurs sauvegardes restent sur ce Mac.",
+        "Epic's launcher syncs a game's saves with Epic's cloud when the game sets a cloud save folder.": "Le lanceur d’Epic synchronise les sauvegardes d’un jeu avec le cloud d’Epic quand le jeu définit un dossier de sauvegarde en ligne.",
+        "Highball does the same for a Windows version: before Play, newer saves come down, after this Mac's are backed up; when the game ends, this Mac's go back up. If both changed since the last sync, Highball asks which to keep.": "Highball fait de même pour une version Windows : avant de jouer, les sauvegardes plus récentes sont téléchargées, après une copie de celles de ce Mac ; à la fin du jeu, celles de ce Mac sont renvoyées. Si les deux ont changé depuis la dernière synchronisation, Highball demande lesquelles garder.",
+        "This game's saves sync with Epic's cloud before and after you play.": "Les sauvegardes de ce jeu se synchronisent avec le cloud Epic avant et après chaque partie.",
         "This Mac version is 32-bit, which current macOS can't run.": "Cette version Mac est en 32 bits, que les macOS récents ne lancent plus.",
         "Highball's game database says this Mac version is not the one to play: the Windows version is.":
             "La base de jeux de Highball indique que cette version Mac n’est pas celle à lancer : c’est la version Windows.",
