@@ -915,9 +915,10 @@ public struct Bottle: Sendable {
         // that goes over full scale, as the last stage of Windows' audio engine does, where the Mac
         // would clip it (Paperback, highball-db#349). Builds after 20261008 cap microphones the same
         // way, where Wine dropped 32 frames a period (highball#350), and run Wine's per-stream audio
-        // clock in real time, which a busy Mac otherwise woke late (highball#444). HB_AUDIOBUF=0 in
-        // an environment's variables leaves the library out, HB_AUDIOLIMIT=0 keeps it without the
-        // limiter, HB_AUDIORT=0 without the real-time clock.
+        // clock in real time, which a busy Mac otherwise woke late (highball#444), and move a game
+        // to the Mac's output when it changes (highball#460). HB_AUDIOBUF=0 in an environment's
+        // variables leaves the library out, HB_AUDIOLIMIT=0 keeps it without the limiter,
+        // HB_AUDIORT=0 without the real-time clock, HB_AUDIOFOLLOW=0 without the move.
         if let lib = engine.audioBufferLibrary, env["HB_AUDIOBUF"] != "0" {
             let inserted = (env["DYLD_INSERT_LIBRARIES"] ?? "").split(separator: ":").map(String.init)
             env["DYLD_INSERT_LIBRARIES"] = ([lib.path] + inserted.filter { $0 != lib.path }).joined(separator: ":")
