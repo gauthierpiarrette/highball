@@ -540,7 +540,7 @@ struct Tricks: AsyncParsableCommand {
         env["WINESERVER_BIN"] = eng.wineserverBinary.path
         env["WINE_BINDIR"] = eng.wineBinary.deletingLastPathComponent().path
         env["WINESERVER"] = eng.wineserverBinary.path
-        env["PATH"] = "\(eng.engineDir.appending(path: "bin").path):/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = WinetricksWine.pathWithTools("\(eng.engineDir.appending(path: "bin").path):/usr/bin:/bin:/usr/sbin:/sbin")
         // bash, as the recipe path runs it (winetricks' macOS guidance). bash drops the DYLD vars
         // under SIP like sh does, so they reach wine through WinetricksWine's script.
         env = WinetricksWine.environment(env, wine: eng.wineBinary, script: try WinetricksWine.installScript(in: HighballPaths()))

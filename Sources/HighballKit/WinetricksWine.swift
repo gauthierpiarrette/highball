@@ -55,4 +55,17 @@ public enum WinetricksWine {
         out["WINE"] = script.path
         return out
     }
+
+    /// `path` with Highball's tool folders in front. winetricks shells out to cabextract for
+    /// Microsoft's cabinet installers (the core fonts among them) and macOS does not ship it, so
+    /// the app bundles one under Resources/tools (highball#96). HIGHBALL_TOOLS names another
+    /// directory, for the CLI. Shared by recipes and `highball tricks`, whose PATH once lacked it
+    /// and failed every verb that needs cabextract (db#941).
+    public static func pathWithTools(_ path: String?) -> String? {
+        let tools = [ProcessInfo.processInfo.environment["HIGHBALL_TOOLS"].map { URL(fileURLWithPath: $0) },
+                     Bundle.main.resourceURL?.appending(path: "tools", directoryHint: .isDirectory)]
+            .compactMap { $0 }.filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !tools.isEmpty else { return path }
+        return (tools.map(\.path) + [path ?? ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"]).joined(separator: ":")
+    }
 }

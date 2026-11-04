@@ -45,6 +45,23 @@ final class WinetricksWineTests: XCTestCase {
         XCTAssertEqual(out.trimmingCharacters(in: .whitespacesAndNewlines), "wine got: cmd.exe /c echo %AppData%")
     }
 
+    /// `highball tricks` built its PATH from the engine and the system folders only, so a verb that
+    /// shells out to cabextract failed from the CLI while the same recipe step worked (db#941).
+    func testToolFoldersGoInFrontOfThePathBothCallersGive() throws {
+        let tools = FileManager.default.temporaryDirectory.appending(path: "hb-tools-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tools); unsetenv("HIGHBALL_TOOLS") }
+        let engineBin = "/engines/e/engine/bin:/usr/bin:/bin"
+        unsetenv("HIGHBALL_TOOLS")
+        let without = WinetricksWine.pathWithTools(engineBin)
+        XCTAssertTrue(without?.hasSuffix(engineBin) == true)
+        setenv("HIGHBALL_TOOLS", tools.path, 1)
+        XCTAssertEqual(WinetricksWine.pathWithTools(engineBin)?.split(separator: ":").first.map(String.init), tools.path)
+        XCTAssertTrue(WinetricksWine.pathWithTools(engineBin)?.hasSuffix(engineBin) == true, "the engine's folders stay")
+        setenv("HIGHBALL_TOOLS", tools.appending(path: "missing").path, 1)
+        XCTAssertEqual(WinetricksWine.pathWithTools(engineBin), without, "a folder that is not there is not added")
+    }
+
     private func run(_ args: [String], env: [String: String]) throws -> String {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
