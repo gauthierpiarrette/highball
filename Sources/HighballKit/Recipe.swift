@@ -663,15 +663,8 @@ public struct RecipeRunner: Sendable {
                 env = joined
                 // The library paths reach winetricks' wine through a script, past bash (see WinetricksWine).
                 env = WinetricksWine.environment(env, wine: engine.wineBinary, script: try WinetricksWine.installScript(in: paths))
-                // winetricks shells out to cabextract for Microsoft's cabinet installers (the core
-                // fonts among them) and macOS does not ship it, so the app bundles one under
-                // Resources/tools (highball#96). HIGHBALL_TOOLS names another directory, for the CLI.
-                let tools = [ProcessInfo.processInfo.environment["HIGHBALL_TOOLS"].map { URL(fileURLWithPath: $0) },
-                             Bundle.main.resourceURL?.appending(path: "tools", directoryHint: .isDirectory)]
-                    .compactMap { $0 }.filter { FileManager.default.fileExists(atPath: $0.path) }
-                if !tools.isEmpty {
-                    env["PATH"] = (tools.map(\.path) + [env["PATH"] ?? ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"]).joined(separator: ":")
-                }
+                // cabextract and the other tools winetricks shells out to (see WinetricksWine.pathWithTools).
+                env["PATH"] = WinetricksWine.pathWithTools(env["PATH"])
                 // Its own log, named like every other one in the folder. Without it the step was
                 // invisible: what winetricks said lived only in the error dialog's Details, so
                 // three reports of the core fonts failing came with a game's launch log attached
