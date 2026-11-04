@@ -1091,6 +1091,83 @@ extension RegressionTests {
         XCTAssertEqual(withMissing.last?.label, "x64-gone-r0", "a missing engine has no manifest, so its row is the id")
     }
 
+    // Hayden's picker of 48 rows (Discord, 2026-10-29): only the newest of each line and macOS floor is offered
+    // to download, unless the player asks for the older revisions.
+    func testPickersOfferOnlyTheNewestOfEachFlavourToDownload() throws {
+        func manifest(_ id: String, floor: String = "14.0") throws -> EngineManifest {
+            let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"\#(floor)","components":{}}"#
+            return try JSONDecoder().decode(EngineManifest.self, from: Data(json.utf8))
+        }
+        let known = [try manifest("x64-a-r2"), try manifest("x64-a-r9"), try manifest("x64-a-r10"),
+                     try manifest("x64-a-r8", floor: "27.0"), try manifest("x64-a-r11", floor: "27.0"),
+                     try manifest("x64-b-r3")]
+        func ids(installed: [InstalledEngine] = [], current: String? = nil, macOS: String = "27.0", all: Bool = false) -> [String] {
+            EngineStore.offeredEngines(installed: installed, known: known, current: current, macOS: macOS, allRevisions: all).map(\.id)
+        }
+        XCTAssertEqual(ids(), ["x64-b-r3", "x64-a-r11", "x64-a-r10"])
+        XCTAssertEqual(ids(macOS: "26.6"), ["x64-b-r3", "x64-a-r10"], "a revision this Mac cannot run does not hide the one it can")
+        XCTAssertEqual(ids(all: true), ["x64-b-r3", "x64-a-r11", "x64-a-r10", "x64-a-r9", "x64-a-r8", "x64-a-r2"])
+        // An old engine a bottle runs stays listed, and the newest of its flavour already installed offers nothing older.
+        let r2 = InstalledEngine(manifest: try manifest("x64-a-r2"), root: URL(fileURLWithPath: "/tmp/r2"))
+        XCTAssertEqual(ids(installed: [r2], current: "x64-a-r2"), ["x64-a-r2", "x64-b-r3", "x64-a-r11", "x64-a-r10"])
+        let r10 = InstalledEngine(manifest: try manifest("x64-a-r10"), root: URL(fileURLWithPath: "/tmp/r10"))
+        XCTAssertEqual(ids(installed: [r10]), ["x64-a-r10", "x64-b-r3", "x64-a-r11"])
+        XCTAssertEqual(ids(installed: [], current: "x64-gone-r1"), ["x64-b-r3", "x64-a-r11", "x64-a-r10", "x64-gone-r1"])
+    }
+
+    /// highball#618: a long digest lost its end to the URL limit, and the end is the crash.
+    func testAReportTooLongForItsURLKeepsBothEnds() throws {
+        let lines = ["# gin engine header"] + (0..<400).map { "0123:err:ole:class \($0) not registered, padded out to make the digest long" } + ["unhandled exception at the very end"]
+        var text = lines.joined(separator: "\n")
+        while text.count > 1500 { text = BugReport.shortened(text) }
+        XCTAssertTrue(text.contains("# gin engine header"))
+        XCTAssertTrue(text.contains("unhandled exception at the very end"))
+        let few = String(repeating: "x", count: 4000)
+        XCTAssertLessThan(BugReport.shortened(few).count, few.count, "a text it can't cut between lines still gets shorter")
+    }
+
+    // Forza Horizon 6's second route: an environment on the route's line goes by the route, every other by the recipe,
+    // under one id, so what an environment records for the game stays in one place.
+    func testPreviewRouteAppliesOnlyOnItsOwnLine() throws {
+        let json = #"""
+        {"id":"game","kind":"game","title":"Game","renderer":"d3dmetal","engine":"x64-a-r18","minMemoryGB":null,
+         "steps":[{"type":"environment","name":"OLD","value":"1"}],
+         "previewRoute":{"engine":"arm64-b-r1","renderer":"vkd3d","minMemoryGB":32,"note":"Steadier.",
+           "steps":[{"type":"environment","name":"NEW","value":"1"},{"type":"framecap","value":30}]}}
+        """#
+        let recipe = try JSONDecoder().decode(HighballKit.Recipe.self, from: Data(json.utf8))
+        XCTAssertFalse(recipe.isPreviewRoute)
+        XCTAssertEqual(recipe.routed(onEngine: "x64-a-r28").engine, "x64-a-r18")
+        XCTAssertFalse(recipe.routed(onEngine: nil).isPreviewRoute)
+        XCTAssertFalse(recipe.routed(onEngine: "arm64-other-r9").isPreviewRoute, "another arm64 line is not the route")
+        let route = recipe.routed(onEngine: "arm64-b-r7")
+        XCTAssertTrue(route.isPreviewRoute, "a later revision of the line goes by the route")
+        XCTAssertEqual(route.id, "game")
+        XCTAssertEqual(route.engine, "arm64-b-r1")
+        XCTAssertEqual(route.renderer, .vkd3d)
+        XCTAssertEqual(route.minMemoryGB, 32)
+        XCTAssertEqual(route.previewRouteNote, "Steadier.")
+        XCTAssertNil(route.previewRoute)
+        XCTAssertTrue(route.changesLaunchEnvironment)
+        XCTAssertTrue(route.isAutoApplicable)
+        // A long list of switches reads as one line on the page.
+        var long = route
+        long.steps = (0..<7).map { .environment(name: "V\($0)", value: "1") } + [.frameCap(30)]
+        let plan = GamePageCopy.willDo(nil, recipe: long, applied: false, bottleRenderer: .vkd3d).map(\.text)
+        XCTAssertTrue(plan.contains("Set 7 emulator and graphics variables for this game"), "\(plan)")
+        XCTAssertFalse(plan.contains { $0.contains("V3") })
+        // The variables follow whichever route the environment is on.
+        var settings = BottleSettings(name: "b", engineID: "arm64-b-r1")
+        XCTAssertEqual(HighballKit.Recipe.syncScopedEnvironment(of: route, in: &settings), ["NEW"])
+        XCTAssertEqual(settings.gameEnvironment["game"], ["NEW": "1"])
+    }
+
+    func testRecipeFilePathsNameTheMacUser() {
+        let drive = URL(fileURLWithPath: "/tmp/drive_c")
+        XCTAssertEqual(HighballKit.Recipe.target(of: "users/${user}/AppData/x", driveC: drive, steamGames: []).path,
+                       "/tmp/drive_c/users/\(NSUserName())/AppData/x")
+    }
+
     func testEnginesAboveTheMacOSFloorAreNotOffered() throws {
         func manifest(_ id: String, floor: String) throws -> EngineManifest {
             let json = #"{"id":"\#(id)","displayName":"e","arch":"x86_64","minMacOS":"\#(floor)","components":{}}"#

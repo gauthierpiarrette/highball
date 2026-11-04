@@ -7,12 +7,17 @@ import XCTest
 final class PlayFromCommandLineTests: XCTestCase {
     func testEveryLibraryIdNamesTheTargetItsLinkStarts() {
         let uuid = UUID(uuidString: "B43215E4-3490-4E8A-835B-3668A02B279F")!
-        let targets: [PlayLink.Target] = [.steam(appid: 2420510), .epic(appName: "Fortnite"),
-                                          .pin(bottle: "Games", id: uuid), .launcher(id: "ea-app")]
+        let targets: [PlayLink.Target] = [.steam(appid: 2420510), .epic(appName: "Fortnite"), .gog(id: "1207658924"),
+                                          .pin(bottle: "Games", id: uuid), .battlenet(product: "wow_classic"),
+                                          .launcher(id: "ea-app")]
         for target in targets {
             XCTAssertEqual(PlayLink.Target(libraryID: target.libraryID), target, target.libraryID)
         }
         XCTAssertEqual(PlayLink.Target(libraryID: "steam:620")?.libraryID, "steam:620")
+        // A Battle.net game's link is the one its Mac app would open (highball#417, #432).
+        let link = PlayLink.url(for: .battlenet(product: "pro"), token: "t")
+        XCTAssertEqual(link.absoluteString, "highball://play/battlenet/pro?t=t")
+        XCTAssertEqual(PlayLink.parse(link)?.target, .battlenet(product: "pro"))
     }
 
     /// An environment's name may hold a colon or a space; the program's id ends at its uuid.
@@ -28,8 +33,8 @@ final class PlayFromCommandLineTests: XCTestCase {
 
     func testAnythingElseIsNotAnId() {
         for bad in ["", "steam", "steam:", "steam:0", "steam:-3", "steam:abc", "epic:", "pin:Games",
-                    "pin::B43215E4-3490-4E8A-835B-3668A02B279F", "pin:Games:not-a-uuid", "gog:123",
-                    "launcher:Steam Client", "launcher:../x", "2420510"] {
+                    "pin::B43215E4-3490-4E8A-835B-3668A02B279F", "pin:Games:not-a-uuid", "gog:", "gog:abc",
+                    "launcher:Steam Client", "launcher:../x", "2420510", "battlenet:", "battlenet:../wow", "battlenet:wow classic"] {
             XCTAssertNil(PlayLink.Target(libraryID: bad), bad)
         }
     }

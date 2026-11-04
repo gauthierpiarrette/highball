@@ -7,7 +7,7 @@ struct Highball: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "highball",
         abstract: "Highball — run Windows games on Apple Silicon. Free, open, engine-agnostic.",
-        subcommands: [Config.self, Engine.self, Bottle.self, Run.self, LibraryCommand.self, Play.self, PinCommand.self, Recipe.self, Tricks.self, Env.self, Epic.self, Report.self, BugReportCommand.self, Verify.self],
+        subcommands: [Config.self, Engine.self, Bottle.self, Run.self, LibraryCommand.self, Play.self, QuitCommand.self, PinCommand.self, Recipe.self, Tricks.self, Env.self, Epic.self, GOG.self, Report.self, BugReportCommand.self, Verify.self],
         defaultSubcommand: nil
     )
 }
@@ -28,6 +28,9 @@ struct Engine: AsyncParsableCommand {
         @Argument var license: String
         func run() async throws {
             let store = EngineStore()
+            guard FileManager.default.fileExists(atPath: HighballPaths().engine(engine).appending(path: "manifest.json").path) else {
+                fail("engine '\(engine)' is not installed; `highball engine list` shows the ids")
+            }
             let e = try store.accept(license: license, engine: store.engine(engine))
             print("accepted \(license) for \(e.id); renderers now: \(HighballKit.Renderer.allCases.filter { $0 == .wined3d || e.rendererDir($0.rawValue) != nil }.map(\.rawValue).joined(separator: ","))")
         }
@@ -490,7 +493,7 @@ struct Recipe: AsyncParsableCommand {
             let b = try BottleStore().get(bottle)
             let eng = try EngineStore().engine(b.settings.engineID)
             var r = RecipeRunner(engine: eng, bottle: b)
-            let notes = try await r.apply(try loadRecipe(recipe), resolve: { try? loadRecipe($0) }) { print($0) }
+            let notes = try await r.apply(try loadRecipe(recipe).routed(onEngine: b.settings.engineID), resolve: { try? loadRecipe($0) }) { print($0) }
             for n in notes { print("note: \(n)") }
         }
     }
@@ -735,11 +738,167 @@ struct Epic: AsyncParsableCommand {
     }
 }
 
+struct GOG: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "gog",
+        abstract: "Install and play GOG games through gogdl, with comet for achievements and gogdl for cloud saves (GOG Galaxy cannot sign in under Wine).",
+        subcommands: [Login.self, Auth.self, List.self, Install.self, Launch.self])
+
+    struct Login: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Print the GOG sign-in URL; paste the address it ends on into 'highball gog auth'.")
+        func run() async throws {
+            try await GOGStore().ensureInstalled()
+            print("1. Open: \(GOGStore.loginURL.absoluteString)")
+            print("2. Sign in. GOG ends on a mostly blank embed.gog.com page: copy its whole address.")
+            print("3. Run: highball gog auth, and paste the address when asked.")
+        }
+    }
+
+    struct Auth: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Finish sign-in with the address (or the code) the login page ended on; asks for it when not given, which keeps it out of shell history.")
+        @Argument var pasted: String?
+        func run() async throws {
+            let store = GOGStore()
+            try await store.ensureInstalled()
+            var text = pasted
+            if text == nil {
+                print("Paste the address GOG's sign-in page ended on: ", terminator: "")
+                text = readLine()
+            }
+            let reading = GOGStore.readSignIn(text ?? "")
+            guard case let .code(code) = reading else {
+                switch reading {
+                case .signInPage: fail("that is the sign-in page itself; log in on it, then paste the address of the page it ends on")
+                case .noCode: fail("that GOG address has no code; paste the address shown right after you log in")
+                default: fail("no code in that; paste the whole embed.gog.com address")
+                }
+            }
+            try store.authenticate(code: code)
+            print("signed in\(store.username.map { " as \($0)" } ?? "")")
+        }
+    }
+
+    struct List: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "List the account's games, and where each installed one lives.")
+        func run() async throws {
+            let store = GOGStore()
+            try await store.ensureInstalled()
+            guard store.isAuthenticated else { fail("not signed in — run 'highball gog login' first") }
+            var installed: [String: String] = [:]
+            for b in (try? BottleStore().list()) ?? [] {
+                for g in GOGStore.installedGames(driveC: b.driveC) { installed[g.id] = b.name }
+            }
+            for g in try await store.ownedGames() {
+                let mark = installed[g.id].map { "[installed: \($0)] " } ?? ""
+                print("\(mark)\(g.id)\t\(g.title)")
+            }
+        }
+    }
+
+    struct Install: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Download a game's Windows build into a bottle (drive_c/Games) and run its GOG setup.")
+        @Argument var bottle: String
+        @Argument(help: "Product id from 'highball gog list'.") var id: String
+        func run() async throws {
+            let store = GOGStore()
+            try await store.ensureInstalled()
+            guard store.isAuthenticated else { fail("not signed in — run 'highball gog login' first") }
+            let b = try BottleStore().get(bottle)
+            let info = try store.info(id)
+            let language = GOGStore.language(for: info.languages)
+            if !info.dependencies.isEmpty { _ = try? store.downloadRedists(info.dependencies) { print($0) } }
+            let status = try store.install(id, into: b, language: language) { line in
+                if !line.contains("[PROGRESS]") || line.contains("= Progress:") { print(line) }
+            }
+            guard status == 0, store.downloadCompleted(id) else { fail("gogdl download did not finish (exit \(status)); run the same command to resume") }
+            guard let game = GOGStore.installedGames(driveC: b.driveC).first(where: { $0.id == id }) else { fail("downloaded, but no goggame-\(id).info turned up in \(b.name)") }
+            store.keepManifest(for: game)
+            let eng = try EngineStore().engine(b.settings.engineID)
+            let runner = WineRunner(engine: eng, bottle: b)
+            try await store.runSetup(game, language: language, runner: runner,
+                                     onStep: { n, total, label in print("setup \(n)/\(total): \(label)") },
+                                     onFailure: { label, code in print("setup: \(label) ended with code \(code); carrying on") })
+            print("installed \(game.title) into \(b.name): \(game.folder.path)")
+        }
+    }
+
+    struct Launch: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Launch an installed GOG game in a bottle, with comet and cloud saves unless turned off.")
+        @Argument var bottle: String
+        @Argument var id: String
+        @Option var renderer: HighballKit.Renderer?
+        @Flag(help: "Run without comet (no achievements).") var noComet = false
+        @Flag(help: "Skip the cloud-save sync before and after.") var noSaves = false
+        func run() async throws {
+            let store = GOGStore()
+            let b = try BottleStore().get(bottle)
+            guard let game = GOGStore.installedGames(driveC: b.driveC).first(where: { $0.id == id }),
+                  let task = game.launchTask(choice: GOGSettings.load(store).launchChoice[id]),
+                  let launch = GOGStore.launch(task, in: game) else { fail("GOG game \(id) is not installed in \(b.name)") }
+            let eng = try EngineStore().engine(b.settings.engineID)
+            let runner = WineRunner(engine: eng, bottle: b)
+            let saves = GOGSaves(store: store)
+            let settings = GOGSettings.load(store)   // the game page's choices hold here too
+            var folders: [(GOGSaves.Location, URL)] = []
+            if !noSaves, !settings.cloudSavesOff.contains(id), store.isAuthenticated, let client = saves.clientID(for: game), let locations = try? saves.locations(clientID: client) {
+                folders = locations.compactMap { l in GOGSaves.resolve(l.template, game: game, driveC: b.driveC).map { (l, $0) } }
+                for (l, f) in folders { print("saves \(l.name) down: \(Self.describe(saves.sync(game, location: l, folder: f, direction: .download), direction: .download))") }
+            }
+            var comet: Process?
+            if !noComet, settings.cometOff[id] == nil, store.isAuthenticated {
+                if let tools = try? await store.ensureComet() { _ = try? await GOGComet.installService(from: tools.service, runner: runner) }
+                let log = HighballPaths().logs.appending(path: "comet-\(id).log")
+                comet = try? GOGComet(store: store).start(log: log)
+                print(comet != nil ? "comet running (log \(log.path))" : "comet did not start; playing without achievements")
+            }
+            let result: LaunchResult
+            do {
+                result = try await runner.start(launch.executable, arguments: launch.arguments, renderer: renderer,
+                                                workingDirectory: launch.workingDirectory)
+            } catch {
+                GOGComet(store: store).stop(comet)   // it would hold port 9977 and its copy of the tokens
+                throw error
+            }
+            print("exit=\(result.exitStatus) — log: \(result.log.path)")
+            // A launcher task hands over to another program in the folder and exits: the session
+            // lasts while any of them runs in this bottle, so comet and the save upload wait for
+            // the game itself.
+            let markers = game.sessionMarkers(launching: launch.executable)
+            var handedOver = false
+            for _ in 0..<5 {   // the program it hands to can take a moment to appear
+                if !SessionWatch.pids(ofPrefix: b.url, markers: markers).isEmpty { handedOver = true; break }
+                try await Task.sleep(for: .seconds(2))
+            }
+            if handedOver {
+                print("the game is still running (handed over from \(launch.executable.lastPathComponent)); waiting for it to close")
+                while !SessionWatch.pids(ofPrefix: b.url, markers: markers).isEmpty {
+                    try await Task.sleep(for: .seconds(2))
+                }
+            }
+            GOGComet(store: store).stop(comet)
+            for (l, f) in folders { print("saves \(l.name) up: \(Self.describe(saves.sync(game, location: l, folder: f, direction: .upload), direction: .upload))") }
+        }
+
+        static func describe(_ outcome: GOGSaves.Outcome, direction: GOGSaves.Direction) -> String {
+            switch outcome {
+            case .synced: return "synced"
+            case .conflict: return "both copies changed, nothing moved; play from the app to choose which to keep"
+            case .refused:
+                return direction == .upload
+                    ? "GOG's cloud has newer saves, nothing uploaded; they come down at the next play"
+                    : "this Mac's saves are newer, nothing downloaded; they go up after the game"
+            case .failed(let why): return "failed (\(why))"
+            }
+        }
+    }
+}
+
 // MARK: - highball library / play (highball#432)
 
 /// The library as the app builds it, read from disk: the environments' Steam games, installed and
-/// owned, Steam for Mac's installs, the programs added by hand, and with `epic` the Epic account's
-/// games, which asks legendary. Not-installed games are homed as the app homes them (AppState's
+/// owned, Steam for Mac's installs, Battle.net's installs, the GOG games in the environments, the
+/// programs added by hand, and with `epic` the Epic account's games, which asks legendary, and the
+/// GOG games' names and covers, which may ask GOG's database. Not-installed games are homed as the app homes them (AppState's
 /// defaultBottle: the Games environment, else the first with Steam, else the first).
 func currentLibrary(paths: HighballPaths, epic: Bool) -> [LibraryItem] {
     let bottles = (try? BottleStore(paths: paths).list()) ?? []
@@ -755,10 +914,47 @@ func currentLibrary(paths: HighballPaths, epic: Bool) -> [LibraryItem] {
         FileManager.default.fileExists(atPath: b.driveC.appending(path: "Program Files (x86)/Steam/steam.exe").path)
     }
     let home = bottles.first { $0.name == "Games" } ?? bottles.first(where: hasSteam) ?? bottles.first
+    let battleNet = Dictionary(bottles.map { ($0.name, BattleNetLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
+    // GOG as the app reads it: installs from disk, and the launch choices that decide which
+    // programs added by hand its tiles stand for, so both list the same ids.
+    let gogStore = GOGStore(paths: paths)
+    let gogInstalled = Dictionary(bottles.map { ($0.name, GOGStore.installedGames(driveC: $0.driveC)) }, uniquingKeysWith: { a, _ in a })
+    let gogGames = epic ? Set(gogInstalled.values.joined().map(\.id)).sorted().compactMap { gogStore.game($0) } : []
     return LibraryIndex.build(bottles: bottles, steamByBottle: steam, steamOwnedByBottle: owned,
                               macInstalled: MacSteam.installedGames(), epicOwned: epicOwned, epicInstalls: epicInstalls,
+                              gogGames: gogGames, gogInstalledByBottle: gogInstalled,
+                              gogLaunchChoice: GOGSettings.load(gogStore).launchChoice,
+                              battleNetByBottle: battleNet,
                               plays: LibraryStore(paths: paths).load(), defaultBottle: home?.name,
                               pinExists: { b, pin in FileManager.default.fileExists(atPath: pin.executableURL(driveC: b.driveC).path) })
+}
+
+/// Everything Highball started, ended in one go: what a frontend runs when it closes (highball#432),
+/// since it knows games by id and has no idea which environment holds which. Every environment
+/// with a live Wine server is stopped the way Stop all processes does it, then the app is asked
+/// to quit, as Quit in its menu would. Nothing outside Highball's environments is touched.
+struct QuitCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "quit",
+        abstract: "Stop every program running in Highball's environments, Steam included, and quit Highball.",
+        discussion: "For frontends such as ES-DE on exit. --keep-app leaves the Highball app open.")
+    @Flag(help: "Stop the environments but leave the Highball app running.") var keepApp = false
+
+    func run() async throws {
+        let paths = HighballPaths()
+        let engines = EngineStore(paths: paths)
+        for b in (try? BottleStore(paths: paths).list()) ?? [] where ProcessTable.liveServer(forPrefix: b.url) != nil {
+            guard let eng = try? engines.engine(b.settings.engineID) else { continue }
+            _ = try? WineRunner(paths: paths, engine: eng, bottle: b).kill()
+            print("stopped \(b.name)")
+        }
+        guard !keepApp else { return }
+        let quit = Process()
+        quit.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        quit.arguments = ["-e", "if application id \"app.highball.Highball\" is running then tell application id \"app.highball.Highball\" to quit"]
+        try? quit.run()
+        quit.waitUntilExit()
+    }
 }
 
 struct LibraryCommand: AsyncParsableCommand {
@@ -789,8 +985,8 @@ struct Play: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Start a library game through the Highball app, as its Play button does.",
         discussion: """
-            The id is one `highball library` lists: steam:<appid>, epic:<app name> or \
-            pin:<environment>:<uuid>, and launcher:<id> opens a launcher. Highball starts it with \
+            The id is one `highball library` lists: steam:<appid>, epic:<app name>, gog:<product id>, \
+            pin:<environment>:<uuid> or battlenet:<product code>, and launcher:<id> opens a launcher. Highball starts it with \
             the game's own settings and stays in the background, the way a game's Mac app does. \
             With --wait the command returns once the game has quit, for frontends such as ES-DE, \
             and Highball and Steam keep running. It follows the games Highball runs in its \
@@ -802,7 +998,7 @@ struct Play: AsyncParsableCommand {
 
     func run() async throws {
         guard let target = PlayLink.Target(libraryID: id) else {
-            fail("\(id) is not a library id. `highball library` lists them: steam:<appid>, epic:<app name>, pin:<environment>:<uuid>.")
+            fail("\(id) is not a library id. `highball library` lists them: steam:<appid>, epic:<app name>, gog:<product id>, pin:<environment>:<uuid>, battlenet:<product code>.")
         }
         let paths = HighballPaths()
         // A typo fails here and now, not as an alert in the app and a wait that never ends.
@@ -814,7 +1010,7 @@ struct Play: AsyncParsableCommand {
             guard store.isAuthenticated, EpicStore.installMap((try? store.installedGames()) ?? [])[name] != nil else {
                 fail("\(id) is not an installed Epic game in this Highball. `highball library --installed` lists what can be played.")
             }
-        case .steam, .pin:
+        case .steam, .gog, .pin, .battlenet:
             guard currentLibrary(paths: paths, epic: false).contains(where: { $0.id == target.libraryID }) else {
                 fail("\(id) is not in this Highball's library. `highball library` lists the ids.")
             }

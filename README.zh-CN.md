@@ -43,11 +43,11 @@ brew install --cask highball
 
 ### [在数据库里搜索你的游戏 →](https://gethighball.com/database/)
 
-举个例子，《赛博朋克 2077》在 M5 上能跑到 60 到 82 fps（D3DMetal 加 FSR 2.1）。《荒野大镖客：救赎 2》在修复了 MoltenVK 的一个问题之后可以在 M1 Pro 上游玩，这个修复已经作为拉取请求提交给上游。图形模式切换、通过 Wine 的 WoW64 运行 32 位程序、Windows 运行库、ReShade，以及通过 Legendary 使用 Epic 游戏库，也都可以正常工作。
+举个例子，《赛博朋克 2077》在 M5 上能跑到 60 到 82 fps（D3DMetal 加 FSR 2.1）。《荒野大镖客：救赎 2》在修复了 MoltenVK 的一个问题之后可以在 M1 Pro 上游玩，这个修复已经作为拉取请求提交给上游。图形模式切换、通过 Wine 的 WoW64 运行 32 位程序、Windows 运行库、ReShade，通过 Legendary 使用 Epic 游戏库，以及通过 gogdl 使用 GOG 游戏库，也都可以正常工作。
 
 ## 游戏平台
 
-Steam 和 Epic（通过 Legendary）在默认引擎上就能用。Rockstar、EA app 和 Ubisoft Connect 的登录窗口使用内嵌浏览器，需要 Highball 的 Wine 11 引擎（基于 CrossOver 26.3 的源码构建）。游戏需要时，点击 Play 会主动提供这个引擎，你也可以在设置里把某个环境切换过去。在这里，Rockstar 能登录并运行 GTA V 和《荒野大镖客：救赎 2》，EA app 能登录并运行《模拟人生 4》。Ubisoft Connect 和 Battle.net 能显示登录窗口，但还没有在这里通过它们实际玩过游戏。GOG Galaxy 仍然是黑屏，无法登录，不过 GOG 的无 DRM 离线安装包可以直接在环境里运行。每种情况都记录在对应启动器配方的 `knownIssues` 里。
+Steam 和 Epic（通过 Legendary）在默认引擎上就能用。Rockstar、EA app 和 Ubisoft Connect 的登录窗口使用内嵌浏览器，需要 Highball 的 Wine 11 引擎（基于 CrossOver 26.3 的源码构建）。游戏需要时，点击 Play 会主动提供这个引擎，你也可以在设置里把某个环境切换过去。在这里，Rockstar 能登录并运行 GTA V 和《荒野大镖客：救赎 2》，EA app 能登录并运行《模拟人生 4》。Ubisoft Connect 和 Battle.net 能显示登录窗口，但还没有在这里通过它们实际玩过游戏。GOG Galaxy 仍然是黑屏，无法通过它登录；“连接 GOG”改用 Heroic 的 gogdl 和 comet 来完成 Galaxy 的工作：在浏览器里登录 GOG 的页面，你的 GOG 游戏库就会带着封面、成就和云存档直接安装到环境里。用离线安装包安装的 GOG 游戏也会显示为 GOG 游戏。每种情况都记录在对应启动器配方的 `knownIssues` 里。
 
 ## 开始使用
 
@@ -66,7 +66,7 @@ git clone https://github.com/gauthierpiarrette/highball && cd highball        # 
 git clone https://github.com/gauthierpiarrette/highball-db ../highball-db     # 配方和游戏数据库（CC0）
 swift build -c release
 .build/release/highball engine install spike/engine-manifest.json
-.build/release/highball engine accept x64-sikarugir10.0_6-r2 apple-gptk-license-2023-08-17  # 可选：启用 D3DMetal
+.build/release/highball engine accept <the id install printed> apple-gptk-license-2023-08-17  # 可选：启用 D3DMetal
 .build/release/highball bottle create play --recipe steam
 .build/release/highball run play Steam
 ```

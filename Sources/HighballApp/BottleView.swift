@@ -123,7 +123,9 @@ struct BottleView: View {
         VStack(alignment: .leading, spacing: 12) {
             HB.eyebrow(L("Launchers"))
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 108, maximum: 140), spacing: 12)], spacing: 12) {
-                ForEach(Self.launcherMeta, id: \.id) { meta in
+                // GOG Galaxy's blocked client gives way to Connect GOG, as in Add games, unless
+                // this environment already has it.
+                ForEach(Self.launcherMeta.filter { $0.id != "gog-galaxy" || bottle.settings.recipes.contains($0.id) }, id: \.id) { meta in
                     if let recipe = AppState.recipe(meta.id) {
                         let installed = bottle.settings.recipes.contains(meta.id)
                         let pin = bottle.settings.pins.first { $0.name.lowercased().hasPrefix(meta.short.lowercased().prefix(5)) }
@@ -216,12 +218,15 @@ struct LauncherTile: View {
     var flakyReason: String? = nil
     let action: () -> Void
     @State private var hovering = false
+    @State private var showingReason = false
 
     private var blocked: Bool { blockedReason != nil && !installed }
     private var flaky: Bool { flakyReason != nil && !installed && !blocked }
 
     var body: some View {
-        Button(action: action) {
+        // A blocked tile still takes the click and answers with its reason: macOS shows no tooltip
+        // on a disabled control, so the hover text alone left "Blocked" unexplained (highball#571).
+        Button(action: { if blocked { showingReason = true } else { action() } }) {
             VStack(spacing: 8) {
                 ZStack(alignment: .bottomTrailing) {
                     ZStack {
@@ -258,9 +263,16 @@ struct LauncherTile: View {
             .opacity(blocked ? 0.55 : 1)
         }
         .buttonStyle(.plain)
-        .disabled(busy || blocked)
+        .disabled(busy)
         .help(blockedReason.map { L("Blocked on the current engine: ") + $0 }
               ?? flakyReason.map { L("Known issues: ") + $0 } ?? "")
+        .popover(isPresented: $showingReason, arrowEdge: .bottom) {
+            Text(L("Blocked on the current engine: ") + (blockedReason ?? ""))
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 320, alignment: .leading)
+                .padding(14)
+        }
         .animation(.easeOut(duration: 0.12), value: hovering)
         .onHover { hovering = $0 }
     }
@@ -299,6 +311,7 @@ struct EnvironmentSettingsPage: View {
     // Settings' TabView owns the window toolbar; its generated navigation arrow does not pop.
     var showsInlineBack = false
     @State private var selectedSection: EnvironmentSettingsSection = .graphics
+    @AppStorage(EngineStore.showOlderRevisionsKey) private var showOlderRevisions = false
     @State private var confirmDelete = false
     @State private var showFrameGenInfo = false
 
@@ -564,6 +577,7 @@ struct EnvironmentSettingsPage: View {
                                 }
                             }
                             .disabled(state.busy)
+                            Toggle(L("Show older engine revisions"), isOn: $showOlderRevisions)
                             Text(L("Environments never change engine on their own. Switching re-runs the Windows setup when the Wine build differs; switching back is the same step. An engine marked download is fetched first."))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
@@ -592,15 +606,20 @@ struct EnvironmentSettingsPage: View {
                                     Text(r.title)
                                     Spacer()
                                     let live = state.bottles.first { $0.name == bottle.name } ?? bottle
-                                    if live.settings.recipes.contains(r.id) || state.tweakIsInstalled(r, in: live) {
+                                    if state.isApplying(r, in: live) {
+                                        // A component reads as installed once every step has run, not when its files first appear.
+                                        HStack(spacing: 6) {
+                                            ProgressView().controlSize(.small)
+                                            Text(L("Installing…")).foregroundStyle(.secondary)
+                                        }
+                                    } else if live.settings.recipes.contains(r.id) || state.tweakIsInstalled(r, in: live) {
                                         Label(L("Installed"), systemImage: "checkmark.circle.fill").foregroundStyle(.green).labelStyle(.titleAndIcon)
                                         if r.isRemovable {
                                             Button(L("Remove")) { state.removeTweak(r, from: live) }.controlSize(.small).disabled(state.busy)
                                         }
                                     } else {
-                                        Button(L("Install")) {
-                                            state.applyRecipe(r.id, to: state.bottles.first { $0.name == bottle.name } ?? bottle)
-                                        }.controlSize(.small)
+                                        Button(L("Install")) { state.applyRecipe(r.id, to: live) }
+                                            .controlSize(.small).disabled(state.busy)
                                     }
                                 }
                             }
@@ -615,13 +634,7 @@ struct EnvironmentSettingsPage: View {
         .navigationTitle(L("Environment settings"))
         .navigationBarBackButtonHidden(showsInlineBack)
         .background { PageCancelShortcut { dismiss() } }
-        .confirmationDialog(UserFolders.hasFilesInside(driveC: bottle.driveC)
-                            ? L("Delete this environment? Its Windows drive and everything installed in it are removed, including the game saves kept in its Documents folder.")
-                            : L("Delete this environment? Its Windows drive and everything installed in it are removed."),
-                            isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button(L("Delete"), role: .destructive) { dismiss(); state.deleteBottle(bottle.name) }
-            Button(L("Cancel"), role: .cancel) {}
-        }
+        .deleteEnvironmentDialog(bottle.name, isPresented: $confirmDelete) { dismiss() }
         .alert(L("About frame generation"), isPresented: $showFrameGenInfo) {
             Button(L("Got it"), role: .cancel) {}
         } message: {
@@ -656,6 +669,49 @@ struct EnvironmentSettingsPage: View {
                 copy.settings[keyPath: keyPath] = newValue
                 Task { @MainActor in state.update(copy) }
             })
+    }
+}
+
+/// The question before an environment goes: keep a copy of its saves first (the default), or
+/// delete everything as before. The size of the copy is measured off the main actor while the
+/// question is up.
+private struct DeleteEnvironmentDialog: ViewModifier {
+    @Environment(AppState.self) private var state
+    let name: String?
+    @Binding var isPresented: Bool
+    let onDelete: () -> Void
+    @State private var savesSize: String?
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(String(format: L("Delete the %@ environment?"), name ?? ""),
+                                isPresented: $isPresented, titleVisibility: .visible) {
+                Button(L("Keep saves")) { delete(keepSaves: true) }.keyboardShortcut(.defaultAction)
+                Button(L("Delete everything"), role: .destructive) { delete(keepSaves: false) }
+                Button(L("Cancel"), role: .cancel) {}
+            } message: {
+                Text(savesSize.map { String(format: L("Its Windows drive and everything installed in it are removed. Keep saves first puts a copy of its saves folders (%@) in Highball's save-backups folder."), $0) }
+                     ?? L("Its Windows drive and everything installed in it are removed. Keep saves first puts a copy of its saves folders in Highball's save-backups folder."))
+            }
+            .task(id: isPresented ? name : nil) {
+                savesSize = nil
+                guard isPresented, let name else { return }
+                let environment = state.paths.bottle(name)
+                let bytes = await Task.detached { EnvironmentSaves.bytes(environment: environment) }.value
+                savesSize = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+            }
+    }
+
+    private func delete(keepSaves: Bool) {
+        guard let name else { return }
+        onDelete()
+        state.deleteBottle(name, keepSaves: keepSaves)
+    }
+}
+
+extension View {
+    func deleteEnvironmentDialog(_ name: String?, isPresented: Binding<Bool>, onDelete: @escaping () -> Void = {}) -> some View {
+        modifier(DeleteEnvironmentDialog(name: name, isPresented: isPresented, onDelete: onDelete))
     }
 }
 
@@ -759,6 +815,125 @@ struct EpicSignInSheet: View {
             }
         }
         .padding(24)
+    }
+}
+
+
+/// GOG sign-in, written for someone who has never copied a link: GOG's own page in the browser,
+/// which ends on an almost empty embed.gog.com page whose link carries a one-time code. Each step
+/// says what to click and what the player will see. Pasting the link connects at once; the sheet
+/// stays open while it does, and says what went wrong in place, so a bad paste or an expired
+/// link is fixed without hunting for the button again.
+struct GOGSignInSheet: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.dismiss) private var dismiss
+    @State private var pasted = ""
+    @State private var connecting = false
+    @State private var problem: String?
+
+    var body: some View {
+        let reading = GOGStore.readSignIn(pasted)
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(state.gogSignedIn ? L("Your GOG account") : L("Connect your GOG account")).font(.title2.bold())
+                Text(state.gogSignedIn
+                     ? L("To use a different GOG account, follow the steps again and sign in with it. You sign in on GOG's own website, so Highball never sees your password.")
+                     : L("It takes about a minute. You sign in on GOG's own website, so Highball never sees your password."))
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if state.gogSignedIn {
+                Label(state.gogAccountName.map { String(format: L("Connected as %@"), $0) } ?? L("GOG account connected"),
+                      systemImage: "checkmark.circle.fill").foregroundStyle(HB.good)
+            }
+            step(1, L("Sign in to GOG in your browser.")) {
+                Button(L("Open GOG sign-in")) { NSWorkspace.shared.open(GOGStore.loginURL) }
+            }
+            step(2, L("After you sign in, GOG shows an almost empty page. That is normal: it means it worked."))
+            step(3, L("Copy that page's link: click the address bar at the top of your browser, then press ⌘C."))
+            step(4, L("Come back here and paste it.")) {
+                HStack(spacing: 8) {
+                    PasteButton(payloadType: String.self) { strings in
+                        Task { @MainActor in
+                            pasted = strings.first ?? ""
+                            if GOGStore.authorizationCode(from: pasted) != nil { connect() }
+                        }
+                    }
+                    TextField(L("or paste the link here"), text: $pasted).textFieldStyle(.roundedBorder).frame(width: 240)
+                        .onSubmit { if case .code = reading { connect() } }
+                }
+                .disabled(connecting)
+            }
+            Group {
+                if connecting {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(L("Connecting to GOG…"))
+                    }
+                } else if let problem {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(HB.amber)
+                } else if let hint = Self.hint(for: reading) {
+                    Label(hint.text, systemImage: hint.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(hint.ok ? HB.good : HB.amber)
+                }
+            }
+            .font(.callout).frame(maxWidth: 420, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            Text(L("Highball connects through gogdl, the open source tool the Heroic launcher uses. You can disconnect at any time."))
+                .font(.caption).foregroundStyle(.secondary).frame(maxWidth: 420, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                if state.gogSignedIn {
+                    Button(L("Disconnect GOG"), role: .destructive) { dismiss(); state.gogSignOut() }
+                }
+                Spacer()
+                Button(L("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L("Connect")) { connect() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(connecting || GOGStore.authorizationCode(from: pasted) == nil)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+        // A new paste replaces the last problem; the field emptied after a failure keeps it shown.
+        .onChange(of: pasted) { _, new in if !new.isEmpty { problem = nil } }
+    }
+
+    /// One numbered instruction, with the control it needs (if any) under its text.
+    private func step(_ number: Int, _ text: String, @ViewBuilder control: () -> some View = { EmptyView() }) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("\(number)").font(.callout.weight(.semibold).monospacedDigit())
+                .frame(width: 20, height: 20).background(Circle().fill(.quaternary))
+            VStack(alignment: .leading, spacing: 8) {
+                Text(text).fixedSize(horizontal: false, vertical: true)
+                control()
+            }
+        }
+    }
+
+    private func connect() {
+        guard !connecting, let code = GOGStore.authorizationCode(from: pasted) else { return }
+        connecting = true
+        problem = nil
+        Task {
+            do {
+                try await state.gogConnect(code: code)
+                dismiss()
+            } catch {
+                connecting = false
+                problem = L(AppState.message(for: error))   // the kit's sign-in messages have French entries
+                pasted = ""
+            }
+        }
+    }
+
+    /// What the sheet says about the pasted text; nothing while it is empty.
+    static func hint(for reading: GOGStore.PastedSignIn) -> (text: String, ok: Bool)? {
+        switch reading {
+        case .empty: nil
+        case .code: (L("That is the right link. Click Connect."), true)
+        case .signInPage: (L("That is the link of the sign-in page. Sign in on that page first, then copy the link of the almost empty page you land on."), false)
+        case .noCode: (L("That is a GOG page, but not the right one. Copy the link of the almost empty page GOG shows right after you sign in."), false)
+        case .notGOG: (L("That does not look like a link from GOG. Copy the link of the almost empty page GOG shows after you sign in."), false)
+        }
     }
 }
 

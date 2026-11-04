@@ -10,7 +10,9 @@ import Foundation
 /// The rule that shapes this: a store's library is the store's to keep. Deleting a Steam game's
 /// folder from underneath the client leaves Steam believing it is installed, and the next launch
 /// repairs or redownloads it, so a Steam game is handed to Steam's own uninstall dialog and
-/// Highball does not touch the files. The same goes for Epic through legendary.
+/// Highball does not touch the files. The same goes for Epic through legendary. GOG games have no
+/// client keeping a library: their files are the record (GOGStore), so Highball removes them
+/// itself, running the game's own uninstaller first when an offline installer left one.
 public enum Uninstall {
     public enum Route: Equatable, Sendable {
         /// Hand it to the running Steam client (`steam://uninstall/<appid>`), which asks its own
@@ -18,6 +20,8 @@ public enum Uninstall {
         case steam(appID: Int)
         /// Legendary owns Epic installs, so it does the removing.
         case epic(appName: String)
+        /// Highball removes the game's folder, after its unins000.exe when it has one.
+        case gog(id: String)
         /// Wine's Add/Remove Programs, for a program that came with its own uninstaller.
         case windowsUninstaller
         /// Nothing can be run for it. The reason is shown to the person, who then decides.
@@ -38,6 +42,11 @@ public enum Uninstall {
                 return .none(reason: "Highball does not know this game's Epic id, so the Epic tools cannot be asked to remove it.")
             }
             return .epic(appName: name)
+        case .gog:
+            guard let id = item.gogID, item.installed else {
+                return .none(reason: "This GOG game is not installed in an environment.")
+            }
+            return .gog(id: id)
         case .pin:
             return .windowsUninstaller
         case .battlenet:
@@ -56,7 +65,9 @@ public enum Uninstall {
         case .steam:
             return "Steam does the uninstalling and asks you to confirm in its own window, so its library stays right.\(size)"
         case .epic:
-            return "The Epic tools do the uninstalling, so their library stays right.\(size)"
+            return "The Epic tools do the uninstalling, so their library stays right. Keep save data first copies the game's save folder, and the files the game wrote in its folder, to Highball's save-backups, and offers to put them back if you install the game again. Delete save data too copies nothing and also deletes the game's save folder when it is inside this environment. Saves in Epic's cloud stay there either way.\(size)"
+        case .gog:
+            return "Highball deletes the game's folder from this environment. Keep save data first copies your saves from it, and every file the game changed there since you first played it, to Highball's save-backups, and offers to put them back if you install the game again. Delete save data too copies nothing and also deletes the game's save folders elsewhere in this environment. Saves in GOG's cloud stay there either way, and the game stays in your GOG library to install again.\(size)"
         case .windowsUninstaller:
             return "Highball opens Windows' Add or Remove Programs in this environment, where you pick it from the list. A game with no uninstaller of its own will not be in that list, and then the only way to remove it is to delete the environment."
         case let .none(reason):

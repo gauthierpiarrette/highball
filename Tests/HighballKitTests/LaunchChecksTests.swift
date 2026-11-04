@@ -49,7 +49,22 @@ final class LaunchChecksTests: XCTestCase {
         XCTAssertTrue(SteamRestart.windowNeedsRestart(live: d3dmetal, window: .dxmt))
         XCTAssertFalse(SteamRestart.windowNeedsRestart(live: dxmt, window: .dxmt), "already drawing")
         XCTAssertFalse(SteamRestart.windowNeedsRestart(live: dxvk, window: .dxmt), "not the black case")
-        XCTAssertFalse(SteamRestart.windowNeedsRestart(live: d3dmetal, window: nil), "the window keeps the environment's mode")
+        XCTAssertFalse(SteamRestart.windowNeedsRestart(live: d3dmetal, window: .d3dmetal), "the player chose D3DMetal for the window")
+    }
+
+    /// highball#565: a DXMT environment whose game ran with D3DMetal (its own mode or its database
+    /// row) left Steam on D3DMetal, and Show brought back "steamwebhelper is not responding".
+    func testSteamWindowRestartsInADXMTEnvironment() {
+        let engine = "/Users/x/Library/Application Support/Highball/engines/x64-sikarugir10.0_6-r28"
+        let d3dmetal = ["WINEDLLPATH_PREPEND": "\(engine)/renderers/d3dmetal-tsshim/wine:\(engine)/frameworks/renderer/d3dmetal/wine"]
+        let window = SteamRestart.windowMode(shortcut: nil, environment: .dxmt, dxmtRuns: true)
+        XCTAssertEqual(window, .dxmt)
+        XCTAssertTrue(SteamRestart.windowNeedsRestart(live: d3dmetal, window: window))
+        XCTAssertEqual(SteamRestart.windowMode(shortcut: nil, environment: .d3dmetal, dxmtRuns: true), .dxmt)
+        XCTAssertEqual(SteamRestart.windowMode(shortcut: nil, environment: .d3dmetal, dxmtRuns: false), .d3dmetal)
+        XCTAssertEqual(SteamRestart.windowMode(shortcut: .dxvk, environment: .d3dmetal, dxmtRuns: true), .dxvk)
+        XCTAssertFalse(SteamRestart.windowNeedsRestart(live: d3dmetal,
+                                                       window: SteamRestart.windowMode(shortcut: .d3dmetal, environment: .dxmt, dxmtRuns: true)))
     }
 
     /// highball#241, #336: winetricks started its wine processes with the environment's msync while

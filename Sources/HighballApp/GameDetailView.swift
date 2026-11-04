@@ -7,6 +7,8 @@ struct GameDetailView: View {
     let passedItem: LibraryItem
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var storeDetails: SteamGameDetails?
+    /// The registry's ActiveUser for the game's environment, as last read (accountNote).
+    @State private var activeUserRead: ActiveUserRead?
     @State private var loadingDetails = true
     @State private var expandedDescription = false
     @State private var selectedGalleryURL: URL?
@@ -14,6 +16,12 @@ struct GameDetailView: View {
     /// The launch arguments being typed; saved on Return, on Play and when the page closes, so a
     /// space typed between two arguments is not normalised away mid-word.
     @State private var argsText = ""
+    /// The game keeps saves in Epic's cloud (EpicSaves.supportsCloudSaves): read once per page.
+    @State private var epicCloudSaves = false
+    /// Where legendary keeps the game's saves, once a sync has worked it out.
+    @State private var epicSaveFolder: URL?
+    /// When this install's saves last synced with GOG or Epic, for the Cloud saves setting.
+    @State private var lastSynced: Date?
     @State private var argsLoaded = false
     /// Saves a line still being typed, so the Play that follows launches with it. Skipped until the
     /// field has loaded, or its empty text would clear the stored arguments.
@@ -26,7 +34,15 @@ struct GameDetailView: View {
     @State private var showWhy = false
     @State private var showAdvanced = false
 
-    private var entry: GameDBEntry? { state.gameDB.entry(for: item) }
+    private var entry: GameDBEntry? {
+        var row = state.gameDB.entry(for: item)
+        // On a game's preview route the route's mode is the game's, whatever the row verified for its other route.
+        if let recipe = fixRecipe, recipe.isPreviewRoute {
+            row?.renderer = recipe.renderer; row?.rendererMinMacOS = nil
+            if let verified = recipe.previewRouteVerified { row?.verified = verified; row?.lastVerified = recipe.lastVerified?.date }
+        }
+        return row
+    }
     private var bottle: Bottle? { item.bottleName.flatMap { name in state.bottles.first { $0.name == name } } }
     private var blocked: Bool { entry?.isBlocked == true }
     /// Steam already has an appmanifest for it (downloading or updating), as opposed to a game
@@ -47,12 +63,42 @@ struct GameDetailView: View {
     private var verdict: GamePageCopy.Verdict { GamePageCopy.verdict(entry, myChip: state.machineChip) }
     private var willDo: [GamePageCopy.WillDo] {
         GamePageCopy.willDo(entry, recipe: fixRecipe, applied: fixApplied, bottleRenderer: bottle?.settings.renderer ?? .dxvk,
-                            explicit: bottle?.settings.rendererExplicit ?? false, gameOverride: state.rendererOverride(for: item),
+                            explicit: (bottle?.settings.rendererExplicit ?? false) && fixRecipe?.isPreviewRoute != true, gameOverride: state.rendererOverride(for: item),
                             needsDirect3D12: item.installed && entry?.nativeVulkan != true && state.programNeedsDirect3D12(item))
     }
     private var engineName: String? { bottle.flatMap { state.engine(for: $0) }?.displayName }
 
     private var storeAppID: Int? { item.steamAppID }
+
+    private struct ActiveUserRead: Equatable {
+        let bottle: String
+        let user: UInt64?
+    }
+
+    /// What the ActiveUser task depends on: the Steam game's environment, whether its Steam runs,
+    /// and whether more than one account uses it.
+    private struct AccountWatch: Equatable {
+        let bottle: String?
+        let running: Bool
+        let severalAccounts: Bool
+    }
+
+    private var accountWatch: AccountWatch {
+        let name = item.source == .steam && item.steamAppID != nil ? item.bottleName : nil
+        return AccountWatch(bottle: name, running: name.map { state.steamClients.contains($0) } ?? false,
+                            severalAccounts: name.map { (state.steamAccountsByBottle[$0]?.count ?? 0) > 1 } ?? false)
+    }
+
+    /// Who installed this Steam game, and whether Steam is signed in, or signed in last, to an
+    /// account that may not have it: "is signed in" only while that Steam runs, and an account
+    /// the Account row counts as having the game is never warned about.
+    private func accountNote(_ owners: SteamAccounts.Owners?) -> SteamAccounts.GameNote? {
+        guard item.source == .steam, let name = item.bottleName, let read = activeUserRead, read.bottle == name else { return nil }
+        return SteamAccounts.note(installedBy: state.steamInstaller(for: item),
+                                  accounts: state.steamAccountsByBottle[name] ?? [], activeUser: read.user,
+                                  steamRunning: state.steamClients.contains(name),
+                                  owners: owners?.reason == .unknown ? nil : owners?.accounts)
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -86,6 +132,17 @@ struct GameDetailView: View {
         }
         .background(BottleBackdrop())
         .navigationTitle(state.displayTitle(item))
+        .task(id: item.id) {
+            // Read off the main thread: legendary's metadata and install records are JSON files.
+            let saves = EpicSaves(store: state.epicStore), app = item.epicAppName
+            let found = await Task.detached { app.map { (saves.supportsCloudSaves($0), saves.savePath($0)) } }.value
+            epicCloudSaves = found?.0 ?? false
+            epicSaveFolder = found?.1
+        }
+        // Read again whenever a sync ends (AppState.savesSynced).
+        .task(id: "\(item.id)|\(state.savesSynced)") {
+            lastSynced = await syncedAt()
+        }
         .task(id: storeAppID) {
             storeDetails = nil
             expandedDescription = false
@@ -96,6 +153,22 @@ struct GameDetailView: View {
             guard !Task.isCancelled else { return }
             storeDetails = details
             loadingDetails = false
+        }
+        // Which account Steam is signed in to, for accountNote. Only that is read here: the install
+        // records and accounts are already in the app's state. Read with more than one account
+        // only, again every few seconds while Steam runs (switching accounts happens in Steam),
+        // and once more when it starts or quits.
+        .task(id: accountWatch) {
+            let watch = accountWatch
+            guard let name = watch.bottle, watch.severalAccounts,
+                  let bottle = state.bottles.first(where: { $0.name == name }) else { return }
+            while !Task.isCancelled {
+                let user = await Task.detached { SteamAccounts.signedIn(bottleURL: bottle.url) }.value
+                let read = ActiveUserRead(bottle: name, user: user)
+                if read != activeUserRead { activeUserRead = read }
+                guard watch.running else { return }
+                try? await Task.sleep(for: .seconds(5))
+            }
         }
     }
 
@@ -133,10 +206,136 @@ struct GameDetailView: View {
         }
     }
 
+    /// A sync that worked shows nothing else, so the setting says when the last one was; not
+    /// while sync is turned off for the game (`on` false), when no sync runs.
+    @ViewBuilder private func lastSyncedLine(on: Bool) -> some View {
+        if on, let lastSynced {
+            Text(String(format: L("Last synced: %@"), Self.syncedFormatter.string(from: lastSynced)))
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// "Today at 10:50", "Yesterday at 21:04", or the date.
+    private static let syncedFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium; f.timeStyle = .short; f.doesRelativeDateFormatting = true
+        return f
+    }()
+
+    /// This install's last sync, read off the main thread (the stores keep it in JSON files).
+    private func syncedAt() async -> Date? {
+        switch item.source {
+        case .gog:
+            guard let game = item.bottleName.flatMap({ name in state.gogInstalledByBottle[name]?.first { $0.id == item.gogID } }) else { return nil }
+            let saves = GOGSaves(store: state.gogStore)
+            return await Task.detached { saves.lastSynced(game) }.value
+        case .epic:
+            guard let app = item.epicAppName, let path = state.epicInstalls[app] else { return nil }
+            let saves = EpicSaves(store: state.epicStore), install = URL(fileURLWithPath: path, isDirectory: true)
+            return await Task.detached { saves.lastSynced(app, install: install) }.value
+        default:
+            return nil
+        }
+    }
+
+    /// An Epic game's cloud-save setting, in the game settings like GOG's.
+    private func epicSettings(_ app: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(L("Cloud saves")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(L("Sync saves with Epic"), isOn: Binding(
+                    get: { !state.epicCloudSavesOff.contains(app) }, set: { state.epicSetCloudSaves($0, for: app) }))
+                    .toggleStyle(.checkbox).disabled(!state.epicSignedIn)
+                Text(L("Before Play, newer saves come down from Epic's cloud, after this Mac's are backed up; when the game ends, this Mac's go back up. If both changed since the last sync, Highball asks which to keep."))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let epicSaveFolder {
+                    Text(String(format: L("Saves sync from %@."), (epicSaveFolder.path as NSString).abbreviatingWithTildeInPath))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
+                lastSyncedLine(on: !state.epicCloudSavesOff.contains(app))
+            }
+        }
+    }
+
+    /// A GOG game's own settings, one row each like the rest of the page: comet (achievements and
+    /// stats), cloud saves, which launch task Play runs, and an update for a game gogdl installed.
+    @ViewBuilder private func gogSettings(_ game: GOGStore.InstalledGame) -> some View {
+        let cometOff = state.gogSettings.cometOff[game.id]
+        HStack(alignment: .top, spacing: 12) {
+            Text(L("Achievements")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(L("Achievements and stats (comet)"), isOn: Binding(
+                    get: { cometOff == nil }, set: { state.gogSetComet($0, for: game.id) }))
+                    .toggleStyle(.checkbox).disabled(!state.gogSignedIn)
+                Text(cometOff == GOGSettings.crashedWithComet
+                     ? L("Turned off after the game closed at once with comet running and then started fine without it. Turn it back on to try again.")
+                     : L("comet stands in for GOG Galaxy while the game runs, so achievements, stats and play time reach your GOG account. If the game won't start with it, Highball starts it again without."))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        HStack(alignment: .top, spacing: 12) {
+            Text(L("Cloud saves")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(L("Sync saves with GOG"), isOn: Binding(
+                    get: { !state.gogSettings.cloudSavesOff.contains(game.id) }, set: { state.gogSetCloudSaves($0, for: game.id) }))
+                    .toggleStyle(.checkbox).disabled(!state.gogSignedIn)
+                Text(L("Saves come down from GOG's cloud before Play and go back up when the game ends. If both copies changed, Highball asks which one wins."))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                lastSyncedLine(on: !state.gogSettings.cloudSavesOff.contains(game.id))
+                if !state.gogSignedIn {
+                    Button(L("Connect GOG")) { state.showGOGSignIn = true }.controlSize(.small)
+                }
+            }
+        }
+        if !game.launchChoices.isEmpty {
+            HStack(alignment: .top, spacing: 12) {
+                Text(L("Launch option")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 4)
+                Picker("", selection: Binding(
+                    get: { state.gogSettings.launchChoice[game.id] ?? -1 },
+                    set: { state.gogSetLaunchChoice($0 < 0 ? nil : $0, for: game.id) })) {
+                    Text(L("GOG's default")).tag(-1)
+                    ForEach(Array(game.launchChoices.enumerated()), id: \.offset) { index, task in
+                        Text(verbatim: task.name ?? task.path ?? "").tag(index)
+                    }
+                }.labelsHidden().frame(maxWidth: 360)
+            }
+        }
+        if state.gogStore.hasManifest(game) {
+            HStack(alignment: .top, spacing: 12) {
+                Text(L("Version")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 2)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(verbatim: game.buildID.map { String(format: L("GOG build %@"), $0) } ?? "GOG").font(.callout)
+                        Button(L("Update from GOG")) { state.gogUpdate(item) }.controlSize(.small).disabled(state.busy)
+                    }
+                    Text(L("Downloads only what changed since this build. Nothing happens when it is already the newest."))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
     private var libraryInfo: some View {
         VStack(alignment: .leading, spacing: 12) {
             row(L("Source"), item.source == .steam ? "Steam" : item.source == .epic ? "Epic Games"
-                : item.source == .battlenet ? "Battle.net" : L("Windows program"))
+                : item.source == .gog ? "GOG" : item.source == .battlenet ? "Battle.net" : L("Windows program"))
+            let owners = state.steamOwners(for: item)
+            if let owners, (state.steamAccountsByBottle[item.bottleName ?? ""]?.count ?? 0) > 1 { steamAccountRow(owners) }
+            if let note = accountNote(owners) {
+                VStack(alignment: .leading, spacing: 6) {
+                    row(L("Installed by"), note.installedBy.displayName)
+                    if let other = note.otherAccount {
+                        Label(String(format: note.signedInNow
+                                     ? L("Steam is signed in as %@. That account may not have access to this game.")
+                                     : L("Steam last signed in as %@. That account may not have access to this game."),
+                                     other.displayName),
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(HB.amber)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.leading, Self.rowLabelWidth + 12)   // under the row's value
+                    }
+                }
+            }
             if item.sizeOnDisk > 0 {
                 row(L("Size on disk"), ByteCountFormatter.string(fromByteCount: item.sizeOnDisk, countStyle: .file))
             }
@@ -336,7 +535,7 @@ struct GameDetailView: View {
                          : L("Its anti-cheat does not run on macOS."))
                         .font(.callout).foregroundStyle(.secondary)
                 }
-            } else if item.source == .epic {
+            } else if item.source == .epic || item.source == .gog {
                 Button { state.install(item) } label: { primaryActionLabel(L("Install"), symbol: "arrow.down") }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                     .disabled(state.busy)
                 Text(String(format: L("Installs into %@."), state.defaultBottle?.name ?? L("your environment"))).font(.callout).foregroundStyle(.secondary)
@@ -506,7 +705,7 @@ struct GameDetailView: View {
                                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        if item.source == .steam || item.source == .epic {
+                        if item.source == .steam || item.source == .epic || item.source == .gog {
                             HStack(alignment: .top, spacing: 12) {
                                 Text(L("Launch arguments")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 4)
                                 VStack(alignment: .leading, spacing: 4) {
@@ -522,6 +721,21 @@ struct GameDetailView: View {
                                 argsText = ArgumentLine.join(state.launchArguments(for: item)); argsLoaded = true
                             }
                             .onDisappear { state.setLaunchArguments(argsText, for: item) }
+                        }
+                        if item.source == .gog, let game = state.gogInstalled(item, in: bottle) {
+                            gogSettings(game)
+                        }
+                        if item.source == .epic, let app = item.epicAppName, epicCloudSaves {
+                            epicSettings(app)
+                        }
+                        // A second route on a preview engine: Play asks once, and here it can be asked again.
+                        if let offer = state.routeOffer(for: item) {
+                            HStack(alignment: .top, spacing: 12) {
+                                Text(L("Other route")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+                                Button(String(format: L("Try the %@ engine…"), GamePageCopy.shortEngineName(offer.manifest))) {
+                                    state.pendingPreview = (offer.recipe, bottle, offer.manifest, item, nil)
+                                }.disabled(state.busy)
+                            }
                         }
                         // The engine is the environment's, so the page says so and can change it
                         // through the same switch page as the environment's settings, which lists
@@ -570,6 +784,17 @@ struct GameDetailView: View {
                             Text(L("Environment")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
                             Text(bottle.name).font(.callout)
                             NavigationLink(L("Environment settings…"), value: EnvironmentSettingsDestination(name: bottle.name)).controlSize(.small)
+                            // An Epic game lives where its folder is, so it can move alone, where the
+                            // engine switch moves every game of the environment (highball#566).
+                            if item.source == .epic, item.installed, state.bottles.count > 1 {
+                                Menu(L("Move to…")) {
+                                    ForEach(state.bottles.filter { $0.name != bottle.name }, id: \.name) { other in
+                                        Button(other.name) { state.moveEpicGame(item, to: other) }
+                                    }
+                                }
+                                .controlSize(.small).fixedSize().disabled(state.busy || running != nil)
+                                .help(L("Moves this game's folder into another environment, where it plays with that environment's engine and settings. Its other games stay where they are. Saves the game keeps in the environment's user folders stay behind, unless Epic keeps them in the cloud."))
+                            }
                         }
                         // Another copy plays from its own environment; once played there, the
                         // tile follows it (highball#264).
@@ -589,7 +814,9 @@ struct GameDetailView: View {
                             Button(L("Show the Windows drive")) { NSWorkspace.shared.open(bottle.driveC) }.controlSize(.small)
                             if item.installed {
                                 Button(L("Uninstall…"), role: .destructive) { state.askUninstall(item) }.controlSize(.small)
-                                    .help(L("Steam and the Epic tools do their own uninstalling, so their libraries stay right."))
+                                    .disabled(state.uninstallWaitsFor(item) != nil)
+                                    .help(state.uninstallWaitsFor(item).map { String(format: L("Available once “%@” has finished."), $0) }
+                                          ?? L("Steam and the Epic tools do their own uninstalling, so their libraries stay right."))
                             }
                             if MacAppStub.existing(for: item.title) != nil {
                                 Button(L("Remove the Mac app")) { state.removeMacApp(title: item.title) }.controlSize(.small)
@@ -634,9 +861,49 @@ struct GameDetailView: View {
         .padding(.top, 6)
     }
 
+    /// Whose Steam game this is, by profile name, and why Highball thinks so; the menu sets it.
+    /// Shown with more than one account on its Steam, also when Highball has no sign of whose it is
+    /// (SteamAccounts.Owners), so the player can say.
+    private func steamAccountRow(_ owners: SteamAccounts.Owners) -> some View {
+        // The accounts of this game's own Steam: another environment's are no answer here.
+        let accounts = state.steamAccountsByBottle[item.bottleName ?? ""] ?? []
+        let names = owners.reason == .unknown ? [L("Any account")]
+            : owners.accounts.compactMap { state.steamAccountName($0) }.sorted()
+        let why: String = switch owners.reason {
+        case .chosen: L("set by you")
+        case .installed: L("installed it")
+        case .added: L("signed in when it was added")
+        case .unknown: L("no sign of whose it is")
+        }
+        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(L("Account")).font(.caption).foregroundStyle(.secondary).frame(width: Self.rowLabelWidth, alignment: .leading)
+            Menu {
+                // A checkmark on the player's own pick.
+                let picked = owners.reason == .chosen ? owners.accounts : nil
+                ForEach(accounts, id: \.id) { account in
+                    Button { state.setSteamOwners([account.id], for: item) } label: {
+                        if picked == [account.id] { Label(account.displayName, systemImage: "checkmark") } else { Text(account.displayName) }
+                    }
+                }
+                Button { state.setSteamOwners(Set(accounts.map(\.id)), for: item) } label: {
+                    if accounts.count > 1, picked == Set(accounts.map(\.id)) { Label(L("Every account here"), systemImage: "checkmark") } else { Text(L("Every account here")) }
+                }
+                Divider()
+                Button(L("Let Highball guess")) { state.setSteamOwners(nil, for: item) }
+            } label: {
+                Text(names.joined(separator: ", ")).font(.callout)
+            }
+            .menuStyle(.button).buttonStyle(.plain).fixedSize()
+            .help(L("Whose Steam game this is. Highball goes by who installed it and who was signed in when it appeared; pick one to set it."))
+            Text(why).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    static let rowLabelWidth: CGFloat = 110
+
     private func row(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+            Text(label).font(.caption).foregroundStyle(.secondary).frame(width: Self.rowLabelWidth, alignment: .leading)
             Text(value).font(.callout).textSelection(.enabled)
         }
     }

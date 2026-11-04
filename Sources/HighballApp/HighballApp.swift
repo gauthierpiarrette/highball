@@ -148,6 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             state.killAllBottles()
+            state.stopGOGComets()
             return .terminateNow
         case .alertSecondButtonReturn:
             return .terminateNow
@@ -158,6 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         appState?.stopEpicInstall()
+        appState?.stopGOGInstall()
         DiscordPresence.shared.setEnabled(false)
         DiscordPresence.shared.stop()
     }
@@ -252,6 +254,12 @@ struct ContentView: View {
         .modesetTrialAsk(state)
         .homeMoveAsk(state)
         .sheet(isPresented: $state.showEpicSignIn) { EpicSignInSheet() }
+        .sheet(isPresented: $state.showGOGSignIn) { GOGSignInSheet() }
+        .gogSaveConflictAsk(state)
+        .gogRemovalWithoutBackupAsk(state)
+        .epicRemovalWithoutCopyAsk(state)
+        .gogPutBackSavesAsk(state)
+        .epicPutBackSavesAsk(state)
         .sheet(item: $state.engineTransition) { t in EngineTransitionSheet(transition: t) }
         #if DEBUG
         // Screenshot runs only: HB_SHOW_ENGINE_SWITCH="<environment>><engine id>" opens the switch
@@ -526,13 +534,130 @@ private extension View {
         self.alert(state.pendingUninstall.map { String(format: L("Remove %@?"), $0.item.title) } ?? "",
                isPresented: .init(get: { state.pendingUninstall != nil }, set: { if !$0 { state.pendingUninstall = nil } }),
                presenting: state.pendingUninstall) { pending in
-            if Uninstall.isActionable(pending.route) {
-                Button(L("Remove"), role: .destructive) { state.uninstallConfirmed() }
+            switch pending.route {
+            case .gog, .epic:
+                // Keeping the saves is the answer Return gives.
+                Button(L("Keep save data")) { state.uninstallConfirmed() }.keyboardShortcut(.defaultAction)
+                Button(L("Delete save data too"), role: .destructive) { state.uninstallConfirmed(deleteSaves: true) }
+            default:
+                if Uninstall.isActionable(pending.route) {
+                    Button(L("Remove"), role: .destructive) { state.uninstallConfirmed() }
+                }
             }
             Button(L("Cancel"), role: .cancel) { state.pendingUninstall = nil }
         } message: { pending in
             Text(Uninstall.confirmation(route: pending.route, sizeOnDisk: pending.item.sizeOnDisk))
         }
+    }
+
+    /// Both this Mac's saves and GOG's changed since the last sync (GOGSaves): nothing moved, and
+    /// the player picks the copy that wins. Before Play the launch waits for this answer.
+    @MainActor func gogSaveConflictAsk(_ state: AppState) -> some View {
+        self.alert(state.gogSaveConflict.map { String(format: L("Which %@ saves should win?"), $0.title) } ?? "",
+                   isPresented: .init(get: { state.gogSaveConflict != nil }, set: { if !$0 { state.resolveGOGSaveConflict(.skip) } }),
+                   presenting: state.gogSaveConflict) { _ in
+            Button(state.gogSaveConflict?.epic == true ? L("Use Epic's cloud saves") : L("Use GOG's cloud saves")) { state.resolveGOGSaveConflict(.useCloud) }
+            Button(L("Keep this Mac's saves")) { state.resolveGOGSaveConflict(.keepMac) }
+            Button(L("Decide later"), role: .cancel) { state.resolveGOGSaveConflict(.skip) }
+        } message: { conflict in
+            Text(conflict.epic ? Self.epicSaveConflictMessage(beforePlay: conflict.beforePlay, firstSync: conflict.firstSync, backups: EpicSaves(store: state.epicStore).backups.root)
+                               : Self.saveConflictMessage(beforePlay: conflict.beforePlay, backups: GOGSaves(store: state.gogStore).backupsDir))
+        }
+    }
+
+    /// An uninstall kept this game's saves, and it is installed again: offered once per install.
+    @MainActor func gogPutBackSavesAsk(_ state: AppState) -> some View {
+        self.alert(state.gogSavesToPutBack.map { String(format: L("Put back your saves from %@?"),
+                                                        $0.kept.date.formatted(date: .abbreviated, time: .omitted)) } ?? "",
+               // The buttons answer (Escape is Not now); the dismissal that follows must not answer
+               // the next game's question, which an answer may already have raised.
+               isPresented: .init(get: { state.gogSavesToPutBack != nil }, set: { _ in }),
+               presenting: state.gogSavesToPutBack) { _ in
+            Button(L("Put them back")) { state.gogPutBackSaves(.putBack) }.keyboardShortcut(.defaultAction)
+            Button(L("Not now"), role: .cancel) { state.gogPutBackSaves(.notNow) }
+            Button(L("Don't ask again")) { state.gogPutBackSaves(.dontAskAgain) }
+        } message: { pending in
+            Text(String(format: L("Highball kept %@'s saves when it was removed. Put them back copies them into the game's folder; anything already there is copied to save-backups first. Not now asks again the next time Highball starts."), pending.title))
+        }
+    }
+
+    /// An uninstall kept this Epic game's saves, and it is installed again: offered once per install.
+    @MainActor func epicPutBackSavesAsk(_ state: AppState) -> some View {
+        self.alert(state.epicSavesToPutBack.map { String(format: L("Put back your saves from %@?"),
+                                                         $0.kept.date.formatted(date: .abbreviated, time: .omitted)) } ?? "",
+               // As GOG's: the buttons answer, the dismissal never answers the next game's question.
+               isPresented: .init(get: { state.epicSavesToPutBack != nil }, set: { _ in }),
+               presenting: state.epicSavesToPutBack) { _ in
+            Button(L("Put them back")) { state.epicPutBackSaves(.putBack) }.keyboardShortcut(.defaultAction)
+            Button(L("Not now"), role: .cancel) { state.epicPutBackSaves(.notNow) }
+            Button(L("Don't ask again")) { state.epicPutBackSaves(.dontAskAgain) }
+        } message: { pending in
+            Text(String(format: L("Highball kept %@'s saves when it was removed. Put them back copies them to where they were; anything already there is copied to save-backups first. Not now asks again the next time Highball starts."), pending.title))
+        }
+    }
+
+    /// Some of a game's saves can't be backed up before it is removed (GOG unreachable, or saves
+    /// kept directly in the game's folder). Nothing is removed unless the player agrees.
+    @MainActor func gogRemovalWithoutBackupAsk(_ state: AppState) -> some View {
+        self.alert(state.gogRemovalWithoutBackup.map { String(format: L("Remove %@ without a copy of every save?"), $0.title) } ?? "",
+               isPresented: .init(get: { state.gogRemovalWithoutBackup != nil }, set: { if !$0 { state.gogRemovalWithoutBackup = nil } }),
+               presenting: state.gogRemovalWithoutBackup) { _ in
+            Button(L("Remove anyway"), role: .destructive) { state.gogRemoveWithoutBackup() }
+            Button(L("Cancel"), role: .cancel) { state.gogRemovalWithoutBackup = nil }
+        } message: { pending in
+            Text(Self.removalWithoutBackupMessage(pending))
+        }
+    }
+
+    /// What is and isn't copied first, in the case the removal is in.
+    static func removalWithoutBackupMessage(_ pending: AppState.GOGRemovalWithoutBackup) -> String {
+        switch (pending.plan == nil, pending.gameFolderUncopied) {
+        case (true, false):
+            String(format: L("Highball couldn't reach GOG to find out where %@ keeps its saves, so the save folders GOG names inside the game's folder are deleted with it. Files the game changed in its folder since you first played it are still copied to save-backups first, and saves already in GOG's cloud are not affected. To keep every save, cancel and try again once GOG can be reached."), pending.title)
+        case (false, false):
+            String(format: L("GOG says %@ keeps some of its saves directly in the game's folder, which Highball can't copy as one save folder. Files the game changed in its folder since you first played it are still copied to save-backups first, along with its other save folders, and saves already in GOG's cloud are not affected."), pending.title)
+        case (true, true):
+            String(format: L("Highball couldn't reach GOG to find out where %@ keeps its saves, and can't tell which files in the game's folder the game wrote, because nothing records when it was installed. So nothing in the game's folder is copied first, and saves there are deleted with it. Saves already in GOG's cloud are not affected. To keep its save folders, cancel and try again once GOG can be reached."), pending.title)
+        case (false, true):
+            String(format: L("Highball can't tell which files in %@'s folder the game wrote, because nothing records when it was installed. Only the save folders GOG names are copied to save-backups first; any other save the game kept in its folder is deleted with it. Saves already in GOG's cloud are not affected."), pending.title)
+        }
+    }
+
+    /// For an Epic game (EpicSaves). Each choice says what it replaces; the Mac's saves are
+    /// backed up before Epic's replace them.
+    static func epicSaveConflictMessage(beforePlay: Bool, firstSync: Bool, backups: URL) -> String {
+        let situation = firstSync
+            ? L("This Mac and Epic's cloud both have saves for this game, and Highball hasn't synced them before, so it can't tell which to keep. Nothing was copied or replaced.")
+            : L("The saves on this Mac and the ones in Epic's cloud have both changed since they were last synced. Nothing was copied or replaced.")
+        let decideLater = beforePlay ? L("Decide later plays with this Mac's saves and doesn't upload them afterwards; Highball asks again next time.")
+                                     : L("Decide later leaves both as they are; Highball asks again next time you play.")
+        return [situation,
+                String(format: L("Use Epic's cloud saves replaces this Mac's, after backing them up to %@. Keep this Mac's saves uploads them as Epic's newest save, which your other devices then download."),
+                       (backups.path as NSString).abbreviatingWithTildeInPath),
+                decideLater].joined(separator: " ")
+    }
+
+    /// Nothing tells the files an Epic game wrote in its folder from legendary's, so Keep can't
+    /// copy them. Nothing is removed unless the player agrees.
+    @MainActor func epicRemovalWithoutCopyAsk(_ state: AppState) -> some View {
+        self.alert(state.epicRemovalWithoutCopy.map { String(format: L("Remove %@ without a copy of its folder?"), $0.title) } ?? "",
+                   isPresented: .init(get: { state.epicRemovalWithoutCopy != nil }, set: { if !$0 { state.epicRemovalWithoutCopy = nil } }),
+                   presenting: state.epicRemovalWithoutCopy) { _ in
+            Button(L("Remove anyway"), role: .destructive) { state.epicRemoveWithoutCopy() }
+            Button(L("Cancel"), role: .cancel) { state.epicRemovalWithoutCopy = nil }
+        } message: { pending in
+            Text(String(format: L("Highball can't tell which files in %@'s folder the game wrote: the Epic tools have no file list for it, and it was installed before Highball kept a record of installs. Its save folder is copied to save-backups first when Highball can find it, but any other save the game kept in its folder is deleted with it. Saves in Epic's cloud are not affected."), pending.title))
+        }
+    }
+
+    /// Each choice says what it replaces and that a backup is made first (GOGSaves backups).
+    static func saveConflictMessage(beforePlay: Bool, backups: URL) -> String {
+        let decideLater = beforePlay ? L("Decide later plays with this Mac's saves and leaves the cloud alone.")
+                                     : L("Decide later leaves both as they are until the next time you play.")
+        return [L("The saves on this Mac and the ones in GOG's cloud have both changed since they were last synced, or haven't been synced from this install yet, so neither was copied."),
+                String(format: L("Use GOG's cloud saves replaces this Mac's; Keep this Mac's saves replaces the cloud's. Either way, a copy of what gets replaced is kept first, in %@."),
+                       (backups.path as NSString).abbreviatingWithTildeInPath),
+                decideLater].joined(separator: " ")
     }
 
     @MainActor func rendererTrialAsk(_ state: AppState) -> some View {

@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Graphics backend applied to a bottle (or overridden per program).
 public enum Renderer: String, Codable, CaseIterable, Sendable {
@@ -808,6 +809,16 @@ public struct Bottle: Sendable {
                 env["D3DM_MAX_FPS"] = String(settings.fpsCap)
             default: break
             }
+            // A limiter alone reaches the panel unevenly: it sleeps to the period but nothing aligns
+            // the present to vsync, so a frame that finishes past a boundary shows after 3 vsyncs and
+            // the next after 1. Measured on a GPU-bound game capped at 30 on a 60 Hz panel: 74% of the
+            // displayed intervals were 2 vsyncs and the interval changed 36% of the time; with Metal
+            // holding each frame for the cap's slot (the arm64 engines' MoltenVK patch 0017, the same
+            // change in Mesa's Metal WSI) it is 98% and 1.5%. Only a cap that divides the refresh rate
+            // has a slot: Metal rounds the minimum up to the next vsync, so 45 on 60 Hz would become 30.
+            if r == .dxvk || r == .vkd3d, Self.displayRefreshRate() % settings.fpsCap == 0 {
+                env["HB_PRESENT_PACE_FPS"] = String(settings.fpsCap)
+            }
         }
         // Wine's menu builder writes .lnk shortcuts and app bundles onto the macOS Desktop and
         // into ~/Applications for every installer that asks. Sikarugir's engines leave the
@@ -902,14 +913,27 @@ public struct Bottle: Sendable {
         // #187). An engine that ships libhbaudiobuf.dylib gets it inserted into Wine's processes,
         // where it caps the audio unit's buffer at 5 ms. Since 20261008 it also limits a float mix
         // that goes over full scale, as the last stage of Windows' audio engine does, where the Mac
-        // would clip it (Paperback, highball-db#349). HB_AUDIOBUF=0 in an environment's variables
-        // leaves the library out, HB_AUDIOLIMIT=0 keeps it without the limiter.
+        // would clip it (Paperback, highball-db#349). Builds after 20261008 cap microphones the same
+        // way, where Wine dropped 32 frames a period (highball#350), and run Wine's per-stream audio
+        // clock in real time, which a busy Mac otherwise woke late (highball#444), and move a game
+        // to the Mac's output when it changes (highball#460). HB_AUDIOBUF=0 in an environment's
+        // variables leaves the library out, HB_AUDIOLIMIT=0 keeps it without the limiter,
+        // HB_AUDIORT=0 without the real-time clock, HB_AUDIOFOLLOW=0 without the move.
         if let lib = engine.audioBufferLibrary, env["HB_AUDIOBUF"] != "0" {
             let inserted = (env["DYLD_INSERT_LIBRARIES"] ?? "").split(separator: ":").map(String.init)
             env["DYLD_INSERT_LIBRARIES"] = ([lib.path] + inserted.filter { $0 != lib.path }).joined(separator: ":")
         }
-        // A recipe's value can depend on this Mac (a video memory budget from its memory).
-        return env.mapValues { MacVariables.expand($0) }
+        // Old 32-bit games do their maths on the x87 unit, which Rosetta runs slowly. A game's recipe
+        // asks for athei's x87sidecar with HB_X87SIDECAR=1, and it applies only where the engine
+        // ships the sidecar and runs under Rosetta. Never on for everything: the sidecar relies on
+        // how Rosetta lays out its translations, and checks that at each start (highball#165).
+        env.removeValue(forKey: "ROSETTA_X87_PATH")
+        if env["HB_X87SIDECAR"] == "1", engine.manifest.requiresRosetta, let sidecar = engine.x87Sidecar {
+            env["ROSETTA_X87_PATH"] = sidecar.path
+        }
+        // A recipe's value can depend on this Mac (a video memory budget from its memory), and an engine's or a recipe's
+        // on this environment (a driver's shader cache kept inside it, and gone with it).
+        return env.mapValues { MacVariables.expand($0).replacingOccurrences(of: "${environment}", with: url.path) }
     }
 
     /// The renderer-specific bridge files that make the DLSS switch actionable in this engine.
@@ -961,6 +985,12 @@ public struct Bottle: Sendable {
         for old in (try? fm.contentsOfDirectory(atPath: vkd3dCacheRoot.path)) ?? [] where old != key {
             try? fm.removeItem(at: vkd3dCacheRoot.appending(path: old))
         }
+    }
+    /// Frames per second of the main display, for the frame cap's pacing; CoreGraphics reports 0 for
+    /// some built-in panels, taken as 60. Tests replace it.
+    nonisolated(unsafe) public static var displayRefreshRate: () -> Int = {
+        let rate = CGDisplayCopyDisplayMode(CGMainDisplayID())?.refreshRate ?? 0
+        return rate > 0 ? Int(rate.rounded()) : 60
     }
     /// Windows path DXVK writes its per-process logs to, and its Unix location.
     public static let dxvkLogWindowsPath = #"C:\highball\logs"#

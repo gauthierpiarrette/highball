@@ -65,6 +65,21 @@ final class SteamLibraryFoldersTests: XCTestCase {
                        external.appending(path: "steamapps/common/BloodySpell").standardizedFileURL.path)
     }
 
+    func testTheLibraryListInConfigIsReadWhenSteamappsCantBe() throws {
+        // highball#603: a Finder alias named steamapps is a file, so the list inside it can't be read.
+        let bottle = tmp.appending(path: "alias-bottle", directoryHint: .isDirectory)
+        let steam = bottle.appending(path: "drive_c/Program Files (x86)/Steam", directoryHint: .isDirectory)
+        let external = tmp.appending(path: "alias-external/SteamLibrary", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: steam.appending(path: "config"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: external.appending(path: "steamapps"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: bottle.appending(path: "dosdevices"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: bottle.appending(path: "dosdevices/d:"), withDestinationURL: external.deletingLastPathComponent())
+        try Data("alias".utf8).write(to: steam.appending(path: "steamapps"))
+        try Data(#""libraryfolders" { "1" { "path" "D:\\\\SteamLibrary" } }"#.utf8).write(to: steam.appending(path: "config/libraryfolders.vdf"))
+        let folders = SteamLibrary.libraryFolders(steamRoot: steam, bottleURL: bottle)
+        XCTAssertEqual(folders.map(\.standardizedFileURL.path).last, external.standardizedFileURL.path)
+    }
+
     func testASymlinkedSteamappsFolderIsRead() throws {
         // highball-db#316: steamapps moved to an external disk with a symlink left in its place.
         let bottle = tmp.appending(path: "bottle", directoryHint: .isDirectory)

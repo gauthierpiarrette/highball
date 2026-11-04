@@ -28,6 +28,12 @@ struct AddGamesView: View {
                                connected: state.epicSignedIn) {
                         state.showEpicSignIn = true
                     }
+                    sourceCard("GOG", symbol: "g.circle.fill",
+                               description: L("Connect your GOG account to see and download your games."),
+                               action: state.gogSignedIn ? L("GOG account connected") : L("Connect GOG account…"),
+                               connected: state.gogSignedIn, manage: { state.showGOGSignIn = true }) {
+                        state.showGOGSignIn = true
+                    }
                     sourceCard(L("A Windows program I have…"), symbol: "app.dashed",
                                description: L("Choose an .exe, .msi or .bat file, or drop it on this window."),
                                action: L("Choose a file…")) {
@@ -37,7 +43,9 @@ struct AddGamesView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HB.eyebrow(L("Launchers"))
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 120, maximum: 170), spacing: 12)], spacing: 12) {
-                        ForEach(BottleView.launcherMeta.filter { $0.id != "steam" }, id: \.id) { meta in
+                        // Steam and GOG have their own cards above; GOG Galaxy's own client stays blocked
+                        // (its sign-in window draws black), and Connect GOG does its jobs instead.
+                        ForEach(BottleView.launcherMeta.filter { $0.id != "steam" && $0.id != "gog-galaxy" }, id: \.id) { meta in
                             if let recipe = AppState.recipe(meta.id) {
                                 LauncherTile(title: meta.short, symbol: meta.symbol,
                                              installed: state.launcherInstalled(meta.id), busy: unavailable,
@@ -66,7 +74,8 @@ struct AddGamesView: View {
     }
 
     private func sourceCard(_ title: String, symbol: String, description: String,
-                            action: String, connected: Bool = false, perform: @escaping () -> Void) -> some View {
+                            action: String, connected: Bool = false, manage: (() -> Void)? = nil,
+                            perform: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Image(systemName: symbol).font(.title).foregroundStyle(HB.amber)
                 .accessibilityHidden(true)
@@ -75,8 +84,15 @@ struct AddGamesView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             if connected {
-                Label(action, systemImage: "checkmark.circle.fill")
-                    .font(.callout).foregroundStyle(HB.good)
+                HStack {
+                    Label(action, systemImage: "checkmark.circle.fill")
+                        .font(.callout).foregroundStyle(HB.good)
+                    // The way back to a connected account: switching accounts, or disconnecting.
+                    if let manage {
+                        Spacer()
+                        Button(L("Manage…"), action: manage).buttonStyle(.plain).font(.callout).foregroundStyle(HB.amber)
+                    }
+                }
             } else {
                 Button(action, action: perform).buttonStyle(.bordered).disabled(unavailable)
             }

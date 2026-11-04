@@ -59,8 +59,8 @@ titles as impossible before you download 80 GB.
 
 Cyberpunk 2077, for one, runs 60–82 fps on an M5 (D3DMetal + FSR 2.1), and Red Dead
 Redemption 2 plays on an M1 Pro after a MoltenVK fix that is now a pull request upstream.
-Renderer switching, 32-bit apps via Wine's WoW64, Windows runtimes, ReShade, and your Epic
-library via Legendary work too.
+Renderer switching, 32-bit apps via Wine's WoW64, Windows runtimes, ReShade, your Epic
+library via Legendary and your GOG library via gogdl work too.
 
 ## Launchers
 
@@ -70,8 +70,11 @@ engine (built from the CrossOver 26.3 tree); Play offers that engine when a game
 you can move an environment to it in Settings. Rockstar signs in and runs GTA V and Red Dead
 Redemption 2 here, the EA app signs in and runs The Sims 4, Ubisoft Connect and Battle.net show
 their sign-in windows but no game has been played through them here yet. GOG Galaxy still comes
-up black, so you can't sign in; GOG's DRM-free offline installers run directly in an environment
-instead. Each case is tracked in the launcher recipe's `knownIssues`.
+up black, so you can't sign in through it; Connect GOG does Galaxy's jobs instead, through
+Heroic's gogdl and comet: sign in on GOG's page in your browser, and your GOG library installs
+straight into an environment with its covers, achievements and cloud saves. GOG games you
+installed from offline installers show up as GOG games too. Each launcher case is tracked in its
+recipe's `knownIssues`.
 
 ## Getting started
 
@@ -96,7 +99,7 @@ git clone https://github.com/gauthierpiarrette/highball && cd highball        # 
 git clone https://github.com/gauthierpiarrette/highball-db ../highball-db     # recipes + game database (CC0)
 swift build -c release
 .build/release/highball engine install spike/engine-manifest.json
-.build/release/highball engine accept x64-sikarugir10.0_6-r2 apple-gptk-license-2023-08-17  # optional: D3DMetal
+.build/release/highball engine accept <the id install printed> apple-gptk-license-2023-08-17  # optional: D3DMetal
 .build/release/highball bottle create play --recipe steam
 .build/release/highball run play Steam
 ```

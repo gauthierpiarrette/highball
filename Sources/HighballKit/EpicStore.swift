@@ -61,14 +61,15 @@ public struct EpicStore: Sendable {
     }
 
     /// Runs legendary streaming each output line (installs are long and progress matters).
-    /// `control` lets the caller stop it the way Ctrl-C in a terminal does.
+    /// `control` lets the caller stop it the way Ctrl-C in a terminal does; `extra` adds to its
+    /// environment (WINEPREFIX, for a save folder legendary resolves inside an environment).
     @discardableResult
-    public func runStreaming(_ args: [String], control: LegendaryControl? = nil,
+    public func runStreaming(_ args: [String], control: LegendaryControl? = nil, environment extra: [String: String] = [:],
                              onLine: (@Sendable (String) -> Void)? = nil) throws -> Int32 {
         let p = Process()
         p.executableURL = binary
         p.arguments = args
-        p.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
+        p.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }.merging(extra) { $1 }
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = pipe
@@ -153,6 +154,8 @@ public struct EpicStore: Sendable {
     public struct InstalledGame: Codable, Sendable {
         public let app_name: String
         public let install_path: String?
+        /// Where the game keeps the saves legendary syncs, once it has resolved it (EpicSaves).
+        public var save_path: String? = nil
     }
 
     /// Everything legendary has installed, with where. Legendary's install state is global
@@ -163,6 +166,61 @@ public struct EpicStore: Sendable {
         let out = try capture(["list-installed", "--json"])
         return try JSONDecoder().decode([InstalledGame].self, from: Data(out.utf8))
     }
+
+    /// Legendary's own install records (installed.json in its config folder), app name to install
+    /// path, read without running it. Empty when legendary has installed nothing; nil when the
+    /// file is there but can't be read.
+    public func installRecords() -> [String: String]? {
+        let file = configDir.appending(path: "installed.json")
+        guard FileManager.default.fileExists(atPath: file.path) else { return [:] }
+        guard let data = try? Data(contentsOf: file),
+              let all = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        return all.mapValues { (($0 as? [String: Any])?["install_path"] as? String) ?? "" }
+    }
+
+    /// Whether legendary still records the game as installed; nil when its records can't be
+    /// read. An uninstall is done when the record is gone: legendary deletes the files its
+    /// manifest names, then removes the folder only if nothing else is left in it (core.py
+    /// `uninstall_game`, `delete_filelist`), so a log, a config or a save keeps the folder.
+    public func isRecorded(_ appName: String) -> Bool? {
+        installRecords().map { $0[appName] != nil }
+    }
+
+    /// The files legendary installed for a game, by its installed manifest, as paths relative to
+    /// the install folder. Read offline, with no sign-in, from the manifest file legendary keeps
+    /// for the installed version (`list-files --manifest`): `list-files <app>` signs in and
+    /// downloads one in 0.21.0, since `main()` always sets a platform. Throws when legendary has
+    /// no manifest for it.
+    public func installedFiles(_ appName: String) throws -> [String] {
+        guard let manifest = installedManifest(appName) else {
+            throw HighballError.failed("legendary has no manifest for \(appName)")
+        }
+        struct File: Decodable { let filename: String }
+        let out = try capture(Self.listFilesArguments(manifest: manifest))
+        return try JSONDecoder().decode([File].self, from: Data(out.utf8)).map(\.filename)
+    }
+    static func listFilesArguments(manifest: URL) -> [String] { ["list-files", "--manifest", manifest.path, "--json"] }
+
+    /// The manifest file legendary keeps for a game's installed version, nil when there is none.
+    func installedManifest(_ appName: String) -> URL? {
+        guard let data = try? Data(contentsOf: configDir.appending(path: "installed.json")),
+              let all = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let entry = all[appName] as? [String: Any] else { return nil }
+        return Self.manifestNames(appName, entry: entry)
+            .map { configDir.appending(path: "manifests/\($0)") }
+            .first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// The names legendary saves an installed version's manifest under (lgndry.py
+    /// `_get_manifest_filename`): with its platform, or without it for an older install.
+    static func manifestNames(_ appName: String, entry: [String: Any]) -> [String] {
+        guard let version = entry["version"] as? String else { return [] }
+        let platform = entry["platform"] as? String ?? "Windows"
+        return ["\(appName)_\(platform)_\(version)", "\(appName)_\(version)"].map { cleanFilename($0) + ".manifest" }
+    }
+
+    /// legendary's clean_filename: the characters a file name cannot hold, dropped.
+    static func cleanFilename(_ name: String) -> String { name.filter { !"<>:\"/\\|?*".contains($0) } }
 
     /// Legendary's install records, app name to path, keeping only the ones whose folder still
     /// exists. Legendary never notices a removed environment or a deleted game folder, and a
@@ -236,6 +294,40 @@ public struct EpicStore: Sendable {
         let number = rest.prefix { $0.isNumber || $0 == "." }
         guard !number.isEmpty, rest.dropFirst(number.count).hasPrefix(" MiB"), let value = Double(number) else { return nil }
         return Int64(value * 1_048_576)
+    }
+
+    static func moveArguments(appName: String, basePath: String) -> [String] { ["move", appName, basePath] }
+
+    /// Moves an installed game's folder into another environment's drive_c/Games and rewrites
+    /// legendary's record of it, so the game alone plays there (highball#566: the engine switch
+    /// moves every game of an environment). Legendary renames the folder, which takes a moment
+    /// whatever the game's size, and it refuses another disk. It prints its refusals and still
+    /// exits 0, so the files decide: nil when the folder now sits in the new place, else why not.
+    public func move(_ appName: String, from installPath: String, into bottle: Bottle,
+                     onLine: (@Sendable (String) -> Void)? = nil) throws -> String? {
+        let base = bottle.driveC.appending(path: "Games", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let refusals = Collector()
+        _ = try runStreaming(Self.moveArguments(appName: appName, basePath: base.path)) { line in
+            if let r = line.range(of: "ERROR: ") { refusals.append(String(line[r.upperBound...])) }
+            onLine?(line)
+        }
+        let moved = base.appending(path: URL(fileURLWithPath: installPath).lastPathComponent).path
+        if FileManager.default.fileExists(atPath: moved), !FileManager.default.fileExists(atPath: installPath) { return nil }
+        return refusals.lines.last.map(Self.moveFailure) ?? "Its folder is still at \(installPath)."
+    }
+
+    /// Legendary's refusal to move, as a sentence for the player.
+    static func moveFailure(_ message: String) -> String {
+        if message.hasPrefix("Moving to a different drive is not supported") {
+            return "The game is on another disk than that environment, and Epic's tool only moves a game within one disk."
+        }
+        // 0.21.0 renames straight onto the target: an empty folder there is replaced, a full one
+        // fails with errno 66 (measured 2026-10-30). Its own check for that case reads this way.
+        if message.contains("Directory not empty") || message.hasPrefix("The target path already contains a folder called") {
+            return "That environment already has a folder of that name in drive_c/Games. Remove or rename it, then try again."
+        }
+        return message
     }
 
     static func uninstallArguments(appName: String) -> [String] { ["uninstall", appName, "-y"] }
