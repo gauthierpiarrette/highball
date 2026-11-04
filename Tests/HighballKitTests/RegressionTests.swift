@@ -384,6 +384,29 @@ extension RegressionTests {
         XCTAssertFalse(BugReport.isChore(dir.appending(path: "x-Games-winetricks-corefonts.log")), "a winetricks log explains a failed dependency")
     }
 
+    // highball#645: the two newest logs, Steam launches on engine r3, had no backend line, and the
+    // picker went back to the evening before for a log written on r1.
+    func testReportKeepsToTheNewestSittingOverAnOlderBackendLog() throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "hb-sitting-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let write = { (name: String, text: String, age: TimeInterval) -> URL in
+            let url = dir.appending(path: name)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-age)], ofItemAtPath: url.path)
+            return url
+        }
+        let backend = "info:  Game: steamsysinfo.exe\ninfo:  DXVK: v3.1.1\n"
+        _ = try write("2026-11-03T211314Z-FH6-steam.exe.log", "# gin arm64-kk-wine11.18-r1 bottle=FH6\n" + backend, 14 * 3600)
+        _ = try write("2026-11-04T063732Z-FH6-steam.exe.log", "# gin arm64-kk-wine11.18-r3 bottle=FH6\n", 4 * 3600)
+        let newest = try write("2026-11-04T110154Z-FH6-steam.exe.log", "# gin arm64-kk-wine11.18-r3 bottle=FH6\n", 60)
+        XCTAssertEqual(BugReport.mostInformativeLog(in: [dir])?.url.lastPathComponent, newest.lastPathComponent)
+
+        // Within the same sitting the log that recorded the backend still wins.
+        let game = try write("2026-11-04T104000Z-FH6-ForzaHorizon6.exe.log", "# gin arm64-kk-wine11.18-r3 bottle=FH6\n" + backend, 30 * 60)
+        XCTAssertEqual(BugReport.mostInformativeLog(in: [dir])?.url.lastPathComponent, game.lastPathComponent)
+    }
+
     // A blind suffix(30) is useless on a wine log: the end is MoltenVK warning spam while the
     // block that identifies the backend sits thousands of lines earlier (6547 of 8185 in #21).
     func testReportDigestKeepsTheBackendBlockBuriedMidLogAndCollapsesSpam() {

@@ -247,6 +247,8 @@ public enum BugReport {
     static let maxDigestCharacters = 8000
     /// How many of the newest logs to open. The directory accumulates hundreds of files.
     static let maxLogsExamined = 15
+    /// How far before the newest log a log still counts as the same sitting.
+    static let sameSessionWindow: TimeInterval = 2 * 3600
     /// GitHub answers a request URI over roughly 8 KB with 414, and percent-encoding a log can
     /// several-fold its length (every newline becomes %0A), so the ENCODED url is what must be
     /// budgeted — not the digest's character count. Someone not signed in to GitHub is sent to
@@ -483,6 +485,11 @@ public enum BugReport {
         // both times chosen by this picker, and each round cost days. Repair runs wineboot, so it
         // is also the log most likely to be the newest one after someone follows fix instructions.
         let isPrefixBoot: (URL) -> Bool = { $0.lastPathComponent.hasSuffix("-wineboot.log") }
+        // A log that recorded a backend wins over newer ones only from the same sitting. A Forza
+        // Horizon 6 report came with a log from the evening before, written on another engine
+        // revision, because the two newest logs (Steam launches on the new one) had no backend
+        // line (highball#645).
+        let sessionStart = newestFirst.first.map { modified($0).addingTimeInterval(-sameSessionWindow) } ?? .distantPast
         var fallback: (url: URL, text: String)?
         var bootFallback: (url: URL, text: String)?
         for url in newestFirst {
@@ -491,7 +498,7 @@ public enum BugReport {
                 if bootFallback == nil { bootFallback = (url, text) }
                 continue
             }
-            if backendMarkers.contains(where: text.contains) { return (url, text) }
+            if backendMarkers.contains(where: text.contains), modified(url) >= sessionStart { return (url, text) }
             if fallback == nil { fallback = (url, text) }
         }
         // Only when it is genuinely the only thing on disk — a bottle that has never run anything.
