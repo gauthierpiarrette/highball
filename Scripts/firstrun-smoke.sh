@@ -26,7 +26,13 @@ d=json.load(open(sys.argv[1]))
 for k,v in d["components"].items():
     if v.get("url"): print(k, v["url"])
 PY
-  code=$(curl -sIL -o /dev/null -w '%{http_code}' --max-time 30 "$u")
+  # A 5xx or no answer is asked again twice, 30 s apart: GitHub's release host answered 504 for minutes at a
+  # time on 2026-11-05 while every file was there, and two gate runs failed on it. A 404 stays a
+  # failure at once.
+  for try in 1 2 3; do
+    code=$(curl -sIL -o /dev/null -w '%{http_code}' --max-time 30 "$u")
+    case "$code" in 5??|000) [ $try -lt 3 ] && { echo "  $k: HTTP $code, asking again"; sleep 30; } ;; *) break ;; esac
+  done
   [ "$code" = "200" ] || { echo "  $k: HTTP $code ($u)"; touch "$H/.urlfail"; }
   echo "  $k: HTTP $code"
 done
