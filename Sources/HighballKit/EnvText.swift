@@ -19,12 +19,24 @@ public enum EnvText {
             let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
             let key = parts.first?.trimmingCharacters(in: .whitespaces) ?? ""
             if parts.count == 2, !key.isEmpty, key.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil {
-                env[key] = parts[1]
+                env[key] = unquoted(parts[1])
             } else {
                 ignored.append(line)
             }
         }
         return Parsed(environment: env, ignored: ignored)
+    }
+
+    /// No shell reads these values, so quotes typed around one reached the program as part of it.
+    /// A value wrapped in one pair of quotes, straight or the curly ones macOS's text view types
+    /// for them, is taken without that pair: a player's WINEDEBUG arrived as `" loaddll”` and Wine
+    /// read no channel from it (highball-db#862). Quotes inside a value stay, as in DXVK_CONFIG's
+    /// customDeviceDesc="…".
+    static func unquoted(_ value: String) -> String {
+        let quotes: Set<Character> = ["\"", "'", "\u{201C}", "\u{201D}", "\u{201E}", "\u{2018}", "\u{2019}"]
+        guard value.count >= 2, let first = value.first, let last = value.last,
+              quotes.contains(first), quotes.contains(last) else { return value }
+        return String(value.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
     }
 
     public static func text(for environment: [String: String]) -> String {
