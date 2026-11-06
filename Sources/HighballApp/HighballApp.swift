@@ -531,11 +531,37 @@ private extension View {
             Text(GamePageCopy.updateAsk(recipe: pending.recipe, engineID: pending.engineID, canPlay: pending.play != nil))
         }
     }
-    /// A GOG Mac build goes to the Trash only once the player has seen what goes.
+    /// Epic keeps one build per game: switching to the Mac one removes the Windows one once the
+    /// Mac one is in (EpicBuildSwitch), and removing the Mac one means downloading it again to play it. A GOG Mac build goes to
+    /// the Trash only once the player has seen what goes.
     @MainActor func macVersionAsks(_ state: AppState) -> some View {
-        self.alert(state.pendingGOGMacTrash.map { String(format: L("Move the Mac version of %@ to the Trash?"), $0.title) } ?? "",
-                   isPresented: .init(get: { state.pendingGOGMacTrash != nil }, set: { if !$0 { state.pendingGOGMacTrash = nil } }),
-                   presenting: state.pendingGOGMacTrash) { item in
+        self.alert(state.pendingEpicMacSwitch.map { String(format: L("Switch %@ to the Mac version?"), $0.title) } ?? "",
+                   isPresented: .init(get: { state.pendingEpicMacSwitch != nil }, set: { if !$0 { state.pendingEpicMacSwitch = nil } }),
+                   presenting: state.pendingEpicMacSwitch) { item in
+            Button(L("Switch to the Mac version")) { state.pendingEpicMacSwitch = nil; state.epicInstallMac(item, replacingWindows: true) }
+            Button(L("Cancel"), role: .cancel) { state.pendingEpicMacSwitch = nil }
+        } message: { _ in
+            Text(L("Epic keeps one version of a game installed at a time, so the Mac version downloads and the Windows version is removed once it is in. Stop the download, or should it fail, and the Windows version stays. Only the files Epic installed for the old version are removed: saves and settings the game keeps in its folder stay, and so do your Highball settings for the game."))
+        }
+        .alert(state.pendingEpicWindowsSwitch.map { String(format: L("Switch %@ to the Windows version?"), $0.title) } ?? "",
+               isPresented: .init(get: { state.pendingEpicWindowsSwitch != nil }, set: { if !$0 { state.pendingEpicWindowsSwitch = nil } }),
+               presenting: state.pendingEpicWindowsSwitch) { item in
+            Button(L("Switch to the Windows version")) { state.pendingEpicWindowsSwitch = nil; state.epicSwitchToWindows(item) }
+            Button(L("Cancel"), role: .cancel) { state.pendingEpicWindowsSwitch = nil }
+        } message: { _ in
+            Text(L("Epic keeps one version of a game installed at a time, so the Windows version downloads into your environment and the Mac version is removed once it is in. Stop the download, or should it fail, and the Mac version stays. Only the files Epic installed for the old version are removed: saves and settings the game keeps in its folder stay."))
+        }
+        .alert(state.pendingEpicMacUninstall.map { String(format: L("Remove the Mac version of %@?"), $0.title) } ?? "",
+               isPresented: .init(get: { state.pendingEpicMacUninstall != nil }, set: { if !$0 { state.pendingEpicMacUninstall = nil } }),
+               presenting: state.pendingEpicMacUninstall) { item in
+            Button(L("Remove"), role: .destructive) { state.pendingEpicMacUninstall = nil; state.epicUninstallMac(item) }
+            Button(L("Cancel"), role: .cancel) { state.pendingEpicMacUninstall = nil }
+        } message: { _ in
+            Text(L("Epic removes its files. Playing it again means downloading it again."))
+        }
+        .alert(state.pendingGOGMacTrash.map { String(format: L("Move the Mac version of %@ to the Trash?"), $0.title) } ?? "",
+               isPresented: .init(get: { state.pendingGOGMacTrash != nil }, set: { if !$0 { state.pendingGOGMacTrash = nil } }),
+               presenting: state.pendingGOGMacTrash) { item in
             if state.gogMacTrashTarget(for: item) != nil {
                 Button(L("Move to the Trash"), role: .destructive) { state.pendingGOGMacTrash = nil; state.gogTrashMac(item) }
             }

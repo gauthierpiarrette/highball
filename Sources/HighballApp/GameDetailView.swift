@@ -581,6 +581,26 @@ struct GameDetailView: View {
                         }
                         .padding(.top, 2)
                     }
+                } else if let folder = state.macFolder(for: item) {
+                    // Epic's Mac build, installed through legendary; its processor read once per refresh.
+                    let arch = item.epicAppName.flatMap { state.epicMacArch[$0] } ?? .unknown
+                    if let note = Self.archNote(arch) {
+                        Text(note).font(.callout).foregroundStyle(arch == .only32Bit ? HB.warn : .secondary)
+                    }
+                    Text(L("Highball can't update the Mac version yet: for a newer build, remove it and install it again."))
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 10) {
+                        Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([folder]) }
+                        Button(L("Remove the Mac version…")) { state.pendingEpicMacUninstall = item }.disabled(state.busy || state.isRunningNow(item))
+                    }
+                    .controlSize(.small).padding(.top, 2)
+                } else if item.installed {
+                    // Epic keeps one build per game: from the Windows one, a switch.
+                    HStack(spacing: 8) {
+                        Button(L("Switch to the Mac version…")) { state.installOnMac(item) }.controlSize(.small).disabled(state.busy || state.isRunningNow(item))
+                        estimateText(macEstimate)
+                    }
+                    .padding(.top, 2)
                 }
             }
             Spacer(minLength: 0)
@@ -798,7 +818,7 @@ struct GameDetailView: View {
                          : L("Its anti-cheat does not run on macOS."))
                         .font(.callout).foregroundStyle(.secondary)
                 }
-            } else if item.source == .gog, state.macListed(item), !item.installedOnMac {
+            } else if item.source == .gog || item.source == .epic, state.macListed(item), !item.installedOnMac {
                 // A Mac version is listed: that's the install on offer, the Windows one a click away.
                 VStack(alignment: .leading, spacing: 6) {
                     VStack(alignment: .leading, spacing: 10) {
@@ -814,6 +834,16 @@ struct GameDetailView: View {
                         estimateText(windowsEstimate)
                     }
                 }
+            } else if item.source == .epic, item.installedOnMac {
+                // Epic keeps one build per game, and this Mac one is not played (32-bit, or the
+                // database row says it is not the one to play): the way out is the Windows build,
+                // which takes its place.
+                Text(item.epicAppName.flatMap { state.epicMacArch[$0] } == .only32Bit
+                     ? L("This Mac version is 32-bit, which current macOS can't run.")
+                     : L("Highball's game database says this Mac version is not the one to play: the Windows version is."))
+                    .font(.callout).foregroundStyle(HB.warn)
+                Button(L("Switch to the Windows version…")) { state.pendingEpicWindowsSwitch = item }
+                    .controlSize(.large).disabled(state.busy || state.isRunningNow(item))
             } else if item.source == .epic || item.source == .gog {
                 Button { state.install(item) } label: { primaryActionLabel(L("Install"), symbol: "arrow.down") }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
                     .disabled(state.busy)

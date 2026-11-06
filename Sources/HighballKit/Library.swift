@@ -23,7 +23,8 @@ public struct LibraryItem: Identifiable, Sendable, Hashable {
     public let bottleName: String?
     public let installed: Bool
     /// The native build is installed: Steam for Mac's (MacSteam), or for GOG the Mac build gogdl
-    /// put in the Mac games folder (GOGStore.macInstalledGames). Play goes there first.
+    /// put in the Mac games folder (GOGStore.macInstalledGames), or for Epic the Mac build
+    /// legendary installed. Play goes there first.
     public let installedOnMac: Bool
     public let steamAppID: Int?
     public let epicAppName: String?
@@ -262,6 +263,7 @@ public enum LibraryIndex {
                              gogInstalledByBottle: [String: [GOGStore.InstalledGame]] = [:],
                              gogLaunchChoice: [String: Int] = [:],
                              gogMacInstalled: Set<String> = [],
+                             epicMacInstalled: Set<String> = [],
                              battleNetByBottle: [String: [BattleNetGame]] = [:],
                              plays: [String: LibraryStore.PlayRecord] = [:],
                              defaultBottle: String? = nil,
@@ -341,7 +343,7 @@ public enum LibraryIndex {
             }
             items.append(LibraryItem(
                 source: .epic, id: id, title: game.app_title, bottleName: home,
-                installed: home != nil, epicAppName: game.app_name,
+                installed: home != nil, installedOnMac: epicMacInstalled.contains(game.app_name), epicAppName: game.app_name,
                 artworkTall: game.artworkTall, artworkWide: game.artworkWide,
                 lastPlayed: plays[id]?.lastPlayedAt, macListed: game.listsMac))
         }

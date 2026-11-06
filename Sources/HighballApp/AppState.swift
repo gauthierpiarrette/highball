@@ -302,6 +302,7 @@ final class AppState {
                                           epicOwned: epicOwned, epicInstalls: epicInstalls,
                                           gogGames: gogGames, gogInstalledByBottle: gogInstalledByBottle, gogLaunchChoice: gogSettings.launchChoice,
                                           gogMacInstalled: Set(gogMacInstalled.keys),
+                                          epicMacInstalled: Set(epicMacInstalls.keys),
                                           battleNetByBottle: battleNetByBottle,
                                           plays: libraryPlays, defaultBottle: defaultBottle?.name,
                                           pinExists: { bottle, pin in
@@ -507,6 +508,7 @@ final class AppState {
     /// Starts the native build through Steam for Mac.
     func playOnMac(_ item: LibraryItem) {
         if item.source == .gog { gogPlayMac(item); return }
+        if item.source == .epic { epicPlayMac(item); return }
         guard let appid = item.steamAppID else { return }
         recordPlay(item)
         _ = openInSteamForMac(URL(string: "steam://run/\(appid)")!)
@@ -516,6 +518,7 @@ final class AppState {
     /// download page for Steam for Mac.
     func installOnMac(_ item: LibraryItem) {
         if item.source == .gog { gogInstallMac(item); return }
+        if item.source == .epic { epicInstallMac(item); return }
         guard let appid = item.steamAppID else { return }
         if !openInSteamForMac(URL(string: "steam://install/\(appid)")!) {
             NSWorkspace.shared.open(URL(string: "https://store.steampowered.com/about/")!)
@@ -548,9 +551,9 @@ final class AppState {
 
     /// Play on Mac leads for this item (see MacSteamBuild.leads).
     func prefersMacBuild(_ item: LibraryItem) -> Bool {
-        if item.source == .gog {
-            return StoreMacBuild.leads(entry: gameDB.entry(for: item), installedOnMac: item.installedOnMac,
-                                       arch: item.gogID.flatMap { gogMacInstalled[$0] }?.arch)
+        if item.source == .gog || item.source == .epic {
+            let arch = item.source == .gog ? item.gogID.flatMap { gogMacInstalled[$0] }?.arch : item.epicAppName.flatMap { epicMacArch[$0] }
+            return StoreMacBuild.leads(entry: gameDB.entry(for: item), installedOnMac: item.installedOnMac, arch: arch)
         }
         return MacSteamBuild.leads(entry: gameDB.entry(for: item), installedOnMac: item.installedOnMac,
                             appInfo: item.steamAppID.flatMap { macAppInfoByAppID[$0] })
@@ -1294,11 +1297,12 @@ final class AppState {
                 await MainActor.run { self.epicFetchInFlight = false }
                 return
             }
+            let archs = Self.macArchs(installed)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.epicFetchInFlight = false
                 defer { self.offerKeptEpicSaves() }
-                guard self.applyEpicInstalls(installed) else { return }
+                guard self.applyEpicInstalls(installed, archs: archs) else { return }
                 self.forgetProgramExecutables()
                 self.rebuildLibrary()
             }
@@ -1348,7 +1352,7 @@ final class AppState {
         loadLibraryCache()
         rebuildLibrary()
         steamOwnedRefresh()
-        epicRefresh()
+        finishEpicSwitches { [self] in epicRefresh() }
         gogRefresh()
         maybeAutoUpdateEngine()
         if gameDB.byAppID.isEmpty {
@@ -2348,12 +2352,13 @@ final class AppState {
         }
     }
 
-    /// The native build's place on disk: a GOG Mac build's app, or Steam for Mac's install
-    /// folder. Nil when no Mac build is installed.
+    /// The native build's place on disk: a GOG Mac build's app, the folder legendary put an Epic
+    /// Mac build in, or Steam for Mac's install folder. Nil when no Mac build is installed.
     func macFolder(for item: LibraryItem) -> URL? {
         guard item.installedOnMac else { return nil }
         switch item.source {
         case .gog: return item.gogID.flatMap { gogMacInstalled[$0] }.map { $0.app ?? $0.folder }
+        case .epic: return item.epicAppName.flatMap { epicMacInstalls[$0] }.map { URL(fileURLWithPath: $0) }
         case .steam: return macSteamGames.first { $0.appid == item.steamAppID }?.installFolder
         default: return nil
         }
@@ -3542,7 +3547,7 @@ final class AppState {
 
     func epicRefresh() {
         epicSignedIn = epicStore.isAuthenticated
-        guard epicSignedIn else { epicOwned = []; epicInstalls = [:]; epicInstallRecords = [:]; return }
+        guard epicSignedIn else { epicOwned = []; epicInstalls = [:]; epicMacInstalls = [:]; epicInstallRecords = [:]; epicMacArch = [:]; return }
         guard !epicFetchInFlight else { return }
         epicFetchInFlight = true
         epicLoading = epicOwned.isEmpty
@@ -3551,10 +3556,11 @@ final class AppState {
             // saved last time, stays, rather than the library emptying.
             let owned = try? store.ownedGames()
             let installed = try? store.installedGames()
+            let archs = installed.map(Self.macArchs)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 if let owned { self.epicOwned = owned.sorted { $0.app_title < $1.app_title } }
-                if let installed { _ = self.applyEpicInstalls(installed) }
+                if let installed, let archs { _ = self.applyEpicInstalls(installed, archs: archs) }
                 self.epicLoading = false
                 self.epicFetchInFlight = false
                 self.rebuildLibrary()   // Epic results arrive after refresh(); fold them in
@@ -3608,58 +3614,331 @@ final class AppState {
     @ObservationIgnored private var epicInstallControl: LegendaryControl?
 
     func epicInstall(_ game: EpicStore.Game, in bottle: Bottle) {
+        epicDownload(title: "Installing \(game.app_title)", history: (game.app_name, bottle.driveC)) { store, control, onLine in
+            try store.install(game.app_name, into: bottle, control: control, onLine: onLine)
+        }
+    }
+
+    /// One legendary download under the strip (an install of either build): progress, Stop as a
+    /// Ctrl-C that keeps the progress, and legendary's refusals turned into sentences. `wrap`
+    /// runs around the download inside the same task (EpicBuildSwitch, when replacing a build).
+    private func epicDownload(title: String, history: (app: String, driveC: URL)? = nil,
+                              wrap: (@MainActor (_ download: @escaping @MainActor () async throws -> Void) async throws -> Void)? = nil,
+                              install: @escaping @Sendable (EpicStore, LegendaryControl, @escaping @Sendable (String) -> Void) throws -> Int32) {
         let control = LegendaryControl()
-        runBusy("Installing \(game.app_title)", expected: L("a large download; you can leave it running"),
+        runBusy(title, expected: L("a large download; you can leave it running"),
                 stop: .cancelTask(label: L("Stop")), cleanup: { [weak self] in self?.epicInstallControl = nil }) { [self] in
-            epicInstallControl = control
-            let store = epicStore
-            epicDownloadTotal = nil
-            let refused = OSAllocatedUnfairLock(initialState: false)
-            let failure = OSAllocatedUnfairLock<String?>(initialState: nil)
-            // What changes in the game's folder while legendary installs or updates it is
-            // legendary's, not saves (EpicSaves.historyFile).
-            let start = Date()
-            // Stop cancels this task, and the cancellation reaches legendary as a Ctrl-C, which
-            // keeps the download's progress for the next Install.
-            let status: Int32
-            do {
-                status = try await withTaskCancellationHandler {
-                    try await Task.detached {
-                        try store.install(game.app_name, into: bottle, control: control) { line in
-                            if EpicStore.refusedForLock(line) { refused.withLock { $0 = true } }
-                            if let why = EpicStore.installFailure(line) { failure.withLock { if $0 == nil { $0 = why } } }
-                            Task { @MainActor in self.appendLog(line); self.reportEpicDownload(line) }
-                        }
-                    }.value
-                } onCancel: { control.stop() }
-            } catch {
-                EpicSaves.recordInstall(app: game.app_name, driveC: bottle.driveC, start: start, end: Date(), finished: false)
-                throw error
+            let download: @MainActor () async throws -> Void = { [self] in
+                epicInstallControl = control
+                let store = epicStore
+                epicDownloadTotal = nil
+                let refused = OSAllocatedUnfairLock(initialState: false)
+                let failure = OSAllocatedUnfairLock<String?>(initialState: nil)
+                // What changes in an environment's game folder while legendary installs or updates
+                // it is legendary's, not saves (EpicSaves.historyFile).
+                let start = Date()
+                func record(finished: Bool) {
+                    if let history { EpicSaves.recordInstall(app: history.app, driveC: history.driveC, start: start, end: Date(), finished: finished) }
+                }
+                // Stop cancels this task, and the cancellation reaches legendary as a Ctrl-C, which
+                // keeps the download's progress for the next Install.
+                let status: Int32
+                do {
+                    status = try await withTaskCancellationHandler {
+                        try await Task.detached {
+                            try install(store, control) { line in
+                                if EpicStore.refusedForLock(line) { refused.withLock { $0 = true } }
+                                if let why = EpicStore.installFailure(line) { failure.withLock { if $0 == nil { $0 = why } } }
+                                Task { @MainActor in self.appendLog(line); self.reportEpicDownload(line) }
+                            }
+                        }.value
+                    } onCancel: { control.stop() }
+                } catch {
+                    record(finished: false)
+                    throw error
+                }
+                record(finished: status == 0 && !refused.withLock({ $0 }) && !Task.isCancelled)
+                try Task.checkCancellation()
+                if refused.withLock({ $0 }) {
+                    throw HighballError.failed(L("Another Epic download is still running, and legendary installs one game at a time. If Highball shows none, one started before Highball last quit is still going, so quit legendary in Activity Monitor and press Install again."))
+                }
+                guard status == 0 else {
+                    if let why = failure.withLock({ $0 }) { throw HighballError.failed(why) }
+                    throw HighballError.processFailed(command: "epic install", status: status, output: "see the log above")
+                }
             }
-            EpicSaves.recordInstall(app: game.app_name, driveC: bottle.driveC, start: start, end: Date(),
-                                    finished: status == 0 && !refused.withLock({ $0 }) && !Task.isCancelled)
-            try Task.checkCancellation()
-            if refused.withLock({ $0 }) {
-                throw HighballError.failed(L("Another Epic download is still running, and legendary installs one game at a time. If Highball shows none, one started before Highball last quit is still going, so quit legendary in Activity Monitor and press Install again."))
-            }
-            guard status == 0 else {
-                if let why = failure.withLock({ $0 }) { throw HighballError.failed(why) }
-                throw HighballError.processFailed(command: "epic install", status: status, output: "see the log above")
-            }
+            if let wrap { try await wrap(download) } else { try await download() }
             await MainActor.run { self.epicRefresh() }
         }
     }
 
+    /// Epic games whose Mac build legendary installed, by app name, with where (one build per
+    /// game in legendary: such a game has no Windows install).
+    var epicMacInstalls: [String: String] = [:]
     /// legendary's install records by app name (installed size, save folder), for the game page.
     @ObservationIgnored var epicInstallRecords: [String: EpicStore.InstalledGame] = [:]
+    /// What each installed Epic Mac build is built for, read once per refresh, not per render.
+    var epicMacArch: [String: MacBinaryArch] = [:]
 
-    /// Keeps legendary's records and the install map read from them. Whether the library changed.
-    private func applyEpicInstalls(_ installed: [EpicStore.InstalledGame]) -> Bool {
-        let installs = EpicStore.installMap(installed)
+    /// Splits legendary's records into the Windows and Mac builds (one per game). Whether the
+    /// library changed.
+    private func applyEpicInstalls(_ installed: [EpicStore.InstalledGame], archs: [String: MacBinaryArch]) -> Bool {
+        let windows = EpicStore.installMap(installed.filter { !$0.isMac }), mac = EpicStore.installMap(installed.filter(\.isMac))
         epicInstallRecords = Dictionary(installed.map { ($0.app_name, $0) }, uniquingKeysWith: { a, _ in a })
-        guard installs != epicInstalls else { return false }
-        epicInstalls = installs
+        guard windows != epicInstalls || mac != epicMacInstalls || archs != epicMacArch else { return false }
+        epicInstalls = windows; epicMacInstalls = mac; epicMacArch = archs
         return true
+    }
+
+    nonisolated private static func macArchs(_ installed: [EpicStore.InstalledGame]) -> [String: MacBinaryArch] {
+        Dictionary(installed.filter(\.isMac).compactMap { record in
+            record.install_path.map { (record.app_name, MacBinaryArch.ofApp(at: URL(fileURLWithPath: $0))) }
+        }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// The Windows build is installed and legendary keeps one build per game: switching asks
+    /// first (the Windows copy is removed once the Mac one is in, its settings stay).
+    var pendingEpicMacSwitch: LibraryItem?
+    /// An Epic Mac build the player asked to remove: asked first, it is a long download back.
+    var pendingEpicMacUninstall: LibraryItem?
+    /// An Epic game whose installed Mac build does not run (32-bit), switching to the Windows one:
+    /// asked first, as the Mac build is removed.
+    var pendingEpicWindowsSwitch: LibraryItem?
+
+    /// Removes an Epic game's installed build through legendary (one per game), its lines in the log.
+    private func legendaryUninstall(_ app: String) async throws {
+        let store = epicStore
+        let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
+        let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
+        guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall", status: status, output: "see the log above") }
+    }
+
+    /// Replaces an Epic game's Mac build with the Windows one in the default environment
+    /// (legendary keeps one build per game), through EpicBuildSwitch: the Mac files stay until
+    /// the Windows build is in, and a Stop or a failure puts the Mac build back as it was.
+    func epicSwitchToWindows(_ item: LibraryItem) {
+        guard let app = item.epicAppName, let game = epicOwned.first(where: { $0.app_name == app }),
+              refuseWhileRunning(item) else { return }
+        guard let bottle = defaultBottle else {
+            fail(HighballError.failed(L("Make an environment first: the Windows version installs into one.")))
+            return
+        }
+        epicDownload(title: "Installing \(game.app_title)", history: (app, bottle.driveC),
+                     wrap: epicBuildSwitch(item, app: app, oldPath: epicMacInstalls[app], oldPlatform: "Mac", hasNewBuild: { true })) { store, control, onLine in
+            try store.install(app, into: bottle, control: control, onLine: onLine)
+        }
+    }
+
+    /// Installs an Epic game's Mac build. With the Windows build installed, the player says yes
+    /// first (pendingEpicMacSwitch) and EpicBuildSwitch replaces it. Before anything changes,
+    /// legendary is asked whether Epic has a Mac build for this account: with none, its install
+    /// would fall back to the Windows build and put it in the Mac games folder, outside every
+    /// environment (EpicStore.installMac stops that). The Windows files stay until the Mac build
+    /// is in, and a Stop or a failure puts the Windows build back as it was.
+    func epicInstallMac(_ item: LibraryItem, replacingWindows: Bool = false) {
+        guard let app = item.epicAppName else { return }
+        if item.installed && !replacingWindows { pendingEpicMacSwitch = item; return }
+        guard refuseWhileRunning(item) else { return }
+        let store = epicStore
+        let hasMac: @MainActor () async throws -> Bool = { [self] in
+            stage = L("Asking Epic about the Mac version")
+            do {
+                return try await Task.detached { try store.hasMacBuild(app) }.value
+            } catch {
+                appendLog("\(item.title): legendary info --platform Mac failed: \(error)")
+                throw HighballError.failed(L("Highball could not ask Epic whether a Mac build of this game is there to download, so nothing was changed. Check your connection, then try again."))
+            }
+        }
+        epicDownload(title: String(format: L("Installing the Mac version of %@"), item.title),
+                     wrap: epicBuildSwitch(item, app: app, oldPath: replacingWindows ? epicInstalls[app] : nil,
+                                           oldPlatform: "Windows", hasNewBuild: hasMac)) { store, control, onLine in
+            try store.installMac(app, control: control, onLine: onLine)
+        }
+    }
+
+    /// The EpicBuildSwitch steps around `epicDownload`'s download. `oldPath`, the installed
+    /// build's folder; nil when there is none to replace. The old files are deleted only from a
+    /// folder Highball installs into.
+    private func epicBuildSwitch(_ item: LibraryItem, app: String, oldPath: String?, oldPlatform: String,
+                                 hasNewBuild: @escaping @MainActor () async throws -> Bool)
+        -> @MainActor (_ download: @escaping @MainActor () async throws -> Void) async throws -> Void {
+        let store = epicStore
+        let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
+        let roots = epicInstallRoots
+        let removing = oldPlatform == "Mac" ? String(format: L("Removing the Mac version of %@"), item.title)
+                                            : String(format: L("Removing the Windows version of %@"), item.title)
+        return { [self] download in
+            let steps = EpicBuildSwitch.Steps(
+                hasNewBuild: hasNewBuild,
+                // legendary's record of the old build is kept aside first (EpicStore.saveRecord),
+                // so the undo puts it back from disk: no sign-in, no network, either build.
+                dropOldRecord: oldPath.map { _ in { [self] in
+                    stage = removing
+                    try await Task.detached { try store.saveRecord(app) }.value
+                    let status = try await Task.detached { try store.forgetRecordKeepingFiles(app, onLine: log) }.value
+                    guard status == 0 else {
+                        _ = try? await Task.detached { try store.restoreSavedRecord(app) }.value
+                        throw HighballError.processFailed(command: "legendary uninstall --keep-files", status: status, output: "see the log above")
+                    }
+                    // legendary exits 0 without touching its records when another legendary holds
+                    // its lock: the switch goes on only once the record is really gone.
+                    guard await Task.detached(operation: { store.recordsGame(app) }).value == false else {
+                        _ = try? await Task.detached { try store.restoreSavedRecord(app) }.value
+                        throw HighballError.failed(String(format: L("The Epic tools didn't let go of %@'s installed version (another of their tasks may be running), so nothing was changed. Try again in a moment."), item.title))
+                    }
+                } },
+                install: download,
+                restoreOldRecord: { [self] in
+                    guard let oldPath else { return }
+                    do {
+                        let back = try await Task.detached { try store.restoreSavedRecord(app) }.value
+                        appendLog(back ? "\(item.title): the \(oldPlatform) version is back as it was"
+                                       : "\(item.title): legendary records the game already, so its record was left as it is")
+                    } catch {
+                        appendLog("\(item.title): could not put the \(oldPlatform) version's record back yet (\(error.localizedDescription)); its files are still in \(oldPath), and Highball finishes this when it next opens")
+                        epicRefresh()
+                        // The alert says this, not only the download's error: the game is missing
+                        // from Epic's list until the next launch puts it back.
+                        throw HighballError.failed(String(format: L("The switch didn't finish, and the %@ version couldn't be put back yet, so %@ is missing from Epic's list until Highball next opens. Its files are still in %@."), oldPlatform, item.title, oldPath))
+                    }
+                    epicRefresh()
+                },
+                deleteOldFiles: { [self] in
+                    guard let oldPath else { return }
+                    stage = removing
+                    let result = await Task.detached { store.deleteOldBuild(app, at: oldPath, roots: roots) }.value
+                    appendLog(Self.oldBuildDeletionLine(item.title, platform: oldPlatform, path: oldPath, result))
+                })
+            do { try await EpicBuildSwitch.run(steps) } catch EpicBuildSwitch.Failure.noNewBuild {
+                throw HighballError.failed(L("Epic lists a Mac version of this game, but has no Mac build to download for your account, so nothing was changed."))
+            }
+        }
+    }
+
+    @ObservationIgnored private var epicSwitchesFinished = false
+
+    /// The folders Highball installs Epic builds into: an old build's files are deleted only from
+    /// inside one of them (EpicBuildSwitch.isSafeToDelete).
+    private var epicInstallRoots: [URL] {
+        bottles.map { $0.driveC.appending(path: "Games", directoryHint: .isDirectory) } + [GOGStore.macGamesDir]
+    }
+
+    /// Completes a build switch Highball quit in the middle of (EpicStore.switchesInFlight), off
+    /// the main thread, then runs `then` (the Epic refresh, so it sees a record put back): the old
+    /// build's record goes back from where the switch kept it, or, when legendary records the new
+    /// build in another folder, the old build's files go as legendary's uninstall deletes them
+    /// (EpicStore.finishSwitch, deleteOldBuild). Once, at launch.
+    private func finishEpicSwitches(then: @escaping @MainActor () -> Void) {
+        guard !epicSwitchesFinished else { then(); return }
+        epicSwitchesFinished = true
+        let store = epicStore, roots = epicInstallRoots
+        Task { [self] in
+            let lines = await Task.detached { () -> [String] in
+                var lines: [String] = []
+                for app in store.switchesInFlight() {
+                    do {
+                        switch try store.finishSwitch(app) {
+                        case .restored:
+                            lines.append("\(app): a switch between Epic builds did not finish, so the old build is back as it was")
+                        case .deleteOldBuild(let oldPath):
+                            lines.append("\(app): a switch between Epic builds finished as Highball quit; deleting the old build's files in \(oldPath)")
+                            lines.append(Self.oldBuildDeletionLine(app, platform: nil, path: oldPath,
+                                                                   store.deleteOldBuild(app, at: oldPath, roots: roots)))
+                        case .unreadable:
+                            lines.append("\(app): a switch between Epic builds did not finish, and legendary's installed.json could not be read, so nothing was changed; Highball tries again when it next opens")
+                        case .leftAsItWas:
+                            break
+                        }
+                    } catch {
+                        lines.append("\(app): a switch between Epic builds did not finish, and its old record could not go back yet (\(error.localizedDescription)); Highball tries again when it next opens")
+                    }
+                }
+                return lines
+            }.value
+            lines.forEach(appendLog)
+            then()
+        }
+    }
+
+    /// The log line for an old build's files after a switch (EpicStore.deleteOldBuild).
+    nonisolated static func oldBuildDeletionLine(_ name: String, platform: String?, path: String,
+                                                 _ result: EpicStore.OldBuildDeletion) -> String {
+        let build = platform.map { "old \($0) files" } ?? "old build's files"
+        switch result {
+        case .deleted(let files, 0):
+            return "\(name): deleted the \(build) in \(path) (\(files) files from its manifest; anything else the game wrote there stays)"
+        case .deleted(let files, let failed):
+            return "\(name): deleted \(files) of the \(build) in \(path); \(failed) could not be deleted and stay there"
+        case .outsideGameFolders:
+            return "\(name): left the \(build) in \(path), outside Highball's game folders"
+        case .noFileList(let why):
+            return "\(name): left the \(build) in \(path): legendary could not list them (\(why)), so nothing there was deleted"
+        case .stillRecorded:
+            return "\(name): left the \(build) in \(path): legendary still records the game there, so it is the installed build"
+        case .recordsUnreadable:
+            return "\(name): left the \(build) in \(path): legendary's install records could not be read; Highball looks again when it next opens"
+        }
+    }
+
+    /// Starts an Epic game's Mac build the way legendary launches it, with the sign-in arguments
+    /// Epic's own launcher passes (single use, fetched right before). On the strip, as the GOG
+    /// Mac build and the Windows build start: legendary takes seconds to answer, and a second
+    /// Play meanwhile finds Highball busy and starts nothing, where it used to start a second
+    /// copy. A failure reaches the alert, not only the log. The game runs until nothing runs from
+    /// its folder (watchEpicMacGame), a launcher's hand-over included.
+    func epicPlayMac(_ item: LibraryItem) {
+        guard let app = item.epicAppName else { return }
+        if macGameProcesses[item.id] != nil {
+            fail(HighballError.failed("\(item.title) is already running."))
+            return
+        }
+        let store = epicStore
+        runBusy(String(format: L("Starting %@"), item.title), done: .handedOff) { [self] in
+            appendLog("\(item.title): opening the Mac version")
+            let info = try await Task.detached { try store.launchInfo(app) }.value
+            try Task.checkCancellation()
+            let p = Process()
+            p.executableURL = info.executable
+            p.arguments = info.arguments
+            p.currentDirectoryURL = info.workingDirectory
+            p.environment = ProcessInfo.processInfo.environment.merging(info.environment) { $1 }
+            do { try p.run() } catch {
+                throw HighballError.failed(String(format: L("The Mac version of %@ did not start: %@"), item.title, error.localizedDescription))
+            }
+            macGameProcesses[item.id] = p
+            recordPlay(item)
+            // The install's folder, else the app legendary's launch runs from.
+            let folder = epicMacInstalls[app].map { URL(fileURLWithPath: $0, isDirectory: true) }
+                ?? sequence(first: info.executable, next: { $0.pathComponents.count > 1 ? $0.deletingLastPathComponent() : nil })
+                    .first { $0.pathExtension == "app" }
+            watchEpicMacGame(p, item: item, folder: folder)
+        }
+    }
+
+    /// Once an Epic Mac build quits, as for a GOG one (watchMacGame): the process Highball started
+    /// may be a launcher that hands over to the game and exits at once, so its entry in
+    /// macGameProcesses, which keeps a second Play from starting another copy, stays until
+    /// nothing runs from the game's folder (MacGameWatch). Never the Mac games folder itself,
+    /// which holds every other game.
+    private func watchEpicMacGame(_ process: Process, item: LibraryItem, folder: URL?) {
+        let watched = folder.flatMap { $0.standardizedFileURL.path == GOGStore.macGamesDir.standardizedFileURL.path ? nil : $0 }
+        Task.detached { [weak self] in
+            if await Self.macGameEnd(of: process, watching: watched) {
+                await self?.appendLog("\(item.title): the Mac version handed over to another app, which has now quit too")
+            }
+            await self?.epicMacGameEnded(item)
+        }
+    }
+
+    private func epicMacGameEnded(_ item: LibraryItem) { macGameProcesses[item.id] = nil }
+
+    /// Removes an Epic game's Mac build through legendary, so its library stays right.
+    func epicUninstallMac(_ item: LibraryItem) {
+        guard let app = item.epicAppName, refuseWhileRunning(item) else { return }
+        runBusy(String(format: L("Removing the Mac version of %@"), item.title), expected: nil) { [self] in
+            try await legendaryUninstall(app)
+            await MainActor.run { self.epicRefresh() }
+        }
     }
 
     /// An Epic game the player is asked about before it is removed: nothing tells the files the
@@ -4162,16 +4441,18 @@ final class AppState {
         }
         var epicOwned: [EpicGame] = []
         var epicInstalls: [String: String] = [:]
+        var epicMacInstalls: [String: String] = [:]
         var gogGames: [GOGStore.Game] = []
 
-        init(epicOwned: [EpicGame], epicInstalls: [String: String], gogGames: [GOGStore.Game]) {
-            self.epicOwned = epicOwned; self.epicInstalls = epicInstalls; self.gogGames = gogGames
+        init(epicOwned: [EpicGame], epicInstalls: [String: String], epicMacInstalls: [String: String], gogGames: [GOGStore.Game]) {
+            self.epicOwned = epicOwned; self.epicInstalls = epicInstalls; self.epicMacInstalls = epicMacInstalls; self.gogGames = gogGames
         }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             epicOwned = try c.decodeIfPresent([EpicGame].self, forKey: .epicOwned) ?? []
             epicInstalls = try c.decodeIfPresent([String: String].self, forKey: .epicInstalls) ?? [:]
+            epicMacInstalls = try c.decodeIfPresent([String: String].self, forKey: .epicMacInstalls) ?? [:]
             gogGames = try c.decodeIfPresent([GOGStore.Game].self, forKey: .gogGames) ?? []
         }
     }
@@ -4186,6 +4467,7 @@ final class AppState {
                 return game
             }
             epicInstalls = cache.epicInstalls
+            epicMacInstalls = cache.epicMacInstalls
         }
         if gogStore.isAuthenticated { gogGames = cache.gogGames }
     }
@@ -4194,7 +4476,7 @@ final class AppState {
         let cache = LibraryCache(
             epicOwned: epicOwned.map { .init(appName: $0.app_name, title: $0.app_title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall,
                                              listsMac: $0.listsMac, cloudSaves: $0.cloudSaves) },
-            epicInstalls: epicInstalls, gogGames: gogGames)
+            epicInstalls: epicInstalls, epicMacInstalls: epicMacInstalls, gogGames: gogGames)
         try? JSONEncoder().encode(cache).write(to: libraryCacheFile, options: .atomic)
     }
 
@@ -4893,7 +5175,8 @@ final class AppState {
     struct InstalledSizes: Equatable {
         /// The Windows build's folder (or a program's); nil for Steam, whose own record the page shows.
         var game: Int64?
-        /// The Mac build's size: a GOG Mac build's app, Steam for Mac's record.
+        /// The Mac build's size: a GOG Mac build's app, legendary's record of an Epic one, Steam
+        /// for Mac's record.
         var macGame: Int64?
         /// The saves Highball knows the place of: GOG's and Epic's cloud-save folders, Steam
         /// Cloud's own copy for Steam. nil when there is no such place or nothing in it yet.
@@ -4929,7 +5212,8 @@ final class AppState {
             return await Task.detached {
                 guard let record = known ?? (try? store.installedGames())?.first(where: { $0.app_name == app }) else { return InstalledSizes() }
                 let size = record.install_size ?? record.install_path.flatMap { DiskUsage.bytes(at: URL(fileURLWithPath: $0)) }
-                return InstalledSizes(game: size, saves: record.save_path.flatMap { DiskUsage.bytes(at: URL(fileURLWithPath: $0)) })
+                return InstalledSizes(game: record.isMac ? nil : size, macGame: record.isMac ? size : nil,
+                                      saves: record.save_path.flatMap { DiskUsage.bytes(at: URL(fileURLWithPath: $0)) })
             }.value
         default:
             // A program added by hand, a Battle.net game: the folder it lives in.
