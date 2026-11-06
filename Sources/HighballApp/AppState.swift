@@ -895,6 +895,7 @@ final class AppState {
                 self.noteNewSteamGames(owned.mapValues { Set($0.map(\.appid)) }, signedIn: signedIn)
                 guard owned != self.steamOwnedByBottle else { return }
                 self.steamOwnedByBottle = owned
+                self.steamCloudByAppID = Dictionary(owned.values.joined().map { ($0.appid, $0.steamCloud) }, uniquingKeysWith: { a, b in a || b })
                 self.macAppInfoByAppID = Dictionary(owned.values.joined().map { ($0.appid, $0.macBuild) },
                                                     uniquingKeysWith: { a, _ in a })
                 self.rebuildLibrary()
@@ -1273,14 +1274,15 @@ final class AppState {
         guard epicSignedIn, !epicFetchInFlight else { return }
         epicFetchInFlight = true
         Task.detached { [store = epicStore] in
-            let installed = (try? store.installedGames()) ?? []
+            guard let installed = try? store.installedGames() else {
+                await MainActor.run { self.epicFetchInFlight = false }
+                return
+            }
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.epicFetchInFlight = false
                 defer { self.offerKeptEpicSaves() }
-                let installs = EpicStore.installMap(installed)
-                guard installs != self.epicInstalls else { return }
-                self.epicInstalls = installs
+                guard self.applyEpicInstalls(installed) else { return }
                 self.forgetProgramExecutables()
                 self.rebuildLibrary()
             }
@@ -1327,6 +1329,7 @@ final class AppState {
         libraryDisplays = libraryStore.displayChoices()
         hiddenItems = libraryStore.hiddenIDs()
         includeMacSteam = libraryStore.includesMacSteam
+        loadLibraryCache()
         rebuildLibrary()
         steamOwnedRefresh()
         epicRefresh()
@@ -3512,20 +3515,24 @@ final class AppState {
 
     func epicRefresh() {
         epicSignedIn = epicStore.isAuthenticated
-        guard epicSignedIn else { epicOwned = []; epicInstalls = [:]; return }
+        guard epicSignedIn else { epicOwned = []; epicInstalls = [:]; epicInstallRecords = [:]; return }
         guard !epicFetchInFlight else { return }
         epicFetchInFlight = true
         epicLoading = epicOwned.isEmpty
         Task.detached { [store = epicStore] in
-            let owned = (try? store.ownedGames()) ?? []
-            let installed = (try? store.installedGames()) ?? []
+            // nil when legendary could not answer (offline, Epic down): the list shown, the one
+            // saved last time, stays, rather than the library emptying.
+            let owned = try? store.ownedGames()
+            let installed = try? store.installedGames()
             await MainActor.run { [weak self] in
-                self?.epicOwned = owned.sorted { $0.app_title < $1.app_title }
-                self?.epicInstalls = EpicStore.installMap(installed)
-                self?.epicLoading = false
-                self?.epicFetchInFlight = false
-                self?.rebuildLibrary()   // Epic results arrive after refresh(); fold them in
-                self?.offerKeptEpicSaves()
+                guard let self else { return }
+                if let owned { self.epicOwned = owned.sorted { $0.app_title < $1.app_title } }
+                if let installed { _ = self.applyEpicInstalls(installed) }
+                self.epicLoading = false
+                self.epicFetchInFlight = false
+                self.rebuildLibrary()   // Epic results arrive after refresh(); fold them in
+                if owned != nil { self.saveLibraryCache() }
+                self.offerKeptEpicSaves()
             }
         }
     }
@@ -3614,6 +3621,18 @@ final class AppState {
             }
             await MainActor.run { self.epicRefresh() }
         }
+    }
+
+    /// legendary's install records by app name (installed size, save folder), for the game page.
+    @ObservationIgnored var epicInstallRecords: [String: EpicStore.InstalledGame] = [:]
+
+    /// Keeps legendary's records and the install map read from them. Whether the library changed.
+    private func applyEpicInstalls(_ installed: [EpicStore.InstalledGame]) -> Bool {
+        let installs = EpicStore.installMap(installed)
+        epicInstallRecords = Dictionary(installed.map { ($0.app_name, $0) }, uniquingKeysWith: { a, _ in a })
+        guard installs != epicInstalls else { return false }
+        epicInstalls = installs
+        return true
     }
 
     /// An Epic game the player is asked about before it is removed: nothing tells the files the
@@ -3978,9 +3997,13 @@ final class AppState {
         gogLoading = gogSignedIn && gogGames.isEmpty
         let signedIn = gogSignedIn
         let installedIDs = Set(gogInstalledByBottle.values.joined().map(\.id))
+        let shown = gogGames
         Task.detached { [store = gogStore] in
             GOGComet(store: store).removeStaleTokens()
-            var games = signedIn ? ((try? await store.ownedGames()) ?? []) : []
+            // nil when GOG could not answer (offline, GOG down): the list shown, the one saved last
+            // time, stays, as Epic's does, rather than shrinking to the installed games.
+            let owned: [GOGStore.Game]? = signedIn ? (try? await store.ownedGames()) : []
+            var games = owned ?? shown
             // A GOG game in an environment that the account list does not name still gets its
             // title, cover and database match.
             let known = Set(games.map(\.id))
@@ -3992,7 +4015,10 @@ final class AppState {
                 guard let self else { return }
                 self.gogFetchInFlight = false
                 self.gogLoading = false
-                if found != self.gogGames { self.gogGames = found; self.rebuildLibrary() }
+                guard found != self.gogGames else { return }
+                self.gogGames = found
+                self.rebuildLibrary()
+                if owned != nil { self.saveLibraryCache() }
             }
         }
     }
@@ -4068,7 +4094,59 @@ final class AppState {
     func gogSignOut() {
         gogStore.logout()
         gogGames = []
+        saveLibraryCache()
         gogRefresh()
+    }
+
+    // MARK: The library as last seen
+
+    /// Epic's and GOG's lists from the last refresh, kept on disk (library-cache.json) so the
+    /// library is whole the moment Highball opens: asking legendary and GOG takes seconds (Epic's
+    /// two calls about 6), and the refresh that follows only changes what changed. A store signed
+    /// out since is not read back. Steam needs none: its lists are read off disk at once.
+    private var libraryCacheFile: URL { paths.home.appending(path: "library-cache.json") }
+
+    private struct LibraryCache: Codable {
+        struct EpicGame: Codable {
+            var appName: String, title: String, artworkWide: URL?, artworkTall: URL?
+            var cloudSaves: Bool?
+        }
+        var epicOwned: [EpicGame] = []
+        var epicInstalls: [String: String] = [:]
+        var gogGames: [GOGStore.Game] = []
+
+        init(epicOwned: [EpicGame], epicInstalls: [String: String], gogGames: [GOGStore.Game]) {
+            self.epicOwned = epicOwned; self.epicInstalls = epicInstalls; self.gogGames = gogGames
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            epicOwned = try c.decodeIfPresent([EpicGame].self, forKey: .epicOwned) ?? []
+            epicInstalls = try c.decodeIfPresent([String: String].self, forKey: .epicInstalls) ?? [:]
+            gogGames = try c.decodeIfPresent([GOGStore.Game].self, forKey: .gogGames) ?? []
+        }
+    }
+
+    private func loadLibraryCache() {
+        guard epicOwned.isEmpty, gogGames.isEmpty,
+              let cache = try? JSONDecoder().decode(LibraryCache.self, from: Data(contentsOf: libraryCacheFile)) else { return }
+        if epicStore.isAuthenticated {
+            epicOwned = cache.epicOwned.map {
+                var game = EpicStore.Game(app_name: $0.appName, app_title: $0.title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall)
+                game.cloudSaves = $0.cloudSaves ?? false
+                return game
+            }
+            epicInstalls = cache.epicInstalls
+        }
+        if gogStore.isAuthenticated { gogGames = cache.gogGames }
+    }
+
+    private func saveLibraryCache() {
+        let cache = LibraryCache(
+            epicOwned: epicOwned.map { .init(appName: $0.app_name, title: $0.app_title, artworkWide: $0.artworkWide, artworkTall: $0.artworkTall,
+                                             cloudSaves: $0.cloudSaves) },
+            epicInstalls: epicInstalls, gogGames: gogGames)
+        try? JSONEncoder().encode(cache).write(to: libraryCacheFile, options: .atomic)
     }
 
     /// The GOG download running now, for the strip's Stop and for quitting the app.
@@ -4102,6 +4180,42 @@ final class AppState {
                 try await gogRunSetup(game, title: item.title, in: bottle, language: language)
             }
             await MainActor.run { self.gogRefresh() }
+        }
+    }
+
+    /// Whether Steam Cloud keeps each owned Steam game's saves (OwnedSteamGame.steamCloud), for the
+    /// games an environment's Steam has listed; a game not here is one Highball cannot say about.
+    var steamCloudByAppID: [Int: Bool] = [:]
+
+    /// How GOG syncs each GOG game's saves (GOGSaves.CloudSetup), asked once a session per game.
+    @ObservationIgnored private var gogCloudSetups: [String: GOGSaves.CloudSetup] = [:]
+
+    /// Why gogCloudSetup has no answer for a game: not found in its environment, no client id
+    /// (GOG keeps no cloud saves for it), or GOG did not answer.
+    enum GOGCloudMiss: Error { case notFound, noClientID, unreachable }
+    @ObservationIgnored private var gogCloudMisses: [String: GOGCloudMiss] = [:]
+
+    /// Why the last gogCloudSetup for the game came back empty; nil once it has an answer.
+    func gogCloudMiss(for item: LibraryItem) -> GOGCloudMiss? { item.gogID.flatMap { gogCloudMisses[$0] } }
+
+    /// How an installed GOG game's saves sync, for its page; nil when there is no answer (gogCloudMiss says why).
+    func gogCloudSetup(for item: LibraryItem) async -> GOGSaves.CloudSetup? {
+        guard let id = item.gogID else { return nil }
+        if let known = gogCloudSetups[id] { return known }
+        guard let game = bottles.first(where: { $0.name == item.bottleName }).flatMap({ gogInstalled(item, in: $0) }) else {
+            gogCloudMisses[id] = .notFound
+            return nil
+        }
+        let saves = GOGSaves(store: gogStore)
+        let answer = await Task.detached { () -> Result<GOGSaves.CloudSetup, GOGCloudMiss> in
+            do {
+                guard let client = try saves.lookUpClientID(for: game) else { return .failure(.noClientID) }
+                return .success(try saves.cloudSetup(clientID: client))
+            } catch { return .failure(.unreachable) }
+        }.value
+        switch answer {
+        case .success(let setup): gogCloudSetups[id] = setup; gogCloudMisses[id] = nil; return setup
+        case .failure(let miss): gogCloudMisses[id] = miss; return nil
         }
     }
 
@@ -4436,6 +4550,140 @@ final class AppState {
         sample.rarity = 31
         sample.rarityLevel = "Common"
         AchievementToast.shared.show(sample)
+    }
+
+    // MARK: Sizes
+
+    /// What the store said a download takes, by item id and platform, kept on disk for a week
+    /// (download-sizes.json): asking gogdl or legendary takes seconds, and a page opened again
+    /// shows the size at once.
+    private var downloadEstimates: [String: DownloadEstimate] = [:]
+    private var downloadEstimatesFetched: [String: Date] = [:]
+    private var downloadEstimatesLoaded = false
+    private var downloadSizesFile: URL { paths.home.appending(path: "download-sizes.json") }
+    private struct SavedEstimate: Codable { var download: Int64?; var disk: Int64?; var fetched: Date }
+
+    private func loadDownloadEstimates() {
+        guard !downloadEstimatesLoaded else { return }
+        downloadEstimatesLoaded = true
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        let saved = (try? decoder.decode([String: SavedEstimate].self, from: Data(contentsOf: downloadSizesFile))) ?? [:]
+        let fresh = Date().addingTimeInterval(-7 * 86_400)
+        for (key, value) in saved where value.fetched > fresh {
+            downloadEstimates[key] = DownloadEstimate(download: value.download, disk: value.disk)
+            downloadEstimatesFetched[key] = value.fetched
+        }
+    }
+
+    private func saveDownloadEstimates() {
+        let saved = Dictionary(uniqueKeysWithValues: downloadEstimates.map { key, value in
+            (key, SavedEstimate(download: value.download, disk: value.disk, fetched: downloadEstimatesFetched[key] ?? Date()))
+        })
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
+        try? encoder.encode(saved).write(to: downloadSizesFile, options: .atomic)
+    }
+
+    /// The download and installed size of a game's Windows or Mac build before it is installed:
+    /// GOG's and Epic's tools ask the store, Steam's comes from its client's data on the Mac.
+    /// nil when there is no saying (signed out, offline, no such build, Steam not set up).
+    func downloadEstimate(for item: LibraryItem, mac: Bool, refresh: Bool = false) async -> DownloadEstimate? {
+        let key = Self.estimateKey(item, mac: mac)
+        loadDownloadEstimates()
+        if !refresh, let cached = downloadEstimates[key] { return cached }
+        let estimate: DownloadEstimate?
+        switch item.source {
+        case .gog:
+            guard let id = item.gogID else { return nil }
+            let store = gogStore
+            estimate = await Task.detached {
+                (try? store.info(id, platform: mac ? "osx" : "windows")).map { DownloadEstimate(download: $0.downloadSize, disk: $0.diskSize) }
+            }.value
+        case .epic:
+            guard let app = item.epicAppName else { return nil }
+            let store = epicStore
+            estimate = await Task.detached { try? store.downloadEstimate(app, platform: mac ? "Mac" : "Windows") }.value
+        case .steam:
+            // Steam's own data in the environment's client: no request, no Steam window.
+            guard let appID = item.steamAppID,
+                  let root = (bottles.first { $0.name == item.bottleName } ?? defaultBottle).flatMap(SteamLibrary.steamRoot(of:)) else { return nil }
+            estimate = await Task.detached { () -> DownloadEstimate? in
+                guard let app = (try? SteamAppInfo.read(root.appending(path: "appcache/appinfo.vdf"), only: [appID]))?[appID] else { return nil }
+                return SteamDownloadSize.estimate(appID: appID, app: app, packages: SteamPackageInfo.read(steamRoot: root), mac: mac)
+            }.value
+        default:
+            return nil
+        }
+        // An answer with neither size (GOG's info without them) says nothing: never kept as the size.
+        let answer = estimate.flatMap { $0.download != nil || $0.disk != nil ? $0 : nil }
+        if let answer { downloadEstimates[key] = answer; downloadEstimatesFetched[key] = Date(); saveDownloadEstimates() }
+        return answer ?? (refresh ? downloadEstimates[key] : nil)
+    }
+
+    private static func estimateKey(_ item: LibraryItem, mac: Bool) -> String { "\(item.id)|\(mac ? "mac" : "windows")" }
+
+    /// The size saved from an earlier check, at once, with no store asked.
+    func savedEstimate(for item: LibraryItem, mac: Bool) -> DownloadEstimate? {
+        loadDownloadEstimates()
+        return downloadEstimates[Self.estimateKey(item, mac: mac)]
+    }
+
+    /// A saved size older than a day: worth a quiet second look when its page opens (an update
+    /// can change it).
+    func estimateIsStale(for item: LibraryItem, mac: Bool) -> Bool {
+        (downloadEstimatesFetched[Self.estimateKey(item, mac: mac)] ?? .distantPast) < Date().addingTimeInterval(-86_400)
+    }
+
+    /// A native Mac version the store offers: Steam's (MacSteamBuild).
+    func offersMacVersion(_ item: LibraryItem) -> Bool {
+        item.installedOnMac || (item.source == .steam && macSteamBuild(for: item) != nil)
+    }
+
+    /// An installed game's folder and saves as they are on disk now.
+    struct InstalledSizes: Equatable {
+        /// The Windows build's folder (or a program's); nil for Steam, whose own record the page shows.
+        var game: Int64?
+        /// The Mac build's size: Steam for Mac's record.
+        var macGame: Int64?
+        /// The saves Highball knows the place of: GOG's and Epic's cloud-save folders, Steam
+        /// Cloud's own copy for Steam. nil when there is no such place or nothing in it yet.
+        var saves: Int64?
+    }
+
+    func installedSizes(for item: LibraryItem) async -> InstalledSizes {
+        let bottle = bottles.first { $0.name == item.bottleName }
+        switch item.source {
+        case .steam:
+            // The Windows build's size is Steam's own record (LibraryItem.sizeOnDisk); Steam for
+            // Mac's install has its own record too.
+            let mac = macSteamGames.first { $0.appid == item.steamAppID }.map(\.sizeOnDisk).flatMap { $0 > 0 ? $0 : nil }
+            guard let appID = item.steamAppID, let root = bottle.flatMap(SteamLibrary.steamRoot(of:)) else { return InstalledSizes(macGame: mac) }
+            return await Task.detached {
+                InstalledSizes(macGame: mac, saves: DiskUsage.bytes(at: SteamLibrary.cloudSaveFolders(steamRoot: root, appID: appID)))
+            }.value
+        case .gog:
+            let windows = bottle.flatMap { gogInstalled(item, in: $0) }
+            let saves = GOGSaves(store: gogStore)
+            return await Task.detached {
+                var sizes = InstalledSizes(game: windows.flatMap { DiskUsage.bytes(at: $0.folder) })
+                if let windows, let bottle, let client = saves.clientID(for: windows),
+                   let locations = (try? saves.locations(clientID: client)) ?? nil {
+                    sizes.saves = DiskUsage.bytes(at: locations.compactMap { GOGSaves.resolve($0.template, game: windows, driveC: bottle.driveC) })
+                }
+                return sizes
+            }.value
+        case .epic:
+            guard let app = item.epicAppName else { return InstalledSizes() }
+            let known = epicInstallRecords[app], store = epicStore
+            return await Task.detached {
+                guard let record = known ?? (try? store.installedGames())?.first(where: { $0.app_name == app }) else { return InstalledSizes() }
+                let size = record.install_size ?? record.install_path.flatMap { DiskUsage.bytes(at: URL(fileURLWithPath: $0)) }
+                return InstalledSizes(game: size, saves: record.save_path.flatMap { DiskUsage.bytes(at: URL(fileURLWithPath: $0)) })
+            }.value
+        default:
+            // A program added by hand, a Battle.net game: the folder it lives in.
+            let folder = programFolder(for: item)
+            return await Task.detached { InstalledSizes(game: folder.flatMap { DiskUsage.bytes(at: $0) }) }.value
+        }
     }
 
     /// The game's cloud-save locations. Returns an empty array for a game without cloud saves

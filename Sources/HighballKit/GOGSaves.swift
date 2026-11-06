@@ -85,6 +85,25 @@ public struct GOGSaves: Sendable {
             : list
     }
 
+    // MARK: How a game saves
+
+    /// How GOG syncs a game's saves: the folders GOG's file sync copies, empty when it copies
+    /// none. Such a game saves through the game itself, which may sync its own saves with GOG's
+    /// cloud through GOG's SDK, unseen here.
+    public struct CloudSetup: Sendable, Equatable {
+        public let windows: [Location]
+    }
+
+    /// The setup, from the remote config GOG publishes per client id.
+    public func cloudSetup(clientID: String) throws -> CloudSetup {
+        let url = URL(string: "https://remote-config.gog.com/components/galaxy_client/clients/\(clientID)?component_version=2.0.45")!
+        return Self.parseCloudSetup(try GOGStore.fetch(URLRequest(url: url)), clientID: clientID)
+    }
+
+    static func parseCloudSetup(_ data: Data, clientID: String) -> CloudSetup {
+        CloudSetup(windows: parseLocations(data, clientID: clientID) ?? [])
+    }
+
     /// A location as a folder on the Mac, inside the environment. GOG's variables are the Windows
     /// known folders; Wine keeps them under drive_c/users/<Mac user name>. A Documents folder the
     /// environment links to the Mac's (UserFolders) resolves through the link, as Wine does.
