@@ -449,12 +449,20 @@ enum L10n {
             "GOG propose une version Mac de ce jeu. Elle se lance sans Windows ni Wine, mais certaines anciennes versions Mac ne démarrent plus sur les macOS récents.",
         "Epic lists a Mac build of this game. It runs without Windows or Wine, though some older Mac versions no longer start on current macOS.":
             "Epic propose une version Mac de ce jeu. Elle se lance sans Windows ni Wine, mais certaines anciennes versions Mac ne démarrent plus sur les macOS récents.",
+        "Mac version installed": "Version Mac installée",
         "How this game's saves sync": "Comment se synchronisent les sauvegardes de ce jeu",
         "Highball could not reach GOG to see how this game saves.": "Highball n’a pas pu joindre GOG pour voir comment ce jeu sauvegarde.",
         "Kept on this Mac: Sync saves with GOG, under Game settings, syncs them.": "Gardées sur ce Mac : Synchroniser avec GOG, dans les réglages du jeu, les synchronise.",
         "The Windows version's saves sync with GOG's cloud before and after you play.": "Les sauvegardes de la version Windows se synchronisent avec le cloud GOG avant et après chaque partie.",
         "The game handles the Windows version's saves; some games sync them with GOG's cloud themselves while comet runs.":
             "Le jeu gère les sauvegardes de la version Windows ; certains jeux les synchronisent eux-mêmes avec le cloud GOG quand comet tourne.",
+        "The Mac version's saves sync with GOG's cloud before and after you play.": "Les sauvegardes de la version Mac se synchronisent avec le cloud GOG avant et après chaque partie.",
+        "The game handles the Mac version's saves; some games sync them with GOG's cloud themselves while comet runs.":
+            "Le jeu gère les sauvegardes de la version Mac ; certains jeux les synchronisent eux-mêmes avec le cloud GOG quand comet tourne.",
+        "Highball can't update the Mac version yet: for a newer build, remove it and install it again.":
+            "Highball ne sait pas encore mettre à jour la version Mac : pour une version plus récente, supprimez-la et installez-la de nouveau.",
+        "GOG names a folder for the Mac version's saves that other apps may share, so Highball does not sync it: the saves stay on this Mac.":
+            "GOG indique pour les sauvegardes de la version Mac un dossier que d’autres apps peuvent partager, donc Highball ne le synchronise pas : les sauvegardes restent sur ce Mac.",
         "How saves sync with GOG": "Comment les sauvegardes se synchronisent avec GOG",
         "GOG syncs saves in one of two ways, chosen per game and per version.": "GOG synchronise les sauvegardes de deux façons, selon le jeu et la version.",
         "Folder sync: GOG names the folders a game saves in, and Highball copies them to and from GOG's cloud before and after you play, as GOG Galaxy does. When both copies changed, Highball asks which one to keep.":
@@ -474,6 +482,11 @@ enum L10n {
         "Epic's launcher syncs a game's saves with Epic's cloud when the game sets a cloud save folder.": "Le lanceur d’Epic synchronise les sauvegardes d’un jeu avec le cloud d’Epic quand le jeu définit un dossier de sauvegarde en ligne.",
         "Highball does the same for a Windows version: before Play, newer saves come down, after this Mac's are backed up; when the game ends, this Mac's go back up. If both changed since the last sync, Highball asks which to keep.": "Highball fait de même pour une version Windows : avant de jouer, les sauvegardes plus récentes sont téléchargées, après une copie de celles de ce Mac ; à la fin du jeu, celles de ce Mac sont renvoyées. Si les deux ont changé depuis la dernière synchronisation, Highball demande lesquelles garder.",
         "This game's saves sync with Epic's cloud before and after you play.": "Les sauvegardes de ce jeu se synchronisent avec le cloud Epic avant et après chaque partie.",
+        "Highball could not find the Mac version of %@ to open.": "Highball ne trouve pas la version Mac de %@ à ouvrir.",
+        "The Mac version of %@ did not start: %@": "La version Mac de %@ n’a pas démarré : %@",
+        "Show the Windows version in Finder": "Afficher la version Windows dans le Finder",
+        "Show the Mac version in Finder": "Afficher la version Mac dans le Finder",
+        "Uninstall the Windows version…": "Désinstaller la version Windows…",
         "Size (Windows)": "Taille (Windows)",
         "Size (Mac)": "Taille (Mac)",
         "Size": "Taille",
@@ -487,6 +500,26 @@ enum L10n {
         "Saves": "Sauvegardes",
         "Steam Cloud saves": "Sauvegardes Steam Cloud",
         "Games with a native Mac version, which runs without Wine.": "Les jeux qui ont une version Mac native, qui tourne sans Wine.",
+        "Installing the Mac version of %@": "Installation de la version Mac de %@",
+        "The download finished, but Highball could not find the Mac version in it.":
+            "Le téléchargement est terminé, mais Highball n’y trouve pas la version Mac.",
+        "Opens the Mac version, without Wine.": "Ouvre la version Mac, sans Wine.",
+        "Install the Mac version": "Installer la version Mac",
+        "Goes into %@, outside every environment.": "Va dans %@, en dehors de tout environnement.",
+        "Show in Finder": "Afficher dans le Finder",
+        "Move the Mac version to the Trash…": "Mettre la version Mac à la corbeille…",
+        "Move the Mac version of %@ to the Trash?": "Mettre la version Mac de %@ à la corbeille ?",
+        "Move to the Trash": "Mettre à la corbeille",
+        "%@ goes to the Trash, where you can still put it back.": "%@ va à la corbeille, d’où vous pouvez encore le récupérer.",
+        "Highball could not tell which folder is this game's alone, so it leaves the files where they are.":
+            "Highball ne sait pas quel dossier appartient à ce seul jeu, donc il laisse les fichiers où ils sont.",
+        "Quit %@ first: it is running.": "Quittez d’abord %@ : le jeu est en cours d’exécution.",
+        "%@ is running as its Mac version. Quit it first.": "%@ est lancé dans sa version Mac. Quittez-le d’abord.",
+        "%@ is running as its Windows version. Quit it first.": "%@ est lancé dans sa version Windows. Quittez-le d’abord.",
+        "Built for Apple silicon: runs natively.": "Conçue pour Apple silicon : tourne en natif.",
+        "Built for Intel Macs: runs through Rosetta.": "Conçue pour les Mac Intel : tourne via Rosetta.",
+        "A 32-bit build, which current macOS can't run. Play the Windows version instead.":
+            "Une version 32 bits, que les macOS récents ne lancent plus. Jouez plutôt à la version Windows.",
         "Installed by": "Installé par",
         "All Steam accounts": "Tous les comptes Steam",
         "Steam games of one account on this Mac: the one that installed them, or was signed in when they appeared. A game with no sign of whose it is shows under every account.":

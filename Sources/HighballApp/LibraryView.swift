@@ -352,7 +352,8 @@ struct LibraryTile: View {
                         }
                         .transition(.opacity)
                     }
-                    SourceBadge(source: item.source, mac: state.macSteamBuild(for: item), macListed: state.macListed(item))
+                    SourceBadge(source: item.source, mac: state.macSteamBuild(for: item), macListed: state.macListed(item),
+                                macInstalled: item.source == .gog && item.installedOnMac)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .padding(6)
                     if let appid = item.steamAppID, state.session(forAppID: appid) != nil {
@@ -475,6 +476,17 @@ struct LibraryTile: View {
             } else {
                 Button(L("Hide from library")) { state.setHidden(true, for: item) }
             }
+            // Where the files are, without opening the game's page: one entry per installed build.
+            if item.installed, let folder = state.programFolder(for: item) {
+                Button(item.installedOnMac ? L("Show the Windows version in Finder") : L("Show in Finder")) {
+                    NSWorkspace.shared.activateFileViewerSelecting([folder])
+                }
+            }
+            if let mac = state.macFolder(for: item) {
+                Button(item.installed ? L("Show the Mac version in Finder") : L("Show in Finder")) {
+                    NSWorkspace.shared.activateFileViewerSelecting([mac])
+                }
+            }
             // A program someone added by hand leaves the library from its tile, not only from
             // the environment's programs list (highball-db#68). Steam and Epic entries follow
             // their stores' libraries, so they have no such button.
@@ -486,13 +498,19 @@ struct LibraryTile: View {
             }
             // Removing the game itself, not just the entry: asked for on r/macgaming because
             // there was nowhere to do it (highball#185).
+            if item.installed || (item.source == .gog && item.installedOnMac) { Divider() }
             if item.installed {
-                Divider()
-                Button(L("Uninstall…"), role: .destructive) { state.askUninstall(item) }
+                Button(item.installedOnMac ? L("Uninstall the Windows version…") : L("Uninstall…"), role: .destructive) { state.askUninstall(item) }
                     .disabled(state.uninstallWaitsFor(item) != nil)
             }
+            // A GOG Mac build is an app in the Mac games folder: to the Trash, where it can be put back,
+            // once the player has seen what goes.
+            if item.source == .gog, item.installedOnMac {
+                Button(L("Move the Mac version to the Trash…"), role: .destructive) { state.pendingGOGMacTrash = item }
+                    .disabled(state.busy || state.isRunningNow(item))
+            }
         }
-        .accessibilityLabel("\(item.title), \(item.source.rawValue)\(item.installedOnMac ? ", " + L("Installed in Steam for Mac") : item.installed ? "" : ", " + L("Not installed"))")
+        .accessibilityLabel("\(item.title), \(item.source.rawValue)\(item.installedOnMac ? ", " + (item.source == .steam ? L("Installed in Steam for Mac") : L("Mac version installed")) : item.installed ? "" : ", " + L("Not installed"))")
     }
 
     private var verdict: (String, Color)? { verdictLabel(entry?.status) }
@@ -517,13 +535,15 @@ struct SourceBadge: View {
     var mac: MacSteamBuild? = nil
     /// GOG's or Epic's catalog lists a Mac version (LibraryItem.macListed): the logo, unlit.
     var macListed = false
+    /// That Mac version is installed (a GOG Mac build): the badge lit, as for Steam for Mac.
+    var macInstalled = false
     private var label: String {
         switch source { case .steam: "STEAM"; case .epic: "EPIC"; case .gog: "GOG"; case .pin: "EXE"; case .battlenet: "BATTLE.NET" }
     }
-    private var lit: Bool { mac == .installed }
+    private var lit: Bool { mac == .installed || macInstalled }
     var body: some View {
         HStack(spacing: 3) {
-            if mac != nil || macListed { Image(systemName: "apple.logo").font(.system(size: 8, weight: .semibold)) }
+            if mac != nil || macListed || macInstalled { Image(systemName: "apple.logo").font(.system(size: 8, weight: .semibold)) }
             Text(label)
         }
             .font(.system(size: 8.5, weight: lit ? .bold : .medium).monospaced())
@@ -532,7 +552,7 @@ struct SourceBadge: View {
             .background(RoundedRectangle(cornerRadius: 4).fill(lit ? .white.opacity(0.92) : .black.opacity(0.55)))
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(.white.opacity(lit ? 0 : 0.18), lineWidth: 0.5))
             .foregroundStyle(lit ? .black : .white.opacity(0.92))
-            .help(lit ? L("Installed in Steam for Mac") : mac != nil ? L("Native Mac build on Steam")
+            .help(macInstalled ? L("Mac version installed") : lit ? L("Installed in Steam for Mac") : mac != nil ? L("Native Mac build on Steam")
                   : macListed ? (source == .gog ? L("GOG lists a Mac version") : L("Epic lists a Mac version")) : "")
     }
 }

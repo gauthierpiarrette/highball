@@ -300,7 +300,7 @@ extension GOGStore {
         public let dependencies: [String]
     }
 
-    /// `platform` is gogdl's: "windows", or "osx" for a Mac build.
+    /// `platform` is gogdl's: "windows", or "osx" for a Mac build (GOGMac).
     public func info(_ id: String, platform: String = "windows") throws -> DownloadInfo {
         let out = try capture(["info", id, "--os", platform])
         guard let start = out.firstIndex(of: "{"),
@@ -340,8 +340,9 @@ extension GOGStore {
 
     /// gogdl appends the game's own folder name to `--path` for a download, and takes the game's
     /// folder itself for an update. DLC comes along: what the account owns installs with the game.
-    static func downloadArguments(id: String, into base: String, support: String, language: String, update: Bool) -> [String] {
-        [update ? "update" : "download", id, "--platform", "windows", "--path", base,
+    static func downloadArguments(id: String, into base: String, support: String, language: String, update: Bool,
+                                  platform: String = "windows") -> [String] {
+        [update ? "update" : "download", id, "--platform", platform, "--path", base,
          "--support", support, "--with-dlcs", "--lang", language]
     }
 
@@ -418,6 +419,14 @@ extension GOGStore {
     /// gogdl can end a download that failed partway with status 0 and no manifest (its executor
     /// returns "cancelled" on a fatal error), so a finished install is one whose manifest exists.
     public func downloadCompleted(_ id: String) -> Bool { FileManager.default.fileExists(atPath: manifest(id).path) }
+
+    /// Whether another copy of a game still needs what gogdl kept about it once the copy in
+    /// `bottleName` is removed: a copy in another environment, or the Mac build, which gogdl
+    /// downloaded with the same support folder.
+    public static func otherInstallsRemain(_ id: String, removingFrom bottleName: String,
+                                           installedByBottle: [String: [InstalledGame]], macInstalls: Set<String>) -> Bool {
+        macInstalls.contains(id) || installedByBottle.contains { $0.key != bottleName && $0.value.contains { $0.id == id } }
+    }
 
     /// Forgets what gogdl kept about a game once no environment holds it any more, so it never
     /// tries to patch a game that is not there. While another install remains, its state stays.

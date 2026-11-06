@@ -17,6 +17,12 @@ public struct GOGSaves: Sendable {
         public let name: String
         /// GOG's template, e.g. "<?SAVED_GAMES?>/Remedy/Control".
         public let template: String
+        /// The system gogdl syncs it as: "windows" for GOG's Windows locations, "osx" for its Mac ones.
+        public var os = "windows"
+
+        public init(name: String, template: String, os: String = "windows") {
+            self.name = name; self.template = template; self.os = os
+        }
     }
 
     /// The client id cloud storage is keyed by: the info file's, else the manifest gogdl kept
@@ -67,41 +73,119 @@ public struct GOGSaves: Sendable {
     /// folder, which Galaxy names __default. Throws only when GOG can't be reached or answers with
     /// another error.
     public func locations(clientID: String) throws -> [Location]? {
-        let url = URL(string: "https://remote-config.gog.com/components/galaxy_client/clients/\(clientID)?component_version=2.0.45")!
-        guard let data = try GOGStore.fetchIfFound(URLRequest(url: url)) else { return nil }
+        guard let data = try Self.remoteConfig(clientID) else { return nil }
         return Self.parseLocations(data, clientID: clientID)
     }
 
-    static func parseLocations(_ data: Data, clientID: String) -> [Location]? {
+    /// The remote config GOG publishes per client id, which names every version's cloud saves. nil
+    /// when GOG has none for the client (HTTP 404).
+    static func remoteConfig(_ clientID: String) throws -> Data? {
+        try GOGStore.fetchIfFound(URLRequest(url: URL(string: "https://remote-config.gog.com/components/galaxy_client/clients/\(clientID)?component_version=2.0.45")!))
+    }
+
+    /// `platform` is GOG's: "Windows", or "MacOS" for the Mac build's own locations.
+    static func parseLocations(_ data: Data, clientID: String, platform: String = "Windows") -> [Location]? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let windows = (obj["content"] as? [String: Any])?["Windows"] as? [String: Any],
-              let cloud = windows["cloudStorage"] as? [String: Any], cloud["enabled"] as? Bool == true else { return nil }
+              let config = (obj["content"] as? [String: Any])?[platform] as? [String: Any],
+              let cloud = config["cloudStorage"] as? [String: Any], cloud["enabled"] as? Bool == true else { return nil }
+        let os = platform == "MacOS" ? "osx" : "windows"
         let list = (cloud["locations"] as? [[String: Any]] ?? []).compactMap { l -> Location? in
             guard let name = l["name"] as? String, let location = l["location"] as? String else { return nil }
-            return Location(name: name, template: location)
+            return Location(name: name, template: location, os: os)
         }
-        return list.isEmpty
-            ? [Location(name: "__default", template: "<?APPLICATION_DATA_LOCAL?>/GOG.com/Galaxy/Applications/\(clientID)/Storage/Shared/Files")]
-            : list
+        guard list.isEmpty else { return list }
+        return platform == "MacOS"
+            ? [Location(name: "__default", template: "<?APPLICATION_SUPPORT?>/GOG.com/Galaxy/Applications/\(clientID)/Storage/Shared/Files", os: os)]
+            : [Location(name: "__default", template: "<?APPLICATION_DATA_LOCAL?>/GOG.com/Galaxy/Applications/\(clientID)/Storage/Shared/Files")]
     }
 
     // MARK: How a game saves
 
-    /// How GOG syncs a game's saves: the folders GOG's file sync copies, empty when it copies
-    /// none. Such a game saves through the game itself, which may sync its own saves with GOG's
-    /// cloud through GOG's SDK, unseen here.
+    /// How GOG syncs a game's saves, per version: the folders GOG's file sync copies, empty for a
+    /// version it copies none of. Such a version saves through the game itself, which may sync
+    /// its own saves with GOG's cloud through GOG's SDK (Cyberpunk 2077 on Mac), unseen here.
     public struct CloudSetup: Sendable, Equatable {
         public let windows: [Location]
+        public let mac: [Location]
     }
 
-    /// The setup, from the remote config GOG publishes per client id.
+    /// Both versions' setups, from the one remote config GOG publishes per client id.
     public func cloudSetup(clientID: String) throws -> CloudSetup {
-        let url = URL(string: "https://remote-config.gog.com/components/galaxy_client/clients/\(clientID)?component_version=2.0.45")!
-        return Self.parseCloudSetup(try GOGStore.fetch(URLRequest(url: url)), clientID: clientID)
+        guard let data = try Self.remoteConfig(clientID) else { return CloudSetup(windows: [], mac: []) }
+        return Self.parseCloudSetup(data, clientID: clientID)
     }
 
     static func parseCloudSetup(_ data: Data, clientID: String) -> CloudSetup {
-        CloudSetup(windows: parseLocations(data, clientID: clientID) ?? [])
+        CloudSetup(windows: parseLocations(data, clientID: clientID) ?? [],
+                   mac: parseLocations(data, clientID: clientID, platform: "MacOS") ?? [])
+    }
+
+    // MARK: The Mac build's saves
+
+    /// Where a Mac build's saves sync: GOG's Mac locations, nil when GOG syncs none for the Mac
+    /// build. A game that syncs its own saves through GOG's SDK (Cyberpunk 2077 on Mac, through
+    /// comet) needs none from Highball, and a file sync beside it would fight it.
+    public func macLocations(clientID: String) throws -> [Location]? {
+        guard let data = try Self.remoteConfig(clientID) else { return nil }
+        return Self.parseLocations(data, clientID: clientID, platform: "MacOS")
+    }
+
+    /// A Mac location as a folder, from GOG's Mac variables. gogdl deletes local files the cloud
+    /// lacks, so only a folder that is clearly the game's own is synced (isOwnFolder), and never
+    /// one in an install folder that also holds another game's app (`gameID`, the game asking).
+    public static func resolveMac(_ template: String, installFolder: URL, gameID: String? = nil,
+                                  home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL? {
+        let values: [String: URL] = [
+            "INSTALL": installFolder,
+            "DOCUMENTS": home.appending(path: "Documents"),
+            "APPLICATION_SUPPORT": home.appending(path: "Library/Application Support"),
+            "LIBRARY": home.appending(path: "Library"),
+            "PREFERENCES": home.appending(path: "Library/Preferences"),
+            "CACHES": home.appending(path: "Library/Caches"),
+        ]
+        var path = template.replacingOccurrences(of: "\\", with: "/")
+        guard let open = path.range(of: "<?"), let close = path.range(of: "?>", range: open.upperBound..<path.endIndex),
+              open.lowerBound == path.startIndex, let base = values[String(path[open.upperBound..<close.lowerBound])] else { return nil }
+        path.removeSubrange(path.startIndex..<close.upperBound)
+        guard !path.contains("%"), !path.contains("<?") else { return nil }
+        let parts = path.split(separator: "/").map(String.init)
+        guard !parts.isEmpty, !parts.contains(where: { $0 == "." || $0 == ".." }) else { return nil }
+        let folder = parts.reduce(base) { $0.appending(path: $1) }
+        if template.hasPrefix("<?INSTALL?>"), let gameID, GOGStore.holdsOtherGames(installFolder, besides: gameID) { return nil }
+        return isOwnFolder(folder, home: home) ? folder : nil
+    }
+
+    /// Whether a folder is clearly one game's: at least two levels below every folder that holds
+    /// many games' files (isSharedFolder), so ~/Library/Application Support/<studio>/<game> and
+    /// ~/Documents/My Games/<game> pass, and a studio's or a launcher's folder, which may hold its
+    /// other games, does not. Both the path as written and with its links resolved must pass, so
+    /// a link to a shared folder counts as that folder.
+    static func isOwnFolder(_ folder: URL, home: URL) -> Bool {
+        let written = folder.standardizedFileURL
+        return [written, written.resolvingSymlinksInPath()].allSatisfy { path in
+            !isSharedFolder(path, home: home) && !isSharedFolder(path.deletingLastPathComponent(), home: home)
+        }
+    }
+
+    /// A folder that holds more than one game's files, which a save sync must never be given
+    /// whole: the home itself, every folder straight inside it (Documents, Library, Desktop and
+    /// the rest), every folder straight inside its Library (Preferences, Application Support,
+    /// Caches, Containers, Group Containers, Saved Application State and the rest), the top of a
+    /// synced drive or a container there (iCloud Drive's com~apple~CloudDocs, a CloudStorage
+    /// provider's folder, an app's container), and the folders Mac builds are looked for in.
+    /// Compared without case, as the Mac's disks are, against the home as written and resolved.
+    static func isSharedFolder(_ folder: URL, home: URL) -> Bool {
+        func parts(_ url: URL) -> [String] { url.standardizedFileURL.pathComponents.map { $0.lowercased() } }
+        let path = parts(folder)
+        if GOGStore.macSearchFolders.contains(where: { parts($0) == path }) { return true }
+        return Set([parts(home), parts(home.resolvingSymlinksInPath())]).contains { homeParts in
+            guard path.count >= homeParts.count, Array(path.prefix(homeParts.count)) == homeParts else { return false }
+            let inside = Array(path.dropFirst(homeParts.count))
+            if inside.count <= 1 { return true }
+            guard inside[0] == "library" else { return false }
+            if inside.count == 2 { return true }
+            return inside.count == 3 && ["mobile documents", "cloudstorage", "containers", "group containers"].contains(inside[1])
+        }
     }
 
     /// A location as a folder on the Mac, inside the environment. GOG's variables are the Windows
@@ -299,11 +383,13 @@ public struct GOGSaves: Sendable {
     /// empty folder and a location name no cloud file starts with, so gogdl finds no files on
     /// either side and only logs the listing (saves.py `sync`). nil when gogdl logged none
     /// (it logs none when GOG has no cloud storage for the game at all).
-    func listCloud(_ game: GOGStore.InstalledGame) throws -> [CloudFile]? {
+    /// `os` is the build's ("windows" or "osx"): gogdl asks GOG for that build, and a Mac-only
+    /// game has no Windows one.
+    func listCloud(_ game: GOGStore.InstalledGame, os: String = "windows") throws -> [CloudFile]? {
         let empty = FileManager.default.temporaryDirectory.appending(path: "highball-listing-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: empty) }
-        let nothing = Location(name: "highball-listing-only-\(UUID().uuidString)", template: "")
+        let nothing = Location(name: "highball-listing-only-\(UUID().uuidString)", template: "", os: os)
         let result = try run(game, location: nothing, folder: empty, timestamp: "0", direction: .download)
         guard result.status == 0, result.downloadFailures + result.otherFailures == 0 else {
             throw HighballError.failed("gogdl could not list GOG's cloud saves (status \(result.status))")
@@ -321,7 +407,7 @@ public struct GOGSaves: Sendable {
     @discardableResult
     public func backUpCloud(_ game: GOGStore.InstalledGame, location: Location, kept: Bool = false) throws -> URL? {
         let dir = backupsFolder(game, location)
-        if let listing = try listCloud(game) {
+        if let listing = try listCloud(game, os: location.os) {
             guard !Self.ownFiles(for: location, in: listing).isEmpty else { return nil }
             if let same = backups.reuse(in: dir, kind: .cloud, fingerprint: Self.fingerprint(cloud: listing, location: location), kept: kept) {
                 return same
@@ -513,7 +599,7 @@ public struct GOGSaves: Sendable {
         case .forceDownload: flag = "--force-download"
         case .forceUpload: flag = "--force-upload"
         }
-        return ["save-sync", folder.path, id, "--os", "windows", "--ts", timestamp, "--name", location.name, "--debug", flag]
+        return ["save-sync", folder.path, id, "--os", location.os, "--ts", timestamp, "--name", location.name, "--debug", flag]
     }
 
     static func isDebug(_ line: String) -> Bool { line.contains("] DEBUG: ") }

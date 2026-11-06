@@ -17,6 +17,9 @@ struct GameDetailView: View {
     /// How this GOG game's saves sync, per version; asked when the page opens.
     @State private var cloudSetup: GOGSaves.CloudSetup?
     @State private var cloudSetupAsked = false
+    /// The installed Mac build's cloud-save locations Highball syncs: the ones resolveMac gives a
+    /// folder, as the play sync does (gogMacSaveLocations). The others are left alone.
+    @State private var macSyncedSaves: [GOGSaves.Location] = []
     @State private var showCloudHelp = false
     @State private var loadingDetails = true
     @State private var expandedDescription = false
@@ -164,9 +167,15 @@ struct GameDetailView: View {
             loadingDetails = false
         }
         .task(id: "\(item.id)|\(item.installed)|\(item.installedOnMac)|cloud") {
-            cloudSetup = nil; cloudSetupAsked = false
+            cloudSetup = nil; cloudSetupAsked = false; macSyncedSaves = []
             guard item.source == .gog, item.installedAnywhere else { return }
-            cloudSetup = await state.gogCloudSetup(for: item)
+            let setup = await state.gogCloudSetup(for: item)
+            if let setup, let mac = item.gogID.flatMap({ state.gogMacInstalled[$0] }) {
+                macSyncedSaves = await Task.detached {
+                    setup.mac.filter { GOGSaves.resolveMac($0.template, installFolder: mac.folder, gameID: mac.id) != nil }
+                }.value
+            }
+            cloudSetup = setup
             cloudSetupAsked = true
         }
         // How much room it takes: the store's estimate before an install, the folders after.
@@ -224,7 +233,7 @@ struct GameDetailView: View {
                 .textSelection(.enabled)
             if let macBuild {
                 macBlock(macBuild)
-            } else if state.macListed(item), item.source == .gog || item.source == .epic {
+            } else if state.macListed(item) || item.installedOnMac, item.source == .gog || item.source == .epic {
                 storeMacBlock
             } else if let outdated = GamePageCopy.outdatedMacBuild(appInfo: item.steamAppID.flatMap { state.macAppInfoByAppID[$0] }, entry: entry) {
                 Label(L(outdated), systemImage: "apple.logo").font(.callout).foregroundStyle(.secondary)
@@ -552,6 +561,27 @@ struct GameDetailView: View {
                 Text(gog ? L("GOG lists a Mac build of this game. It runs without Windows or Wine, though some older Mac versions no longer start on current macOS.")
                          : L("Epic lists a Mac build of this game. It runs without Windows or Wine, though some older Mac versions no longer start on current macOS."))
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if gog, let game = item.gogID.flatMap({ state.gogMacInstalled[$0] }) {
+                    if let note = Self.archNote(game.arch) {
+                        Text(note).font(.callout).foregroundStyle(game.arch == .only32Bit ? HB.warn : .secondary)
+                    }
+                    Text(L("Highball can't update the Mac version yet: for a newer build, remove it and install it again."))
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 10) {
+                        Button(L("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([game.app ?? game.folder]) }
+                        Button(L("Move the Mac version to the Trash…")) { state.pendingGOGMacTrash = item }.disabled(state.busy || state.isRunningNow(item))
+                    }
+                    .controlSize(.small).padding(.top, 2)
+                } else if gog {
+                    // With the Windows build installed the play row offers that one; the Mac one is here.
+                    if item.installed {
+                        HStack(spacing: 8) {
+                            Button(L("Install the Mac version")) { state.installOnMac(item) }.controlSize(.small).disabled(state.busy)
+                            estimateText(macEstimate)
+                        }
+                        .padding(.top, 2)
+                    }
+                }
             }
             Spacer(minLength: 0)
         }
@@ -611,6 +641,13 @@ struct GameDetailView: View {
             lines.append(line(setup.windows, synced: L("The Windows version's saves sync with GOG's cloud before and after you play."),
                               own: L("The game handles the Windows version's saves; some games sync them with GOG's cloud themselves while comet runs.")))
         }
+        if item.installedOnMac {
+            // GOG names Mac folders none of which is clearly the game's own: nothing syncs them.
+            lines.append(!setup.mac.isEmpty && macSyncedSaves.isEmpty
+                ? L("GOG names a folder for the Mac version's saves that other apps may share, so Highball does not sync it: the saves stay on this Mac.")
+                : line(macSyncedSaves, synced: L("The Mac version's saves sync with GOG's cloud before and after you play."),
+                       own: L("The game handles the Mac version's saves; some games sync them with GOG's cloud themselves while comet runs.")))
+        }
         return lines
     }
 
@@ -647,7 +684,7 @@ struct GameDetailView: View {
                 .font(.callout).foregroundStyle(.secondary)
             Text(L("The game's own sync: some games send their saves to GOG's cloud themselves, through GOG's game kit. With Highball that works while comet runs beside the game, and the game says so when it syncs, as Cyberpunk 2077 does."))
                 .font(.callout).foregroundStyle(.secondary)
-            let folders = (cloudSetup.map { item.installed ? $0.windows : [] } ?? []).map(\.template)
+            let folders = ((cloudSetup.map { item.installed ? $0.windows : [] } ?? []) + (item.installedOnMac ? macSyncedSaves : [])).map(\.template)
             if !folders.isEmpty {
                 Text(L("Folders this game syncs")).font(.caption.weight(.semibold)).padding(.top, 2)
                 ForEach(folders, id: \.self) { Text(verbatim: $0).font(.caption.monospaced()).textSelection(.enabled) }
@@ -697,6 +734,16 @@ struct GameDetailView: View {
         }
     }
 
+    /// What an installed Mac build's executable says about running here (MacBinaryArch).
+    static func archNote(_ arch: MacBinaryArch) -> String? {
+        switch arch {
+        case .native: L("Built for Apple silicon: runs natively.")
+        case .intelOnly: L("Built for Intel Macs: runs through Rosetta.")
+        case .only32Bit: L("A 32-bit build, which current macOS can't run. Play the Windows version instead.")
+        case .unknown: nil
+        }
+    }
+
     /// Only when the Windows build is the installed one: otherwise the play row already offers
     /// the Mac build (Play on Mac, Install on Mac).
     @ViewBuilder private var macButton: some View {
@@ -726,26 +773,46 @@ struct GameDetailView: View {
                     primaryActionLabel(L("Play on Mac"), symbol: "play.fill")
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
+                .disabled(state.macPlayUnavailable(item))
                 if item.installed {
+                    // Not while the Mac build Highball started runs: one build at a time.
                     Button(L("Play the Windows version")) { commitTypedArguments(); state.play(item, windowsBuild: true) }
-                        .controlSize(.large).disabled(state.busy || blocked)
+                        .controlSize(.large).disabled(state.busy || blocked || state.isRunningNow(item))
                 } else {
-                    Text(L("Starts through Steam for Mac.")).font(.callout).foregroundStyle(.secondary)
+                    Text(item.source == .steam ? L("Starts through Steam for Mac.") : L("Opens the Mac version, without Wine."))
+                        .font(.callout).foregroundStyle(.secondary)
                 }
             } else if item.installed {
                 Button { commitTypedArguments(); state.play(item) } label: {
                     primaryActionLabel(L("Play"), symbol: "play.fill")
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)
-                .disabled(state.busy || blocked)
+                .disabled(state.busy || blocked || state.isRunningNow(item))
                 if item.installedOnMac {
                     // The row put the Windows build first (a Mac build missing content); the Mac one stays a click away.
                     Button(L("Play on Mac")) { commitTypedArguments(); state.playOnMac(item) }.controlSize(.large)
+                        .disabled(state.macPlayUnavailable(item))
                 } else {
                     Text(!blocked ? L("Highball will ask how it went when you finish.")
                          : entry?.status == "blocked-publisher" ? L("Its publisher stops it on macOS on purpose.")
                          : L("Its anti-cheat does not run on macOS."))
                         .font(.callout).foregroundStyle(.secondary)
+                }
+            } else if item.source == .gog, state.macListed(item), !item.installedOnMac {
+                // A Mac version is listed: that's the install on offer, the Windows one a click away.
+                VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Button { state.installOnMac(item) } label: { primaryActionLabel(L("Install the Mac version"), symbol: "apple.logo") }
+                            .buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber).disabled(state.busy)
+                        Text(String(format: L("Goes into %@, outside every environment."), "~/Applications/Highball Games"))
+                            .font(.callout).foregroundStyle(.secondary)
+                        estimateText(macEstimate)
+                    }
+                    HStack(spacing: 6) {
+                        Button(L("Install the Windows version instead")) { state.install(item) }
+                            .buttonStyle(.link).font(.callout).disabled(state.busy)
+                        estimateText(windowsEstimate)
+                    }
                 }
             } else if item.source == .epic || item.source == .gog {
                 Button { state.install(item) } label: { primaryActionLabel(L("Install"), symbol: "arrow.down") }.buttonStyle(.borderedProminent).controlSize(.large).tint(HB.amber)

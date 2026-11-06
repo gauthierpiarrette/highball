@@ -250,6 +250,7 @@ struct ContentView: View {
         .previewMoveAsk(state)
         .macOSAsk(state)
         .uninstallAsk(state)
+        .macVersionAsks(state)
         .rendererTrialAsk(state)
         .modesetTrialAsk(state)
         .homeMoveAsk(state)
@@ -530,6 +531,24 @@ private extension View {
             Text(GamePageCopy.updateAsk(recipe: pending.recipe, engineID: pending.engineID, canPlay: pending.play != nil))
         }
     }
+    /// A GOG Mac build goes to the Trash only once the player has seen what goes.
+    @MainActor func macVersionAsks(_ state: AppState) -> some View {
+        self.alert(state.pendingGOGMacTrash.map { String(format: L("Move the Mac version of %@ to the Trash?"), $0.title) } ?? "",
+                   isPresented: .init(get: { state.pendingGOGMacTrash != nil }, set: { if !$0 { state.pendingGOGMacTrash = nil } }),
+                   presenting: state.pendingGOGMacTrash) { item in
+            if state.gogMacTrashTarget(for: item) != nil {
+                Button(L("Move to the Trash"), role: .destructive) { state.pendingGOGMacTrash = nil; state.gogTrashMac(item) }
+            }
+            Button(L("Cancel"), role: .cancel) { state.pendingGOGMacTrash = nil }
+        } message: { item in
+            if let target = state.gogMacTrashTarget(for: item) {
+                Text(String(format: L("%@ goes to the Trash, where you can still put it back."), target.path))
+            } else {
+                Text(L("Highball could not tell which folder is this game's alone, so it leaves the files where they are."))
+            }
+        }
+    }
+
     @MainActor func uninstallAsk(_ state: AppState) -> some View {
         self.alert(state.pendingUninstall.map { String(format: L("Remove %@?"), $0.item.title) } ?? "",
                isPresented: .init(get: { state.pendingUninstall != nil }, set: { if !$0 { state.pendingUninstall = nil } }),
