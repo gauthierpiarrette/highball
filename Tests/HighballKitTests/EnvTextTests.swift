@@ -13,6 +13,17 @@ final class EnvTextTests: XCTestCase {
         XCTAssertEqual(EnvText.parse("DXMT_METAL_HUD=").environment, ["DXMT_METAL_HUD": ""])
     }
 
+    /// highball-db#862: macOS turned the typed quotes curly, and the value reached Wine with them.
+    func testAValueInOnePairOfQuotesLosesThem() {
+        let p = EnvText.parse("WINEDEBUG=\" loaddll\u{201D}\nA='x y'\nB=\u{201C}+seh\u{201D}\nC=dxgi.customDeviceDesc=\"Intel(R) Arc\"\nD=\"\nE=plain")
+        XCTAssertEqual(p.environment["WINEDEBUG"], "loaddll")
+        XCTAssertEqual(p.environment["A"], "x y")
+        XCTAssertEqual(p.environment["B"], "+seh")
+        XCTAssertEqual(p.environment["C"], "dxgi.customDeviceDesc=\"Intel(R) Arc\"", "quotes inside a value stay")
+        XCTAssertEqual(p.environment["D"], "\"", "a lone quote is not a pair")
+        XCTAssertEqual(p.environment["E"], "plain")
+    }
+
     func testRoundTrip() {
         let env = ["B": "2", "A": "1"]
         XCTAssertEqual(EnvText.text(for: env), "A=1\nB=2")
