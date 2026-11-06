@@ -919,7 +919,13 @@ func currentLibrary(paths: HighballPaths, epic: Bool) -> [LibraryItem] {
     // programs added by hand its tiles stand for, so both list the same ids.
     let gogStore = GOGStore(paths: paths)
     let gogInstalled = Dictionary(bottles.map { ($0.name, GOGStore.installedGames(driveC: $0.driveC)) }, uniquingKeysWith: { a, _ in a })
-    let gogGames = epic ? Set(gogInstalled.values.joined().map(\.id)).sorted().compactMap { gogStore.game($0) } : []
+    // The owned list the app saved, then installed games it doesn't hold (an offline installer's).
+    var gogGames: [GOGStore.Game] = []
+    if epic {
+        let owned = gogStore.isAuthenticated ? GOGStore.lastSeenOwnedGames(home: paths.home) : []
+        let installedOnly = Set(gogInstalled.values.joined().map(\.id)).subtracting(owned.map(\.id))
+        gogGames = owned + installedOnly.sorted().compactMap { gogStore.game($0) }
+    }
     return LibraryIndex.build(bottles: bottles, steamByBottle: steam, steamOwnedByBottle: owned,
                               macInstalled: MacSteam.installedGames(), epicOwned: epicOwned, epicInstalls: epicInstalls,
                               gogGames: gogGames, gogInstalledByBottle: gogInstalled,

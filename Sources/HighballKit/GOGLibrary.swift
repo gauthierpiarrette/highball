@@ -130,6 +130,17 @@ extension GOGStore {
         }
         return (try? Self.fetch(Self.releaseRequest(id, certificate: nil, token: nil))).flatMap { Self.parseRelease(id: id, data: $0) }
     }
+
+    /// The owned list as the app last saw it, from library-cache.json in Highball's home (the app
+    /// writes it after each GOG refresh). The CLI lists the library without asking GOG, and read only
+    /// installed games until now, so `highball library` left out every GOG game not installed
+    /// (highball#432). Empty when the app never saved one.
+    public static func lastSeenOwnedGames(home: URL) -> [Game] {
+        struct Snapshot: Decodable { var gogGames: [Game]? }
+        guard let data = try? Data(contentsOf: home.appending(path: "library-cache.json")),
+              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) else { return [] }
+        return snapshot.gogGames ?? []
+    }
 }
 
 // MARK: Installed games, read from disk
