@@ -462,6 +462,31 @@ public struct EpicStore: Sendable {
     }
 }
 
+/// The last lines a legendary run printed, for the Details of a failure none of them explains
+/// (EpicStore.installFailure). The error said "see the log above" and its Details showed only
+/// that, never legendary's output (highball-db#961, an install that exited with 1). The download
+/// manager's progress block, several lines a second, stays out.
+public final class LegendaryTail: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+    private let limit: Int
+
+    public init(limit: Int = 30) { self.limit = limit }
+
+    public func append(_ line: String) {
+        guard !line.contains("[DLManager] INFO:"), !line.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        lock.withLock {
+            lines.append(line)
+            if lines.count > limit { lines.removeFirst(lines.count - limit) }
+        }
+    }
+
+    public var text: String {
+        let lines = lock.withLock { self.lines }
+        return lines.isEmpty ? "legendary printed nothing" : "legendary's last lines:\n" + lines.joined(separator: "\n")
+    }
+}
+
 /// Stops a running legendary the way Ctrl-C in a terminal does. A terminal signals the whole
 /// process group, and legendary's downloader runs in child processes, so SIGINT goes to
 /// legendary and everything it started. legendary answers by keeping the download's progress,

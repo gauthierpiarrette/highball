@@ -12,6 +12,23 @@ final class EpicStoreTests: XCTestCase {
         XCTAssertNil(EpicStore.installFailure("[cli] INFO: Download size: 95232.19 MiB (Compression savings: 2.1%)"))
     }
 
+    /// highball-db#961: an install that exited with 1 and no sentence showed "see the log above" in Details,
+    /// and no log. Details now carries legendary's last lines, without the download manager's progress.
+    func testAFailureNoSentenceExplainsKeepsLegendarysLastLines() {
+        let tail = LegendaryTail(limit: 3)
+        XCTAssertEqual(tail.text, "legendary printed nothing")
+        for line in ["[cli] INFO: Preparing download for \"Gamename\"...",
+                     "[DLManager] INFO: = Progress: 10.07% (10035/99671), Running for 00:06:22, ETA: 00:56:57",
+                     "",
+                     "[cli] INFO: Install path: C:\\Games\\Gamename",
+                     "[Core] WARNING: Parsing manifest failed",
+                     "Traceback (most recent call last):",
+                     "KeyError: 'files'"] {
+            tail.append(line)
+        }
+        XCTAssertEqual(tail.text, "legendary's last lines:\n[Core] WARNING: Parsing manifest failed\nTraceback (most recent call last):\nKeyError: 'files'")
+    }
+
     /// Legendary has no terminal under Highball: the selective-download prompt (optional
     /// language packs) raised EOFError and killed the install (#110). `-y` alone does not skip it.
     /// legendary's lines as a GTA V Enhanced install printed them (highball#287): the size once,
