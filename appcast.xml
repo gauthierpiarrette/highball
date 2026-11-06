@@ -7,9 +7,9 @@
     <item>
       <title>Highball 0.10.26</title>
       <description><![CDATA[Forza Horizon 6 starts again after its November 3 update, and new Wine 11 engines r30 and r31]]></description>
-      <pubDate>Thu, 05 Nov 2026 23:03:31 +0100</pubDate>
+      <pubDate>Fri, 06 Nov 2026 19:51:31 +0100</pubDate>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
       <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.10.26/Highball-0.10.26.zip" sparkle:version="0.10.26" sparkle:shortVersionString="0.10.26" sparkle:edSignature="fJiekfDnkABjc/o50gA2jzuJza0D03Jhptb6sU5YQR4gC4kyhm4p5Eswe2004Jj/NNiyy6NuQg/Xh5wctkyECg==" length="9028820" type="application/octet-stream"/>
     </item>
     <item>
