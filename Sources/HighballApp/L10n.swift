@@ -441,6 +441,14 @@ enum L10n {
         "Not installed in any bottle": "Installé dans aucune bouteille",
         "Also installed in %@": "Aussi installé dans %@",
         "Source": "Source",
+        "GOG lists a Mac version": "GOG propose une version Mac",
+        "Epic lists a Mac version": "Epic propose une version Mac",
+        "Your GOG purchase includes a Mac version": "Votre achat GOG comprend une version Mac",
+        "Your Epic purchase includes a Mac version": "Votre achat Epic comprend une version Mac",
+        "GOG lists a Mac build of this game. It runs without Windows or Wine, though some older Mac versions no longer start on current macOS.":
+            "GOG propose une version Mac de ce jeu. Elle se lance sans Windows ni Wine, mais certaines anciennes versions Mac ne démarrent plus sur les macOS récents.",
+        "Epic lists a Mac build of this game. It runs without Windows or Wine, though some older Mac versions no longer start on current macOS.":
+            "Epic propose une version Mac de ce jeu. Elle se lance sans Windows ni Wine, mais certaines anciennes versions Mac ne démarrent plus sur les macOS récents.",
         "How this game's saves sync": "Comment se synchronisent les sauvegardes de ce jeu",
         "Highball could not reach GOG to see how this game saves.": "Highball n’a pas pu joindre GOG pour voir comment ce jeu sauvegarde.",
         "Kept on this Mac: Sync saves with GOG, under Game settings, syncs them.": "Gardées sur ce Mac : Synchroniser avec GOG, dans les réglages du jeu, les synchronise.",
@@ -478,6 +486,7 @@ enum L10n {
         "Uses %@ of space": "Occupe %@",
         "Saves": "Sauvegardes",
         "Steam Cloud saves": "Sauvegardes Steam Cloud",
+        "Games with a native Mac version, which runs without Wine.": "Les jeux qui ont une version Mac native, qui tourne sans Wine.",
         "Installed by": "Installé par",
         "All Steam accounts": "Tous les comptes Steam",
         "Steam games of one account on this Mac: the one that installed them, or was signed in when they appeared. A game with no sign of whose it is shows under every account.":

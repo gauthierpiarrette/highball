@@ -109,18 +109,22 @@ public struct EpicStore: Sendable {
         /// 2:3 cover for the future unified library. Same type mapping Heroic uses.
         public let artworkWide: URL?
         public let artworkTall: URL?
+        /// The catalog item lists a Mac release beside the Windows one (metadata.releaseInfo's
+        /// platforms), which the same purchase includes.
+        public let listsMac: Bool
         /// The catalog item names a cloud save folder (metadata.customAttributes.CloudSaveFolder):
         /// Epic's cloud keeps its saves when Epic's own launcher syncs them.
         public var cloudSaves = false
 
-        public init(app_name: String, app_title: String, artworkWide: URL? = nil, artworkTall: URL? = nil) {
+        public init(app_name: String, app_title: String, artworkWide: URL? = nil, artworkTall: URL? = nil, listsMac: Bool = false) {
             self.app_name = app_name; self.app_title = app_title
-            self.artworkWide = artworkWide; self.artworkTall = artworkTall
+            self.artworkWide = artworkWide; self.artworkTall = artworkTall; self.listsMac = listsMac
         }
 
         private enum CodingKeys: String, CodingKey { case app_name, app_title, metadata }
-        private enum MetadataKeys: String, CodingKey { case keyImages, customAttributes }
+        private enum MetadataKeys: String, CodingKey { case keyImages, releaseInfo, customAttributes }
         private struct KeyImage: Codable { let type: String?; let url: String? }
+        private struct ReleaseInfo: Codable { let platform: [String]? }
         private struct CustomAttribute: Codable { let value: String? }
 
         public init(from decoder: Decoder) throws {
@@ -128,11 +132,14 @@ public struct EpicStore: Sendable {
             app_name = try c.decode(String.self, forKey: .app_name)
             app_title = try c.decode(String.self, forKey: .app_title)
             var images: [KeyImage] = []
+            var releases: [ReleaseInfo] = []
             if let md = try? c.nestedContainer(keyedBy: MetadataKeys.self, forKey: .metadata) {
                 images = (try? md.decode([KeyImage].self, forKey: .keyImages)) ?? []
+                releases = (try? md.decode([ReleaseInfo].self, forKey: .releaseInfo)) ?? []
                 let attributes = (try? md.decode([String: CustomAttribute].self, forKey: .customAttributes)) ?? [:]
                 cloudSaves = !(attributes["CloudSaveFolder"]?.value ?? "").isEmpty
             }
+            listsMac = releases.contains { $0.platform?.contains("Mac") == true }
             func first(_ types: [String]) -> URL? {
                 for t in types {
                     if let u = images.first(where: { $0.type == t })?.url, let url = URL(string: u) { return url }
@@ -144,7 +151,8 @@ public struct EpicStore: Sendable {
         }
 
         public func encode(to encoder: Encoder) throws {
-            // Artwork is derived from legendary's metadata on every decode; only identity persists.
+            // Artwork and platforms are derived from legendary's metadata on every decode; only
+            // identity persists.
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(app_name, forKey: .app_name)
             try c.encode(app_title, forKey: .app_title)

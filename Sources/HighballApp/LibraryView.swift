@@ -25,6 +25,7 @@ struct LibraryView: View {
     /// Steam games of one account only, under the Steam filter: "" all, else a 64-bit Steam ID
     /// (AppState.steamOwners).
     @AppStorage("library.steamAccount") private var steamAccount = ""
+    @AppStorage("library.macOnly") private var macOnly = false
     /// Shows the games the player hid, and only them, so one can be brought back (highball#445).
     /// Not kept across starts: a library that opened on its hidden games alone would look emptied.
     @State private var showingHidden = false
@@ -48,6 +49,8 @@ struct LibraryView: View {
             // A game with no sign of whose it is is every account's (`.unknown`), so it stays, as
             // does one Highball cannot place (Steam for Mac's, or before the accounts are read).
             if let account, let owners = state.steamOwners(for: item), !owners.accounts.contains(account) { return false }
+            // A native Mac version from any store: Steam's (MacSteamBuild), or one GOG or Epic lists.
+            if macOnly && state.macSteamBuild(for: item) == nil && !state.macListed(item) && !item.installedOnMac { return false }
             if verifiedOnly {
                 guard state.gameDB.entry(for: item)?.status == "verified-local" else { return false }
             }
@@ -73,7 +76,7 @@ struct LibraryView: View {
                 // Installed games first, large, with Play on the cover. The verdict stays under
                 // every cover, the grid below keeps every game, and the row steps aside as soon as
                 // a search or a filter is on.
-                if !homeItems.isEmpty && search.isEmpty && sourceFilter == nil && !installedOnly && !verifiedOnly && !showingHidden {
+                if !homeItems.isEmpty && search.isEmpty && sourceFilter == nil && !installedOnly && !verifiedOnly && !macOnly && !showingHidden {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             HB.eyebrow(L("Installed games"))
@@ -148,6 +151,8 @@ struct LibraryView: View {
             Divider().frame(height: 16)
             FilterChip(label: L("Installed"), on: installedOnly) { installedOnly.toggle() }
             FilterChip(label: L("Verified"), on: verifiedOnly) { verifiedOnly.toggle() }
+            FilterChip(label: "Mac", symbol: "apple.logo", on: macOnly) { macOnly.toggle() }
+                .help(L("Games with a native Mac version, which runs without Wine."))
             // Only once a game in the library is hidden: the chip is the way back to it.
             if showingHidden || state.libraryItems.contains(where: state.isHidden) {
                 FilterChip(label: L("Hidden"), on: showingHidden) { showingHidden.toggle() }
@@ -284,11 +289,15 @@ extension LibraryView {
 
 struct FilterChip: View {
     let label: String
+    var symbol: String? = nil
     let on: Bool
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            Text(label)
+            HStack(spacing: 4) {
+                if let symbol { Image(systemName: symbol).font(.system(size: 11, weight: .semibold)) }
+                Text(label)
+            }
                 .font(.system(size: 12.5, weight: .semibold))
                 .padding(.horizontal, 12).padding(.vertical, 4)
                 .background(Capsule().fill(on ? HB.amber : HB.card))
@@ -343,7 +352,7 @@ struct LibraryTile: View {
                         }
                         .transition(.opacity)
                     }
-                    SourceBadge(source: item.source, mac: state.macSteamBuild(for: item))
+                    SourceBadge(source: item.source, mac: state.macSteamBuild(for: item), macListed: state.macListed(item))
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .padding(6)
                     if let appid = item.steamAppID, state.session(forAppID: appid) != nil {
@@ -506,13 +515,15 @@ struct SourceBadge: View {
     /// A native Mac build on Steam (MacSteamBuild): an Apple logo in front of the label, and the
     /// whole badge lit when Steam for Mac has it installed.
     var mac: MacSteamBuild? = nil
+    /// GOG's or Epic's catalog lists a Mac version (LibraryItem.macListed): the logo, unlit.
+    var macListed = false
     private var label: String {
         switch source { case .steam: "STEAM"; case .epic: "EPIC"; case .gog: "GOG"; case .pin: "EXE"; case .battlenet: "BATTLE.NET" }
     }
     private var lit: Bool { mac == .installed }
     var body: some View {
         HStack(spacing: 3) {
-            if mac != nil { Image(systemName: "apple.logo").font(.system(size: 8, weight: .semibold)) }
+            if mac != nil || macListed { Image(systemName: "apple.logo").font(.system(size: 8, weight: .semibold)) }
             Text(label)
         }
             .font(.system(size: 8.5, weight: lit ? .bold : .medium).monospaced())
@@ -521,7 +532,8 @@ struct SourceBadge: View {
             .background(RoundedRectangle(cornerRadius: 4).fill(lit ? .white.opacity(0.92) : .black.opacity(0.55)))
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(.white.opacity(lit ? 0 : 0.18), lineWidth: 0.5))
             .foregroundStyle(lit ? .black : .white.opacity(0.92))
-            .help(lit ? L("Installed in Steam for Mac") : mac != nil ? L("Native Mac build on Steam") : "")
+            .help(lit ? L("Installed in Steam for Mac") : mac != nil ? L("Native Mac build on Steam")
+                  : macListed ? (source == .gog ? L("GOG lists a Mac version") : L("Epic lists a Mac version")) : "")
     }
 }
 
