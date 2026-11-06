@@ -927,4 +927,23 @@ final class GOGStoreTests: XCTestCase {
         XCTAssertEqual(try running.readToEnd(), Data("comet 0.4.0".utf8))
         XCTAssertEqual(try Data(contentsOf: binary), Data("comet 0.4.1".utf8))
     }
+
+    /// highball#432: `highball library` listed only installed GOG games. The CLI now reads the
+    /// owned list the app saved in library-cache.json, beside Epic's lists it ignores here.
+    func testTheCLIReadsTheOwnedListTheAppSaved() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "hb-gogcache-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        XCTAssertEqual(GOGStore.lastSeenOwnedGames(home: home), [], "no cache yet")
+        let owned = [GOGStore.Game(id: "1440148836", title: "Fallout"), GOGStore.Game(id: "1207658924", title: "Heretic", listsMac: true)]
+        let cache: [String: Any] = [
+            "epicOwned": [["appName": "Fortnite", "title": "Fortnite"]],
+            "epicInstalls": [String: String](),
+            "gogGames": try JSONSerialization.jsonObject(with: JSONEncoder().encode(owned)),
+        ]
+        try JSONSerialization.data(withJSONObject: cache).write(to: home.appending(path: "library-cache.json"))
+        XCTAssertEqual(GOGStore.lastSeenOwnedGames(home: home), owned)
+        try Data("not json".utf8).write(to: home.appending(path: "library-cache.json"))
+        XCTAssertEqual(GOGStore.lastSeenOwnedGames(home: home), [], "a damaged cache lists nothing rather than failing")
+    }
 }
