@@ -186,6 +186,19 @@ struct LibraryView: View {
                 }
             } else if state.libraryItems.isEmpty {
                 whereAreYourGames
+            } else if let source = sourceFilter, unconnected(source) {
+                // A store's tab with nothing from that store and no account connected: the way in,
+                // where "Nothing matches" said nothing about it (highball#604).
+                HStack {
+                    Spacer()
+                    switch source {
+                    case .steam: steamCard
+                    case .epic: epicCard
+                    default: gogCard
+                    }
+                    Spacer()
+                }
+                .padding(.top, 40)
             } else {
                 Text(L("Nothing matches these filters.")).foregroundStyle(.secondary)
             }
@@ -213,16 +226,40 @@ struct LibraryView: View {
         .padding(.top, 40)
     }
 
-    @ViewBuilder private var sourceCards: some View {
+    /// A store with no game of its own in the library and no account behind it: Epic or GOG not
+    /// connected, Steam not installed in the default environment.
+    private func unconnected(_ source: LibrarySource) -> Bool {
+        guard !state.libraryItems.contains(where: { $0.source == source }) else { return false }
+        switch source {
+        case .steam: return state.defaultBottle.map(state.steamInstalled) != true
+        case .epic: return !state.epicSignedIn
+        case .gog: return !state.gogSignedIn
+        default: return false
+        }
+    }
+
+    private var steamCard: some View {
         sourceCard(symbol: "gamecontroller.fill", accent: true, title: L("Steam"),
                    text: L("Install Steam and sign in. Your Steam library shows up here. Its first start takes 15 to 25 minutes."),
                    button: state.defaultBottle.map(state.steamInstalled) == true ? L("Open Steam") : L("Install Steam")) { state.installSteam() }
+    }
+
+    private var epicCard: some View {
         sourceCard(symbol: "bag.fill", accent: false, title: L("Epic Games"),
                    text: L("Connect your Epic account. Your games install straight into Highball."),
                    button: L("Connect Epic")) { state.showEpicSignIn = true }
+    }
+
+    private var gogCard: some View {
         sourceCard(symbol: "g.circle.fill", accent: false, title: "GOG",
                    text: L("Connect your GOG account. Your games install straight into Highball."),
                    button: L("Connect GOG")) { state.showGOGSignIn = true }
+    }
+
+    @ViewBuilder private var sourceCards: some View {
+        steamCard
+        epicCard
+        gogCard
         sourceCard(symbol: "folder.fill", accent: false, title: L("A Windows program I have"),
                    text: L("An installer or game from your Mac. Or drop it onto this window."),
                    button: L("Choose a file…")) { state.chooseProgramToRun() }
