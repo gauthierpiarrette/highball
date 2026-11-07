@@ -3635,6 +3635,7 @@ final class AppState {
                 epicDownloadTotal = nil
                 let refused = OSAllocatedUnfairLock(initialState: false)
                 let failure = OSAllocatedUnfairLock<String?>(initialState: nil)
+                let tail = LegendaryTail()
                 // What changes in an environment's game folder while legendary installs or updates
                 // it is legendary's, not saves (EpicSaves.historyFile).
                 let start = Date()
@@ -3650,6 +3651,7 @@ final class AppState {
                             try install(store, control) { line in
                                 if EpicStore.refusedForLock(line) { refused.withLock { $0 = true } }
                                 if let why = EpicStore.installFailure(line) { failure.withLock { if $0 == nil { $0 = why } } }
+                                tail.append(line)
                                 Task { @MainActor in self.appendLog(line); self.reportEpicDownload(line) }
                             }
                         }.value
@@ -3665,7 +3667,7 @@ final class AppState {
                 }
                 guard status == 0 else {
                     if let why = failure.withLock({ $0 }) { throw HighballError.failed(why) }
-                    throw HighballError.processFailed(command: "epic install", status: status, output: "see the log above")
+                    throw HighballError.processFailed(command: "epic install", status: status, output: tail.text)
                 }
             }
             if let wrap { try await wrap(download) } else { try await download() }
@@ -3709,9 +3711,10 @@ final class AppState {
     /// Removes an Epic game's installed build through legendary (one per game), its lines in the log.
     private func legendaryUninstall(_ app: String) async throws {
         let store = epicStore
-        let log: @Sendable (String) -> Void = { line in Task { @MainActor in self.appendLog(line) } }
+        let tail = LegendaryTail()
+        let log: @Sendable (String) -> Void = { line in tail.append(line); Task { @MainActor in self.appendLog(line) } }
         let status: Int32 = try await Task.detached { try store.uninstall(app, onLine: log) }.value
-        guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall", status: status, output: "see the log above") }
+        guard status == 0 else { throw HighballError.processFailed(command: "legendary uninstall", status: status, output: tail.text) }
     }
 
     /// Replaces an Epic game's Mac build with the Windows one in the default environment
@@ -3776,10 +3779,11 @@ final class AppState {
                 dropOldRecord: oldPath.map { _ in { [self] in
                     stage = removing
                     try await Task.detached { try store.saveRecord(app) }.value
-                    let status = try await Task.detached { try store.forgetRecordKeepingFiles(app, onLine: log) }.value
+                    let tail = LegendaryTail()
+                    let status = try await Task.detached { try store.forgetRecordKeepingFiles(app, onLine: { tail.append($0); log($0) }) }.value
                     guard status == 0 else {
                         _ = try? await Task.detached { try store.restoreSavedRecord(app) }.value
-                        throw HighballError.processFailed(command: "legendary uninstall --keep-files", status: status, output: "see the log above")
+                        throw HighballError.processFailed(command: "legendary uninstall --keep-files", status: status, output: tail.text)
                     }
                     // legendary exits 0 without touching its records when another legendary holds
                     // its lock: the switch goes on only once the record is really gone.
