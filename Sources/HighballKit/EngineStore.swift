@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Security
 
 public enum HighballError: Error, CustomStringConvertible {
     case checksumMismatch(file: String, expected: String, actual: String)
@@ -49,6 +50,7 @@ public struct EngineStore: Sendable {
             guard let m = try? EngineManifest.load(from: manifest) else { return nil }
             try? linkRuntime(dir)   // heals broken runtime links from pre-0.7.9 installs
             try? linkSignedLoader(dir, manifest: m)   // an app that moved repoints its arm64 engines
+            try? signIntelLoader(dir, manifest: m)    // engines installed before their loader was signed
             // GStreamer took the plugin folder's `._libgst*.dylib` files for plugins (see AppleDouble); this also
             // heals engines installed before the cleanup.
             AppleDouble.removeTwins(in: InstalledEngine(manifest: m, root: dir).gstreamerPluginDir, recursive: false)
@@ -273,6 +275,7 @@ public struct EngineStore: Sendable {
         let m = try EngineManifest.load(from: root.appending(path: "manifest.json"))
         try? linkRuntime(root)      // heals broken runtime links from pre-0.7.9 installs
         try? linkSignedLoader(root, manifest: m)
+        try? signIntelLoader(root, manifest: m)
         return InstalledEngine(manifest: m, root: root)
     }
 
@@ -345,6 +348,7 @@ public struct EngineStore: Sendable {
         try saved.save(to: staging.appending(path: "manifest.json"))
         try linkRuntime(staging)
         try linkSignedLoader(staging, manifest: saved)
+        try? signIntelLoader(staging, manifest: saved)   // an unsigned loader still runs, only without the Neural Engine
         AppleDouble.removeTwins(in: staging, recursive: true)
         // The unpacked tree must be a whole engine before it replaces anything: an archive that
         // unpacked short (a full disk, a file the archive lacks) used to install all the same and
@@ -597,6 +601,70 @@ public struct EngineStore: Sendable {
             try fm.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
             try fm.createSymbolicLink(atPath: link.path, withDestinationPath: target)
         }
+    }
+
+    /// The identifier signIntelLoader gives an Intel engine's Wine loader.
+    public static let intelLoaderIdentifier = "app.highball.wine"
+
+    /// Gives an Intel engine's Wine loader an ad-hoc signature with an identifier when it has none.
+    ///
+    /// The engine CI builds an unsigned x86-64 `wine`, and Rosetta runs that unsigned code. But the
+    /// Neural Engine daemon refuses to compile for a process without a signing identifier. aned logs
+    /// `bundleID rejected (nil, path separator, or traversal)` and `refusing compile ... csIdentity=
+    /// <path>/wine_unsigned`. On macOS 27 with an M5, MetalFX's temporal scaler is a network that
+    /// MPSGraph compiles for the Neural Engine. DLSS reaches that scaler through D3DMetal. Refused,
+    /// the network falls back to the GPU, beside the game's own frame. In Cities: Skylines II, every
+    /// time the scaler was rebuilt (each load and each save), a command buffer hit the GPU timeout
+    /// about 4 s later. A few of those close together, and macOS ignored the process's submissions
+    /// for good: the picture froze while sound and input carried on. With the loader signed, aned
+    /// compiled and loaded the network, and the same session had no GPU errors at all (M5 Max,
+    /// macOS 27.2, x64-crossover26.3-r28, 2026-11-08).
+    ///
+    /// Only a regular, unsigned Mach-O is signed. A loader that already carries a signature keeps
+    /// it (the Sikarugir builds are signed org.winehq.wine). An arm64 engine runs through the
+    /// helper (linkSignedLoader). The signed copy replaces the file with a rename, so a running
+    /// Wine keeps the file it started from. Redone on every read of the engine, like
+    /// linkSignedLoader, so an engine installed earlier heals on the next launch.
+    func signIntelLoader(_ root: URL, manifest: EngineManifest) throws {
+        guard !manifest.isNativeARM64 else { return }
+        for file in ["engine/bin/wine", "engine/lib/wine/\(manifest.unixLibDir)/wine"] {
+            let url = root.appending(path: file)
+            guard Self.isUnsignedMachO(url) else { continue }
+            let signing = url.deletingLastPathComponent().appending(path: ".\(url.lastPathComponent).\(UUID().uuidString).signing")
+            defer { try? FileManager.default.removeItem(at: signing) }
+            try FileManager.default.copyItem(at: url, to: signing)
+            try Shell.run("/usr/bin/codesign", ["--force", "--sign", "-", "--identifier", Self.intelLoaderIdentifier, signing.path])
+            guard rename(signing.path, url.path) == 0 else {
+                throw HighballError.failed("Could not replace \(file) with its signed copy (errno \(errno)).")
+            }
+        }
+    }
+
+    /// Whether `url` is a regular Mach-O file without a code signature. A file of any other kind is
+    /// reported unsigned by the Security framework too, and codesign would sign it into its extended
+    /// attributes, so the header is checked first.
+    static func isUnsignedMachO(_ url: URL) -> Bool {
+        guard let kind = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+              kind.isRegularFile == true, kind.isSymbolicLink != true,
+              let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        guard let head = try? handle.read(upToCount: 4), head.count == 4 else { return false }
+        let magic = head.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
+        // thin 64- and 32-bit, universal and universal-64, in either byte order
+        let machO: Set<UInt32> = [0xfeedfacf, 0xcffaedfe, 0xfeedface, 0xcefaedfe, 0xcafebabe, 0xbebafeca, 0xcafebabf, 0xbfbafeca]
+        guard machO.contains(magic) else { return false }
+        var code: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let code else { return false }
+        return SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSBasicValidateOnly), nil) == errSecCSUnsigned
+    }
+
+    /// The identifier in a file's code signature, nil when it has none.
+    static func signingIdentifier(of url: URL) -> String? {
+        var code: SecStaticCode?, info: CFDictionary?
+        guard SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess, let code,
+              SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess
+        else { return nil }
+        return (info as? [String: Any])?[kSecCodeInfoIdentifier as String] as? String
     }
 
     func stripQuarantine(_ url: URL) throws {
