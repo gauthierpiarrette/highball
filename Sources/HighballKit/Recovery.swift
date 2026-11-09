@@ -89,6 +89,13 @@ public struct Recovery: Equatable, Sendable {
             if let reason = Self.winetricksReason(output) { meaning += " It said: \(reason)" }
             return Recovery(headline: "\(what) didn't finish.", meaning: meaning,
                             actionTitle: "Try again", action: .retry)
+        // Epic's and GOG's own tools (legendary, gogdl) give their reason in their last lines, which
+        // Details shows (#665). "A fresh copy" means nothing for a store download, and "epic didn't
+        // finish" read like Highball's own installer had broken (highball#677).
+        case let .processFailed(command, _, _) where command.hasPrefix("epic ") || command.hasPrefix("legendary ") || command.hasPrefix("gogdl "):
+            return Recovery(headline: command.hasPrefix("gogdl ") ? "GOG stopped with an error." : "Epic stopped with an error.",
+                            meaning: "The reason is in its last lines, under Details. A full disk, a game this account doesn't own and a dropped connection are the usual ones.",
+                            actionTitle: "Try again", action: .retry)
         case let .processFailed(command, _, _):
             let name = command.split(separator: " ").first.map(String.init) ?? "The installer"
             return Recovery(headline: "\(name) didn't finish.",
