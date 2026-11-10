@@ -627,3 +627,136 @@ extension GOGStore {
         save(history, for: game, driveC: driveC)
     }
 }
+
+// MARK: The install's own files (an uninstall removes those and nothing else)
+
+extension GOGStore {
+    /// The files gogdl put in an install's folder, one path below the folder per line, kept in
+    /// the folder like the manifest. An uninstall removes these and leaves what the player or the
+    /// game added (a mod, a patch, a Mac build the game wants beside it), as Steam does (highball#652).
+    static func installFilesRecord(_ folder: URL) -> URL { folder.appending(path: ".highball-install-files") }
+
+    /// The files an uninstall left in the folder (the player's or the game's), so a later download
+    /// into the same folder does not count them as its own.
+    static func leftFilesRecord(_ folder: URL) -> URL { folder.appending(path: ".highball-left-files") }
+
+    /// After a finished download that began at `start`: lists every file in the game's folder as
+    /// the install's, all of it gogdl's, a download stopped and resumed included. The exception is
+    /// what an earlier uninstall left there (leftFilesRecord) and the download did not touch. The
+    /// status change time counts as well as the modification and creation dates: Finder and unzip
+    /// keep a file's old modification date, but nothing sets a status change time back.
+    /// Links are listed, never followed.
+    public static func recordInstallFiles(for game: InstalledGame, downloadStarted start: Date) {
+        recordInstallFiles(in: game.folder, downloadStarted: start)
+    }
+
+    static func recordInstallFiles(in folder: URL, downloadStarted start: Date) {
+        let since = start.addingTimeInterval(-2)
+        let left = Set(readList(leftFilesRecord(folder)) ?? [])
+        let listed = filesWithDates(in: folder).filter { !left.contains($0.0) || $0.1 >= since }.map(\.0)
+        writeList(listed, to: installFilesRecord(folder))
+        try? FileManager.default.removeItem(at: leftFilesRecord(folder))
+    }
+
+    /// After an update that began at `start`: adds what changed in the folder since then. An
+    /// install with no list keeps none, since the update's files alone are not the whole game.
+    public static func recordUpdatedFiles(for game: InstalledGame, updateStarted start: Date) {
+        recordUpdatedFiles(in: game.folder, updateStarted: start)
+    }
+
+    static func recordUpdatedFiles(in folder: URL, updateStarted start: Date) {
+        guard let old = installFiles(folder) else { return }
+        let since = start.addingTimeInterval(-2)
+        writeList(old + filesWithDates(in: folder).filter { $0.1 >= since }.map(\.0), to: installFilesRecord(folder))
+    }
+
+    /// The install's list, nil when it has none (installed before Highball kept one).
+    static func installFiles(_ folder: URL) -> [String]? { readList(installFilesRecord(folder)) }
+
+    private static func readList(_ file: URL) -> [String]? {
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        return text.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+    }
+
+    private static func writeList(_ paths: [String], to file: URL) {
+        let text = Set(paths).filter { !$0.hasPrefix(".highball-") }.sorted().joined(separator: "\n") + "\n"
+        try? Data(text.utf8).write(to: file, options: .atomic)
+    }
+
+    /// Every file and link below `folder`, by its path below it, with the latest of its dates.
+    /// Folders behind a link are not entered.
+    static func filesWithDates(in folder: URL) -> [(String, Date)] {
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey,
+                                      .attributeModificationDateKey, .creationDateKey]
+        guard let walk = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys) else { return [] }
+        let top = folder.standardizedFileURL.path + "/"
+        var found: [(String, Date)] = []
+        for case let url as URL in walk {
+            guard let v = try? url.resourceValues(forKeys: Set(keys)) else { continue }
+            if v.isDirectory == true && v.isSymbolicLink != true { continue }
+            let path = url.standardizedFileURL.path
+            guard path.hasPrefix(top) else { continue }
+            let dates = [v.contentModificationDate, v.attributeModificationDate, v.creationDate].compactMap { $0 }
+            found.append((String(path.dropFirst(top.count)), dates.max() ?? .distantPast))
+        }
+        return found
+    }
+
+    /// Uninstall for an install with a list: removes the listed files and the install's records at
+    /// the top of the folder (goggame-<id>.info, unins*, Highball's .highball-* files), then the
+    /// folders left empty, the game's folder too when nothing is left. Returns the files that stay,
+    /// and lists them in the folder for a later download (leftFilesRecord). nil when the install
+    /// has no list, which leaves everything to the caller. A path that leads out of the folder,
+    /// through `..` or a linked parent, is skipped.
+    public static func removeInstallFiles(of game: InstalledGame) -> [URL]? {
+        removeInstallFiles(in: game.folder)
+    }
+
+    static func removeInstallFiles(in folder: URL) -> [URL]? {
+        guard let listed = installFiles(folder) else { return nil }
+        let fm = FileManager.default
+        let root = folder.resolvingSymlinksInPath().standardizedFileURL.path
+        func inside(_ url: URL) -> Bool {
+            let parent = url.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL.path
+            return parent == root || parent.hasPrefix(root + "/")
+        }
+        for relative in listed where !relative.hasPrefix("/") && !relative.split(separator: "/").contains("..") {
+            let url = folder.appending(path: relative)
+            guard inside(url) else { continue }
+            try? fm.removeItem(at: url)   // a link goes, never what it points to
+        }
+        for name in (try? fm.contentsOfDirectory(atPath: folder.path)) ?? [] {
+            let lower = name.lowercased()
+            if lower.hasPrefix("goggame-") || lower.hasPrefix("unins") || lower.hasPrefix(".highball-") {
+                try? fm.removeItem(at: folder.appending(path: name))
+            }
+        }
+        removeEmptyFolders(folder)
+        guard fm.fileExists(atPath: folder.path) else { return [] }
+        let left = filesWithDates(in: folder).map(\.0).filter { $0 != ".DS_Store" && !$0.hasSuffix("/.DS_Store") }
+        writeList(left, to: leftFilesRecord(folder))
+        return left.map { folder.appending(path: $0) }
+    }
+
+    /// Removes the folders below `folder`, and `folder` itself, that hold nothing but Finder's
+    /// .DS_Store, deepest first. Links are never entered.
+    static func removeEmptyFolders(_ folder: URL) {
+        let fm = FileManager.default
+        func prune(_ dir: URL) -> Bool {
+            guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return false }
+            var empty = true
+            for name in names {
+                let item = dir.appending(path: name)
+                let v = try? item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                if v?.isDirectory == true && v?.isSymbolicLink != true {
+                    if !prune(item) { empty = false }
+                } else if name != ".DS_Store" {
+                    empty = false
+                }
+            }
+            guard empty else { return false }
+            return (try? fm.removeItem(at: dir)) != nil
+        }
+        _ = prune(folder)
+    }
+}

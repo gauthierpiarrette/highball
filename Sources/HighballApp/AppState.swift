@@ -4591,6 +4591,7 @@ final class AppState {
                 if status != 0 { appendLog("\(item.title): the shared Windows runtimes did not all download; the game may ask for them") }
             }
             stage = String(format: L("Downloading %@"), item.title)
+            let downloadStart = Date()
             try await gogDownload(title: item.title, command: "gogdl download", completed: { store.downloadCompleted(id) }) { control, onLine in
                 try store.install(id, into: bottle, language: language, control: control, onLine: onLine)
             }
@@ -4598,7 +4599,11 @@ final class AppState {
             refreshGOGInstalls()
             if let game = gogInstalledByBottle[bottle.name]?.first(where: { $0.id == id }) {
                 store.keepManifest(for: game)
+                // The install's own files, so an uninstall leaves what the player adds (#652);
+                // again after setup, which can write into the folder too.
+                GOGStore.recordInstallFiles(for: game, downloadStarted: downloadStart)
                 try await gogRunSetup(game, title: item.title, in: bottle, language: language)
+                GOGStore.recordInstallFiles(for: game, downloadStarted: downloadStart)
             }
             await MainActor.run { self.gogRefresh() }
         }
@@ -4851,9 +4856,11 @@ final class AppState {
             }
             busyProgress = nil; transferRate = nil
             store.keepManifest(for: game)
+            GOGStore.recordUpdatedFiles(for: game, updateStarted: start)
             refreshGOGInstalls()
             if let fresh = gogInstalledByBottle[bottle.name]?.first(where: { $0.id == game.id }) {
                 try await gogRunSetup(fresh, title: item.title, in: bottle, language: language)
+                GOGStore.recordUpdatedFiles(for: fresh, updateStarted: start)
             }
         }
     }
@@ -5572,7 +5579,17 @@ final class AppState {
             if FileManager.default.fileExists(atPath: game.folder.path) {
                 // One call with no progress of its own, and a big game is tens of thousands of files.
                 stage = L("Deleting the game's files")
-                try await Task.detached { try FileManager.default.removeItem(at: game.folder) }.value
+                // An install Highball listed loses only its own files, as on Steam: a mod, a patch or a
+                // Mac build the player put beside it stays (#652). Asked to delete the saves too, or
+                // with no list (installed before 0.10.28), the whole folder goes as before.
+                let left = deleteSaves ? nil : await Task.detached { GOGStore.removeInstallFiles(of: game) }.value
+                if let left {
+                    if !left.isEmpty {
+                        appendLog("\(title): \(left.count) file\(left.count == 1 ? "" : "s") the install didn't put there stay in \(game.folder.path)")
+                    }
+                } else {
+                    try await Task.detached { try FileManager.default.removeItem(at: game.folder) }.value
+                }
             }
             let elsewhere = GOGStore.otherInstallsRemain(id, removingFrom: bottle.name, installedByBottle: gogInstalledByBottle,
                                                          macInstalls: Set(gogMacInstalled.keys))
