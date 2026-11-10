@@ -58,6 +58,7 @@ public enum PlayReport {
         if s.metalHUD { lines.append("Metal HUD on") }
         if s.dxvkAsync { lines.append("DXVK async shader compilation on") }
         if s.advertiseAVX { lines.append("AVX advertised") }
+        if s.dlssEnabled { lines.append("DLSS (MetalFX) on") }
         if s.fpsCap > 0 { lines.append("frame cap \(s.fpsCap)") }
         if s.frameGen > 1 {
             var fg = "frame generation \(s.frameGen)x"

@@ -34,13 +34,13 @@ final class PlayReportTests: XCTestCase {
         var s = BottleSettings(name: "Gaming", engineID: "e")
         XCTAssertEqual(PlayReport.settingsSummary(s), "mode dxmt, sync msync, Windows win10, scale 96 dpi",
                        "defaults say nothing about the run, so only the always-on line remains")
-        s.fpsCap = 60; s.frameGen = 2; s.frameGenAdaptive = true; s.metalHUD = true
+        s.fpsCap = 60; s.frameGen = 2; s.frameGenAdaptive = true; s.metalHUD = true; s.dlssEnabled = true
         s.environment = ["DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN": "1"]
         s.dxvkAppConfig = ["csgo.exe": ["d3d9.customDeviceId": "73BF"]]
         s.recipes = ["steam"]
         let pin = Pin(name: "Skyrim", path: "x.exe", arguments: ["-dx11"], environment: ["A": "b"], renderer: .d3dmetal)
         let lines = PlayReport.settingsSummary(s, pin: pin).split(separator: "\n").map(String.init)
-        XCTAssertEqual(lines, ["mode dxmt, sync msync, Windows win10, scale 96 dpi", "Metal HUD on", "frame cap 60",
+        XCTAssertEqual(lines, ["mode dxmt, sync msync, Windows win10, scale 96 dpi", "Metal HUD on", "DLSS (MetalFX) on", "frame cap 60",
                                "frame generation 2x, adaptive", "DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1",
                                "dxvk.conf [csgo.exe] d3d9.customDeviceId=73BF", "recipes steam",
                                "program mode d3dmetal", "program arguments -dx11", "program A=b"])
