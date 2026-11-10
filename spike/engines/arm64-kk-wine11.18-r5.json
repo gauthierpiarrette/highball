@@ -1,0 +1,103 @@
+{
+  "$schema": "https://highball.app/schemas/engine-manifest/v0",
+  "id": "arm64-kk-wine11.18-r5",
+  "displayName": "Wine 11.18 native arm64 (preview, KosmicKrisp) r5",
+  "arch": "arm64",
+  "minMacOS": "27.0",
+  "requires": [],
+  "channel": "preview",
+  "direct3D9": "wined3d",
+  "notes": [
+    "r5 (2026-11-10): r4 with patches-arm64 0056 and 0057, the spatial audio pair Tx wrote for the Wine 11 line (highball#313). A game that plays a surround bed (5.1, 7.1, 7.1.4) on a Mac's two-channel output lost everything but front left and right, so Forza Horizon 6 dropped the sounds behind the camera on headphones (highball#672). The bed now goes through Apple's AUSpatialMixer, which renders it for the Mac's speakers, headphones or external speakers. HB_SPATIAL=speakers, headphones or external overrides that guess and HB_SPATIAL=0 turns the path off. Every other file is r4's. Checked on an M1 Pro with macOS 27.0: a 7.1 and a 7.1.4 stream from a test program open, run their clock and go through the mixer on the built-in speakers, stereo streams keep the old path. Forza Horizon 6 was not run on r5, its route stays on r3.",
+    "r4 (2026-11-04): r3 with fixes for games beyond Forza Horizon 6. Video: GStreamer's VideoToolbox plugin imports MoltenVK's vkGetMTLDeviceMVK, which the Khronos loader this line ships as libMoltenVK.dylib lacked, so the plugin never loaded, no H.264 video played and a game waiting on its intro video stayed black (ContractVille). The loader now carries that call (highball-engine kosmickrisp-arm64/mvk_compat.c). OpenGL: Wine 11.18 marked no extension in a legacy (before 3.0) context, so a game asking for framebuffer objects there got nothing; patches-arm64 0054 is the upstream fix by Rémi Bernon (1c2d909829c). 0053 gives a legacy context GL_ARB_ES2_compatibility's five calls, as the Wine 11 line's 0021 does. Paperback: The Game needed both. KosmicKrisp: highball patch 0008 gives a LINEAR image Metal cannot back with a buffer (several levels or layers, or 3D) a tiled texture with linear-looking subresource layouts, as MoltenVK did; Red Dead Redemption 2 aborted in Metal during its first load before, and now reaches its menu and the opening cutscene at 60 fps. Every other file is r3's: FEX with ineshd's 0034, vkd3d-proton and DXVK. On a base M4 with macOS 27.0 FNAF, Among Us, the Half-Life 2 demo, WHERE SAFETY ENDS, Bloodbreaker, Portal, Portal 2, Big Walk, The Last Flame, The Sims Legacy Collection, ContractVille and Paperback reach their menus. Forza Horizon 6 was not run on r4, its route stays on r3.",
+    "r3 (2026-11-03): r2 with FEX patch 0034 by ineshd. FEX patched an unaligned atomic in its code buffer without the MAP_JIT write permission the engine turns on, and Forza Horizon 6 crashed at xtajit64.dll+0x1177ac within a minute of a controller coming into use (highball#618). Every other archive is r2's. Tested by the contributor for 30 minutes with an Xbox controller on an M5; on an M4 here the engine boots and runs 32-bit and 64-bit programs.",
+    "r2 (2026-11-01): r1 with a KosmicKrisp build that carries highball patch 0007, every other archive the same. Encoder end barriers ask for Device visibility instead of ResourceAlias, and HB_KK_NO_UBO_ROBUST=1, which a recipe asks for, drops the bounds check on constant buffer reads. Forza Horizon 6's benchmark on a base M4 at 1080p, Very Low, FSR Quality: GPU time per frame from 26.7 ms to about 21 ms, 36 to 43 fps uncapped. A new driver build means the shader cache fills again on the first start.",
+    "r1 (2026-11-01): Forza Horizon 6's native route. Wine 11.18 with patches-arm64 through 0052, FEX 2610 with fex/patches through 0033, vkd3d-proton with renderers-arm64 through 0010, and KosmicKrisp (Mesa's Vulkan driver on Metal 4) with steamac's patches and kosmickrisp-arm64/highball in place of MoltenVK. A line of its own: Microsoft Flight Simulator 2024's engine and its offers do not move until a flight has run on these patches.",
+    "The Khronos loader is engine/lib/libMoltenVK.dylib, the name winevulkan opens, and VK_DRIVER_FILES points it at the driver in renderers/kosmickrisp. Steam's browser runs without Chromium's sandbox (appDefaults): with the game's emulator switches its renderer dies at once inside the sandbox and is relaunched for good, so the sign-in window never comes (measured 2026-11-01).",
+    "Known: a burst of stalls of several seconds in all, about half a minute into the first drive of a session on a warm shader cache, cause open. Measured only on a base M4 with 32 GB."
+  ],
+  "components": {
+    "wine": {
+      "kind": "engine",
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/engine-arm64-wine-11.18-20261108T132317Z-spatial-0056-0057/engine-arm64-wine-11.18-20261108T132317Z-spatial-0056-0057.tar.gz",
+      "size": 402959865,
+      "sha256": "6721b1f4ee2665283f7c16e4e0b3cf5737c454399fac3d74657fde181d148f33",
+      "extract": {
+        "into": "engine",
+        "subpath": "engine"
+      },
+      "license": "LGPL-2.1+",
+      "version": "wine-11.18 (WineHQ) Highball arm64 build 2026-11-08, patches-arm64 through 0054 plus 0056 and 0057, FEX 2610 with fex/patches through 0034, Wine Mono 11.3.0 and Gecko 2.47.4 included",
+      "note": "Built by highball-engine's build-arm64 workflow (run 42480524132) from branch arm64-spatial-audio at 1dc6db7: r4's sources (arm64-games) plus patches-arm64 0056 and 0057."
+    },
+    "frameworks": {
+      "kind": "frameworks",
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/engine-arm64-wine-11.18-20261108T132317Z-spatial-0056-0057/engine-arm64-wine-11.18-20261108T132317Z-spatial-0056-0057.tar.gz",
+      "size": 402959865,
+      "sha256": "6721b1f4ee2665283f7c16e4e0b3cf5737c454399fac3d74657fde181d148f33",
+      "extract": {
+        "into": "frameworks",
+        "subpath": "frameworks"
+      },
+      "license": "mixed (LGPL-2.1 GStreamer 1.28.7 and its plugins, Apache-2.0 MoltenVK inside the GStreamer framework)",
+      "version": "GStreamer 1.28.7 (the official macOS framework, pruned to the plugins winegstreamer uses, with applemedia for VideoToolbox decoding, thinned to arm64)",
+      "note": "The same archive as the wine component, its frameworks folder; the store downloads it once."
+    },
+    "vulkan": {
+      "kind": "runtime",
+      "order": 1,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/kosmickrisp-arm64-20261104T165852Z-push/kosmickrisp-arm64-20261104T165852Z-push.tar.gz",
+      "size": 2544432,
+      "sha256": "c88f1067802569b6db055b83884d62bd178c11b778977501a545ed724520ecae",
+      "extract": {
+        "into": "engine/lib/libMoltenVK.dylib",
+        "subpath": "lib/libMoltenVK.dylib"
+      },
+      "license": "Apache-2.0",
+      "version": "Khronos Vulkan loader 1.4.363 with MoltenVK's vkGetMTLDeviceMVK added",
+      "note": "The name Wine's winevulkan opens on this line, replacing the engine's own MoltenVK (so it installs after the wine component). VK_DRIVER_FILES in baseEnv points it at KosmicKrisp. build-kosmickrisp-arm64 run 41866377298 (KosmicKrisp with highball patches through 0008)."
+    },
+    "kosmickrisp": {
+      "kind": "runtime",
+      "order": 1,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/kosmickrisp-arm64-20261104T165852Z-push/kosmickrisp-arm64-20261104T165852Z-push.tar.gz",
+      "size": 2544432,
+      "sha256": "c88f1067802569b6db055b83884d62bd178c11b778977501a545ed724520ecae",
+      "extract": {
+        "into": "renderers/kosmickrisp",
+        "subpath": "renderers/kosmickrisp"
+      },
+      "license": "MIT (Mesa), Apache-2.0 (steamac)",
+      "version": "Mesa at ce576c29 with steamac's 49 KosmicKrisp patches and kosmickrisp-arm64/highball 0001-0007",
+      "note": "The same archive as the vulkan component; its licences and NOTICE are inside."
+    },
+    "renderers": {
+      "kind": "renderer",
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/renderers-arm64-20261031T230303Z-manual/renderers-arm64-20261031T230303Z-manual.tar.gz",
+      "size": 11818314,
+      "sha256": "1b101d93ad23ec72a89216388f250afcbd9b64babb49f21cc5feccea05fbac37",
+      "extract": {
+        "into": "renderers",
+        "subpath": "renderers"
+      },
+      "license": "mixed (LGPL-2.1 vkd3d-proton, zlib DXVK)",
+      "version": "vkd3d-proton and DXVK, ARM64EC builds with renderers-arm64 through vkd3d-proton 0010, dxvk 0003, dxil-spirv 0001",
+      "note": "renderers/vkd3d/wine and renderers/dxvk/wine. build-renderers-arm64 run 41250498323."
+    }
+  },
+  "appDefaults": {
+    "steamwebhelper.exe": {
+      "CommandLineAppend": "--no-sandbox --disable-gpu-sandbox"
+    }
+  },
+  "baseEnv": {
+    "GST_PLUGIN_PATH": "${frameworks}/GStreamer.framework/Versions/1.0/lib/gstreamer-1.0",
+    "WINEDEBUG": "fixme-all",
+    "DXVK_RELAX_FEATURES": "1",
+    "VK_DRIVER_FILES": "${renderers}/kosmickrisp/kosmickrisp_icd.json",
+    "VK_LOADER_LAYERS_DISABLE": "~implicit~",
+    "MESA_SHADER_CACHE_DIR": "${environment}/.highball-mesa-cache",
+    "MESA_SHADER_CACHE_MAX_SIZE": "4G"
+  },
+  "licenses": {}
+}
