@@ -1339,6 +1339,12 @@ extension RegressionTests {
         XCTAssertEqual(tricks.action, .retry)
         XCTAssertEqual(tricks.headline, "Installing corefonts with winetricks didn't finish.", "not '/bin/bash didn't finish' (highball#135)")
         XCTAssertFalse(tricks.meaning.contains("fresh copy"))
+        // A store tool's failure points at its own lines, not at a fresh copy (highball#677).
+        let epic = Recovery.describe(HighballError.processFailed(command: "epic install", status: 1, output: "legendary's last lines:\n[cli] ERROR: x"))
+        XCTAssertEqual(epic.headline, "Epic stopped with an error.", "not 'epic didn't finish'")
+        XCTAssertFalse(epic.meaning.contains("fresh copy")); XCTAssertEqual(epic.action, .retry)
+        XCTAssertEqual(Recovery.describe(HighballError.processFailed(command: "legendary uninstall", status: 1, output: "")).headline, "Epic stopped with an error.")
+        XCTAssertEqual(Recovery.describe(HighballError.processFailed(command: "gogdl download", status: 1, output: "")).headline, "GOG stopped with an error.")
         XCTAssertFalse(tricks.meaning.contains("It said"), "no reason line when winetricks printed nothing")
         // The step writes its own log since 2026-09-22; saying where it is turns three unanswerable
         // reports into ones that carry the output (highball#135, #180, #183).
