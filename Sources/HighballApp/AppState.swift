@@ -5581,7 +5581,7 @@ final class AppState {
                 stage = L("Deleting the game's files")
                 // An install Highball listed loses only its own files, as on Steam: a mod, a patch or a
                 // Mac build the player put beside it stays (#652). Asked to delete the saves too, or
-                // with no list (installed before 0.10.28), the whole folder goes as before.
+                // with no list (installed before Highball kept one), the whole folder goes as before.
                 let left = deleteSaves ? nil : await Task.detached { GOGStore.removeInstallFiles(of: game) }.value
                 if let left {
                     if !left.isEmpty {
