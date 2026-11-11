@@ -807,6 +807,7 @@ struct GOG: AsyncParsableCommand {
             let info = try store.info(id)
             let language = GOGStore.language(for: info.languages)
             if !info.dependencies.isEmpty { _ = try? store.downloadRedists(info.dependencies) { print($0) } }
+            let downloadStart = Date()
             let status = try store.install(id, into: b, language: language) { line in
                 if !line.contains("[PROGRESS]") || line.contains("= Progress:") { print(line) }
             }
@@ -818,6 +819,7 @@ struct GOG: AsyncParsableCommand {
             try await store.runSetup(game, language: language, runner: runner,
                                      onStep: { n, total, label in print("setup \(n)/\(total): \(label)") },
                                      onFailure: { label, code in print("setup: \(label) ended with code \(code); carrying on") })
+            GOGStore.recordInstallFiles(for: game, downloadStarted: downloadStart)   // so the app's uninstall keeps what the player adds (#652)
             print("installed \(game.title) into \(b.name): \(game.folder.path)")
         }
     }

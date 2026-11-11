@@ -365,15 +365,16 @@ public struct GOGSaves: Sendable {
         GOGStore.history(for: game, driveC: driveC).firstSetup != nil
     }
 
-    /// The uninstaller's and GOG's own records at the top of the game's folder (unins000.dat,
-    /// goggame-<id>.info, …): written by the install, not the game, and putting an old one back
-    /// into a new install would break its uninstaller.
+    /// The uninstaller's, GOG's and Highball's own records at the top of the game's folder
+    /// (unins000.dat, goggame-<id>.info, .highball-install-files, …): written by the install, not
+    /// the game, and putting an old one back into a new install would break its uninstaller or
+    /// hand it the old install's file list.
     static func isInstallerRecord(_ path: String, in top: String) -> Bool {
         guard path.hasPrefix(top) else { return false }
         let rest = path.dropFirst(top.count)
         guard !rest.contains("/") else { return false }
         let name = rest.lowercased()
-        return name.hasPrefix("unins") || name.hasPrefix("goggame-")
+        return name.hasPrefix("unins") || name.hasPrefix("goggame-") || name.hasPrefix(".highball-")
     }
 
     /// How many files a backup holds and their size, for the log.
