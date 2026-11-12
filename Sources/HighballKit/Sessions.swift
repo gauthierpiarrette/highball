@@ -87,6 +87,45 @@ public enum SessionWatch {
         isAlive(markers: session.markers, excluding: session.excluding, ps: ps)
     }
 
+    /// The same, also counting a line that runs one of `names` (from `programNames`): the name
+    /// after a path separator, a space or a quote, as the program or a path on the line.
+    public static func isAlive(_ session: GameSession, names: Set<String>, ps: String) -> Bool {
+        if isAlive(session, ps: ps) { return true }
+        guard !names.isEmpty else { return false }
+        return ps.split(whereSeparator: \.isNewline).contains { line in
+            guard !session.excluding.contains(where: { line.contains($0) }) else { return false }
+            let lower = line.lowercased()
+            return names.contains { name in
+                var from = lower.startIndex
+                while let r = lower.range(of: name, range: from..<lower.endIndex) {
+                    if r.lowerBound == lower.startIndex || "\\/ \"".contains(lower[lower.index(before: r.lowerBound)]) { return true }
+                    from = r.upperBound
+                }
+                return false
+            }
+        }
+    }
+
+    /// The game's program names, from the listing lines that carry its markers: the file name of
+    /// the first `.exe` after the marker, lowercased. Wine shows a process's Windows command line
+    /// in `ps`, and a game that starts itself again with only its file name on that line shows no
+    /// folder ("relaunch.exe child", measured 2026-11-12), so its session ended within ten seconds
+    /// while it ran on (Civilization IV's tutorial, highball-db#1168). Names seen while the markers
+    /// matched keep the session alive.
+    public static func programNames(_ session: GameSession, ps: String) -> Set<String> {
+        var names: Set<String> = []
+        for line in ps.split(whereSeparator: \.isNewline) where !session.excluding.contains(where: { line.contains($0) }) {
+            for marker in session.markers {
+                guard let at = line.range(of: marker),
+                      let exe = line[at.upperBound...].range(of: ".exe", options: .caseInsensitive) else { continue }
+                let path = line[at.lowerBound..<exe.upperBound]
+                let name = path.split(whereSeparator: { $0 == "\\" || $0 == "/" }).last.map { $0.lowercased() } ?? ""
+                if !name.isEmpty { names.insert(name) }
+            }
+        }
+        return names
+    }
+
     public static func currentProcessList() -> String {
         (try? Shell.capture("/bin/ps", ["axww"])) ?? ""
     }
