@@ -1,0 +1,200 @@
+{
+  "$schema": "https://highball.app/schemas/engine-manifest/v0",
+  "arch": "x86_64",
+  "baseEnv": {
+    "DYLD_FALLBACK_FRAMEWORK_PATH": "${frameworks}",
+    "DYLD_FALLBACK_LIBRARY_PATH": "${frameworks}:${frameworks}/GStreamer.framework/Versions/1.0/lib",
+    "GST_PLUGIN_PATH": "${frameworks}/GStreamer.framework/Versions/1.0/lib/gstreamer-1.0",
+    "WINEDEBUG": "fixme-all",
+    "DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN": "1",
+    "D3DM_MTL4": "0"
+  },
+  "components": {
+    "d3dmetal-tsshim": {
+      "extract": {
+        "into": "renderers/d3dmetal-tsshim/wine",
+        "subpath": "renderers/d3dmetal-tsshim/wine"
+      },
+      "kind": "renderer",
+      "layout": [
+        "x86_64-windows/d3d12.dll"
+      ],
+      "license": "MIT",
+      "note": "A d3d12.dll in front of D3DMetal's that serves DirectX 12 timestamp queries (D3DMetal 3.0 resolves them to zero at a reported 60 Hz). Exports carry the ordinals D3DMetal 4.0 beta 3 uses (D3D12CreateDevice at 101, D3D12GetInterface at 109, the two Serialize calls at 110 and 111), so games that bind d3d12 imports by ordinal load through it. Kill switch HB_D3D12_TSSHIM=0 idles the patches; the DLL stays in front. HB_TSSHIM_ATOMIC64=1 in a game's variables answers yes to OPTIONS11's 64-bit atomics on descriptor heap resources, which D3DMetal 3 answers no to and Capcom's RE Engine requires (opt-in, for a game's fix to set). Input layouts that place elements with D3D12_APPEND_ALIGNED_ELEMENT reach D3DMetal with those offsets written out, which D3DMetal 4.0 beta 2 and beta 3 get wrong (HB_TSSHIM_APPEND_OFFSETS=0 passes them through). D3D12GetInterface is passed through, and a device factory it returns gets its CreateDevice wrapped so those devices are patched too. Built for beta 3 only: older D3DMetal numbers the Serialize calls 109 and 110. Source: spike/tsshim, Scripts/build-tsshim.sh.",
+      "order": 1,
+      "sha256": "30fccd4ea8f88ad55d44e46b2ac943ad633b2c90fd6a56774294573062ae1259",
+      "size": 52852,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/d3dmetal-tsshim-20261020/d3dmetal-tsshim-20261020.tar.xz",
+      "version": "20261020"
+    },
+    "dxmt": {
+      "extract": {
+        "into": "renderers/dxmt/wine",
+        "subpath": "highball"
+      },
+      "kind": "renderer",
+      "license": "MIT (Highball branch of DXMT: SwapDeviceContextState, cross-process opt-in)",
+      "sha256": "96feaf5d98d3c6cdc3edea9503e2891d435df8d5bfdf7d3f6998a56ec62bbd58",
+      "size": 18923969,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/dxmt-highball-20260930T161516Z-a444716/dxmt-highball-20260930T161516Z-a444716.tar.gz",
+      "note": "DXMT from Highball's fork (gauthierpiarrette/dxmt, branch highball-20260928 at 5c50790): upstream main of 2026-09-16 (v0.80 plus five months of upstream work, among it keyed-mutex and shared-resource support and DXGI functions Steam's overlay can hook) plus four Highball changes: cross-process swapchains behind DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN (off by default), SwapDeviceContextState implemented instead of aborting, 2D textures answering IDXGISurface, and the one that matters on this Wine: a shared texture with no D3DKMT device behind it is created as a private one, with one error line, instead of failing the game. On this Wine the driver assigns GPU LUIDs of its own, so DXMT's lookup of its adapter fails (the build also tries the primary display's name, which fails here too) and there is never a D3DKMT device; before this build every shared texture then died at creation. This revision's DXMT is that branch plus a444716 (branch highball-20260930): the encoding context's Metal device is declared before the command helpers whose constructors build pipelines through it. Declared after them it was still uninitialised memory there, and a game could die at start in newComputePipelineStateWithDescriptor sent to a garbage object: Among Us's 64-bit build did in 8 of 12 launches on r13, and in none of 12 with this build. The bug is in upstream DXMT too."
+    },
+    "moltenvk": {
+      "extract": {
+        "into": "frameworks/libMoltenVK.dylib",
+        "subpath": "libMoltenVK.dylib"
+      },
+      "kind": "runtime",
+      "license": "Apache-2.0",
+      "note": "MoltenVK 1.4.2 rebuilt with three Highball patches (spike/patches/moltenvk-shadow-import.patch, moltenvk-linear-fallback.patch and moltenvk-shadow-readback.patch, Scripts/build-moltenvk.sh). Shadow import is off unless a launch sets MVK_SHADOW_IMPORT=1 (32-bit native-Vulkan games such as The Sims Legacy Collection). Linear fallback is always on: a linear-tiled image that Metal cannot back with linear memory (3D, mipmapped or array images) is created with optimal tiling instead of failing vkCreateImage, which is what takes Red Dead Redemption 2 from an exit at 98 per cent to the main menu and the story. Shadow readback (highball#283) copies what the GPU writes into shadowed memory back to the game's pages when a submission completes, so a 32-bit game's readbacks under MVK_SHADOW_IMPORT=1 stop being stale (The Sims' thumbnails); without the variable it does nothing. Since r30 and r31 also: device-memory-cap (HB_MVK_DEVICE_MEMORY_PERCENT caps the heap and its budget, highball#398) and two changes from DiAvisoo's MoltenVK-Detroit (cache-drawid-present, lenient-interfaces, highball#125), CI build run 41367170976.",
+      "order": 1,
+      "sha256": "662d7c064ad51bbb20b96b3f13415462cfa89a2deb8a57cf651d068bbfbcdf69",
+      "size": 1736604,
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/moltenvk-1.4.2-shadow-import-1-linear-fallback-1-shadow-readback-1-device-memory-cap-1-cache-drawid-present-1-lenient-interfaces-1-x86_64.tar.gz",
+      "version": "1.4.2+shadow-import-1+linear-fallback-1+shadow-readback-1+device-memory-cap-1+cache-drawid-present-1+lenient-interfaces-1"
+    },
+    "runtime": {
+      "extract": {
+        "into": "frameworks",
+        "subpath": "Template-1.0.11.app/Contents/Frameworks"
+      },
+      "kind": "frameworks",
+      "license": "mixed (LGPL-2.1 GStreamer, Apache-2.0 MoltenVK, LGPL gnutls, ...)",
+      "sha256": "9fa15479e7ff6abd99c1d07be285fb95f41fc6991586502427152b1f7d6ccb8a",
+      "size": 84533420,
+      "url": "https://github.com/Sikarugir-App/Template/releases/download/v1.0/Template-1.0.11.tar.xz"
+    },
+    "wine": {
+      "extract": {
+        "into": "engine",
+        "subpath": "engine"
+      },
+      "kind": "engine",
+      "license": "LGPL-2.1+",
+      "note": "Built from CodeWeavers' crossover-sources-26.3.0.tar.gz by highball-engine's build workflow (run 43188180198, branch wine11-gst-rpath, PR #34): r31's series through 0029 plus 0030, gdi32 exporting D3DKMTSetProcessSchedulingPriorityClass, which Steam's client service (SteamService.dll, client of 2026-10-31) imports by name; without it Wine's loader ended the service when it was called (highball#699). The build also rewrites the Unix side's Homebrew paths to @rpath names: winegstreamer.so linked GLib, GStreamer and gettext, and winedmo.so FFmpeg, by /usr/local/opt paths, so on a Mac with Intel Homebrew's glib or gstreamer both copies loaded and GLib broke in Steam's web helper (highball#698); Sikarugir's Wine 10 build already linked them this way.",
+      "sha256": "94936e0dc184e9fba4e202f8ec165c5e8bbbfea1bbed43730ceaa14b8a3bbd46",
+      "size": 335456362,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/engine-wine-11.0-20261112T101620Z-gst-rpath-0030/engine-wine-11.0-20261112T101620Z-gst-rpath-0030.tar.gz",
+      "version": "wine-11.0 (CrossOver 26.3 tree) Highball build 2026-11-12, patches through 0030, 32-bit DLLs with SSE2 maths, no Homebrew paths"
+    },
+    "winetricks": {
+      "kind": "tool",
+      "license": "LGPL-2.1",
+      "note": "Pinned to upstream commit 5a59ea07 (20260125+dev, 2026-08-07) — the exact bytes 0.7.x verified with dotnet48. The old branch URL drifted and broke every fresh engine install (issues #27/#28); URLs here must be immutable.",
+      "sha256": "f35c29737ca08a583569e6a3752d52fbe23333c5acfad5f16c4177d25eaf3f4b",
+      "url": "https://raw.githubusercontent.com/Winetricks/winetricks/5a59ea07513b24093bd90fad943ecf9543cf05bc/src/winetricks"
+    },
+    "nvapi-stub": {
+      "extract": {
+        "into": "engine/lib/wine/i386-windows/nvapi.dll",
+        "subpath": "nvapi.dll"
+      },
+      "kind": "runtime",
+      "license": "MIT (Highball)",
+      "order": 1,
+      "note": "A 32-bit nvapi.dll stub (spike/nvapi-stub, 40 lines of C) placed in the engine's i386 DLL directory with Wine's builtin marker. Games that see an NVIDIA adapter insist on NVIDIA's driver library and load it from the system directory only, so a stub beside the game does nothing; this one answers NvAPI_Initialize with OK and everything else with 'not implemented'. It only matters for a bottle or application given an NVIDIA identity (Highball's default is AMD), which is what lets legacy CS:GO pass its shadow-map check on wined3d.",
+      "sha256": "cbda8aeee87e84ecf98c06759d2123b073dc99a7aa1c639480fade33383d18a2",
+      "size": 1759,
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/nvapi-stub-2-i386.tar.gz",
+      "version": "2",
+      "refreshesPrefix": true
+    },
+    "d3dmetal": {
+      "kind": "renderer",
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/d3dmetal-4.0b3-gptk4.tar.xz",
+      "sha256": "bdc8df8cab9e3caf4bafb8e436aa9f72449bca369fe87b2df4d72ba92f765915",
+      "size": 16553892,
+      "license": "apple-gptk-license-2023-08-17",
+      "version": "D3DMetal-4.0b3 (Game Porting Toolkit 4.0 beta 3, redist/lib; Apple Software Signing chain verified 2026-10-15)",
+      "order": 1,
+      "extract": {
+        "subpath": "renderers/d3dmetal",
+        "into": "renderers/d3dmetal"
+      },
+      "layout": [
+        "external/D3DMetal.framework",
+        "external/libd3dshared.dylib",
+        "wine/x86_64-windows/{d3d10,d3d11,d3d12,d3d12core,dxgi,nvapi64,nvngx-on-metalfx}.dll",
+        "wine/x86_64-unix/*.so -> ../../external/libd3dshared.dylib"
+      ],
+      "note": "Apple's D3DMetal from GPTK 4 beta 3 (Metal 4), laid over the Template's GPTK 3 copy: rendererDir prefers renderers/d3dmetal. New in beta 3: d3d12core.dll and D3D12GetInterface (the Agility SDK entry point; the SDK configuration works, the device factory is not implemented), shader model 6.7, and SampleCmpLevel. Same Apple licence text as GPTK 3 and 4 beta 2 (identical, 2026-10-15), so the same licence id and acceptance apply. The framework's own minimum is macOS 14, but it is offered on 27 or newer only, where it was measured."
+    },
+    "audiobuf": {
+      "kind": "runtime",
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/audiobuf-20261103/audiobuf-20261103.tar.xz",
+      "sha256": "617b8feb3651227c9c27419e4dc58835e8ca471ef7ce3b13b0ddaea7c067454f",
+      "size": 8124,
+      "license": "MIT (Highball's own, source spike/audiobuf/audiobuf.c)",
+      "version": "20261103",
+      "order": 1,
+      "extract": {
+        "subpath": "libhbaudiobuf.dylib",
+        "into": "frameworks/libhbaudiobuf.dylib"
+      },
+      "note": "Highball's audio library, built by Scripts/build-audiobuf.sh. Bottle.environment inserts it into Wine's processes with DYLD_INSERT_LIBRARIES. It caps an output audio unit's I/O buffer at 5 ms before Wine starts it, so a game that keeps one 10 ms period queued no longer drops audio at 48 kHz (highball#127), and it limits float output like the last stage of Windows' audio engine, so a game whose mix goes over full scale is turned down instead of clipped at the speakers (highball-db#349). HB_AUDIOBUF=0 in an environment's variables leaves the library out, HB_AUDIOLIMIT=0 keeps it without the limiter."
+    },
+    "x87sidecar": {
+      "kind": "runtime",
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/x87sidecar-v1.9.0-20261103T004206Z/x87sidecar-v1.9.0-20261103T004206Z.tar.xz",
+      "sha256": "12dd02f17f32e212b9cfa1d321922cf883cbcbf64155bea01c1342f93c5b64d8",
+      "size": 182212,
+      "license": "MIT (athei, github.com/athei/x87sidecar)",
+      "version": "1.9.0 (0b7c5e5)",
+      "extract": {
+        "into": "x87sidecar",
+        "subpath": "x87sidecar"
+      },
+      "note": "athei's x87sidecar, built from source by highball-engine's build-x87sidecar workflow (run 41554641821). Wine re-executes a 32-bit program through it when ROSETTA_X87_PATH names it (patch 0012), which Highball sets only for games whose recipe asks with HB_X87SIDECAR=1."
+    }
+  },
+  "displayName": "Wine 11.0 (CrossOver 26.3) r32, D3DMetal 4.0 beta 3",
+  "id": "x64-crossover26.3-r32",
+  "licenses": {
+    "apple-gptk-license-2023-08-17": {
+      "applies": [
+        "renderers/d3dmetal (bundled in the Sikarugir Template: D3DMetal.framework sha1 1405e5c6… identical to GPTK 3.0-3)",
+        "renderers/d3dmetal (GPTK 4.0 beta 2 redist: D3DMetal-4.0b2)"
+      ],
+      "summary": "Apple Game Porting Toolkit license: non-commercial use/distribution only; no modification; use scoped to developing, testing or evaluating games on Apple hardware.",
+      "text": "spike/d3dmetal-license.txt"
+    }
+  },
+  "minMacOS": "27.0",
+  "notes": [
+    "r32 (2026-11-12): r30 with a rebuilt Wine (D3DMetal 4 line, macOS 27); every other archive is r30's, so only the Wine downloads, once for both r32 and r33. The Wine is r30's source and series plus patch 0030, with no Homebrew paths in its Unix side (highball#698, highball#699). Not run as such: its Wine is r33's, checked there, and every other archive is r30's.",
+    "r30 (2026-11-04): r28's renderers with a new Wine, MoltenVK and audio library, and athei's x87 sidecar, which a game's recipe switches on. Wine: patches 0025 to 0029 (Scam with your Friends' threadpool stop #437, Rockstar sign-in in UTC+3 zones #478, a DLL kept in a program's .local folder, a fault on a foreign thread ends the program instead of hanging it, and upstream Wine's concurrent_vector fixes for concrt140 and msvcp90 by Piotr Caban) and the 32-bit DLLs built with SSE2 maths: dsound.dll had 1,615 x87 instructions and no SSE, now 57 and 1,149. MoltenVK: a video memory cap a recipe can set (#398) and two Detroit fixes (#125). Audio: microphones on the short buffer (#350), Wine's audio clock in real time (#444), games follow the Mac's output (#460, nikiomori). Tested on a base M4, macOS 27.0: Forza Horizon 6's build of 2026-11-03 with its recipe's settings and Wine's own concrt140 crashed within a minute in every cold start before 0029 and reached the game's next screen in 3 of 3 with it; a new environment boots, Steam signs in and draws, Portal 2, The Last Flame and Five Nights at Freddy's reach their menus.",
+    "r28 (2026-10-20): r26 with the D3DMetal shim rebuilt; D3DMetal, the Wine and every other file are r26's, so only the 53 KB shim downloads. D3DMetal 4.0 beta 2 and beta 3 place input layout elements given as D3D12_APPEND_ALIGNED_ELEMENT at the wrong offsets, so a vertex shader reads another attribute's bytes. In Forza Horizon 6 the livery vinyls' coverage alpha came from texcoord bytes: solid shapes drew as gradients, a finished livery had alpha 0.25 to 0.7, and a liveried car showed mostly its base paint (highball#290, highball-db#449); shifted normals and tangents gave factory paint blotchy, faceted reflections, and the trees' wind data was misread. The shim now hands D3DMetal every pipeline with those offsets written out as D3D12's rules give them (CreateGraphicsPipelineState, pipeline state streams and pipeline library loads); HB_TSSHIM_APPEND_OFFSETS=0 passes the layouts through. Measured 2026-10-20 on an M4 Max, macOS 27.0.1: the livery texture reaches alpha 1 where it is covered, and the liveried car, the vinyl picker's shape thumbnails, reflections and trees draw right.",
+    "r26 (2026-10-15): r24 with Apple's D3DMetal from Game Porting Toolkit 4.0 beta 3 and the D3DMetal shim built for it; the Wine and every other file are r24's. Beta 3 adds the Agility SDK entry point D3D12GetInterface with a d3d12core.dll: a game can set its SDK version through it, which beta 2 refused because the export was missing. Its device factory is not implemented yet (E_NOINTERFACE). It reports shader model 6.7 instead of 6.6, and SampleCmpLevel now works; QuadAny and QuadAll run but group a 4x4 compute group's lanes as rows of four rather than 2x2, GatherRaw and writes to multisampled textures still do nothing, and the 64-bit atomics answer on an M1 Pro is still no (the shim's HB_TSSHIM_ATOMIC64=1 still answers yes). The shim exports D3D12GetInterface at beta 3's ordinal and patches devices made through a device factory. Measured 2026-10-15: M1 Pro with a test program and the shader model 6.6 to 6.9 probes against beta 2; M4, macOS 27.0: Forza Horizon 6 through Steam with its recipe reaches its title screen at 57 fps (55 on r24), loads D3DMetal's own d3d12core.dll rather than the game's Agility SDK copy, and runs for five minutes, as on r24. D3DM_MTL4=0 stays in the base environment.",
+    "r24 (2026-10-14): r22 (D3DMetal 4, macOS 27) with the same three components rebuilt as r25. Wine gains patches 0022 to 0024. 0022 and 0023 are Tx's (highball PR #313): Windows spatial audio gave its static objects channels in list order, which swapped the side and back channels of a 7.1 or 7.1.4 bed, and the Mac driver could not give a two-channel output a stream with more channels, so only front left and right played and Forza Horizon 6 lost its dialogue, its navigator and most of its engine sound on any Mac speakers or headphones. A float stream with more channels than the device now goes through Apple's AUSpatialMixer, rendered for the Mac's speakers or for headphones (HB_SPATIAL=speakers, headphones or external overrides the guess, HB_SPATIAL=0 turns it off); stereo streams are untouched. 0024 (Proton's): GetPackagesByPackageFamily, GetPackagePath and PackageFullNameFromId answer from the registry, where wine.inf now lists the VCLibs 140 framework packages, which Forza Horizon 4 waits for before it opens a window (highball#268). The D3DMetal shim answers yes to OPTIONS11's 64-bit atomics on descriptor heap resources when a game's variables set HB_TSSHIM_ATOMIC64=1 (Capcom's RE Engine refuses the adapter without it on M1 and M2 chips, highball-db#450); without the variable nothing changes. MoltenVK gains the shadow readback the Wine 10 engines have carried since their r24 (highball#283), which only runs under MVK_SHADOW_IMPORT=1. Every other file is byte-identical, and r24 and r25 share these three archives. Measured 2026-10-14 on an M4 and an M1 Pro, macOS 27.0, against r23: what the Mac plays (ScreenCaptureKit, left channel, a 0.5 tone per channel) is identical for 16-bit and float stereo; a 5.1, 7.1 or 7.1.4 float stream and a 7.1.4 spatial audio bed gave front left only on r23 and now every channel, the centre at -3 dB, the LFE folded in at -6 dB, side and back objects on the same speakers as the 7.1 stream's side and back channels. A test program finds the two VCLibs packages (x64 in system32, x86 in syswow64) in a new environment and in an r23 environment moved here, and none on r23. The shim reports the atomics 0 without the variable and 1 with it on the M1 Pro (D3DMetal answers yes on the M4 either way). The LastError probe, DXVK frame pacing, the Direct3D 9 lock stall test and the MoltenVK readback test give r23's results. Forza Horizon 6 through Steam with its recipe's settings draws at 56 fps on the Xbox sign-in screen, its 12-channel spatial bed and an 8-channel stream go through AUSpatialMixer, and its sound plays. 14 Steam games on r25, the same Wine, reach the same screens at the same frame rates (Among Us 59, Five Nights at Freddy's on DXVK and on Wine's Direct3D, Umamusume 30, Heartopia, Vindictus, Portal 60, Big Walk 60, PEAK 44, the Resident Evil 6 benchmark, the Half-Life 2 demo 89, The Last Flame 59, Red Dead Redemption 2's main menu 57, GTA V's calibration 31). The first one or two Steam starts on a new engine build are slower (Steam's browser probes the GPU while macOS rebuilds Metal caches for the new Wine binaries), then as before.",
+    "r22 (2026-10-08): r20 (D3DMetal 4, macOS 27) plus Highball's audio library, which the Wine 10 engines have shipped since r19. Its buffer cap does nothing here, patch 0015 already sets the buffer. It adds the limiter: a game whose float mix goes over full scale is turned down like Windows' audio engine does, instead of clipped at the speakers (Paperback, highball-db#349, runs on this line). Only the 6 KB archive is new, the Wine is the same. Measured on an M4, macOS 27.0 (2026-10-08), with this archive's library inserted into Wine 10 r21 and Wine 11 r17 environments: a WASAPI test tone recorded through ScreenCaptureKit passes sound under full scale unchanged (0.5 stays 0.5000, rms 0.3536) and holds a tone at 1.4 times full scale to 0.9923 with no sample over full scale, where HB_AUDIOLIMIT=0 lets 47,376 samples over through. No dropouts or clicks. The same code built as a prototype: Paperback's title music has nothing over full scale (2,586 samples in 30 s without) and is 0.4 dB quieter, Five Nights at Freddy's has nothing over (70 without).",
+    "r20 (2026-10-06): r18 (D3DMetal 4, macOS 27) rebuilt with patch 0020 and the refreshed 0012. 0020 (athei/wine fa43d6db2): in retina mode the Mac driver reported HORZRES and VERTRES twice the screen size that GetSystemMetrics, EnumDisplaySettings and DESKTOPHORZRES report (7680x4320 against 3840x2160 on an M4's 1920x1080 display, measured on r17), so a game sizing its window or fullscreen picture from them got it twice too large; Red Dead Redemption 2's 1080p fullscreen came out cropped for a player with Retina on (highball#261). With retina off nothing changes. 0012 follows athei's 335ebe1c46: the x87 sidecar handshake checks the reply's id and size and says when the sidecar did not attach; it stays dormant until a sidecar is configured. Built by highball-engine's workflow on main (both patches built green on a branch first). Every other component is unchanged. The same build carries 0021: macOS lists GL_ARB_ES2_compatibility only in 4.1 core contexts, so in a legacy 2.1 context opengl32 returned nothing for glClearDepthf, glDepthRangef, glGetShaderPrecisionFormat, glReleaseShaderCompiler and glShaderBinary, and a program written against OpenGL ES 2 called the empty pointer; they now answer through glClearDepth and glDepthRange or do nothing. Paperback: The Game (Loom engine) crashed at address 0 on every engine and reaches its title menu on this one, both builds (M4, macOS 27.0, highball-db#349).",
+    "r18 (2026-10-05): r17 with a rebuilt Wine with patches 0017 to 0019 and a new D3DMetal shim. 0017 adds kernelbase's GetIntegratedDisplaySize (upstream Wine c68ed23672), which Forza Horizon 6 calls once its window is up and died on. 0018 reports a process's commit charge (PagefileUsage, PrivateUsage) from the Mach task's footprint instead of its address space: a 9 MB program read 41,987 MB on an M4, and Forza Horizon 6 warned about low memory at 87 GB of 32. 0019 stops CredEnumerate failing when the macOS Keychain has no match for the filter, which threw away matching registry credentials: the Xbox Live sign-in library looks its device key and tokens up that way and asked for a new sign-in on every launch. The shim (d3dmetal-tsshim-20261005) answers a DirectX 12 shader model query D3DMetal does not know with the highest model it supports, and drops ResolveSubresource from a multisampled depth texture into a colour texture, which aborts D3DMetal 3.0 and 4.0b2 alike. It also carries Apple's D3DMetal 4.0 beta 2 (the Wine 10 line's r20 component), on macOS 27 only with the Metal 4 backend off (D3DM_MTL4=0), for Forza Horizon 6: its copy protection opens its own files through \\\\.\\GLOBALROOT paths that only the Wine 11 tree handles, and it refuses D3DMetal 3.0 as an unsupported graphics card (FH205) because only 4.0b2 reports enhanced barriers. The Metal 4 backend measured the same frame rate with Forza (50 against 49 fps in one scene on an M4). It is numbered below r19 on purpose, like r20 under r21 on the Wine 10 line: a recipe that pins an earlier Wine 11 revision is offered the newest revision carrying its pin, and that must stay a D3DMetal 3 one (r19), so Helldivers 2, Guardians of the Galaxy, Persona 5 Royal and Planet Coaster 2 do not change D3DMetal under their verified rows.",
+    "r17 (2026-10-03): r16 plus patch 0013 (athei's 539aa62). Wine turned data execution prevention off for the whole process as soon as any loaded module lacked IMAGE_DLLCHARACTERISTICS_NX_COMPAT, which most 32-bit games from before 2010 do. With it off every readable mapping gets PROT_EXEC, and under Rosetta a writable and executable page costs a Mach round trip on first touch, so a Direct3D 9 game streaming vertices through DXVK paid for every buffer write (highball#165). Now DEP follows the main executable and stays permanently on under Rosetta, as Windows's AlwaysOn policy does: ProcessExecuteFlags reports it permanent and a request to turn it off gets STATUS_ACCESS_DENIED; WINE_DISABLE_NX_COMPAT=0 in a game's variables restores the old behaviour for a program that writes code into data pages. Measured on an M4, macOS 27.0, with athei's d3d9stall (noover 2816 1500, DXVK d3d9, five runs each on r16): r16 spent 31 to 49 s in Lock+write per 1500 frames with two or three stalls over a second, this build 0.9 to 1.4 s with none. Every other component is byte-identical to r16.",
+    "r16 (2026-10-03): r15 with the DXMT build the default engine has shipped since 0.10.1 (dxmt-highball-20260930T161516Z-a444716) in place of the 4 September build. In the older build the encoding context's Metal device field was declared after the command helpers whose constructors build compute pipelines through it, so a game could die at start or minutes in with newComputePipelineStateWithDescriptor sent to a garbage object (NSInvalidArgumentException, unrecognised selector on an NSIndirectTaggedPointerString or whatever the memory held). Where Winds Meet crashed that way five times on r12 (highball#240), and Among Us's 64-bit build did in 8 of 12 launches on the default engine's r13 before the same fix. Every other component, the Wine build included, is byte-identical to r15, so only the 19 MB DXMT archive is new.",
+    "r14 (2026-10-01): r13 plus patch 0015. Wine's audio driver let the Mac pull its whole buffer at once, 10.7 ms at 48 kHz, more than a game that keeps one 10 ms period queued has, and played the shortfall as silence (highball#127). The driver now sets the audio unit's buffer to half its period before starting it. Measured on an M4 with macOS 27.0: Counter-Strike 2's menu music over the same 95 s had 20 dropouts on r12 and none with this build's driver. Every other component is byte-identical to r13.",
+    "r13 (2026-10-01): r12 plus patch 0014. A wait on several objects under msync that returned early left the thread registered in the wineserver, and nothing ever removed it, so a long session filled msync's node pool (\"msync: warn: node memory pool exhausted\", 242 million lines in one My Summer Car log) and the wineserver grew until the game stalled (highball#224). Measured on an M4 with macOS 27.0 with a reproducer: r12's wineserver went from 30 MB to 77 MB in 30 s, r13's stayed at 39 MB for 2 minutes with no warning, waits no slower. Heartopia ran 90 s under msync on it with a steady wineserver. Every other component is byte-identical to r12.",
+    "r12 (2026-09-24): r11 plus patch 0012, athei's x87sidecar cooperative attach with a loader check. The check alone changes every 32-bit launch: get_alternate_wineloader() used to name an i386-unix loader that does not exist in this wow64-only build, and env.c then relaunched the program through start.exe /exec, so every 32-bit game ran as a child of a detached start.exe. Measured 2026-09-24: two processes on r11, one on this build. With ROSETTA_X87_PATH pointing at athei's x87sidecar (not shipped yet) an i386 program is accelerated: Half-Life 2 timedemo 131 to 174 fps on wined3d, M1 Pro, macOS 27.0, measured on the 6788a14 trial build with WINEARCH=wow64; on this build the attach was verified with a test program only. Every other component is byte-identical to r11. Smoked 2026-09-24 on a clone of re-w11: The Last Flame (DXMT) and Five Nights at Freddy's (Wine's own Direct3D) draw, the 32-bit game runs as one process.",
+    "Known on r11 and r12 (highball#198, 2026-09-24, cause found 2026-09-25): a Direct3D 9 game on the DXVK mode gets a window that never draws and every memory mapping fails with VK_ERROR_OUT_OF_HOST_MEMORY when the environment carries MVK_SHADOW_IMPORT=1, which the Sims recipe set for the whole environment; Highball 0.9.38 scopes a game recipe's variables to that game. Until then remove that line from the environment's variables when not playing the Sims there, or use Wine's own Direct3D for the game, which is also the faster mode on these engines (Five Nights at Freddy's 40 fps on DXVK against 76 on the default engine's).",
+    "r11 (2026-09-20): r10 with patches 0010 and 0011. 0010 (Proton 164af86d): the Media Foundation source reader lets the video processor's allocator create sample textures, so a game's media player gets a real shared handle from DXMT instead of null (The Last Flame's menu video now plays, highball#99; 3Shain/dxmt#135). 0011: on macOS %gs:0x68, where MSVC-built code such as Unity's Mono reads GetLastError() directly, is kept in step with TEB->LastErrorValue, so a Unity game's error paths no longer see garbage (The Last Flame's Start threw IOException Unknown error on a missing save). DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1 is in the base environment: CEF launcher windows paint on Wine 11 with it. Known: winedmo.so still links a Homebrew FFmpeg 9 the engine does not ship, so Wine's MF sources fall back to GStreamer; unchanged from r10.",
+    "r10 (2026-09-15): r9 with MoltenVK 1.4.2 (July 2026) in place of 1.4.1, same two Highball patches. 1.4.2 fixes heap placement checks, imported texture residency, cached texture invalidation and an occlusion query crash, all candidates for Red Dead Redemption 2's trees popping in and out on Apple Silicon (highball#93). A candidate engine, not the default: pick it under Advanced. Everything else is byte-identical to r9.",
+    "r9 (2026-09-15): r8 with the d3dmetal-tsshim component rebuilt so its exports carry Microsoft's d3d12 ordinals (D3D12CreateDevice at 101), which D3DMetal mirrors. The earlier shim numbered them from 1, so a game that binds d3d12 imports by ordinal (Path of Exile 2 delay-loads D3D12CreateDevice as ordinal 101) died at startup with 'ordinal 101 out of range' and Wine's exception 0xc06d007f (highball-db#53). The Wine build and every other component are byte-identical to r8, so existing downloads are reused; only the 46 KB shim tarball is new.",
+    "r8 (2026-09-12): r7 plus patch 0009, the fiber and QoS slot swap. On r5 to r7 a game whose job threads switch fibers and also drive the window could hang black at full CPU, because the fiber pointer the 0008 mirror keeps in the thread slot is what macOS reads there as the thread's QoS class (Metaphor: ReFantazio, highball#80, measured with its free demo). r8 gives the slot to whichever side is running. Nothing else changed from r7.",
+    "r7 (2026-09-11): r6 plus a 32-bit NVAPI stub in the engine. With it, legacy CS:GO plays on macOS 26 through wined3d with an NVIDIA identity scoped to csgo.exe (the csgo-legacy recipe), the route CrossOver users take: DXVK's D3D9 on this Mac either loses the device on Source's HDR pass or stalls after the map load, and wined3d needs the NVIDIA shadow-map path, which needs NVAPI to answer. Nothing else changed from r6.",
+    "r6 (2026-09-11): r5 plus the MoltenVK linear-fallback patch. Red Dead Redemption 2 loads, reaches its main menu and starts the story on this engine (M1 Pro, macOS 26.6.2, 1280x720 windowed, about 60 fps in menus); every earlier engine exits at 98 per cent of the first load because MoltenVK refuses the game's linear 3D, mipmapped and array images. Nothing else changed from r5.",
+    "r5 (2026-09-09): r4 plus patch 0008, the fiber mirror. Marvel's Guardians of the Galaxy reaches gameplay on this engine and crashes on Play Game on every earlier one, verified twice from a clean start on an M1 Pro, macOS 26.6.2, at 27.5 fps in the opening scene. A reproducer that needs no game (private/notes/fibertest4.c) faults identically to the game on r4 and runs clean here.",
+    "Cost of 0008, measured: offset 0x20 holds the thread's pthread QoS class on macOS, so a thread that uses fibers loses that scheduling hint. Windows and macOS both fix that offset, so a correct GetCurrentFiber() and an intact QoS cache cannot coexist. Confined to threads that call the fiber APIs, and a stress run of 8 threads and 6.4M switches showed TLS and thread creation unaffected (320000 wrong fiber values on r4, 0 here).",
+    "Optional engine (2026-09-07): Highball's own build of the CrossOver 26.3 Wine tree (Wine 11.0) with the same DXMT, D3DMetal, MoltenVK and Template runtime as the default engine. Not the default: a bottle moves to it from its Advanced settings, or Highball offers it when a launcher's recipe names it (the EA app). Verified here: EA app install and sign-in, The Sims 4 through it (DXMT, 128 fps on an M1 Pro), Steam with GTA V install, Rockstar launcher sign-in window, Ubisoft Connect window.",
+    "Games were not re-verified on this engine (CS:GO's cascaded shadow maps are known to differ), which is why it is offered for the launchers that need it, one environment at a time, and never becomes the default on its own. Steam's own client renders here (CEF), as do the Rockstar and Ubisoft sign-in windows; their account services were the wall in testing, not the engine.",
+    "Why it exists: Wine 10 (the default engine) cannot start the EA app's vital background service or run its .NET setup steps, and its winemac lacks the cross-process remote-layer route that the Rockstar and Ubisoft launchers' browsers need (highball#15, #56, #60). This tree carries Highball's patches for both.",
+    "Three patches make the tree behave like the default engine: the Windows user follows the macOS user (CrossOver hack 12735 reverted), WINEDLLPATH_PREPEND is honoured so the renderer overlays apply, and wined3d's automatic renderer is OpenGL first as upstream. winemac.so exports macdrv_functions, so the DXMT and D3DMetal bridges work. This engine ships no winemetal.dll of its own; the DXMT overlay carries it. Wine Mono and Gecko are included.",
+    "DXMT here is Highball's branch (cross-process swapchains, DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1), needed by the EA client. D3DMetal is the Template's 3.0 with the timestamp shim in front, as on the default engine. Accepted licences carry over when a bottle moves.",
+    "Moving a bottle here re-runs the Windows setup (different Wine build); moving back is the same step. Nothing installed in the bottle is removed either way.",
+    "r11, the base environment (2026-09-18): DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1 for every process. On the Wine 11 tree, browser UIs whose GPU process draws into another process's window need it or DXMT refuses the swapchain: Rockstar's sign-in then paints (verified 2026-09-05 and 2026-09-18), Battle.net's client stops crashing but its window stays black, and Steam's window comes into being where two cold starts without the flag created none, but it too stays black (measured on r10, 2026-09-18). So the flag is necessary on Wine 11 and not sufficient for Steam or Battle.net; the black browser is a separate Wine 11 problem still open.",
+    "Direct3D 9 on this engine (0.9.38): in the automatic modes, DXMT and D3DMetal, a Direct3D 9 game uses Wine's own Direct3D, because DXVK's d3d9 on this tree is the slow path (Half-Life 2 131 fps on wined3d against 17 on DXVK, Five Nights at Freddy's 40 fps on DXVK against 76 with the Wine 10 engine's DXVK, measured 2026-09-24/25, highball#198). The explicit DXVK mode still gets DXVK's d3d9.",
+    "r15 (2026-10-02): r14 plus patch 0016. Patch 0011 wrote PE's LastError into the TEB at every entry to unix code and again in user_mode_callback_return, which is only reached through a system call, so the second write copied libc's TSD slot, a heap pointer, into the TEB and the next return to PE code handed it to GetLastError(). Every window procedure and driver-load callback goes through that return, so the first display call of a process poisoned LastError on r11 to r14. The Rockstar Games Launcher installer reads it right after it measures the display and stops with 'make sure all instances of the Rockstar Games Launcher have been closed' (highball-db#272). Measured on an M4, macOS 27.0, with lasterr3.exe: 60687104 after GetSystemMetrics on r12 and r13, 0 on r7, and the expected value on this build."
+  ],
+  "requires": [
+    "rosetta2"
+  ],
+  "direct3D9": "wined3d"
+}
