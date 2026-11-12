@@ -73,7 +73,7 @@ swift test --disable-sandbox --build-system native \
 - 源码：本目录上级的整个仓库，分支 `feat/zh-hans-localization`。
 - 应用：`../dist/Highball.app`。
 - 维护、语言切换、审计说明：[`Localization.md`](Localization.md)。
-- 机器审计：[`localization-audit.json`](localization-audit.json)。
+- 机器审计：按 [`Localization.md`](Localization.md) 中的命令在本地生成 `docs/localization-audit.json`；生成结果不纳入版本控制。
 - 后续文本候选：[`localization-review.json`](localization-review.json)。
 - 关键验证输出：[`validation-results.txt`](validation-results.txt)。
 - 完整修改清单：[`modified-files.txt`](modified-files.txt)。

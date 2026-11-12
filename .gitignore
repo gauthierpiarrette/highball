@@ -7,6 +7,9 @@ dist/
 site/
 private/
 
+# Generated localization audit; regenerate locally when needed.
+/docs/localization-audit.json
+
 # Stray single-file compile artifacts (e.g. from `swiftc File.swift` in the repo root)
 *.o
 *.d

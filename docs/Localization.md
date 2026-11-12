@@ -35,7 +35,7 @@
 - 146 行潜在未本地化候选、97 行动态文案候选，均带源码位置。候选包含数字、产品名、路径、命令标识符、已在外层翻译的值与日志，不能当成“缺译条数”。
 - 已人工区分出 34 行底层返回文本候选，主要在 `Bottle.swift`、`EpicSaves.swift`、`EpicStore.swift`、`GOGLibrary.swift`、`Paths.swift`、`SteamGameAction.swift`、`EngineIntegrity.swift`。其中部分已有显示层精确翻译，动态异常和第三方原因仍需后续按显示边界逐项处理，不能对任意日志做模糊替换。
 
-机器可读全量清单：[`localization-audit.json`](localization-audit.json)。手工复核清单：[`localization-review.json`](localization-review.json)。
+机器可读全量清单由审计脚本在本地生成到 `docs/localization-audit.json`，不纳入版本控制，避免字符串变更后报告过期。手工复核清单：[`localization-review.json`](localization-review.json)。
 
 重新生成：
 
