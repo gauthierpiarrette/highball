@@ -2839,11 +2839,15 @@ final class AppState {
             // A game that is gone for two consecutive checks has ended; one miss can be a
             // process table read racing a restart (some games relaunch themselves once).
             // Detached: the `ps` behind isAlive must never run on the main thread.
+            // The game's program names, learned while its folder shows on the command line, so a
+            // relaunch that carries only the file name still counts (SessionWatch.programNames).
             var misses = 0
+            var names = SessionWatch.programNames(session, ps: processList)
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
                 let processes = SessionWatch.currentProcessList()
-                if SessionWatch.isAlive(session, ps: processes) {
+                names.formUnion(SessionWatch.programNames(session, ps: processes))
+                if SessionWatch.isAlive(session, names: names, ps: processes) {
                     misses = 0
                     if let prefix = await self?.discordEnvironmentPrefix(for: session),
                        let env = DiscordSessions.environment(for: session, prefix: prefix, processList: processes) {
