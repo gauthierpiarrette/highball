@@ -804,6 +804,9 @@ struct EpicSignInSheet: View {
             Text(L("Your password never touches Highball. The code is single use and connects through Legendary, the open source Epic client the Heroic launcher uses."))
                 .font(.caption).foregroundStyle(.secondary).frame(maxWidth: 360, alignment: .leading)
             HStack {
+                if state.epicSignedIn {
+                    Button(L("Disconnect Epic"), role: .destructive) { dismiss(); state.epicSignOut() }
+                }
                 Spacer()
                 Button(L("Cancel")) { dismiss() }
                 Button(L("Connect")) {

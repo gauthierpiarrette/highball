@@ -3611,6 +3611,19 @@ final class AppState {
         }
     }
 
+    /// Disconnects Epic. The store card had no way back to the sheet once connected, so a player
+    /// whose session Epic stopped accepting could neither connect again nor leave (highball#708).
+    /// legendary's `auth` keeps a session that still works and only takes a new code once the old
+    /// one is gone, so this is also the way to switch accounts.
+    func epicSignOut() {
+        let store = epicStore
+        Task { [self] in
+            await Task.detached { try? store.logout() }.value
+            epicRefresh()
+            saveLibraryCache()
+        }
+    }
+
     /// The Epic install running now, for the strip's Stop and for quitting the app (highball#323).
     @ObservationIgnored private var epicInstallControl: LegendaryControl?
 
