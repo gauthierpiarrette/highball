@@ -137,6 +137,14 @@ final class SteamOwnedLibraryTests: XCTestCase {
                        "https://cdn.akamai.steamstatic.com/steam/apps/570940/library_600x900.jpg")
     }
 
+    func testDemosStayInTheLibraryLikeGames() throws {
+        // A demo installed on a drive that is now unplugged is still owned (highball#432).
+        let root = try steamRoot(owned: [3460730, 570940, 1145361], appinfo: appinfo([
+            App(appid: 3460730, name: "SlashZero Demo", type: "Demo"), App(appid: 570940, name: "DSR", type: "game"),
+            App(appid: 1145361, name: "Hades Soundtrack", type: "Music")]))
+        XCTAssertEqual(SteamOwnedLibrary.games(steamRoot: root).map(\.appid), [570940, 3460730], "games and demos, by name")
+    }
+
     func testPrefersTheClientsCachedArtwork() throws {
         let root = try steamRoot(owned: [2062430, 570940], appinfo: appinfo([
             App(appid: 2062430, name: "BALL x PIT", type: "game"), App(appid: 570940, name: "DSR", type: "game")]))

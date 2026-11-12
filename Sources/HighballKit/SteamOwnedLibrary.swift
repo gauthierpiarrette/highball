@@ -36,7 +36,9 @@ public struct OwnedSteamGame: Sendable, Hashable {
 /// - `appcache/librarycache/<appid>/` holds each library app's artwork. The client writes one
 ///   folder per app once it has loaded the library, so the folder names are the owned appids
 ///   (games, DLC, tools and soundtracks alike).
-/// - `appcache/appinfo.vdf` is Steam's binary app database; its `common.type` keeps the games.
+/// - `appcache/appinfo.vdf` is Steam's binary app database; its `common.type` keeps the games and
+///   the demos, as Steam's own library does. Without demos, one installed on a drive that was then
+///   unplugged dropped out of the library while games on the same drive stayed (highball#432).
 ///
 /// Nothing is there before the first sign-in, which reads as an empty library, not an error.
 public enum SteamOwnedLibrary {
@@ -61,7 +63,7 @@ public enum SteamOwnedLibrary {
         guard !owned.isEmpty,
               let apps = try? SteamAppInfo.read(steamRoot.appending(path: "appcache/appinfo.vdf"), only: owned) else { return [] }
         return owned.compactMap { appid in
-            guard let app = apps[appid], app.type?.lowercased() == "game", let name = app.name else { return nil }
+            guard let app = apps[appid], ["game", "demo"].contains(app.type?.lowercased() ?? ""), let name = app.name else { return nil }
             let folder = cache.appending(path: String(appid))
             let art = artwork(in: folder)
             return OwnedSteamGame(appid: appid, name: name, localCapsule: art["library_600x900.jpg"],
