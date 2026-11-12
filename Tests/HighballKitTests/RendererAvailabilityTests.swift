@@ -6,7 +6,7 @@ import XCTest
 /// installed?)", the message was wrong, and nothing offered a way out short of a new bottle.
 /// A renderer the engine cannot run must be reported for what it is, a bottle-level setting
 /// must degrade to a mode that runs, and a recipe must not install such a setting.
-final class RendererAvailabilityTests: XCTestCase {
+final class RendererAvailabilityTests: EnglishCopyTestCase {
     private var root: URL!
 
     override func setUpWithError() throws {

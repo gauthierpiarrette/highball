@@ -32,8 +32,8 @@ struct SettingsView: View {
                 Divider()
                 HStack(spacing: 10) {
                     ProgressView().controlSize(.small)
-                    Text(state.busyTitle).font(.callout).lineLimit(1)
-                    if !state.stage.isEmpty { Text(state.stage).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    Text(L(state.busyTitle)).font(.callout).lineLimit(1)
+                    if !state.stage.isEmpty { Text(L10n.activityStage(state.stage)).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                     Spacer()
                     if let stop = state.busyStop { Button(stop.label) { state.stopBusy() }.controlSize(.small) }
                 }

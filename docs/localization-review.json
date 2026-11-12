@@ -1,0 +1,175 @@
+{
+  "description": "Reviewed lower-level text candidates; includes values translated by display-layer exact lookup. Not a proven missing-translation count.",
+  "candidates": [
+    {
+      "file": "Sources/HighballKit/Bottle.swift",
+      "line": 201,
+      "source": "return \"\\(name) is in engine \\(engine.id), but Apple's licence has not been accepted for that engine. Accept it in the environment's settings (Graphics → Review licence…), or choose another graphics mode.\""
+    },
+    {
+      "file": "Sources/HighballKit/Bottle.swift",
+      "line": 203,
+      "source": "return \"engine \\(engine.id) has no \\(name). Switch the environment to an engine that has it (its settings → Advanced → Engine), or choose another graphics mode.\""
+    },
+    {
+      "file": "Sources/HighballKit/Bottle.swift",
+      "line": 372,
+      "source": "if a.isEmpty { return \"\\\"\\\"\" }"
+    },
+    {
+      "file": "Sources/HighballKit/EngineIntegrity.swift",
+      "line": 64,
+      "source": "case 0: return \"Files\""
+    },
+    {
+      "file": "Sources/HighballKit/EngineIntegrity.swift",
+      "line": 66,
+      "source": "case 2: return \"\\(files[0]) and \\(files[1])\""
+    },
+    {
+      "file": "Sources/HighballKit/EngineIntegrity.swift",
+      "line": 67,
+      "source": "default: return \"\\(files[0]), \\(files[1]) and \\(files.count - 2) more\""
+    },
+    {
+      "file": "Sources/HighballKit/EpicSaves.swift",
+      "line": 105,
+      "source": "if all.contains(\"Login failed\") { return \"Highball's Epic sign-in has expired; sign in to Epic again\" }"
+    },
+    {
+      "file": "Sources/HighballKit/EpicSaves.swift",
+      "line": 106,
+      "source": "if all.contains(\"Unable to lock install data\") { return \"legendary was busy with another task\" }"
+    },
+    {
+      "file": "Sources/HighballKit/EpicSaves.swift",
+      "line": 107,
+      "source": "if all.contains(\"unprocessed variables\") { return \"legendary couldn't work out where this game keeps its saves on this Mac\" }"
+    },
+    {
+      "file": "Sources/HighballKit/EpicSaves.swift",
+      "line": 108,
+      "source": "if all.contains(\"Game not installed\") { return \"legendary doesn't list this game as installed\" }"
+    },
+    {
+      "file": "Sources/HighballKit/EpicSaves.swift",
+      "line": 109,
+      "source": "if all.contains(\"does not support cloud saves\") { return \"Epic lists no cloud saves for this game\" }"
+    },
+    {
+      "file": "Sources/HighballKit/EpicSaves.swift",
+      "line": 111,
+      "source": "return \"legendary reported: \" + (error.components(separatedBy: \": \").dropFirst().joined(separator: \": \"))"
+    },
+    {
+      "file": "Sources/HighballKit/EpicSaves.swift",
+      "line": 113,
+      "source": "return \"legendary said nothing about this game's saves\""
+    },
+    {
+      "file": "Sources/HighballKit/EpicStore.swift",
+      "line": 355,
+      "source": "return \"This Mac doesn't have enough free space for the game. It needs \\(gb(needed)) and \\(gb(free)) are free. Free some space, then press Install again.\""
+    },
+    {
+      "file": "Sources/HighballKit/EpicStore.swift",
+      "line": 357,
+      "source": "return \"This Mac doesn't have enough free space for the game. Free some space, then press Install again.\""
+    },
+    {
+      "file": "Sources/HighballKit/EpicStore.swift",
+      "line": 359,
+      "source": "return \"Epic's installer stopped with this message. \\(message)\""
+    },
+    {
+      "file": "Sources/HighballKit/EpicStore.swift",
+      "line": 401,
+      "source": "return \"The game is on another disk than that environment, and Epic's tool only moves a game within one disk.\""
+    },
+    {
+      "file": "Sources/HighballKit/EpicStore.swift",
+      "line": 406,
+      "source": "return \"That environment already has a folder of that name in drive_c/Games. Remove or rename it, then try again.\""
+    },
+    {
+      "file": "Sources/HighballKit/GOGLibrary.swift",
+      "line": 420,
+      "source": "return \"This Mac doesn't have enough free space for the game. Free some space, then press Install again.\""
+    },
+    {
+      "file": "Sources/HighballKit/GOGLibrary.swift",
+      "line": 423,
+      "source": "return \"GOG has no Galaxy-style Windows download for this game, so it can't be installed from here. Its offline installer from gog.com still works: download it from your GOG library and drop it on Highball.\""
+    },
+    {
+      "file": "Sources/HighballKit/Paths.swift",
+      "line": 77,
+      "source": "guard fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else { return \"That folder does not exist.\" }"
+    },
+    {
+      "file": "Sources/HighballKit/Paths.swift",
+      "line": 78,
+      "source": "guard fm.isWritableFile(atPath: url.path) else { return \"Highball cannot write in that folder.\" }"
+    },
+    {
+      "file": "Sources/HighballKit/Paths.swift",
+      "line": 80,
+      "source": "if target.hasPrefix(base) || base.hasPrefix(target) { return \"Pick a folder outside Highball's own data folder.\" }"
+    },
+    {
+      "file": "Sources/HighballKit/Paths.swift",
+      "line": 83,
+      "source": "return \"That volume is read only.\""
+    },
+    {
+      "file": "Sources/HighballKit/Paths.swift",
+      "line": 90,
+      "source": "return \"That drive cannot store a file larger than \\(max >> 30) GB, and game files are often bigger. Format it as APFS, or pick another drive.\""
+    },
+    {
+      "file": "Sources/HighballKit/Paths.swift",
+      "line": 106,
+      "source": "return \"Wine can't use Highball's folder because the folder \\\"\\(part)\\\" in its path has a name Windows can't use (it ends with a period or a space, or holds one of <>:\\\"|?*). In Highball's settings, under Environments, use Change… to keep Highball's data in a folder outside it, such as one in /Users/Shared.\""
+    },
+    {
+      "file": "Sources/HighballKit/Paths.swift",
+      "line": 116,
+      "source": "return \"This folder is on a network share. Games can be slower there, and file locks sometimes get in the way. You can still use it.\""
+    },
+    {
+      "file": "Sources/HighballKit/Paths.swift",
+      "line": 133,
+      "source": "catch { return \"Highball cannot write in that folder.\" }"
+    },
+    {
+      "file": "Sources/HighballKit/Paths.swift",
+      "line": 136,
+      "source": "return \"That drive cannot hold a Windows environment: an environment's drive letters are symbolic links, and this volume does not support them. Format it as APFS, or pick another drive.\""
+    },
+    {
+      "file": "Sources/HighballKit/Paths.swift",
+      "line": 143,
+      "source": "return \"That drive cannot hold a Windows environment: an environment's drive letters are files named c:, and this volume does not allow a colon in a name. Pick a folder on this Mac, an APFS disk, or a network share that keeps Unix file names.\""
+    },
+    {
+      "file": "Sources/HighballKit/Paths.swift",
+      "line": 148,
+      "source": "return \"Highball cannot write in that folder.\""
+    },
+    {
+      "file": "Sources/HighballKit/Paths.swift",
+      "line": 152,
+      "source": "return \"That drive cannot hold a Windows environment: Highball runs its engine from here, and this volume does not keep the execute permission. Format it as APFS, or pick another drive.\""
+    },
+    {
+      "file": "Sources/HighballKit/SteamGameAction.swift",
+      "line": 68,
+      "source": "return \"Steam is waiting for you to accept the licence agreement for \\(game). It is in the Steam window.\""
+    },
+    {
+      "file": "Sources/HighballKit/SteamGameAction.swift",
+      "line": 70,
+      "source": "return \"Steam is waiting for an answer before it starts \\(game). It is in the Steam window.\""
+    }
+  ]
+}

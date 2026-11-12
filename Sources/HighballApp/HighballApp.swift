@@ -591,7 +591,7 @@ private extension View {
             }
             Button(L("Cancel"), role: .cancel) { state.pendingUninstall = nil }
         } message: { pending in
-            Text(Uninstall.confirmation(route: pending.route, sizeOnDisk: pending.item.sizeOnDisk))
+            Text(Uninstall.confirmation(route: pending.route, sizeOnDisk: pending.item.sizeOnDisk, language: L10n.currentLanguage))
         }
     }
 
@@ -772,7 +772,7 @@ private extension View {
                     NSWorkspace.shared.open(BugReport.url(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"))
                 }
             }
-            Button("OK", role: .cancel) { state.errorMessage = nil }
+            Button(L("OK"), role: .cancel) { state.errorMessage = nil }
         } message: {
             // The meaning, in words; exit codes, paths and raw output live behind Details.
             Text(state.errorIsPartialSuccess ? (state.errorMessage ?? "") : (state.errorRecovery?.meaning ?? ""))

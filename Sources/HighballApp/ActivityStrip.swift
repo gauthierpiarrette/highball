@@ -43,9 +43,9 @@ struct ActivityStrip: View {
             HStack(spacing: 10) {
                 ProgressView().controlSize(.small)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(state.busyTitle).font(.callout.weight(.medium)).lineLimit(1)
+                    Text(L(state.busyTitle)).font(.callout.weight(.medium)).lineLimit(1)
                     if !state.stage.isEmpty || !state.stageHint.isEmpty {
-                        Text([state.stage, state.stageHint].filter { !$0.isEmpty }.joined(separator: " · "))
+                        Text([L10n.activityStage(state.stage), L(state.stageHint)].filter { !$0.isEmpty }.joined(separator: " · "))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }

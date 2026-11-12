@@ -762,7 +762,7 @@ struct GPTKLicenseSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Apple Game Porting Toolkit — Software License Agreement").font(.headline)
+            Text(L("Apple Game Porting Toolkit — Software License Agreement")).font(.headline)
             ScrollView {
                 Text(state.gptkLicenseText)
                     .font(.system(size: 11))

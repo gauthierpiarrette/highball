@@ -10,24 +10,8 @@ VERSION="${2:-0.0.0-dev}"
 FEED_URL="https://raw.githubusercontent.com/gauthierpiarrette/highball/main/appcast.xml"
 ED_PUBLIC_KEY="lntI8A+HC5Wo6xb4dZNQ6IYteI771cNybU8XNXmvMd8="
 
-# A duplicate key in L10n's dictionary literal crashes the app at launch (2026-09-15); refuse to build one.
-python3 - <<'PY' || exit 1
-import re, collections
-keys = re.findall(r'^\s*"((?:[^"\\]|\\.)*)"\s*:\s*"', open("Sources/HighballApp/L10n.swift").read(), re.M)
-dups = [k for k, c in collections.Counter(keys).items() if c > 1]
-if dups: print("error: duplicate L10n keys:", dups); raise SystemExit(1)
-# English is the source language and French is the one translation kept complete; a string
-# without a French line shows English on a French Mac (L() falls back), which is fine for a
-# contributor's change, so this warns rather than refusing (2026-09-17). Translations are
-# optional for contributors; the maintainer fills the French in before a release.
-import glob
-used = set()
-for f in glob.glob("Sources/HighballApp/*.swift"):
-    if f.endswith("L10n.swift"): continue
-    used |= set(re.findall(r'\bL\("((?:[^"\\]|\\.)*)"\)', open(f).read()))
-missing = sorted(used - set(keys))
-if missing: print(f"warning: {len(missing)} L() strings without a French line (English shows instead):", missing)
-PY
+# Check each dictionary separately, including formatting and newline integrity.
+python3 Scripts/audit-localization.py
 # SwiftPM's Bundle.module accessor looks for the resource bundle next to the executable or at the
 # absolute build path of the machine that compiled it, never under Contents/Resources, so an app
 # that reads it runs on the builder's Mac and crashes at launch everywhere else (PR #230,
@@ -36,7 +20,8 @@ if grep -rq "Bundle\.module" Sources/HighballApp; then echo "error: Sources/High
 swift build -c "$CONFIG" --product HighballApp
 APP=dist/Highball.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
-cp ".build/$CONFIG/HighballApp" "$APP/Contents/MacOS/Highball"
+BIN_DIR=$(swift build -c "$CONFIG" --show-bin-path)
+cp "$BIN_DIR/HighballApp" "$APP/Contents/MacOS/Highball"
 
 # Sparkle framework (SwiftPM artifact) — embedded, rpath is baked into the binary.
 SPARKLE_FW=$(ls -d .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-*/Sparkle.framework | head -1)
