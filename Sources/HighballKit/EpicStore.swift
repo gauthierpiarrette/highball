@@ -102,7 +102,13 @@ public struct EpicStore: Sendable {
         _ = try capture(["auth", "--disable-webview", "--code", code])
     }
 
-    public func logout() throws { _ = try capture(["auth", "--delete"]) }
+    /// Forgets the account. legendary's `auth --delete` removes its user.json, and the file goes here
+    /// too when legendary can't run, since it is all `isAuthenticated` reads: a player whose session
+    /// Epic stopped accepting must always be able to leave and connect again (highball#708).
+    public func logout() throws {
+        defer { try? FileManager.default.removeItem(at: configDir.appending(path: "user.json")) }
+        _ = try capture(["auth", "--delete"])
+    }
 
     public struct Game: Codable, Sendable {
         public let app_name: String

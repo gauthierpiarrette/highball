@@ -25,7 +25,7 @@ struct AddGamesView: View {
                     sourceCard("Epic Games", symbol: "e.square.fill",
                                description: L("Connect your Epic account to see and download your games."),
                                action: state.epicSignedIn ? L("Epic account connected") : L("Connect Epic account…"),
-                               connected: state.epicSignedIn) {
+                               connected: state.epicSignedIn, manage: { state.showEpicSignIn = true }) {
                         state.showEpicSignIn = true
                     }
                     sourceCard("GOG", symbol: "g.circle.fill",
