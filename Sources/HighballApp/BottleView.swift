@@ -89,13 +89,8 @@ struct BottleView: View {
         .navigationTitle(bottle.name)
         .navigationSubtitle(engine?.displayName ?? "")
         .navigationBarBackButtonHidden()
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                if navigationPath.count == 1 {
-                    Button(L("Done")) { dismiss() }.keyboardShortcut(.defaultAction)
-                }
-            }
-        }
+        // Settings' TabView owns the centered window toolbar. This page already has Back;
+        // adding a confirmation item here creates a redundant Done beside the three tabs.
         .background { if navigationPath.count == 1 { PageCancelShortcut { dismiss() } } }
         .sheet(item: $editingPin) { p in PinSettingsSheet(pin: p, bottle: bottle) }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
