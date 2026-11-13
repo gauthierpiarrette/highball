@@ -664,6 +664,7 @@ extension L10n {
         "That is a GOG page, but not the right one. Copy the link of the almost empty page GOG shows right after you sign in.": "这是 GOG 页面，但不是所需的页面。请复制 GOG 在你登录后立即显示的几乎空白的页面链接。",
         "That does not look like a link from GOG. Copy the link of the almost empty page GOG shows after you sign in.": "这似乎不是 GOG 链接。请复制 GOG 在你登录后显示的几乎空白的页面链接。",
         "Highball could not download the small tool it uses to connect to GOG. Check your internet connection, then try again.": "Highball 无法下载连接 GOG 所需的小工具。请检查网络连接后重试。",
+        "Disconnect Epic": "断开 Epic 连接",
         "Disconnect GOG": "断开 GOG 连接",
         "Highball is still busy with “%@”. Remove %@ once that has finished, or stop it in the bar at the bottom.": "Highball 仍在处理“%@”。请等待完成后再移除 %@，或在底部状态栏中停止任务。",
         "Available once “%@” has finished.": "“%@”完成后可用。",

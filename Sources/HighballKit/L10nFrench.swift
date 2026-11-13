@@ -1,7 +1,6 @@
 // French dictionary preserved from official upstream.
 extension L10n {
     static let fr: [String: String] = [
-        "Disconnect Epic": "Déconnecter Epic",
         "Game settings": "Réglages du jeu",
         "Keep the %@ fix you applied under Game settings": "Conserver le correctif %@ appliqué dans Réglages du jeu",
         "Leave the optional %@ fix alone; it is under Game settings for when the notes say your Mac needs it": "Laisser le correctif facultatif %@ désactivé ; il se trouve dans Réglages du jeu si les notes indiquent que votre Mac en a besoin",
@@ -190,6 +189,7 @@ extension L10n {
         "Highball could not download the small tool it uses to connect to GOG. Check your internet connection, then try again.":
             "Highball n'a pas pu télécharger le petit outil qui lui sert à se connecter à GOG. Vérifiez votre connexion Internet, puis réessayez.",
         "Disconnect GOG": "Déconnecter GOG",
+        "Disconnect Epic": "Déconnecter Epic",
         "Highball is still busy with “%@”. Remove %@ once that has finished, or stop it in the bar at the bottom.":
             "Highball est encore occupé par « %@ ». Supprimez %@ une fois cette opération terminée, ou arrêtez-la dans la barre en bas.",
         "Available once “%@” has finished.": "Disponible une fois « %@ » terminé.",
