@@ -1,7 +1,7 @@
 import XCTest
 @testable import HighballKit
 
-final class MacSteamBuildTests: XCTestCase {
+final class MacSteamBuildTests: EnglishCopyTestCase {
     private func entry(_ json: String) throws -> GameDBEntry {
         try JSONDecoder().decode(GameDBEntry.self, from: Data(json.utf8))
     }

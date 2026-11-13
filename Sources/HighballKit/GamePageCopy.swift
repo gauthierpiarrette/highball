@@ -13,38 +13,38 @@ public enum GamePageCopy {
     public static func verdict(_ entry: GameDBEntry?, myChip: String, today: Date = Date()) -> Verdict {
         let mine = shortChip(myChip)
         guard let entry else {
-            return Verdict(headline: "Nobody has tested this on an \(mine) yet.",
-                           detail: "Nothing in the compatibility database for it yet. You would be the first to report it.")
+            return Verdict(headline: L10n.format("Nobody has tested this on an %@ yet.", String(describing: mine)),
+                           detail: L10n.translate("Nothing in the compatibility database for it yet. You would be the first to report it."))
         }
         switch entry.status {
         case "blocked-anticheat":
-            let name = entry.anticheat?.names.first ?? "its anti-cheat"
-            return Verdict(headline: "Can't run: \(name).",
-                           detail: entry.anticheat?.note ?? "Its anti-cheat does not run on macOS.")
+            let name = entry.anticheat?.names.first ?? L10n.translate("its anti-cheat")
+            return Verdict(headline: L10n.format("Can't run: %@.", String(describing: name)),
+                           detail: entry.anticheat?.note ?? L10n.translate("Its anti-cheat does not run on macOS."))
         case "blocked-publisher":
-            return Verdict(headline: "Can't run: its publisher blocks macOS.",
-                           detail: "The game stops itself when it finds macOS, whatever the engine or graphics mode.")
+            return Verdict(headline: L10n.translate("Can't run: its publisher blocks macOS."),
+                           detail: L10n.translate("The game stops itself when it finds macOS, whatever the engine or graphics mode."))
         case "verified-local":
             let chip = entry.verified?.chip.map(shortChip)
-            var head = chip.map { "Verified on an \($0)." } ?? "Verified on this project's own Mac."
-            if chip == mine { head = "Verified on an \(mine), the same chip as yours." }
+            var head = chip.map { L10n.format("Verified on an %@.", String(describing: $0)) } ?? L10n.translate("Verified on this project's own Mac.")
+            if chip == mine { head = L10n.format("Verified on an %@, the same chip as yours.", String(describing: mine)) }
             var parts: [String] = []
             if let fps = entry.verified?.fps, let phrase = fpsPhrase(fps) {
                 parts.append(phrase)
             }
-            if let os = entry.verified?.macos { parts.append("on macOS \(os)") }
+            if let os = entry.verified?.macos { parts.append(L10n.format("on macOS %@", String(describing: os))) }
             var detail = parts.isEmpty ? "" : sentenceCase(parts.joined(separator: " "))
             if let when = freshness(entry.lastVerified, today: today) {
-                detail += detail.isEmpty ? "Last confirmed \(when)." : ", last confirmed \(when)."
+                detail += detail.isEmpty ? L10n.format("Last confirmed %@.", String(describing: when)) : L10n.format(", last confirmed %@.", String(describing: when))
             } else if !detail.isEmpty { detail += "." }
-            if let chip, chip != mine { detail += (detail.isEmpty ? "" : " ") + "Your Mac is an \(mine)." }
+            if let chip, chip != mine { detail += (detail.isEmpty ? "" : " ") + L10n.format("Your Mac is an %@.", String(describing: mine)) }
             return Verdict(headline: head, detail: detail.isEmpty ? nil : detail)
         case "reported-upstream":
-            return Verdict(headline: "Reported working upstream.",
-                           detail: "Named in the renderer's release notes as working; not verified here yet. Your Mac is an \(mine).")
+            return Verdict(headline: L10n.translate("Reported working upstream."),
+                           detail: L10n.format("Named in the renderer's release notes as working; not verified here yet. Your Mac is an %@.", String(describing: mine)))
         default:
-            return Verdict(headline: "Reported by players.",
-                           detail: "Not verified by this project yet. Your Mac is an \(mine).")
+            return Verdict(headline: L10n.translate("Reported by players."),
+                           detail: L10n.format("Not verified by this project yet. Your Mac is an %@.", String(describing: mine)))
         }
     }
 
@@ -64,18 +64,18 @@ public enum GamePageCopy {
         guard let build else { return nil }
         let installed = build == .installed
         let source = switch build {
-        case .installed: "Steam for Mac lists it as installed."
-        case .inDatabase: "From the compatibility database."
-        case .inAppInfo: "Steam's own data marks a Mac build that runs on current macOS."
-        case .onStore: "Steam's store page lists macOS for it."
+        case .installed: L10n.translate("Steam for Mac lists it as installed.")
+        case .inDatabase: L10n.translate("From the compatibility database.")
+        case .inAppInfo: L10n.translate("Steam's own data marks a Mac build that runs on current macOS.")
+        case .onStore: L10n.translate("Steam's store page lists macOS for it.")
         }
         return MacBuild(
-            headline: installed ? "Installed in Steam for Mac." : "There is a native Mac build on Steam.",
+            headline: installed ? L10n.translate("Installed in Steam for Mac.") : L10n.translate("There is a native Mac build on Steam."),
             detail: installed
-                ? "Play starts the Mac build through Steam for Mac, with no Windows layer in between."
-                : "It will beat running the Windows version through any compatibility layer, and your Steam purchase already includes it.",
+                ? L10n.translate("Play starts the Mac build through Steam for Mac, with no Windows layer in between.")
+                : L10n.translate("It will beat running the Windows version through any compatibility layer, and your Steam purchase already includes it."),
             requirements: entry?.nativeMac?.available == true ? entry?.nativeMac?.note : nil,
-            yourMac: "Your Mac is an \(shortChip(myChip)) on macOS \(macOS).",
+            yourMac: L10n.format("Your Mac is an %@ on macOS %@.", String(describing: shortChip(myChip)), String(describing: macOS)),
             source: source)
     }
 
@@ -85,7 +85,7 @@ public enum GamePageCopy {
     /// instead, as it does for the Mac card.
     public static func outdatedMacBuild(appInfo: MacAppInfoBuild?, entry: GameDBEntry?) -> String? {
         guard appInfo == .only32Bit, entry?.nativeMac == nil else { return nil }
-        return "Steam also has a Mac version of this game, but it is 32-bit and macOS has not run those since Catalina, so Highball installs the Windows version."
+        return L10n.translate("Steam also has a Mac version of this game, but it is 32-bit and macOS has not run those since Catalina, so Highball installs the Windows version.")
     }
 
     /// One line of "when you press Play, Highball will".
@@ -109,43 +109,43 @@ public enum GamePageCopy {
         let direct3D12Mode = (rowMode?.servesDirect3D12 == true ? rowMode : nil) ?? .d3dmetal
         let givesWay = needsDirect3D12 && !bottleRenderer.servesDirect3D12 && (explicit || rowMode == nil)
         if entry?.nativeVulkan == true {
-            items.append(WillDo(text: "Let it draw with Vulkan directly; the graphics mode does not apply to this game"))
+            items.append(WillDo(text: L10n.translate("Let it draw with Vulkan directly; the graphics mode does not apply to this game")))
         } else if let gameOverride {
-            items.append(WillDo(text: "Use \(plainName(gameOverride)) for this game (set by you); the environment stays on \(plainName(bottleRenderer))"))
+            items.append(WillDo(text: L10n.format("Use %@ for this game (set by you); the environment stays on %@", String(describing: plainName(gameOverride)), String(describing: plainName(bottleRenderer)))))
         } else if givesWay {
             // The launch switches (Renderer.direct3D12TakeOver); the plan must not promise the
             // environment's mode for a game that cannot run in it.
             items.append(WillDo(text: explicit
-                                ? "Use \(plainName(direct3D12Mode)) for this game: it only has DirectX 12, which \(plainName(bottleRenderer)), your environment's setting, does not have. The environment keeps \(plainName(bottleRenderer)) for everything else"
-                                : "Use \(plainName(direct3D12Mode)) for this game: it only has DirectX 12, which the environment's \(plainName(bottleRenderer)) does not have"))
+                                ? L10n.format("Use %@ for this game: it only has DirectX 12, which %@, your environment's setting, does not have. The environment keeps %@ for everything else", String(describing: plainName(direct3D12Mode)), String(describing: plainName(bottleRenderer)), String(describing: plainName(bottleRenderer)))
+                                : L10n.format("Use %@ for this game: it only has DirectX 12, which the environment's %@ does not have", String(describing: plainName(direct3D12Mode)), String(describing: plainName(bottleRenderer)))))
         } else if explicit {
             if let wanted = entry?.effectiveRenderer(osMajor: osMajor), wanted != bottleRenderer {
-                items.append(WillDo(text: "Use \(plainName(bottleRenderer)), your environment's setting. The database asks for \(plainName(wanted)), and an environment's own setting wins"))
+                items.append(WillDo(text: L10n.format("Use %@, your environment's setting. The database asks for %@, and an environment's own setting wins", String(describing: plainName(bottleRenderer)), String(describing: plainName(wanted)))))
             } else {
-                items.append(WillDo(text: "Use \(plainName(bottleRenderer)), the environment's setting (set by you)"))
+                items.append(WillDo(text: L10n.format("Use %@, the environment's setting (set by you)", String(describing: plainName(bottleRenderer)))))
             }
         } else if let wanted = entry?.effectiveRenderer(osMajor: osMajor) {
             items.append(WillDo(text: wanted == bottleRenderer
-                                ? "Use \(plainName(wanted)), the way it was verified"
-                                : "Use \(plainName(wanted)) for this game, the way it was verified, instead of the environment's \(wanted == bottleRenderer ? "" : plainName(bottleRenderer))"))
+                                ? L10n.format("Use %@, the way it was verified", String(describing: plainName(wanted)))
+                                : L10n.format("Use %@ for this game, the way it was verified, instead of the environment's %@", String(describing: plainName(wanted)), String(describing: wanted == bottleRenderer ? "" : plainName(bottleRenderer)))))
         } else {
-            items.append(WillDo(text: "Use \(plainName(bottleRenderer)), the environment's setting; no verdict names a better one"))
+            items.append(WillDo(text: L10n.format("Use %@, the environment's setting; no verdict names a better one", String(describing: plainName(bottleRenderer)))))
         }
         if let args = entry?.effectiveLaunchArgs(osMajor: osMajor), !args.isEmpty {
-            items.append(WillDo(text: "Start it with \(args.joined(separator: " "))"))
+            items.append(WillDo(text: L10n.format("Start it with %@", String(describing: args.joined(separator: " ")))))
         }
         if let recipe, recipe.isOptIn {
             // Play does not touch an opt-in fix; the page says so rather than listing steps
             // Play will not take.
             items.append(WillDo(text: applied
-                                ? "Keep the \(recipe.title) fix you applied under Game settings"
-                                : "Leave the optional \(recipe.title) fix alone; it is under Game settings for when the notes say your Mac needs it",
+                                ? L10n.format("Keep the %@ fix you applied under Game settings", String(describing: recipe.title))
+                                : L10n.format("Leave the optional %@ fix alone; it is under Game settings for when the notes say your Mac needs it", String(describing: recipe.title)),
                                 done: applied))
         } else if let recipe {
             // A route's list of switches says nothing to a reader as 28 lines (Forza Horizon 6's emulator switches).
             let variables = recipe.steps.filter { if case .environment = $0 { return true } else { return false } }.count
             if variables > 6 {
-                items.append(WillDo(text: "Set \(variables) emulator and graphics variables for this game", done: applied))
+                items.append(WillDo(text: L10n.format("Set %@ emulator and graphics variables for this game", String(describing: variables)), done: applied))
             }
             for step in recipe.steps {
                 if variables > 6, case .environment = step { continue }
@@ -184,18 +184,18 @@ public enum GamePageCopy {
         guard let r = t.range(of: figure, options: .regularExpression) else { return t }
         let rest = String(t[r.upperBound...])
         if rest.lowercased().hasPrefix(" fps") { return t }
-        return String(t[r]) + " frames per second" + rest
+        return String(t[r]) + L10n.translate(" frames per second") + rest
     }
 
     // MARK: helpers
 
     public static func plainName(_ r: Renderer) -> String {
         switch r {
-        case .dxmt: return "DXMT (DirectX 11 on Metal)"
-        case .d3dmetal: return "Apple's DirectX 12 support"
-        case .dxvk: return "DXVK (Vulkan on Metal)"
-        case .wined3d: return "Wine's own Direct3D"
-        case .vkd3d: return "vkd3d-proton (DirectX 12 through Vulkan)"
+        case .dxmt: return L10n.translate("DXMT (DirectX 11 on Metal)")
+        case .d3dmetal: return L10n.translate("Apple's DirectX 12 support")
+        case .dxvk: return L10n.translate("DXVK (Vulkan on Metal)")
+        case .wined3d: return L10n.translate("Wine's own Direct3D")
+        case .vkd3d: return L10n.translate("vkd3d-proton (DirectX 12 through Vulkan)")
         }
     }
 
@@ -212,10 +212,10 @@ public enum GamePageCopy {
         guard let d = f.date(from: ymd) else { return nil }
         let days = Int(today.timeIntervalSince(d) / 86_400)
         switch days {
-        case ..<1: return "today"
-        case 1: return "yesterday"
-        case 2...60: return "\(days) days ago"
-        default: return "on \(ymd)"
+        case ..<1: return L10n.translate("today")
+        case 1: return L10n.translate("yesterday")
+        case 2...60: return L10n.format("%@ days ago", String(describing: days))
+        default: return L10n.format("on %@", String(describing: ymd))
         }
     }
 
@@ -226,20 +226,20 @@ public enum GamePageCopy {
 
     static func describe(_ step: Recipe.Step) -> String? {
         switch step {
-        case let .installer(_, _, _, label, _, _): return "Install \(label)"
-        case let .winetricks(verbs, _): return "Install \(verbs.joined(separator: ", "))"
-        case let .registry(_, name, _, _): return "Set the Windows registry value \(name)"
-        case let .environment(name, _): return "Set \(name) for this game"
-        case let .renderer(r): return "Switch the environment's graphics mode to \(plainName(r))"
-        case let .sync(m): return "Set the environment's sync mode to \(m.rawValue)"
-        case let .winver(v): return "Report Windows \(v.rawValue) to the game"
-        case let .file(path, _): return "Write \(URL(fileURLWithPath: path).lastPathComponent)"
-        case let .copy(from, _, _): return "Give the game its own \(URL(fileURLWithPath: from).lastPathComponent) from the engine"
+        case let .installer(_, _, _, label, _, _): return L10n.format("Install %@", String(describing: label))
+        case let .winetricks(verbs, _): return L10n.format("Install %@", String(describing: verbs.joined(separator: ", ")))
+        case let .registry(_, name, _, _): return L10n.format("Set the Windows registry value %@", String(describing: name))
+        case let .environment(name, _): return L10n.format("Set %@ for this game", String(describing: name))
+        case let .renderer(r): return L10n.format("Switch the environment's graphics mode to %@", String(describing: plainName(r)))
+        case let .sync(m): return L10n.format("Set the environment's sync mode to %@", String(describing: m.rawValue))
+        case let .winver(v): return L10n.format("Report Windows %@ to the game", String(describing: v.rawValue))
+        case let .file(path, _): return L10n.format("Write %@", String(describing: URL(fileURLWithPath: path).lastPathComponent))
+        case let .copy(from, _, _): return L10n.format("Give the game its own %@ from the engine", String(describing: URL(fileURLWithPath: from).lastPathComponent))
         case .pin: return nil
         case let .note(text): return text
-        case let .dllOverride(v): return "Set the Windows library override \(v)"
-        case let .frameCap(n): return "Cap the frame rate at \(n)"
-        case let .dxvkConfig(exe, _): return "Configure DXVK for \(exe)"
+        case let .dllOverride(v): return L10n.format("Set the Windows library override %@", String(describing: v))
+        case let .frameCap(n): return L10n.format("Cap the frame rate at %@", String(describing: n))
+        case let .dxvkConfig(exe, _): return L10n.format("Configure DXVK for %@", String(describing: exe))
         }
     }
 }
@@ -251,12 +251,12 @@ extension GamePageCopy {
         // Asked because the environment (or a pinned program) is set to D3DMetal, not because
         // the row needs it (#61): say where the setting came from and that the default runs.
         guard entry?.effectiveRenderer() == .d3dmetal else {
-            return "The environment \(title) runs in is set to D3DMetal, which needs Apple's licence accepted for its engine. Turning it on means accepting that licence, which allows non-commercial use; nothing downloads and nothing is sent to Apple. Playing with DXMT, Highball's default, works for most games."
+            return L10n.format("The environment %@ runs in is set to D3DMetal, which needs Apple's licence accepted for its engine. Turning it on means accepting that licence, which allows non-commercial use; nothing downloads and nothing is sent to Apple. Playing with DXMT, Highball's default, works for most games.", String(describing: title))
         }
         let consequence = otherWorkingRenderer(entry).map {
-            "Without it, \(title) still runs on \(plainName($0)), which was recorded as working, but slower."
-        } ?? "The database records no other graphics mode as working for \(title), so without it Highball has nothing else to try."
-        return "Highball already includes it. Turning it on means accepting Apple's licence, which allows non-commercial use. \(consequence) Nothing to download and nothing sent to Apple."
+            L10n.format("Without it, %@ still runs on %@, which was recorded as working, but slower.", String(describing: title), String(describing: plainName($0)))
+        } ?? L10n.format("The database records no other graphics mode as working for %@, so without it Highball has nothing else to try.", String(describing: title))
+        return L10n.format("Highball already includes it. Turning it on means accepting Apple's licence, which allows non-commercial use. %@ Nothing to download and nothing sent to Apple.", String(describing: consequence))
     }
 
     /// A graphics mode other than D3DMetal that the row recorded as working, if any.

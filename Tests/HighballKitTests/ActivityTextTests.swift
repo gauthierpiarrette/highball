@@ -1,7 +1,7 @@
 import XCTest
 @testable import HighballKit
 
-final class ActivityTextTests: XCTestCase {
+final class ActivityTextTests: EnglishCopyTestCase {
     private let t0 = Date(timeIntervalSince1970: 1_000_000)
     private func sample(_ mb: Double, _ seconds: TimeInterval) -> ActivityText.Sample {
         .init(bytes: Int64(mb * 1_048_576), at: t0.addingTimeInterval(seconds))

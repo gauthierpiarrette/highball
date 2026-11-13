@@ -1677,7 +1677,7 @@ final class AppState {
     /// here: D3DMetal is asked for at the first game that needs it.
     func getStarted() {
         guard let manifestURL = Self.bundledManifest else {
-            fail(HighballError.failed("No engine manifest is bundled. Reinstall Highball.")); return
+            fail(HighballError.failed(L("No engine manifest is bundled. Reinstall Highball."))); return
         }
         runBusy(L("Setting up Highball"),
                 expected: L("usually 5–15 minutes"),
@@ -1742,9 +1742,9 @@ final class AppState {
             // "Rosetta 2 update is not available" comes back when macOS cannot load Apple's update
             // catalog at all; running the same command in Terminal then fails the same way (highball#413).
             if said.localizedCaseInsensitiveContains("is not available") || said.localizedCaseInsensitiveContains("software update server") {
-                throw HighballError.failed("macOS could not get Rosetta from Apple's software update server. Check that this Mac can reach Apple's servers (a VPN, firewall or content filter can block them, and so can a managed Mac's settings), then press Get started again. (\(said.suffix(200)))")
+                throw HighballError.failed(String(format: L("macOS could not get Rosetta from Apple's software update server. Check that this Mac can reach Apple's servers (a VPN, firewall or content filter can block them, and so can a managed Mac's settings), then press Get started again. (%@)"), String(describing: said.suffix(200))))
             }
-            throw HighballError.failed("Rosetta did not install. In Terminal, run: softwareupdate --install-rosetta --agree-to-license, then press Get started again. (\(said.suffix(200)))")
+            throw HighballError.failed(String(format: L("Rosetta did not install. In Terminal, run: softwareupdate --install-rosetta --agree-to-license, then press Get started again. (%@)"), String(describing: said.suffix(200))))
         }
     }
 
@@ -1758,7 +1758,7 @@ final class AppState {
     /// Makes the default environment for a Mac that has the engine but no bottle yet.
     func makeDefaultEnvironment() {
         guard let engine = defaultEngine else {
-            fail(HighballError.failed("No engine is installed yet. Restart Highball to finish setup.")); return
+            fail(HighballError.failed(L("No engine is installed yet. Restart Highball to finish setup."))); return
         }
         guard !busy else { return }   // already preparing; the strip shows it
         runBusy(L("Preparing your Windows environment"), expected: L("about 90 seconds"),
@@ -2171,15 +2171,15 @@ final class AppState {
     /// installed downloads first, with the licences accepted on installed engines.
     func createBottle(name: String, recipeID: String?, engineID: String? = nil) {
         guard let fallback = defaultEngine else {
-            fail(HighballError.failed("No engine is installed yet. Reinstall Highball, or restart it to finish setup.")); return
+            fail(HighballError.failed(L("No engine is installed yet. Reinstall Highball, or restart it to finish setup."))); return
         }
         guard !busy else {
-            fail(HighballError.failed("Highball is already busy. Wait for the current step to finish, then try again — its progress is on the strip at the bottom of the window.")); return
+            fail(HighballError.failed(L("Highball is already busy. Wait for the current step to finish, then try again — its progress is on the strip at the bottom of the window."))); return
         }
         let chosen = engineID.flatMap { id in engines.first { $0.id == id } }
         let download = chosen == nil ? engineID.flatMap { id in Self.knownManifests.first { $0.id == id } } : nil
         if let engineID, chosen == nil, download == nil {
-            fail(HighballError.failed("Engine \(engineID) is not offered by this version of Highball.")); return
+            fail(HighballError.failed(String(format: L("Engine %@ is not offered by this version of Highball."), String(describing: engineID)))); return
         }
         let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
         runBusy(String(format: L("Creating the %@ environment — first boot takes about 90 seconds"), name),
@@ -2237,7 +2237,7 @@ final class AppState {
         if let missing = recipe.engineUnknown(current: engine.manifest, known: Self.knownManifests) {
             pendingUpdate = (recipe, missing, nil); return
         }
-        runBusy("Installing \(recipe.title)",
+        runBusy(String(format: L("Installing %@"), recipe.title),
                 done: done ?? DoneState(title: String(format: L("%@ installed"), recipe.title), ctaTitle: nil, cta: nil),
                 stop: .killBottleThenRepair(bottle, label: L("Stop and repair")),
                 cleanup: { [weak self] in self?.applyingRecipe = nil }) { [self] in
@@ -2297,7 +2297,7 @@ final class AppState {
         // next rebuildLibrary. Give up after 20 s so a bad link does not linger forever.
         if let first = deferredPlayLink, Date().timeIntervalSince(first.at) > 20 {
             deferredPlayLink = nil
-            fail(HighballError.failed("That game is not in this Highball's library."))
+            fail(HighballError.failed(L("That game is not in this Highball's library.")))
         } else if deferredPlayLink == nil {
             deferredPlayLink = (request, Date())
         }
@@ -2981,7 +2981,7 @@ final class AppState {
         // A game may be running under Steam even when Highball did not start it (launched from
         // Steam's own window); killing the wineserver would take it down. Refuse then.
         guard !runner.steamGameIsRunning() else {
-            fail(HighballError.failed("A game is still running in this environment. Quit it first, then quit Steam."))
+            fail(HighballError.failed(L("A game is still running in this environment. Quit it first, then quit Steam.")))
             return
         }
         steamClients.remove(bottle.name)
@@ -3008,7 +3008,7 @@ final class AppState {
             return
         }
         guard !launchingPins.contains(pin.id) else {
-            fail(HighballError.failed("\(pin.name) is already starting or running. If its window never appeared, stop the environment's processes in Settings, then try again."))
+            fail(HighballError.failed(String(format: L("%@ is already starting or running. If its window never appeared, stop the environment's processes in Settings, then try again."), String(describing: pin.name))))
             return
         }
         // runBusy refuses a second operation silently; the pin must not be marked as launching then.
@@ -3024,7 +3024,7 @@ final class AppState {
         // page says, with the program's own winning (highball#486).
         let gameID = libraryItems.first(where: { $0.pinID == pin.id }).flatMap { gameDB.entry(for: $0)?.id }
         let gameEnvironment = pin.environment(withGame: bottle.settings.environment(forGame: gameID))
-        runBusy(steamFirstBoot ? L("Starting Steam for the first time — it downloads and unpacks its own client") : "Starting \(pin.name)",
+        runBusy(steamFirstBoot ? L("Starting Steam for the first time — it downloads and unpacks its own client") : String(format: L("Starting %@"), pin.name),
                 expected: steamFirstBoot ? L("usually 15–25 minutes; long quiet stretches are normal") : nil,
                 done: .handedOff,
                 stop: .killBottle(bottle, label: L("Stop")),
@@ -3098,7 +3098,7 @@ final class AppState {
                 // it to start.exe, which reports "File not found" within seconds. Another graphics
                 // mode cannot help, so say what is wrong instead of proposing one (highball#245).
                 guard PEExportName.isWindowsExecutable(at: pin.executableURL(driveC: bottle.driveC)) else {
-                    self.appendLog("\(pin.name) did not start: its file is not a Windows program (empty or cut short), so Wine could not run it. Install it again; for Steam, the Steam row offers the installer.")
+                    self.appendLog(String(format: L("%@ did not start: its file is not a Windows program (empty or cut short), so Wine could not run it. Install it again; for Steam, the Steam row offers the installer."), String(describing: pin.name)))
                     return
                 }
                 let current = pin.renderer ?? bottle.settings.renderer
@@ -3149,7 +3149,7 @@ final class AppState {
         runBusy(String(format: L("Removing engine %@"), id)) { [self] in
             let referenced = Set(try bottleStore.list().map(\.settings.engineID))
             guard !referenced.contains(id) else {
-                throw HighballError.failed("Engine \(id) is used by an environment again, so it stays.")
+                throw HighballError.failed(String(format: L("Engine %@ is used by an environment again, so it stays."), String(describing: id)))
             }
             let root = engine.root
             try await Task.detached { try FileManager.default.removeItem(at: root) }.value
@@ -3252,7 +3252,7 @@ final class AppState {
     func launchGame(_ game: SteamGame, in bottle: Bottle, renderer preferred: Renderer? = nil) {
         guard let engine = engine(for: bottle) else { return }
         if let running = session(forAppID: game.appid) {
-            fail(HighballError.failed("\(running.title) is already running."))
+            fail(HighballError.failed(String(format: L("%@ is already running."), String(describing: running.title))))
             return
         }
         let steam = bottle.driveC.appending(path: "Program Files (x86)/Steam/steam.exe")
@@ -3271,7 +3271,7 @@ final class AppState {
         // The busy sheet covers the start only: Steam's client outlives the game and its launch
         // call says nothing about it, so the game's own processes decide when "starting" ends
         // and a session begins, and the app is free while the game runs (UX plan 0.6).
-        runBusy("Starting \(game.name)", expected: L("a cold Steam client can take a couple of minutes"),
+        runBusy(String(format: L("Starting %@"), game.name), expected: L("a cold Steam client can take a couple of minutes"),
                 done: .handedOff,
                 stop: .killBottle(bottle, label: L("Stop"))) { [self] in
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
@@ -3338,18 +3338,18 @@ final class AppState {
     func launchBattleNetGame(_ game: BattleNetGame, item: LibraryItem, in bottle: Bottle, renderer: Renderer? = nil) {
         guard let engine = engine(for: bottle) else { return }
         if runningSessions.contains(where: { $0.libraryID == item.id && $0.bottleName == bottle.name }) {
-            fail(HighballError.failed("\(game.title) is already running."))
+            fail(HighballError.failed(String(format: L("%@ is already running."), String(describing: game.title))))
             return
         }
         guard let start = BattleNetLibrary.launch(game, client: BattleNetLibrary.client(in: bottle)) else {
-            fail(HighballError.failed("\(game.title) has no Battle.net launcher in its folder and Battle.net is not installed in \(bottle.name). Install Battle.net there, or open the game from Battle.net."))
+            fail(HighballError.failed(String(format: L("%@ has no Battle.net launcher in its folder and Battle.net is not installed in %@. Install Battle.net there, or open the game from Battle.net."), String(describing: game.title), String(describing: bottle.name))))
             return
         }
         let entry = gameDB.entry(for: item)
         // The variables this game's recipe scoped to it (highball#198), as for the other stores.
         let gameEnvironment = bottle.settings.environment(forGame: entry?.id)
         let marks = BattleNetLibrary.sessionMarkers(for: game)
-        runBusy("Starting \(game.title)",
+        runBusy(String(format: L("Starting %@"), game.title),
                 expected: start.throughClient ? L("Battle.net opens, then press Play there") : L("a cold Battle.net can take a couple of minutes"),
                 done: .handedOff,
                 stop: .killBottle(bottle, label: L("Stop"))) { [self] in
@@ -3448,7 +3448,7 @@ final class AppState {
             }
             if await started() { box.handedOff = true; return true }
             if let timeout, waited >= timeout {
-                throw HighballError.failed("\(program) never started: no process of its own appeared in six minutes. Its log is in Details.")
+                throw HighballError.failed(String(format: L("%@ never started: no process of its own appeared in six minutes. Its log is in Details."), String(describing: program)))
             }
             try await Task.sleep(for: .seconds(2)); waited += 2
         }
@@ -3501,7 +3501,7 @@ final class AppState {
     /// settings are untouched; accepted licences carry over as they do for an update.
     func reinstallEngine(_ id: String) {
         guard let manifest = manifestForReinstall(id) else {
-            fail(HighballError.failed("Highball cannot tell what engine \(id) was made of: its manifest is gone too. Quit Highball, move the engines folder inside ~/Library/Application Support/Highball to the Trash, then open Highball again and it installs its engine fresh.")); return
+            fail(HighballError.failed(String(format: L("Highball cannot tell what engine %@ was made of: its manifest is gone too. Quit Highball, move the engines folder inside ~/Library/Application Support/Highball to the Trash, then open Highball again and it installs its engine fresh."), String(describing: id)))); return
         }
         let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
         runBusy(String(format: L("Installing engine %@ again"), id), expected: L("usually a few minutes"),
@@ -3632,7 +3632,7 @@ final class AppState {
     @ObservationIgnored private var epicInstallControl: LegendaryControl?
 
     func epicInstall(_ game: EpicStore.Game, in bottle: Bottle) {
-        epicDownload(title: "Installing \(game.app_title)", history: (game.app_name, bottle.driveC)) { store, control, onLine in
+        epicDownload(title: String(format: L("Installing %@"), game.app_title), history: (game.app_name, bottle.driveC)) { store, control, onLine in
             try store.install(game.app_name, into: bottle, control: control, onLine: onLine)
         }
     }
@@ -3744,7 +3744,7 @@ final class AppState {
             fail(HighballError.failed(L("Make an environment first: the Windows version installs into one.")))
             return
         }
-        epicDownload(title: "Installing \(game.app_title)", history: (app, bottle.driveC),
+        epicDownload(title: String(format: L("Installing %@"), game.app_title), history: (app, bottle.driveC),
                      wrap: epicBuildSwitch(item, app: app, oldPath: epicMacInstalls[app], oldPlatform: "Mac", hasNewBuild: { true })) { store, control, onLine in
             try store.install(app, into: bottle, control: control, onLine: onLine)
         }
@@ -3911,7 +3911,7 @@ final class AppState {
     func epicPlayMac(_ item: LibraryItem) {
         guard let app = item.epicAppName else { return }
         if macGameProcesses[item.id] != nil {
-            fail(HighballError.failed("\(item.title) is already running."))
+            fail(HighballError.failed(String(format: L("%@ is already running."), String(describing: item.title))))
             return
         }
         let store = epicStore
@@ -4224,11 +4224,11 @@ final class AppState {
     func epicPlay(_ game: EpicStore.Game, in bottle: Bottle, renderer: Renderer? = nil, throughEpicLauncherStandIn: Bool = false) {
         guard let engine = engine(for: bottle) else { return }
         if runningSessions.contains(where: { $0.title == game.app_title && $0.bottleName == bottle.name }) {
-            fail(HighballError.failed("\(game.app_title) is already running."))
+            fail(HighballError.failed(String(format: L("%@ is already running."), String(describing: game.app_title))))
             return
         }
         let folder = epicInstalls[game.app_name].map { URL(fileURLWithPath: $0, isDirectory: true) }
-        runBusy("Starting \(game.app_title)", done: .handedOff, stop: .killBottle(bottle, label: L("Stop"))) { [self] in
+        runBusy(String(format: L("Starting %@"), game.app_title), done: .handedOff, stop: .killBottle(bottle, label: L("Stop"))) { [self] in
             let store = epicStore, app = game.app_name
             await removeMacMetadataFiles(from: folder, of: game.app_title)
             // Saves come down from Epic's cloud first, where the game keeps them there and the
@@ -4686,7 +4686,7 @@ final class AppState {
         }
         // The entry stays until the game has ended (watchMacGame), a launcher's hand-over included.
         if macGameProcesses[item.id] != nil {
-            fail(HighballError.failed("\(item.title) is already running."))
+            fail(HighballError.failed(String(format: L("%@ is already running."), String(describing: item.title))))
             return
         }
         // Nor beside the Windows build's session: one build at a time.
@@ -4976,15 +4976,15 @@ final class AppState {
     func gogPlay(_ item: LibraryItem, in bottle: Bottle, renderer: Renderer? = nil, as pin: LibraryIndex.CoveredPin? = nil,
                  retryingWithoutComet: Bool = false) {
         guard let engine = engine(for: bottle), let game = gogInstalled(item, in: bottle) else {
-            fail(HighballError.failed("\(item.title) is not installed in \(bottle.name)."))
+            fail(HighballError.failed(String(format: L("%@ is not installed in %@."), String(describing: item.title), String(describing: bottle.name))))
             return
         }
         if runningSessions.contains(where: { $0.libraryID == item.id && $0.bottleName == bottle.name }) {
-            fail(HighballError.failed("\(item.title) is already running."))
+            fail(HighballError.failed(String(format: L("%@ is already running."), String(describing: item.title))))
             return
         }
         guard let task = pin?.task ?? game.launchTask(choice: gogSettings.launchChoice[game.id]), let launch = GOGStore.launch(task, in: game) else {
-            fail(HighballError.failed("\(item.title)'s GOG files name no program to run. Show the game's folder and add its .exe as a program instead."))
+            fail(HighballError.failed(String(format: L("%@'s GOG files name no program to run. Show the game's folder and add its .exe as a program instead."), String(describing: item.title))))
             return
         }
         let store = gogStore
@@ -5633,7 +5633,7 @@ final class AppState {
         if let retinaAt100 { copy.settings.retinaAt100 = retinaAt100 }
         update(copy)
         let retina = copy.settings.retinaAt100
-        runBusy("Applying display scaling", showLogSheet: false) { [self] in
+        runBusy(L("Applying display scaling"), showLogSheet: false) { [self] in
             try await WineRunner(paths: paths, engine: engine, bottle: copy).setDpi(logPixels: scale, retinaAt100: retina)
         }
     }
@@ -5663,7 +5663,7 @@ final class AppState {
                           Bundle.main.url(forResource: "d3dmetal-license", withExtension: "txt")].compactMap({ $0 }) {
             if let text = try? String(contentsOf: candidate, encoding: .utf8) { gptkLicenseText = text; return }
         }
-        gptkLicenseText = "License text unavailable locally. Read it at github.com/Gcenx/game-porting-toolkit (License.pdf) before accepting."
+        gptkLicenseText = L("License text unavailable locally. Read it at github.com/Gcenx/game-porting-toolkit (License.pdf) before accepting.")
     }
 
     // MARK: Resource lookup (repo checkout or app bundle)

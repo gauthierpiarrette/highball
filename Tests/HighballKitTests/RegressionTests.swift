@@ -2,7 +2,7 @@ import XCTest
 @testable import HighballKit
 
 /// Tripwires for bugs that shipped once and must not ship twice.
-final class RegressionTests: XCTestCase {
+final class RegressionTests: EnglishCopyTestCase {
 
     /// DXVK async was on for every game from 0.3.0, not because anyone chose it but because it
     /// was the default. It skips draws while a pipeline compiles, upstream refuses to ship it,
