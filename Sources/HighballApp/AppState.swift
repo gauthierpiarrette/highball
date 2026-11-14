@@ -2446,6 +2446,38 @@ final class AppState {
         setDisplayModeEmulation(on, in: bottle, executable: exe)
     }
 
+    private var nativeGameWindowCache: [String: (modified: Date, mode: NativeGameWindow)] = [:]
+    @ObservationIgnored private var nativeGameWindowWritten: [String: (at: Date, mode: NativeGameWindow)] = [:]
+
+    func nativeGameWindow(for item: LibraryItem) -> NativeGameWindow? {
+        guard let name = item.bottleName, let bottle = bottles.first(where: { $0.name == name }),
+              engine(for: bottle)?.manifest.nativeGameWindow == true,
+              let exe = programExecutable(for: item) else { return nil }
+        _ = registryVersion
+        let reg = bottle.url.appending(path: "user.reg")
+        let modified = (try? reg.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        let key = bottle.name + "|" + exe.lastPathComponent.lowercased()
+        if let written = nativeGameWindowWritten[key], written.at > modified { return written.mode }
+        if let hit = nativeGameWindowCache[key], hit.modified == modified { return hit.mode }
+        let mode = NativeGameWindow.read(in: bottle, executable: exe)
+        nativeGameWindowCache[key] = (modified, mode)
+        return mode
+    }
+
+    func setNativeGameWindow(_ mode: NativeGameWindow, for item: LibraryItem) {
+        guard let name = item.bottleName, let bottle = bottles.first(where: { $0.name == name }),
+              let engine = engine(for: bottle), engine.manifest.nativeGameWindow == true,
+              let exe = programExecutable(for: item) else { return }
+        let key = bottle.name + "|" + exe.lastPathComponent.lowercased()
+        runBusy(L("Saving window mode")) {
+            let changed = Date()
+            try await mode.write(in: WineRunner(paths: self.paths, engine: engine, bottle: bottle), executable: exe)
+            self.nativeGameWindowWritten[key] = (changed, mode)
+            self.nativeGameWindowCache[key] = nil
+            self.registryVersion += 1
+        }
+    }
+
     /// Whether the item's program needs Direct3D 12 (`ProgramNeeds.wantsDirect3D12`), remembered
     /// per executable and modification date: finding the executable walks the game's folder.
     private var direct3D12Cache: [String: (exe: URL, modified: Date, verdict: Bool)] = [:]

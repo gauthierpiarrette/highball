@@ -107,6 +107,8 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
     public var appDefaults: [String: [String: String]]?
     /// This engine can start a mapped Windows executable in its own macOS app bundle.
     public var nativeGameIdentity: Bool?
+    /// This engine supports native window controls and optional free cursor in windowed mode.
+    public var nativeGameWindow: Bool?
     public var components: [String: Component]
     public var baseEnv: [String: String]?
     /// License ids that gate optional renderers (e.g. `apple-gptk-license-2023-08-17` → d3dmetal).
