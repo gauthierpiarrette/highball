@@ -190,6 +190,63 @@ final class EngineArchTests: XCTestCase {
         XCTAssertNil(try? FileManager.default.destinationOfSymbolicLink(atPath: intelRoot.appending(path: "engine/bin/wine").path))
     }
 
+    /// An unsigned copy of a real executable, which is what the engine CI ships as an Intel `wine`.
+    private func unsignedExecutable(at url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: url)
+        try Shell.run("/usr/bin/codesign", ["--remove-signature", url.path])
+    }
+
+    /// The Neural Engine daemon refuses a process with no signing identifier, so MetalFX's scaler
+    /// network fell back to the GPU and timed out there (EngineStore.signIntelLoader). An Intel
+    /// engine's loader gets an ad-hoc signature that names it. A signed loader, a file that is not
+    /// Mach-O and an arm64 engine are left as they are.
+    func testAnIntelEnginesUnsignedLoaderIsSignedWithAnIdentifier() throws {
+        let intel = manifest("x86_64", requires: ["rosetta2"])
+        let root = tempRoot("x64-engine-sign")
+        let launcher = root.appending(path: "engine/bin/wine"), loader = root.appending(path: "engine/lib/wine/x86_64-unix/wine")
+        let server = root.appending(path: "engine/bin/wineserver")
+        for url in [launcher, loader, server] { try unsignedExecutable(at: url) }
+        XCTAssertTrue(EngineStore.isUnsignedMachO(loader), "the test starts from what CI ships")
+
+        try EngineStore().signIntelLoader(root, manifest: intel)
+        for url in [launcher, loader] {
+            XCTAssertEqual(EngineStore.signingIdentifier(of: url), EngineStore.intelLoaderIdentifier, url.lastPathComponent)
+            XCTAssertFalse(EngineStore.isUnsignedMachO(url))
+            XCTAssertTrue(FileManager.default.isExecutableFile(atPath: url.path), "the copy keeps its mode")
+            XCTAssertNoThrow(try Shell.run(url.path, []), "a signed loader still starts")
+        }
+        XCTAssertTrue(EngineStore.isUnsignedMachO(server), "only the loader hosts Windows programs")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: loader.deletingLastPathComponent().path), ["wine"], "no signing copy is left behind")
+
+        // A second read changes nothing.
+        let signed = try EngineStore().sha256(of: loader)
+        try EngineStore().signIntelLoader(root, manifest: intel)
+        XCTAssertEqual(try EngineStore().sha256(of: loader), signed)
+
+        // A loader that came signed keeps its own signature.
+        let other = tempRoot("x64-engine-presigned")
+        let presigned = other.appending(path: "engine/bin/wine")
+        try unsignedExecutable(at: presigned)
+        try Shell.run("/usr/bin/codesign", ["--force", "--sign", "-", "--identifier", "org.winehq.wine", presigned.path])
+        try EngineStore().signIntelLoader(other, manifest: intel)
+        XCTAssertEqual(EngineStore.signingIdentifier(of: presigned), "org.winehq.wine")
+
+        // A file that is not Mach-O, as the layout tests write, is never signed into its attributes.
+        let fake = tempRoot("x64-engine-fake")
+        try touch(fake.appending(path: "engine/bin/wine"))
+        XCTAssertFalse(EngineStore.isUnsignedMachO(fake.appending(path: "engine/bin/wine")))
+        try EngineStore().signIntelLoader(fake, manifest: intel)
+        XCTAssertNil(EngineStore.signingIdentifier(of: fake.appending(path: "engine/bin/wine")))
+
+        // An arm64 engine is the helper's business.
+        let arm = tempRoot("arm64-engine-sign")
+        let armLoader = arm.appending(path: "engine/lib/wine/aarch64-unix/wine")
+        try unsignedExecutable(at: armLoader)
+        try EngineStore().signIntelLoader(arm, manifest: manifest("arm64"))
+        XCTAssertTrue(EngineStore.isUnsignedMachO(armLoader))
+    }
+
     func testTheHelperIsFoundInTheEnvironmentThenTheAppThenApplications() throws {
         let app = tempRoot("App").appendingPathExtension("app"), installed = tempRoot("Installed").appendingPathExtension("app")
         let nowhere = URL(fileURLWithPath: "/nonexistent/Highball.app")
