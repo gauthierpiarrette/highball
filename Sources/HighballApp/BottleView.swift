@@ -135,8 +135,8 @@ struct BottleView: View {
                             else { state.applyRecipe(meta.id, to: bottle) }
                         }
                         .contextMenu {
-                            if MacAppStub.existing(for: meta.short) != nil {
-                                Button(L("Remove the Mac app")) { state.removeMacApp(title: meta.short) }
+                            if state.hasMacApp(libraryID: PlayLink.Target.launcher(id: meta.id).libraryID) {
+                                Button(L("Remove the Mac app")) { state.removeMacApp(libraryID: PlayLink.Target.launcher(id: meta.id).libraryID) }
                             } else {
                                 Button(L("Make a Mac app…")) { state.makeMacApp(forLauncher: meta.id, short: meta.short) }
                             }

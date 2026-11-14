@@ -15,6 +15,8 @@ struct SettingsView: View {
                     .tag(SettingsTab.environments)
                 EnginePane().tabItem { Label(L("Engine"), systemImage: "gearshape.2") }
                     .tag(SettingsTab.engine)
+                ShortcutsPane().tabItem { Label(L("Shortcuts"), systemImage: "arrow.up.forward.app") }
+                    .tag(SettingsTab.shortcuts)
                 TroubleshootingPane().tabItem { Label(L("Troubleshooting"), systemImage: "wrench.and.screwdriver") }
                     .tag(SettingsTab.troubleshooting)
             }
@@ -51,6 +53,31 @@ struct SettingsView: View {
         }
         .frame(minWidth: 820, minHeight: 560)
         .sheet(isPresented: $state.showGPTKLicense) { GPTKLicenseSheet() }
+    }
+}
+
+private struct ShortcutsPane: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            GroupBox(L("Mac shortcut folder")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text((state.shortcutFolder.path as NSString).abbreviatingWithTildeInPath)
+                        .font(.callout.monospaced()).textSelection(.enabled)
+                    HStack {
+                        Button(L("Choose folder…")) { state.chooseShortcutFolder() }
+                        Button(L("Use default folder")) { state.shortcutFolderPath = nil }
+                            .disabled(state.shortcutFolderPath == nil)
+                    }
+                    Text(L("New game and launcher shortcuts go here. Existing shortcuts stay where you put them."))
+                        .font(.caption).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Spacer()
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
