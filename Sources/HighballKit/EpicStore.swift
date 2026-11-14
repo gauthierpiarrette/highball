@@ -17,7 +17,7 @@ public struct EpicStore: Sendable {
     public static let loginURL = URL(string: "https://legendary.gl/epiclogin")!
 
     public var binary: URL { paths.home.appending(path: "tools/legendary", directoryHint: .notDirectory) }
-    var configDir: URL { paths.home.appending(path: "legendary", directoryHint: .isDirectory) }
+    public var configDir: URL { paths.home.appending(path: "legendary", directoryHint: .isDirectory) }
 
     /// Downloads and verifies the pinned Legendary binary if missing.
     public func ensureInstalled(progress: DownloadProgress? = nil) async throws -> URL {
