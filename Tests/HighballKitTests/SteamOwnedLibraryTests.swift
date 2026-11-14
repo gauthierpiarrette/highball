@@ -121,7 +121,20 @@ final class SteamOwnedLibraryTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         try Data().write(to: exe)
         try Data().write(to: root.appending(path: "out.exe"))
-        XCTAssertEqual(SteamGameIdentity.launchPaths(names, in: game), [exe.resolvingSymlinksInPath().path])
+        let real = try XCTUnwrap(realpath(exe.path, nil))
+        defer { free(real) }
+        XCTAssertEqual(SteamGameIdentity.launchPaths(names, in: game), [String(cString: real)])
+    }
+
+    func testIdentityMapAgreesWithTheWineLoaderForTmpAliases() throws {
+        let root = URL(fileURLWithPath: "/private/tmp", isDirectory: true).appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let exe = root.appending(path: "Game.exe")
+        try Data().write(to: exe)
+        let alias = URL(fileURLWithPath: "/tmp", isDirectory: true).appending(path: root.lastPathComponent)
+        XCTAssertEqual(SteamGameIdentity.launchPaths(["Game.exe"], in: alias), [exe.path])
+        XCTAssertEqual(SteamGameIdentity.launchPaths(["Game.exe"], in: root), [exe.path])
     }
 
     func testOnlySkipsTheRest() throws {

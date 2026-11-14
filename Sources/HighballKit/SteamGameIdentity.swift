@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// The native macOS bundle for a Steam game on an engine that supports game identity.
@@ -63,17 +64,23 @@ public enum SteamGameIdentity {
     }
 
     static func launchPaths(_ names: [String], in folder: URL) -> [String] {
-        let base = folder.resolvingSymlinksInPath().standardizedFileURL
+        // Match Wine's realpath(3), including Darwin aliases such as /tmp and /private/tmp.
+        func canonicalPath(_ url: URL) -> String? {
+            guard let path = realpath(url.path, nil) else { return nil }
+            defer { free(path) }
+            return String(cString: path)
+        }
+        guard let base = canonicalPath(folder) else { return [] }
+        let directory = URL(fileURLWithPath: base, isDirectory: true)
         return Set(names.compactMap { name -> String? in
             let relative = name.replacingOccurrences(of: "\\", with: "/")
             guard relative.lowercased().hasSuffix(".exe"), !relative.hasPrefix("/"), !relative.contains(":"),
                   !relative.split(separator: "/").contains("..") else { return nil }
-            let candidate = base.appending(path: relative).resolvingSymlinksInPath().standardizedFileURL.path
-            var directory: ObjCBool = false
-            guard candidate.hasPrefix(base.path + "/"), candidate.utf8.count < Int(PATH_MAX),
+            var isDirectory: ObjCBool = false
+            guard let candidate = canonicalPath(directory.appending(path: relative)),
+                  candidate.hasPrefix(base + "/"), candidate.utf8.count < Int(PATH_MAX),
                   !candidate.contains("\n"), !candidate.contains("\r"),
-                  FileManager.default.fileExists(atPath: candidate, isDirectory: &directory),
-                  !directory.boolValue else { return nil }
+                  FileManager.default.fileExists(atPath: candidate, isDirectory: &isDirectory), !isDirectory.boolValue else { return nil }
             return candidate
         }).sorted()
     }
