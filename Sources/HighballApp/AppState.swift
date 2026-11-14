@@ -2315,6 +2315,43 @@ final class AppState {
         } catch { fail(error) }
     }
 
+    func copyGameSaves(for item: LibraryItem, in bottle: Bottle) {
+        guard !busy, !runningSessions.contains(where: { $0.libraryID == item.id }) else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true; panel.canChooseFiles = false
+        panel.prompt = L("Copy saves")
+        panel.message = String(format: L("Choose the folder that contains %@’s saves. Quit the game before copying."), item.title)
+        let windowsUser = bottle.driveC.appending(path: "users/\(NSUserName())", directoryHint: .isDirectory)
+        panel.directoryURL = FileManager.default.fileExists(atPath: windowsUser.path) ? windowsUser : bottle.driveC
+        guard panel.runModal() == .OK, let source = panel.url,
+              !runningSessions.contains(where: { $0.libraryID == item.id }) else { return }
+
+        let candidate = source.resolvingSymlinksInPath().standardizedFileURL.path
+        let driveC = bottle.driveC.resolvingSymlinksInPath().standardizedFileURL.path
+        let users = driveC + "/users"
+        let isTooBroad = candidate == "/" || candidate == users || users.hasPrefix(candidate + "/")
+            || UserFolders.userDirectories(driveC: bottle.driveC).contains {
+                $0.resolvingSymlinksInPath().standardizedFileURL.path == candidate
+            }
+        guard !isTooBroad else {
+            fail(HighballError.failed(L("Choose the game's save folder, not an entire drive or Windows user folder.")))
+            return
+        }
+
+        let backups = SaveBackups(root: paths.saveBackups)
+        runBusy(String(format: L("Copying saves for %@"), item.title)) {
+            let copy = try await Task.detached {
+                try backups.copyGameSaves(from: source, title: item.title)
+            }.value
+            guard let copy else { throw HighballError.failed(L("The selected folder has no files to copy.")) }
+            self.appendLog("copied saves for \(item.title) to \(copy.path)")
+            self.busyDoneOverride = DoneState(title: L("Save copy created"), ctaTitle: L("Show in Finder"), cta: {
+                NSWorkspace.shared.activateFileViewerSelecting([copy])
+            })
+            NSWorkspace.shared.activateFileViewerSelecting([copy])
+        }
+    }
+
     /// The program an item runs: the largest .exe in a Steam or Epic game's folder, a pin's own.
     /// Finding it walks the game's folder, so the answer is kept per item until the next
     /// library refresh: views ask on every evaluation.

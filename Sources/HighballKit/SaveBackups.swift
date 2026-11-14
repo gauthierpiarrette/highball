@@ -52,13 +52,16 @@ public struct SaveBackups: Sendable {
     /// linked folder (gogdl's os.path.isdir and legendary's os.walk follow links). A folder
     /// reached twice through links is walked once. Throws for a folder inside it that can't be
     /// read; one that isn't there holds nothing.
-    static func walk(_ folder: URL) throws -> [URL] {
+    static func walk(_ folder: URL, confinedTo root: String? = nil) throws -> [URL] {
         guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
         var files: [URL] = [], walked = Set<String>()
         func walk(_ dir: URL) throws {
             guard walked.insert(dir.resolvingSymlinksInPath().path).inserted else { return }
             for name in try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted() {
                 let item = dir.appending(path: name)
+                if let root, !item.resolvingSymlinksInPath().path.hasPrefix(root + "/") {
+                    throw CocoaError(.fileReadNoPermission, userInfo: [NSURLErrorKey: item])
+                }
                 var isFolder: ObjCBool = false
                 if FileManager.default.fileExists(atPath: item.path, isDirectory: &isFolder), isFolder.boolValue { try walk(item) } else { files.append(item) }
             }
@@ -139,16 +142,39 @@ public struct SaveBackups: Sendable {
         let fingerprint = Self.fingerprint(folder, files: picked)
         if let same = reuse(in: dir, kind: .mac, fingerprint: fingerprint, kept: kept) { return same }
         return try backUp(into: dir, kind: .mac, kept: kept, fingerprint: fingerprint) { partial in
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            // What a link points at, not the link: the tools write through it, so a download
-            // replaces the file it points to. A link to nothing holds nothing to keep.
-            for file in picked {
-                let source = file.resolvingSymlinksInPath()
-                guard FileManager.default.fileExists(atPath: source.path) else { continue }
-                let destination = partial.appending(path: Self.relativePath(file, in: folder))
-                try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try FileManager.default.copyItem(at: source, to: destination)
-            }
+            try Self.copy(picked, from: folder, into: partial, skipMissing: true)
+            return nil
+        }
+    }
+
+    private static func copy(_ files: [URL], from folder: URL, into destination: URL, skipMissing: Bool = false) throws {
+        for file in files {
+            let source = file.resolvingSymlinksInPath()
+            if skipMissing && !FileManager.default.fileExists(atPath: source.path) { continue }
+            let target = destination.appending(path: relativePath(file, in: folder))
+            try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: source, to: target)
+        }
+    }
+
+    /// Copies one explicitly selected game's save folder into the manual backups.
+    public func copyGameSaves(from source: URL, title: String) throws -> URL? {
+        let source = source.resolvingSymlinksInPath().standardizedFileURL
+        let rootPath = root.resolvingSymlinksInPath().standardizedFileURL.path
+        let sourcePath = source.path
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: sourcePath, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw CocoaError(.fileReadNoSuchFile, userInfo: [NSURLErrorKey: source])
+        }
+        guard sourcePath != "/", sourcePath != rootPath, !rootPath.hasPrefix(sourcePath + "/"), !sourcePath.hasPrefix(rootPath + "/") else {
+            throw CocoaError(.fileReadNoPermission, userInfo: [NSURLErrorKey: source])
+        }
+        let files = try Self.walk(source, confinedTo: sourcePath)
+        guard !files.isEmpty else { return nil }
+        let manual = SaveBackups(root: self.root.appending(path: "manual", directoryHint: .isDirectory))
+        return try manual.backUp(into: manual.folder(MacAppStub.appName(for: title), install: source),
+                                 kind: .mac, kept: true) { partial in
+            try Self.copy(files, from: source, into: partial)
             return nil
         }
     }
