@@ -62,8 +62,12 @@ public enum SteamOwnedLibrary {
         let owned = Set(((try? FileManager.default.contentsOfDirectory(atPath: cache.path)) ?? []).compactMap(Int.init))
         guard !owned.isEmpty,
               let apps = try? SteamAppInfo.read(steamRoot.appending(path: "appcache/appinfo.vdf"), only: owned) else { return [] }
+        // A demo of a game the account owns is left out: the game stands for it (highball#432,
+        // Fireside Feelings and its demo both listed).
+        let ownedGames = Set(owned.filter { apps[$0]?.type?.lowercased() == "game" })
         return owned.compactMap { appid in
             guard let app = apps[appid], ["game", "demo"].contains(app.type?.lowercased() ?? ""), let name = app.name else { return nil }
+            if app.type?.lowercased() == "demo", let parent = app.parent, ownedGames.contains(parent) { return nil }
             let folder = cache.appending(path: String(appid))
             let art = artwork(in: folder)
             return OwnedSteamGame(appid: appid, name: name, localCapsule: art["library_600x900.jpg"],
@@ -116,6 +120,8 @@ public enum SteamAppInfo {
         public var depots: [Depot] = []
         /// `ufs.quota`: the room the game has in Steam Cloud, 0 for a game Steam Cloud does not keep.
         public var steamCloudQuota: Int64 = 0
+        /// `common.parent`: the full game a demo (or other child app) belongs to.
+        public var parent: Int? = nil
 
         public struct Depot: Sendable, Equatable {
             public let id: Int
@@ -184,7 +190,8 @@ public enum SteamAppInfo {
             }.sorted { $0.id < $1.id }
             apps[appid] = App(name: common?["name"]?.string, type: common?["type"]?.string, oslist: common?["oslist"]?.string,
                               osextended: common?["osextended"]?.string, macLaunchArchs: macArchs, depots: depots,
-                              steamCloudQuota: Int64(info["ufs"]?.object?["quota"]?.string ?? "") ?? 0)
+                              steamCloudQuota: Int64(info["ufs"]?.object?["quota"]?.string ?? "") ?? 0,
+                              parent: Int(common?["parent"]?.string ?? ""))
         }
         return apps
     }

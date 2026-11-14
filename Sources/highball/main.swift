@@ -1010,6 +1010,7 @@ struct Play: AsyncParsableCommand {
         }
         let paths = HighballPaths()
         // A typo fails here and now, not as an alert in the app and a wait that never ends.
+        var notInstalled = false
         switch target {
         case .launcher:
             break
@@ -1019,9 +1020,10 @@ struct Play: AsyncParsableCommand {
                 fail("\(id) is not an installed Epic game in this Highball. `highball library --installed` lists what can be played.")
             }
         case .steam, .gog, .pin, .battlenet:
-            guard currentLibrary(paths: paths, epic: false).contains(where: { $0.id == target.libraryID }) else {
+            guard let item = currentLibrary(paths: paths, epic: false).first(where: { $0.id == target.libraryID }) else {
                 fail("\(id) is not in this Highball's library. `highball library` lists the ids.")
             }
+            notInstalled = !item.installed && !item.installedOnMac
         }
         // The link the game's Mac app opens, with this install's token, so the app starts it
         // without asking; -g keeps Highball behind the game (MacAppStub.launchScript).
@@ -1034,6 +1036,9 @@ struct Play: AsyncParsableCommand {
         guard open.terminationStatus == 0 else { fail("macOS could not open the Highball app (open exited with \(open.terminationStatus))") }
         guard wait else { return }
         if case .launcher = target { return }   // a launcher is not a game the app follows
+        // A game that isn't installed never starts: the app asks about it in its window, and the
+        // wait used to run to --start-timeout (highball#432). The question is up, so stop here.
+        if notInstalled { fail("\(id) is not installed, so it won't start. Highball shows what it can do with it in its window.") }
 
         let started = Date()
         var phase = PlayWait.Phase.starting

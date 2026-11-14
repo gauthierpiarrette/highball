@@ -10,6 +10,7 @@ final class SteamOwnedLibraryTests: XCTestCase {
     private struct App {
         var appid: UInt32; var name: String; var type: String; var oslist: String = "windows"
         var osextended: String? = nil
+        var parent: UInt32? = nil
         /// Launch entries under config.launch, each with its oslist and optional osarch.
         var launch: [(oslist: String, osarch: String?)] = []
     }
@@ -18,7 +19,7 @@ final class SteamOwnedLibraryTests: XCTestCase {
 
     /// Builds a v29 file (keys as indexes into a trailing string table) or a v28 one (inline keys).
     private func appinfo(_ apps: [App], v29: Bool = true) -> Data {
-        let keys = ["appinfo", "Common", "name", "type", "oslist", "appid", "osextended", "config", "launch", "osarch", "0", "1", "2"]
+        let keys = ["appinfo", "Common", "name", "type", "oslist", "appid", "osextended", "config", "launch", "osarch", "0", "1", "2", "parent"]
         func key(_ k: String) -> [UInt8] { v29 ? le(UInt32(keys.firstIndex(of: k)!)) : Array(k.utf8) + [0] }
         func str(_ k: String, _ v: String) -> [UInt8] { [0x01] + key(k) + Array(v.utf8) + [0] }
         func int(_ k: String, _ v: UInt32) -> [UInt8] { [0x02] + key(k) + le(v) }
@@ -29,6 +30,7 @@ final class SteamOwnedLibraryTests: XCTestCase {
             // Key case varies in Valve's data; the reader must not care.
             var common = str("name", app.name) + str("type", app.type) + str("oslist", app.oslist)
             if let ext = app.osextended { common += str("osextended", ext) }
+            if let parent = app.parent { common += int("parent", parent) }
             var info = int("appid", app.appid) + obj("Common", common)
             if !app.launch.isEmpty {
                 let entries = app.launch.enumerated().flatMap { i, l in
@@ -143,6 +145,16 @@ final class SteamOwnedLibraryTests: XCTestCase {
             App(appid: 3460730, name: "SlashZero Demo", type: "Demo"), App(appid: 570940, name: "DSR", type: "game"),
             App(appid: 1145361, name: "Hades Soundtrack", type: "Music")]))
         XCTAssertEqual(SteamOwnedLibrary.games(steamRoot: root).map(\.appid), [570940, 3460730], "games and demos, by name")
+    }
+
+    func testADemoOfAnOwnedGameIsLeftOut() throws {
+        // Fireside Feelings and its demo were both owned and both listed (highball#432); a demo
+        // whose game the account lacks stays.
+        let root = try steamRoot(owned: [2990600, 3163380, 3460730], appinfo: appinfo([
+            App(appid: 2990600, name: "Fireside Feelings", type: "Game"),
+            App(appid: 3163380, name: "Fireside Feelings Demo", type: "Demo", parent: 2990600),
+            App(appid: 3460730, name: "SlashZero Demo", type: "Demo", parent: 3460720)]))
+        XCTAssertEqual(SteamOwnedLibrary.games(steamRoot: root).map(\.appid), [2990600, 3460730])
     }
 
     func testPrefersTheClientsCachedArtwork() throws {
