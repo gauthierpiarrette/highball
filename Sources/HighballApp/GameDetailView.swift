@@ -1016,7 +1016,7 @@ struct GameDetailView: View {
                                         Text(L("Disconnected display")).tag(stored)
                                     }
                                 }.labelsHidden().frame(maxWidth: 360)
-                                Text(L("Highball moves the game's window here after it opens. Works best for windowed and borderless games. Needs Accessibility permission for Highball."))
+                                Text(L("Highball moves the game's window here after it opens, for windowed and borderless games. A fullscreen game usually opens on the Mac's main display, which you choose in System Settings, Displays. Needs Accessibility permission for Highball."))
                                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             }
                         }
