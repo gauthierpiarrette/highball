@@ -1002,6 +1002,22 @@ struct GameDetailView: View {
                                 }
                             }
                         }
+                        if let mode = state.nativeGameWindow(for: item) {
+                            HStack(alignment: .top, spacing: 12) {
+                                Text(L("Window mode")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading).padding(.top, 4)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Picker(L("Window mode"), selection: Binding(
+                                        get: { mode }, set: { state.setNativeGameWindow($0, for: item) })) {
+                                        Text(L("Game default")).tag(NativeGameWindow.standard)
+                                        Text(L("macOS window")).tag(NativeGameWindow.native)
+                                        Text(L("macOS window with free cursor")).tag(NativeGameWindow.freeCursor)
+                                    }.labelsHidden().frame(maxWidth: 360)
+                                        .disabled(state.busy)
+                                    Text(L("Restart the game and select its windowed mode. Free cursor may affect games that need a locked mouse."))
+                                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
                         let stored = state.displayChoice(for: item) ?? ""
                         let monitors = Monitor.connected()
                         HStack(alignment: .top, spacing: 12) {
