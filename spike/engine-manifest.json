@@ -1,13 +1,14 @@
 {
   "$schema": "https://highball.app/schemas/engine-manifest/v0",
-  "id": "x64-sikarugir10.0_6-r28",
-  "displayName": "Wine 10.0 (Sikarugir) r28",
+  "id": "x64-sikarugir10.0_6-r30",
+  "displayName": "Wine 10.0 (Sikarugir) r30",
   "arch": "x86_64",
   "minMacOS": "14.0",
   "requires": [
     "rosetta2"
   ],
   "notes": [
+    "r30 (2026-11-14): r28 with only the audio library changed, to the 2026-11-03 build the Wine 11 engines r30 to r33 carry (audiobuf component). Microphones keep every frame (highball#350), Wine's audio clock runs in real time so a busy Mac wakes a game's audio on time (highball#444), and games follow the Mac's output when it changes (highball#460, nikiomori). Every other archive is r28's, so environments on r28 move without the Windows setup and download 8 KB. Measured on an M1 Pro, macOS 27.0, installed from this manifest with the CLI: every file is r28's except libhbaudiobuf.dylib, which is byte-identical to the Wine 11 r31 one. A WASAPI capture (event driven, 20 ms buffer) with the HAL's sample time written in place of the microphone's data, 6 s at 48 kHz: r28 broke the ramp 520 and 501 times (about 15,000 frames lost), r30 never; under 10 busy loops 510 against 0. The library logged the capture buffer capped at 240 frames and Wine's audio_client_timer made real time (status 0). No game was run on this revision.",
     "r28 (2026-10-18): r26 with only DXMT changed, built from Highball's DXMT branch with Steep's fix (highball-db#465, by Sean Shmulevich): Steep asks for 8x MSAA without checking, Apple GPUs stop at 4, and the game died with no window. A built-in profile gives steep.exe the highest count the Mac has instead; no other game changes. Same toolchain as the previous DXMT build (mingw-w64 14.0.0_3, meson 1.10.0, Xcode 16.1, LLVM 15.0.7). Environments on r26 move without the Windows setup and download about 19 MB. Measured on an M4, macOS 27.0 (2026-10-18): against the previous DXMT archive, winemetal.so is byte-identical, winemetal.dll, d3d10core, nvapi64 and nvngx differ only in their build timestamps, and d3d11.dll and dxgi.dll (which also carries DXMT's profile table) differ by the fix and the profile. A D3D11 test asking for an 8x MSAA render target, 64- and 32-bit: refused under its own name on r26 and on this revision alike, and named steep.exe it gets a 4x texture here that clears and resolves to the exact colour, where r26 refused it.",
     "r26 (2026-10-08): r24 with the audio library rebuilt to also limit float output like Windows' audio engine (audiobuf component, highball-db#349). Windows ends its shared-mode mix with a limiter, so a game may hand it samples above full scale and never clip. Wine passed them to Core Audio, which clipped them at the device, and loud passages crackled. Only that 6 KB archive changes, so environments move without the Windows setup. Measured on an M4, macOS 27.0 (2026-10-08), with this archive's library inserted into Wine 10 r21 and Wine 11 r17 environments: a WASAPI test tone recorded through ScreenCaptureKit passes sound under full scale unchanged (0.5 stays 0.5000, rms 0.3536) and holds a tone at 1.4 times full scale to 0.9923 with no sample over full scale, where HB_AUDIOLIMIT=0 lets 47,376 samples over through. No dropouts or clicks. The same code built as a prototype: Paperback's title music has nothing over full scale (2,586 samples in 30 s without) and is 0.4 dB quieter, Five Nights at Freddy's has nothing over (70 without).",
     "r24 (2026-10-07): r22 with MoltenVK's shadow-import fixed so GPU results reach the game (moltenvk component, highball#283, highball-db#160, #174). Under MVK_SHADOW_IMPORT=1, which only The Sims Legacy Collection's recipe sets, the private Metal buffer behind imported host memory was copied to the GPU on every submit and never back, so everything a 32-bit Vulkan game read back from the GPU was stale: The Sims' lot thumbnails and family portraits came out as noise. The shadow-readback patch records the ranges a submission's copy, fill, update and query-results commands write into that memory, keeps the next submits' upload off them, and copies them back to the game's pages when the submission completes, before its fence and semaphores are signalled. Measured on an M4 with macOS 27.0 with a 32-bit test program (private/tools/vkrb): with the variable, every readback was stale on r22 and is right on this build, at 32 MB into a 64 MB allocation, next to bytes the program wrote during the submission (kept), and with a second submit in flight (20 rounds). The Sims starts and draws its neighbourhood with no lost device, Portal 2 under DXVK loads two maps with HDR, Direct3D 11 and Direct3D 9 test programs under DXVK give the same results, and without the variable nothing runs differently. Every other component is byte-identical to r22, so only the 1.7 MB MoltenVK archive is new.",
@@ -173,17 +174,17 @@
     },
     "audiobuf": {
       "kind": "runtime",
-      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/audiobuf-20261008/audiobuf-20261008.tar.xz",
-      "sha256": "8b84fa43f7394a3865eef99f4afc97875f155872930cc9f69438ee4a918f17e5",
-      "size": 5700,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/audiobuf-20261103/audiobuf-20261103.tar.xz",
+      "sha256": "617b8feb3651227c9c27419e4dc58835e8ca471ef7ce3b13b0ddaea7c067454f",
+      "size": 8124,
       "license": "MIT (Highball's own, source spike/audiobuf/audiobuf.c)",
-      "version": "20261008",
+      "version": "20261103",
       "order": 1,
       "extract": {
         "subpath": "libhbaudiobuf.dylib",
         "into": "frameworks/libhbaudiobuf.dylib"
       },
-      "note": "Highball's audio library, built by Scripts/build-audiobuf.sh. Bottle.environment inserts it into Wine's processes with DYLD_INSERT_LIBRARIES. It caps an output audio unit's I/O buffer at 5 ms before Wine starts it, so a game that keeps one 10 ms period queued no longer drops audio at 48 kHz (highball#127), and it limits float output like the last stage of Windows' audio engine, so a game whose mix goes over full scale is turned down instead of clipped at the speakers (highball-db#349). HB_AUDIOBUF=0 in an environment's variables leaves the library out, HB_AUDIOLIMIT=0 keeps it without the limiter."
+      "note": "Highball's audio library, built by Scripts/build-audiobuf.sh. Bottle.environment inserts it into Wine's processes with DYLD_INSERT_LIBRARIES. It caps an output audio unit's I/O buffer at 5 ms before Wine starts it, so a game that keeps one 10 ms period queued no longer drops audio at 48 kHz (highball#127), and a microphone's too, so Wine no longer drops 32 frames of it nearly every period (highball#350). It limits float output like the last stage of Windows' audio engine, so a game whose mix goes over full scale is turned down instead of clipped at the speakers (highball-db#349). It runs the clock Wine starts for each audio stream under a real-time policy, so a busy Mac wakes the game's audio on time (highball#444), and it moves output on Wine's default device to the Mac's new output when that changes (highball#460). HB_AUDIOBUF=0 in an environment's variables leaves the library out, HB_AUDIOLIMIT=0 keeps it without the limiter, HB_AUDIORT=0 without the real-time clock, HB_AUDIOFOLLOW=0 without following the output."
     }
   },
   "alternatives": {
@@ -206,10 +207,10 @@
     "GST_PLUGIN_PATH": "${frameworks}/GStreamer.framework/Versions/1.0/lib/gstreamer-1.0"
   },
   "verified": {
-    "date": "2026-10-18",
+    "date": "2026-11-14",
     "macos": "27.0",
-    "chip": "Apple M4",
-    "result": "Installed from this manifest on an M4 (macOS 27.0) with Highball's installer: every file is r26's except the ten DXMT Windows DLLs. The 8x MSAA test is refused under its own name and gets 4x as steep.exe, 64- and 32-bit. Through Steam, Among Us, Umamusume, Heartopia, Vindictus and Where Safety Ends reach the same screens as on r26 in the same environment; The Last Flame reached its menu on r26 and was held by Steam's pending cloud session on this revision, not by the engine."
+    "chip": "Apple M1 Pro",
+    "result": "Installed from this manifest on an M1 Pro (macOS 27.0) with Highball's installer: every file is r28's except the audio library, the Wine 11 r31 one byte for byte. A WASAPI microphone capture with a sample time ramp lost no frames in 6 s where r28 broke it about 500 times, idle and under 10 busy loops, and the library made Wine's audio clock real time. No game was run on this revision."
   },
   "licenses": {
     "apple-gptk-license-2023-08-17": {
