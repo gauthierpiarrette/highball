@@ -179,6 +179,15 @@ public enum SteamLibrary {
         return base
     }
 
+    /// Recheck only the requested game's ACF before a warm shortcut launch.
+    public static func installRecordIsReady(_ game: SteamGame) -> Bool {
+        guard let root = game.libraryRoot else { return false }
+        let acf = root.appending(path: "steamapps/appmanifest_\(game.appid).acf")
+        guard let current = parseManifest(acf), current.appid == game.appid else { return false }
+        return current.isReady && current.installdir == game.installdir
+            && current.installedByWindowsSteam == game.installedByWindowsSteam
+    }
+
     /// Minimal ACF (Valve KeyValues) reader: flat `"key" "value"` pairs are all we need.
     static func parseManifest(_ url: URL, libraryRoot: URL? = nil) -> SteamGame? {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }

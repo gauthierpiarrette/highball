@@ -2,6 +2,23 @@ import XCTest
 @testable import HighballKit
 
 final class SteamRestartTests: XCTestCase {
+    func testWarmPlayRecordRejectsRemovedOrUpdatingSteamInstall() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let directory = root.appending(path: "steamapps")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = directory.appending(path: "appmanifest_620.acf")
+        let ready = #""appid" "620" "name" "Portal 2" "installdir" "Portal 2" "StateFlags" "4""#
+        try ready.write(to: file, atomically: true, encoding: .utf8)
+        let game = try XCTUnwrap(SteamLibrary.parseManifest(file, libraryRoot: root))
+        XCTAssertTrue(SteamLibrary.installRecordIsReady(game))
+        try ready.replacingOccurrences(of: #""StateFlags" "4""#, with: #""StateFlags" "6""#)
+            .write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertFalse(SteamLibrary.installRecordIsReady(game))
+        try FileManager.default.removeItem(at: file)
+        XCTAssertFalse(SteamLibrary.installRecordIsReady(game))
+    }
+
     private let dxvk = ["WINEDLLPATH_PREPEND": "/e/dxvk/wine", "WINEMSYNC": "1", "WINEESYNC": "0"]
 
     func testSameEnvironmentNeedsNoRestart() {

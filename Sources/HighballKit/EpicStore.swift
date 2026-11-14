@@ -200,11 +200,19 @@ public struct EpicStore: Sendable {
     /// path, read without running it. Empty when legendary has installed nothing; nil when the
     /// file is there but can't be read.
     public func installRecords() -> [String: String]? {
+        rawInstallRecords()?.mapValues { (($0 as? [String: Any])?["install_path"] as? String) ?? "" }
+    }
+
+    public func installRecordMatches(_ appName: String, path: String, mac: Bool) -> Bool {
+        guard let entry = rawInstallRecords()?[appName] as? [String: Any], entry["install_path"] as? String == path else { return false }
+        return ((entry["platform"] as? String)?.lowercased() == "mac") == mac
+    }
+
+    private func rawInstallRecords() -> [String: Any]? {
         let file = configDir.appending(path: "installed.json")
         guard FileManager.default.fileExists(atPath: file.path) else { return [:] }
-        guard let data = try? Data(contentsOf: file),
-              let all = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
-        return all.mapValues { (($0 as? [String: Any])?["install_path"] as? String) ?? "" }
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
     /// Whether legendary still records the game as installed; nil when its records can't be
@@ -232,9 +240,7 @@ public struct EpicStore: Sendable {
 
     /// The manifest file legendary keeps for a game's installed version, nil when there is none.
     func installedManifest(_ appName: String) -> URL? {
-        guard let data = try? Data(contentsOf: configDir.appending(path: "installed.json")),
-              let all = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let entry = all[appName] as? [String: Any] else { return nil }
+        guard let entry = rawInstallRecords()?[appName] as? [String: Any] else { return nil }
         return Self.manifestNames(appName, entry: entry)
             .map { configDir.appending(path: "manifests/\($0)") }
             .first { FileManager.default.fileExists(atPath: $0.path) }
