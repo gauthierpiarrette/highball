@@ -45,8 +45,8 @@ public enum MacSteam {
                 // Resolved first, as SteamLibrary.games does: a symlinked steamapps lists as nothing.
                 ((try? FileManager.default.contentsOfDirectory(at: dir.resolvingSymlinksInPath(), includingPropertiesForKeys: nil)) ?? [])
                     .filter { $0.lastPathComponent.hasPrefix("appmanifest_") && $0.pathExtension == "acf" }
+                    .compactMap { SteamLibrary.parseManifest($0, libraryRoot: dir.deletingLastPathComponent()) }
             }
-            .compactMap { SteamLibrary.parseManifest($0) }
             // A manifest the Windows client wrote is that client's game, not a Mac install (a shared
             // library folder lists both).
             .filter { $0.isReady && !$0.installedByWindowsSteam && $0.appid != 228980 && seen.insert($0.appid).inserted }

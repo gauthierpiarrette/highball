@@ -243,14 +243,14 @@ extension GOGStore {
             let found = (try? fm.contentsOfDirectory(at: root.resolvingSymlinksInPath(), includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
             for entry in found where (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
                 let folder = root.appending(path: entry.lastPathComponent, directoryHint: .isDirectory)
-                if fm.fileExists(atPath: folder.appending(path: ".gogdl-resume").path) { continue }
                 if let game = installedGame(in: folder) { games.append(game) }
             }
         }
         return games
     }
 
-    static func installedGame(in folder: URL) -> InstalledGame? {
+    public static func installedGame(in folder: URL) -> InstalledGame? {
+        guard !FileManager.default.fileExists(atPath: folder.appending(path: ".gogdl-resume").path) else { return nil }
         let files = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.lastPathComponent.hasPrefix("goggame-") && $0.pathExtension == "info" }
         let infos = files.compactMap { try? JSONDecoder().decode(InfoFile.self, from: Data(contentsOf: $0)) }

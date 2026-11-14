@@ -84,7 +84,11 @@ final class MacSteamBuildTests: XCTestCase {
                        "the Windows client's Forza is left out, a Mac path or no path counts as before")
         let forza = try XCTUnwrap(SteamLibrary.parseManifest(dir.appending(path: "appmanifest_2483190.acf")))
         XCTAssertTrue(forza.installedByWindowsSteam)
-        XCTAssertFalse(try XCTUnwrap(SteamLibrary.parseManifest(dir.appending(path: "appmanifest_588650.acf"))).installedByWindowsSteam)
+        let deadCells = try XCTUnwrap(MacSteam.installedGames(root: root).first { $0.appid == 588650 })
+        XCTAssertTrue(SteamLibrary.installRecordIsReady(deadCells))
+        try #""AppState" { "appid" "588650" "name" "Dead Cells" "StateFlags" "4" "installdir" "Dead Cells" "LauncherPath" "C:\Steam\steam.exe" }"#
+            .write(to: dir.appending(path: "appmanifest_588650.acf"), atomically: true, encoding: .utf8)
+        XCTAssertFalse(SteamLibrary.installRecordIsReady(deadCells), "a replaced Windows record cannot launch the Mac build")
     }
 
     func testNoSteamForMacIsNothingInstalled() {
