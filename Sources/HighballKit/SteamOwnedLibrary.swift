@@ -112,6 +112,8 @@ public enum SteamAppInfo {
         public var osextended: String? = nil
         /// The `osarch` of each macOS launch entry under `config.launch`, "" for one naming none.
         public var macLaunchArchs: [String] = []
+        /// Windows executable paths declared by Steam under config.launch.
+        public var windowsLaunchExecutables: [String] = []
         /// The app's depots: the pieces Steam downloads, with their sizes (SteamDownloadSize).
         public var depots: [Depot] = []
         /// `ufs.quota`: the room the game has in Steam Cloud, 0 for a game Steam Cloud does not keep.
@@ -169,7 +171,15 @@ public enum SteamAppInfo {
             let root = try r.object(strings)
             let info = root["appinfo"]?.object ?? root
             let common = info["common"]?.object
-            let macArchs = (info["config"]?.object?["launch"]?.object ?? [:]).values
+            let launch = (info["config"]?.object?["launch"]?.object ?? [:]).values
+            let windowsExecutables = launch.compactMap { node -> String? in
+                guard let entry = node.object, let exe = entry["executable"]?.string,
+                      exe.lowercased().hasSuffix(".exe") else { return nil }
+                let platforms = (entry["config"]?.object?["oslist"]?.string ?? "")
+                    .lowercased().split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                return platforms.isEmpty || platforms.contains("windows") ? exe : nil
+            }.sorted()
+            let macArchs = launch
                 .compactMap { $0.object?["config"]?.object }
                 .filter { ($0["oslist"]?.string ?? "").lowercased().contains("macos") }
                 .map { $0["osarch"]?.string ?? "" }.sorted()
@@ -183,7 +193,8 @@ public enum SteamAppInfo {
                                  size: Int64(manifest?["size"]?.string ?? "") ?? 0, download: Int64(manifest?["download"]?.string ?? "") ?? 0)
             }.sorted { $0.id < $1.id }
             apps[appid] = App(name: common?["name"]?.string, type: common?["type"]?.string, oslist: common?["oslist"]?.string,
-                              osextended: common?["osextended"]?.string, macLaunchArchs: macArchs, depots: depots,
+                              osextended: common?["osextended"]?.string, macLaunchArchs: macArchs,
+                              windowsLaunchExecutables: windowsExecutables, depots: depots,
                               steamCloudQuota: Int64(info["ufs"]?.object?["quota"]?.string ?? "") ?? 0)
         }
         return apps

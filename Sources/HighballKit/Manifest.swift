@@ -105,6 +105,8 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
     /// black, while the Wine 10 engine's Steam never touches Direct3D 11, so the engine asks for
     /// CommandLineAppend = --disable-gpu (patch 0006), the software path (highball#202, 2026-09-26).
     public var appDefaults: [String: [String: String]]?
+    /// This engine can start a mapped Windows executable in its own macOS app bundle.
+    public var nativeGameIdentity: Bool?
     public var components: [String: Component]
     public var baseEnv: [String: String]?
     /// License ids that gate optional renderers (e.g. `apple-gptk-license-2023-08-17` → d3dmetal).

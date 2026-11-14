@@ -3277,6 +3277,8 @@ final class AppState {
             let runner = WineRunner(paths: paths, engine: engine, bottle: bottle)
             await adoptRuntimesInstalledByGames(in: bottle, engine: engine)
             await removeMacMetadataFiles(from: folder, of: game.name)
+            do { try SteamGameIdentity.prepare(game, in: bottle, engine: engine) }
+            catch { await MainActor.run { self.appendLog("Could not prepare the macOS identity for \(game.name): \(error.localizedDescription)") } }
             // A running client would serve the launch with its own environment; when that is
             // not the game's, cold-start first: never under a running game, Steam's or not.
             // A kept client is said out loud, in the activity log and in the launch log's header:

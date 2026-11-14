@@ -12,13 +12,14 @@ final class SteamOwnedLibraryTests: XCTestCase {
         var osextended: String? = nil
         /// Launch entries under config.launch, each with its oslist and optional osarch.
         var launch: [(oslist: String, osarch: String?)] = []
+        var executables: [String] = []
     }
 
     private func le<T: FixedWidthInteger>(_ v: T) -> [UInt8] { withUnsafeBytes(of: v.littleEndian) { Array($0) } }
 
     /// Builds a v29 file (keys as indexes into a trailing string table) or a v28 one (inline keys).
     private func appinfo(_ apps: [App], v29: Bool = true) -> Data {
-        let keys = ["appinfo", "Common", "name", "type", "oslist", "appid", "osextended", "config", "launch", "osarch", "0", "1", "2"]
+        let keys = ["appinfo", "Common", "name", "type", "oslist", "appid", "osextended", "config", "launch", "osarch", "0", "1", "2", "executable"]
         func key(_ k: String) -> [UInt8] { v29 ? le(UInt32(keys.firstIndex(of: k)!)) : Array(k.utf8) + [0] }
         func str(_ k: String, _ v: String) -> [UInt8] { [0x01] + key(k) + Array(v.utf8) + [0] }
         func int(_ k: String, _ v: UInt32) -> [UInt8] { [0x02] + key(k) + le(v) }
@@ -32,7 +33,8 @@ final class SteamOwnedLibraryTests: XCTestCase {
             var info = int("appid", app.appid) + obj("Common", common)
             if !app.launch.isEmpty {
                 let entries = app.launch.enumerated().flatMap { i, l in
-                    obj(String(i), obj("config", str("oslist", l.oslist) + (l.osarch.map { str("osarch", $0) } ?? [])))
+                    let exe = i < app.executables.count ? str("executable", app.executables[i]) : []
+                    return obj(String(i), exe + obj("config", str("oslist", l.oslist) + (l.osarch.map { str("osarch", $0) } ?? [])))
                 }
                 info += obj("config", obj("launch", entries))
             }
@@ -101,6 +103,25 @@ final class SteamOwnedLibraryTests: XCTestCase {
     func testReadsV28InlineKeys() throws {
         let parsed = try SteamAppInfo.parse(appinfo(apps, v29: false))
         XCTAssertEqual(parsed[1145361]?.type, "Music")
+    }
+
+    func testIdentityUsesSteamWindowsExecutableInsideTheInstall() throws {
+        let info = try SteamAppInfo.parse(appinfo([
+            App(appid: 1, name: "Title", type: "game",
+                launch: [("windows", nil), ("linux", nil), ("", nil)],
+                executables: ["folder\\Title.exe", "linux.exe", "../out.exe"])
+        ]))
+        let names = try XCTUnwrap(info[1]?.windowsLaunchExecutables)
+        XCTAssertEqual(names, ["../out.exe", "folder\\Title.exe"])
+
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let game = root.appending(path: "game")
+        let exe = game.appending(path: "folder/Title.exe")
+        try FileManager.default.createDirectory(at: exe.deletingLastPathComponent(), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data().write(to: exe)
+        try Data().write(to: root.appending(path: "out.exe"))
+        XCTAssertEqual(SteamGameIdentity.launchPaths(names, in: game), [exe.resolvingSymlinksInPath().path])
     }
 
     func testOnlySkipsTheRest() throws {
