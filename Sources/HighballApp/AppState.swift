@@ -243,7 +243,7 @@ final class AppState {
         autoUpdateTried = true
         let prefixes = bottles.map(\.url)
         Task { [weak self] in
-            let steamUp = await Task.detached { prefixes.contains { WineRunner.steamIsRunning(inPrefix: $0) } }.value
+            let steamUp = await Task.detached { !WineRunner.runningSteamPrefixes(in: prefixes).isEmpty }.value
             await MainActor.run {
                 guard let self else { return }
                 if steamUp { self.appendLog("engine \(update.id) is ready; it applies itself once Steam is closed"); self.autoUpdateTried = false; return }
@@ -2691,7 +2691,8 @@ final class AppState {
             while !Task.isCancelled {
                 guard let self else { return }
                 let bottles = await MainActor.run { [self] in self.bottles }
-                let running = Set(bottles.filter { WineRunner.steamIsRunning(inPrefix: $0.url) }.map(\.name))
+                let prefixes = WineRunner.runningSteamPrefixes(in: bottles.map(\.url))
+                let running = Set(bottles.filter { prefixes.contains($0.url) }.map(\.name))
                 await MainActor.run { [self] in if self.steamClients != running { self.steamClients = running } }
                 // A first start that deadlocked after its bootstrap (issue #9) is restarted once.
                 for bottle in bottles where running.contains(bottle.name) {
