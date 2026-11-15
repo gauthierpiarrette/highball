@@ -1,0 +1,150 @@
+{
+  "$schema": "https://highball.app/schemas/engine-manifest/v0",
+  "arch": "x86_64",
+  "baseEnv": {
+    "DYLD_FALLBACK_FRAMEWORK_PATH": "${frameworks}",
+    "DYLD_FALLBACK_LIBRARY_PATH": "${frameworks}:${frameworks}/GStreamer.framework/Versions/1.0/lib",
+    "GST_PLUGIN_PATH": "${frameworks}/GStreamer.framework/Versions/1.0/lib/gstreamer-1.0",
+    "WINEDEBUG": "fixme-all",
+    "DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN": "1",
+    "AOELAB_SIDECAR_PATH": "${frameworks}/aoe4/x87sidecar",
+    "AOE4_PROFILE_DIR": "${frameworks}/aoe4/profiles",
+    "AOELAB_SOFTFAULT_GAME": "1",
+    "AOELAB_CODE_CACHE_GAME": "1",
+    "AOELAB_COUNTERS_DIR": "${environment}/aoe4-counters"
+  },
+  "components": {
+    "d3dmetal-tsshim": {
+      "extract": {
+        "into": "renderers/d3dmetal-tsshim/wine",
+        "subpath": "renderers/d3dmetal-tsshim/wine"
+      },
+      "kind": "renderer",
+      "layout": [
+        "x86_64-windows/d3d12.dll"
+      ],
+      "license": "MIT",
+      "note": "A d3d12.dll in front of D3DMetal's that serves DirectX 12 timestamp queries (D3DMetal 3.0 resolves them to zero at a reported 60 Hz). Exports carry Microsoft's d3d12 ordinals (D3D12CreateDevice at 101), which D3DMetal mirrors, so games that bind d3d12 imports by ordinal load through it. Kill switch HB_D3D12_TSSHIM=0 idles the patches; the DLL stays in front. HB_TSSHIM_ATOMIC64=1 in a game's variables answers yes to OPTIONS11's 64-bit atomics on descriptor heap resources, which D3DMetal 3 answers no to and Capcom's RE Engine requires (opt-in, for a game's fix to set). Source: spike/tsshim, Scripts/build-tsshim.sh.",
+      "order": 1,
+      "sha256": "5906fd46813e0cbe5e59909f77fd86344768ea8c07babe60cf4d8bbad1d0d00a",
+      "size": 50532,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/d3dmetal-tsshim-20261014/d3dmetal-tsshim-20261014.tar.xz",
+      "version": "20261014"
+    },
+    "dxmt": {
+      "extract": {
+        "into": "renderers/dxmt/wine",
+        "subpath": "highball"
+      },
+      "kind": "renderer",
+      "license": "MIT (Highball branch of DXMT: SwapDeviceContextState, cross-process opt-in)",
+      "sha256": "96feaf5d98d3c6cdc3edea9503e2891d435df8d5bfdf7d3f6998a56ec62bbd58",
+      "size": 18923969,
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/dxmt-highball-20260930T161516Z-a444716/dxmt-highball-20260930T161516Z-a444716.tar.gz",
+      "note": "DXMT from Highball's fork (gauthierpiarrette/dxmt, branch highball-20260928 at 5c50790): upstream main of 2026-09-16 (v0.80 plus five months of upstream work, among it keyed-mutex and shared-resource support and DXGI functions Steam's overlay can hook) plus four Highball changes: cross-process swapchains behind DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN (off by default), SwapDeviceContextState implemented instead of aborting, 2D textures answering IDXGISurface, and the one that matters on this Wine: a shared texture with no D3DKMT device behind it is created as a private one, with one error line, instead of failing the game. On this Wine the driver assigns GPU LUIDs of its own, so DXMT's lookup of its adapter fails (the build also tries the primary display's name, which fails here too) and there is never a D3DKMT device; before this build every shared texture then died at creation. This revision's DXMT is that branch plus a444716 (branch highball-20260930): the encoding context's Metal device is declared before the command helpers whose constructors build pipelines through it. Declared after them it was still uninitialised memory there, and a game could die at start in newComputePipelineStateWithDescriptor sent to a garbage object: Among Us's 64-bit build did in 8 of 12 launches on r13, and in none of 12 with this build. The bug is in upstream DXMT too."
+    },
+    "moltenvk": {
+      "extract": {
+        "into": "frameworks/libMoltenVK.dylib",
+        "subpath": "libMoltenVK.dylib"
+      },
+      "kind": "runtime",
+      "license": "Apache-2.0",
+      "note": "MoltenVK 1.4.2 rebuilt with three Highball patches (spike/patches/moltenvk-shadow-import.patch, moltenvk-linear-fallback.patch and moltenvk-shadow-readback.patch, Scripts/build-moltenvk.sh). Shadow import is off unless a launch sets MVK_SHADOW_IMPORT=1 (32-bit native-Vulkan games such as The Sims Legacy Collection). Linear fallback is always on: a linear-tiled image that Metal cannot back with linear memory (3D, mipmapped or array images) is created with optimal tiling instead of failing vkCreateImage, which is what takes Red Dead Redemption 2 from an exit at 98 per cent to the main menu and the story. Shadow readback (highball#283) copies what the GPU writes into shadowed memory back to the game's pages when a submission completes, so a 32-bit game's readbacks under MVK_SHADOW_IMPORT=1 stop being stale (The Sims' thumbnails); without the variable it does nothing. Since r30 and r31 also: device-memory-cap (HB_MVK_DEVICE_MEMORY_PERCENT caps the heap and its budget, highball#398) and two changes from DiAvisoo's MoltenVK-Detroit (cache-drawid-present, lenient-interfaces, highball#125), CI build run 41367170976.",
+      "order": 1,
+      "sha256": "662d7c064ad51bbb20b96b3f13415462cfa89a2deb8a57cf651d068bbfbcdf69",
+      "size": 1736604,
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/moltenvk-1.4.2-shadow-import-1-linear-fallback-1-shadow-readback-1-device-memory-cap-1-cache-drawid-present-1-lenient-interfaces-1-x86_64.tar.gz",
+      "version": "1.4.2+shadow-import-1+linear-fallback-1+shadow-readback-1+device-memory-cap-1+cache-drawid-present-1+lenient-interfaces-1"
+    },
+    "runtime": {
+      "extract": {
+        "into": "frameworks",
+        "subpath": "Template-1.0.11.app/Contents/Frameworks"
+      },
+      "kind": "frameworks",
+      "license": "mixed (LGPL-2.1 GStreamer, Apache-2.0 MoltenVK, LGPL gnutls, ...)",
+      "sha256": "9fa15479e7ff6abd99c1d07be285fb95f41fc6991586502427152b1f7d6ccb8a",
+      "size": 84533420,
+      "url": "https://github.com/Sikarugir-App/Template/releases/download/v1.0/Template-1.0.11.tar.xz"
+    },
+    "wine": {
+      "kind": "engine",
+      "url": "https://github.com/himbeles/highball-engine-aoe4/releases/download/aoe4-r1/engine-wine-11.0-aoe4-r1.tar.gz",
+      "sha256": "a39c7ca64a0873742bbdc86acfdf9b9a1cb06dc3d85a75d35163ba4db27ce44a",
+      "size": 336683234,
+      "license": "LGPL-2.1-or-later",
+      "extract": {
+        "into": "engine",
+        "subpath": "engine"
+      }
+    },
+    "winetricks": {
+      "kind": "tool",
+      "license": "LGPL-2.1",
+      "note": "Pinned to upstream commit 5a59ea07 (20260125+dev, 2026-08-07) — the exact bytes 0.7.x verified with dotnet48. The old branch URL drifted and broke every fresh engine install (issues #27/#28); URLs here must be immutable.",
+      "sha256": "f35c29737ca08a583569e6a3752d52fbe23333c5acfad5f16c4177d25eaf3f4b",
+      "url": "https://raw.githubusercontent.com/Winetricks/winetricks/5a59ea07513b24093bd90fad943ecf9543cf05bc/src/winetricks"
+    },
+    "nvapi-stub": {
+      "extract": {
+        "into": "engine/lib/wine/i386-windows/nvapi.dll",
+        "subpath": "nvapi.dll"
+      },
+      "kind": "runtime",
+      "license": "MIT (Highball)",
+      "order": 1,
+      "note": "A 32-bit nvapi.dll stub (spike/nvapi-stub, 40 lines of C) placed in the engine's i386 DLL directory with Wine's builtin marker. Games that see an NVIDIA adapter insist on NVIDIA's driver library and load it from the system directory only, so a stub beside the game does nothing; this one answers NvAPI_Initialize with OK and everything else with 'not implemented'. It only matters for a bottle or application given an NVIDIA identity (Highball's default is AMD), which is what lets legacy CS:GO pass its shadow-map check on wined3d.",
+      "sha256": "cbda8aeee87e84ecf98c06759d2123b073dc99a7aa1c639480fade33383d18a2",
+      "size": 1759,
+      "url": "https://github.com/gauthierpiarrette/highball/releases/download/engine-components/nvapi-stub-2-i386.tar.gz",
+      "version": "2",
+      "refreshesPrefix": true
+    },
+    "audiobuf": {
+      "kind": "runtime",
+      "url": "https://github.com/gauthierpiarrette/highball-engine/releases/download/audiobuf-20261103/audiobuf-20261103.tar.xz",
+      "sha256": "617b8feb3651227c9c27419e4dc58835e8ca471ef7ce3b13b0ddaea7c067454f",
+      "size": 8124,
+      "license": "MIT (Highball's own, source spike/audiobuf/audiobuf.c)",
+      "version": "20261103",
+      "order": 1,
+      "extract": {
+        "subpath": "libhbaudiobuf.dylib",
+        "into": "frameworks/libhbaudiobuf.dylib"
+      },
+      "note": "Highball's audio library, built by Scripts/build-audiobuf.sh. Bottle.environment inserts it into Wine's processes with DYLD_INSERT_LIBRARIES. It caps an output audio unit's I/O buffer at 5 ms before Wine starts it, so a game that keeps one 10 ms period queued no longer drops audio at 48 kHz (highball#127), and it limits float output like the last stage of Windows' audio engine, so a game whose mix goes over full scale is turned down instead of clipped at the speakers (highball-db#349). HB_AUDIOBUF=0 in an environment's variables leaves the library out, HB_AUDIOLIMIT=0 keeps it without the limiter."
+    },
+    "aoe4-helper": {
+      "kind": "runtime",
+      "order": 1,
+      "url": "https://github.com/himbeles/highball-engine-aoe4/releases/download/aoe4-r1/aoe4-helper.tar.gz",
+      "sha256": "41dfe64f299303c6224cea79a99a28aaec52c230f7a7336c6e3dda0bde46d380",
+      "size": 195478,
+      "license": "MIT",
+      "extract": {
+        "into": "frameworks/aoe4",
+        "subpath": "aoe4"
+      }
+    }
+  },
+  "displayName": "Wine 11 — AoE IV r1",
+  "id": "x64-crossover26.3-aoe4-r1",
+  "licenses": {
+    "apple-gptk-license-2023-08-17": {
+      "applies": [
+        "renderers/d3dmetal (bundled in the Sikarugir Template: D3DMetal.framework sha1 1405e5c6… identical to GPTK 3.0-3)"
+      ],
+      "summary": "Apple Game Porting Toolkit license: non-commercial use/distribution only; no modification; use scoped to developing, testing or evaluating games on Apple hardware.",
+      "text": "spike/d3dmetal-license.txt"
+    }
+  },
+  "minMacOS": "26.0",
+  "notes": [
+    "Age of Empires IV engine for Rosetta. Uses measured profiles and validates automatically discovered code rings on compatible game updates."
+  ],
+  "requires": [
+    "rosetta2"
+  ],
+  "direct3D9": "wined3d"
+}
