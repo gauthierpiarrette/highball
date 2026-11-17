@@ -108,6 +108,10 @@ public enum SteamRestart {
         if live["ROSETTA_X87_PATH"] != wanted["ROSETTA_X87_PATH"] {
             reasons.append("it runs with the x87 sidecar \(live["ROSETTA_X87_PATH"] == nil ? "off" : "on") and the game wants it \(wanted["ROSETTA_X87_PATH"] == nil ? "off" : "on")")
         }
+        // Steam children inherit the AoE helper path just like the standard x87 helper path.
+        if live["AOE4_SIDECAR_PATH"] != wanted["AOE4_SIDECAR_PATH"] {
+            reasons.append("it runs with the AoE IV helper \(live["AOE4_SIDECAR_PATH"] == nil ? "off" : "on") and the game wants it \(wanted["AOE4_SIDECAR_PATH"] == nil ? "off" : "on")")
+        }
         // Frame generation is a family of LSFGM_ variables the shim reads when the game starts,
         // so a toggle flipped while the client runs would otherwise leave the game where the
         // client was (highball#109 follow-up). Any difference in the family restarts the client.

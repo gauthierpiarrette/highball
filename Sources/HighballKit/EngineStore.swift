@@ -646,6 +646,11 @@ public struct InstalledEngine: Sendable {
         let tool = root.appending(path: "x87sidecar/x87sidecar")
         return FileManager.default.isExecutableFile(atPath: tool.path) ? tool : nil
     }
+    /// AoE IV's decoder helper, installed as a separate engine component.
+    public var aoe4Sidecar: URL? {
+        let tool = root.appending(path: "x87sidecar-aoe4/x87sidecar")
+        return FileManager.default.isExecutableFile(atPath: tool.path) ? tool : nil
+    }
     public var renderersDir: URL { root.appending(path: "renderers", directoryHint: .isDirectory) }
     public var wineBinary: URL { engineDir.appending(path: "bin/wine") }
     public var wineserverBinary: URL { engineDir.appending(path: "bin/wineserver") }

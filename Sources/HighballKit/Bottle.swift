@@ -931,6 +931,11 @@ public struct Bottle: Sendable {
         if env["HB_X87SIDECAR"] == "1", engine.manifest.requiresRosetta, let sidecar = engine.x87Sidecar {
             env["ROSETTA_X87_PATH"] = sidecar.path
         }
+        // AoE IV uses its own sidecar component; the Wine patch verifies the game before attaching it.
+        env.removeValue(forKey: "AOE4_SIDECAR_PATH")
+        if env["HB_AOE4"] == "1", engine.manifest.requiresRosetta, let sidecar = engine.aoe4Sidecar {
+            env["AOE4_SIDECAR_PATH"] = sidecar.path
+        }
         // A recipe's value can depend on this Mac (a video memory budget from its memory), and an engine's or a recipe's
         // on this environment (a driver's shader cache kept inside it, and gone with it).
         return env.mapValues { MacVariables.expand($0).replacingOccurrences(of: "${environment}", with: url.path) }
