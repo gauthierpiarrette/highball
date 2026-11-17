@@ -177,30 +177,6 @@ final class RendererAvailabilityTests: XCTestCase {
         XCTAssertNil(try stale.environment(engine: e)["ROSETTA_X87_PATH"], "only the switch sets it")
     }
 
-    func testAoEHelperRequiresOptInAndItsOwnExecutableComponent() throws {
-        let e = try engine(accepted: false)
-        var asks = bottle(renderer: .dxmt)
-        asks.settings.environment = ["HB_AOE4": "1", "AOE4_SIDECAR_PATH": "/stale/helper"]
-        XCTAssertNil(try asks.environment(engine: e)["AOE4_SIDECAR_PATH"])
-        let standard = e.root.appending(path: "x87sidecar/x87sidecar")
-        try FileManager.default.createDirectory(at: standard.deletingLastPathComponent(), withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: standard.path, contents: Data(), attributes: [.posixPermissions: 0o755])
-        XCTAssertNil(try asks.environment(engine: e)["AOE4_SIDECAR_PATH"], "the standard helper cannot replace the AoE decoder")
-        let tool = e.root.appending(path: "x87sidecar-aoe4/x87sidecar")
-        try FileManager.default.createDirectory(at: tool.deletingLastPathComponent(), withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: tool.path, contents: Data(), attributes: [.posixPermissions: 0o644])
-        XCTAssertNil(try asks.environment(engine: e)["AOE4_SIDECAR_PATH"], "component must be executable")
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
-        XCTAssertEqual(try asks.environment(engine: e)["AOE4_SIDECAR_PATH"], tool.path)
-        XCTAssertNil(try asks.environment(engine: e)["ROSETTA_X87_PATH"])
-        XCTAssertNil(try bottle(renderer: .dxmt).environment(engine: e)["AOE4_SIDECAR_PATH"], "no game opt-in")
-        var nativeManifest = e.manifest
-        nativeManifest.arch = "arm64"
-        nativeManifest.requires = []
-        let native = InstalledEngine(manifest: nativeManifest, root: e.root)
-        XCTAssertNil(try asks.environment(engine: native)["AOE4_SIDECAR_PATH"], "only Rosetta engines")
-    }
-
     func testEnvironmentFollowsTheDegradedRendererInsteadOfThrowing() throws {
         let e = try engine(accepted: false)
         let env = try bottle(renderer: .d3dmetal).environment(engine: e)

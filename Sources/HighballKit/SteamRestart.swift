@@ -13,7 +13,8 @@ public enum SteamRestart {
     /// and the inherited per-process toggles matter; everything else in the environment is per-launch noise.
     /// Per-process settings the game inherits from the client and cannot change afterwards.
     static let inherited: [(String, String)] = [("ROSETTA_ADVERTISE_AVX", "AVX advertised"), ("MTL_HUD_ENABLED", "the Metal HUD"),
-                                                ("CX_FWD_COMPAT_GL_CTX", "forward-compatible OpenGL contexts")]
+                                                ("CX_FWD_COMPAT_GL_CTX", "forward-compatible OpenGL contexts"),
+                                                ("HB_AOE4", "the AoE IV fix")]
 
     /// The mode Steam's own window starts in, when it is not the one the shortcut would give it.
     /// Steam's browser helpers cannot present under D3DMetal: its windows exist and stay black
@@ -107,10 +108,6 @@ public enum SteamRestart {
         // inherits the variable from the client.
         if live["ROSETTA_X87_PATH"] != wanted["ROSETTA_X87_PATH"] {
             reasons.append("it runs with the x87 sidecar \(live["ROSETTA_X87_PATH"] == nil ? "off" : "on") and the game wants it \(wanted["ROSETTA_X87_PATH"] == nil ? "off" : "on")")
-        }
-        // Steam children inherit the AoE helper path just like the standard x87 helper path.
-        if live["AOE4_SIDECAR_PATH"] != wanted["AOE4_SIDECAR_PATH"] {
-            reasons.append("it runs with the AoE IV helper \(live["AOE4_SIDECAR_PATH"] == nil ? "off" : "on") and the game wants it \(wanted["AOE4_SIDECAR_PATH"] == nil ? "off" : "on")")
         }
         // Frame generation is a family of LSFGM_ variables the shim reads when the game starts,
         // so a toggle flipped while the client runs would otherwise leave the game where the

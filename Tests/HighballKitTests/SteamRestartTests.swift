@@ -138,14 +138,13 @@ final class SteamRestartTests: XCTestCase {
         XCTAssertNil(SteamRestart.reason(live: wanted, wanted: wanted, wantedRenderer: "dxmt"))
     }
 
-    func testAoEHelperChangesRestartSteamBeforeLaunchingTheGame() {
+    func testSteamRestartsWhenTheAoEOptInChanges() {
         let base = ["WINEDLLPATH_PREPEND": "/e/dxmt", "WINEMSYNC": "1"]
-        var wanted = base; wanted["AOE4_SIDECAR_PATH"] = "/e/x87sidecar-aoe4/x87sidecar"
-        XCTAssertNotNil(SteamRestart.reason(live: base, wanted: wanted, wantedRenderer: "dxmt"))
-        XCTAssertNotNil(SteamRestart.reason(live: wanted, wanted: base, wantedRenderer: "dxmt"))
-        XCTAssertNil(SteamRestart.reason(live: wanted, wanted: wanted, wantedRenderer: "dxmt"))
-        var changed = wanted; changed["AOE4_SIDECAR_PATH"] = "/new/x87sidecar-aoe4/x87sidecar"
-        XCTAssertNotNil(SteamRestart.reason(live: wanted, wanted: changed, wantedRenderer: "dxmt"))
+        var enabled = base
+        enabled["HB_AOE4"] = "1"
+        XCTAssertNotNil(SteamRestart.reason(live: base, wanted: enabled, wantedRenderer: "dxmt"))
+        XCTAssertNotNil(SteamRestart.reason(live: enabled, wanted: base, wantedRenderer: "dxmt"))
+        XCTAssertNil(SteamRestart.reason(live: enabled, wanted: enabled, wantedRenderer: "dxmt"))
     }
 
     /// The audio buffer library loads when a process starts and the game inherits it from the

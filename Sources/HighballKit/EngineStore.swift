@@ -646,11 +646,6 @@ public struct InstalledEngine: Sendable {
         let tool = root.appending(path: "x87sidecar/x87sidecar")
         return FileManager.default.isExecutableFile(atPath: tool.path) ? tool : nil
     }
-    /// AoE IV's decoder helper, installed as a separate engine component.
-    public var aoe4Sidecar: URL? {
-        let tool = root.appending(path: "x87sidecar-aoe4/x87sidecar")
-        return FileManager.default.isExecutableFile(atPath: tool.path) ? tool : nil
-    }
     public var renderersDir: URL { root.appending(path: "renderers", directoryHint: .isDirectory) }
     public var wineBinary: URL { engineDir.appending(path: "bin/wine") }
     public var wineserverBinary: URL { engineDir.appending(path: "bin/wineserver") }
@@ -679,6 +674,9 @@ public struct InstalledEngine: Sendable {
     /// Which of `requiredFiles` are absent, relative to the engine's root.
     public var missingFiles: [String] {
         var missing = Self.requiredFiles(for: manifest).filter { !FileManager.default.fileExists(atPath: root.appending(path: $0).path) }
+        if let helper = manifest.components["x87sidecar"], !helper.isOptional, x87Sidecar == nil {
+            missing.append("x87sidecar/x87sidecar")
+        }
         if manifest.isNativeARM64, !usesSignedLoader { missing.append(Self.signedLoaderName) }
         return missing
     }
