@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Whether a running Steam client can serve a launch, or has to be cold-started first.
@@ -13,8 +14,7 @@ public enum SteamRestart {
     /// and the inherited per-process toggles matter; everything else in the environment is per-launch noise.
     /// Per-process settings the game inherits from the client and cannot change afterwards.
     static let inherited: [(String, String)] = [("ROSETTA_ADVERTISE_AVX", "AVX advertised"), ("MTL_HUD_ENABLED", "the Metal HUD"),
-                                                ("CX_FWD_COMPAT_GL_CTX", "forward-compatible OpenGL contexts"),
-                                                ("HB_AOE4", "the AoE IV fix")]
+                                                ("CX_FWD_COMPAT_GL_CTX", "forward-compatible OpenGL contexts")]
 
     /// The mode Steam's own window starts in, when it is not the one the shortcut would give it.
     /// Steam's browser helpers cannot present under D3DMetal: its windows exist and stay black
@@ -83,6 +83,22 @@ public enum SteamRestart {
         }
         for name in ["d3dmetal", "dxmt", "vkd3d", "dxvk"] where dirs.contains(name) { return name }
         return "wined3d"
+    }
+
+    // Steam forwards game launches to its existing process. Record what Highball supplied
+    // before merging the host environment, so a setting removed since startup is visible too.
+    static let environmentIDKey = "HIGHBALL_STEAM_ENV_SHA256"
+
+    static func environmentID(_ environment: [String: String]) -> String {
+        // Environment entries cannot contain NUL. Sorting makes the digest independent of insertion order.
+        let entries = environment.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: "\0")
+        return Data(SHA256.hash(data: Data(entries.utf8))).base64EncodedString()
+    }
+
+    static func clientReason(live: [String: String], wanted: [String: String], wantedRenderer: String, custom: [String]) -> String? {
+        if let why = reason(live: live, wanted: wanted, wantedRenderer: wantedRenderer, custom: custom) { return why }
+        guard let previous = live[environmentIDKey] else { return "its launch environment was not recorded" }
+        return previous == environmentID(wanted) ? nil : "its launch environment settings have changed"
     }
 
     /// `custom` names the variables the environment sets on its own, from its settings or a
@@ -187,7 +203,7 @@ extension WineRunner {
         let wanted = try bottle.environment(engine: engine, renderer: renderer, extra: extraEnvironment)
         // Every game's scoped variables count, not only this game's: a client started for the
         // Sims carries MVK_SHADOW_IMPORT=1, and the next game must not inherit it (highball#198).
-        guard let why = SteamRestart.reason(live: live, wanted: wanted,
+        guard let why = SteamRestart.clientReason(live: live, wanted: wanted,
                                             wantedRenderer: (renderer ?? bottle.settings.renderer).rawValue,
                                             custom: bottle.settings.customEnvironmentKeys + Array(extraEnvironment.keys)) else { return .serves }
         if !mayRestart || steamGameIsRunning() { return .kept(why, live: SteamRestart.rendererName(ofLive: live)) }
