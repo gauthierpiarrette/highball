@@ -355,7 +355,7 @@ enum L10n {
         "For a game that opens small, off-centre, or refuses its fullscreen mode. The Mac cannot switch its display for it, so Wine pretends and scales the picture instead. A fix from the database may have set this already.": "Pour un jeu qui s'ouvre en petit, décentré, ou refuse son mode plein écran. Le Mac ne peut pas changer l'affichage pour lui, alors Wine fait comme si et met l'image à l'échelle. Un correctif de la base de données l'a peut-être déjà activé.",
         "Main display": "Écran principal",
         "Disconnected display": "Écran déconnecté",
-        "Highball moves the game's window here after it opens. Works best for windowed and borderless games. Needs Accessibility permission for Highball.": "Highball déplace la fenêtre du jeu ici après son ouverture. Fonctionne mieux pour les jeux en fenêtre ou sans bordure. Nécessite l'autorisation Accessibilité pour Highball.",
+        "Highball moves the game's window here after it opens, for windowed and borderless games. A fullscreen game usually opens on the Mac's main display, which you choose in System Settings, Displays. Needs Accessibility permission for Highball.": "Highball déplace la fenêtre du jeu ici après son ouverture, pour les jeux en fenêtre ou sans bordure. Un jeu en plein écran s'ouvre en général sur l'écran principal du Mac, que vous choisissez dans Réglages Système, Moniteurs. Nécessite l'autorisation Accessibilité pour Highball.",
         "Environment's mode": "Mode de l'environnement",
         "Use %@ for this game": "Utiliser %@ pour ce jeu",
         "Try %@ for %@ next time?": "Essayer %@ pour %@ la prochaine fois ?",
