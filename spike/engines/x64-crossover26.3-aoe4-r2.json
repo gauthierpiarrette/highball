@@ -70,9 +70,9 @@
     },
     "wine": {
       "kind": "engine",
-      "url": "https://github.com/himbeles/highball-engine-aoe4/releases/download/aoe4-r1/engine-wine-11.0-aoe4-r1.tar.gz",
-      "sha256": "a39c7ca64a0873742bbdc86acfdf9b9a1cb06dc3d85a75d35163ba4db27ce44a",
-      "size": 336683234,
+      "url": "https://github.com/himbeles/highball-engine-aoe4/releases/download/aoe4-r2/engine-wine-11.0-aoe4-r2.tar.gz",
+      "sha256": "b1964fcdce3de55fae2aefc5cd0d98d969952a97e20d246fd666016060a1ccf0",
+      "size": 337119001,
       "license": "LGPL-2.1-or-later",
       "extract": {
         "into": "engine",
@@ -118,9 +118,9 @@
     "aoe4-helper": {
       "kind": "runtime",
       "order": 1,
-      "url": "https://github.com/himbeles/highball-engine-aoe4/releases/download/aoe4-r1/aoe4-helper.tar.gz",
-      "sha256": "41dfe64f299303c6224cea79a99a28aaec52c230f7a7336c6e3dda0bde46d380",
-      "size": 195478,
+      "url": "https://github.com/himbeles/highball-engine-aoe4/releases/download/aoe4-r2/aoe4-helper.tar.gz",
+      "sha256": "d78acf8fb1a101512d089ea9098ef75d27ea0e3fa967868a28762b55d5e5b1e1",
+      "size": 196032,
       "license": "MIT",
       "extract": {
         "into": "frameworks/aoe4",
@@ -128,8 +128,8 @@
       }
     }
   },
-  "displayName": "Wine 11 — AoE IV r1",
-  "id": "x64-crossover26.3-aoe4-r1",
+  "displayName": "Wine 11 — AoE IV r2",
+  "id": "x64-crossover26.3-aoe4-r2",
   "licenses": {
     "apple-gptk-license-2023-08-17": {
       "applies": [
