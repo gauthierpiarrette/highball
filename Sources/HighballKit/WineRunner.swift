@@ -696,6 +696,18 @@ public struct WineRunner: Sendable {
         return engineID + ":" + body
     }
 
+    /// The engine's defaults with `--in-process-gpu` appended to Steam's browser's command line.
+    /// Under D3DMetal on macOS 27 Chromium's separate GPU process dies on
+    /// `-[NSViewBackingLayer setDisplaySyncEnabled:]` and is restarted about once a minute, which
+    /// holds a Play and leaves Steam's windows and overlay black. In the browser's own process it
+    /// doesn't happen.
+    public static func appDefaults(engine defaults: [String: [String: String]]) -> [String: [String: String]] {
+        var defaults = defaults
+        let line = defaults["steamwebhelper.exe"]?["CommandLineAppend"]
+        defaults["steamwebhelper.exe", default: [:]]["CommandLineAppend"] = line.map { $0 + " --in-process-gpu" } ?? "--in-process-gpu"
+        return defaults
+    }
+
     /// Mirrors the engine's per-executable registry defaults (EngineManifest.appDefaults) into the
     /// prefix under HKCU\Software\Wine\AppDefaults\<exe>. Once per engine and value set: the marker
     /// in the settings records what was written, so a launch on the same engine costs nothing and
@@ -703,7 +715,7 @@ public struct WineRunner: Sendable {
     /// place: they name that engine's own switches (patch 0006's CommandLineAppend), which other
     /// trees ignore. On failure the marker stays stale so the next launch retries.
     public func syncEngineAppDefaults() async {
-        let defaults = engine.manifest.appDefaults ?? [:]
+        let defaults = Self.appDefaults(engine: engine.manifest.appDefaults ?? [:])
         let wanted = Self.appDefaultsMarker(engineID: engine.id, defaults: defaults)
         guard wanted != (bottle.settings.engineAppDefaultsSynced ?? "") else { return }
         var allAdded = true

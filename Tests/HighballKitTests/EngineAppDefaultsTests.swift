@@ -52,6 +52,12 @@ final class EngineAppDefaultsTests: XCTestCase {
         XCTAssertEqual(store.adoptKnownFacts(known: [known]), [], "a second pass changes nothing")
     }
 
+    func testSteamsBrowserDrawsInItsOwnProcess() {
+        XCTAssertEqual(WineRunner.appDefaults(engine: [:]), ["steamwebhelper.exe": ["CommandLineAppend": "--in-process-gpu"]])
+        XCTAssertEqual(WineRunner.appDefaults(engine: ["steamwebhelper.exe": ["CommandLineAppend": "--disable-gpu"], "a.exe": ["K": "v"]]),
+                       ["steamwebhelper.exe": ["CommandLineAppend": "--disable-gpu --in-process-gpu"], "a.exe": ["K": "v"]])
+    }
+
     func testSettingsKeepTheSyncMarker() throws {
         var s = BottleSettings(name: "t", engineID: "e")
         s.engineAppDefaultsSynced = "e:steamwebhelper.exe{CommandLineAppend=--disable-gpu}"
