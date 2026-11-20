@@ -10,6 +10,15 @@ func L(_ en: String) -> String {
 enum L10n {
     static let fr: [String: String] = [
         "Game settings": "Réglages du jeu",
+        "Shortcuts": "Raccourcis",
+        "Mac shortcut folder": "Dossier des raccourcis Mac",
+        "Choose folder…": "Choisir un dossier…",
+        "Use default folder": "Utiliser le dossier par défaut",
+        "New game and launcher shortcuts go here. Existing shortcuts stay where you put them.": "Les nouveaux raccourcis de jeux et de lanceurs sont créés ici. Les raccourcis existants restent en place.",
+        "Choose where Highball creates new Mac shortcuts.": "Choisissez où Highball crée les nouveaux raccourcis Mac.",
+        "Update the Mac app": "Mettre à jour l’app Mac",
+        "Moves this game's shortcut in the selected folder to the Trash.": "Place le raccourci de ce jeu dans la corbeille depuis le dossier sélectionné.",
+        "Creates a Mac app with this game's icon in the folder set in Highball → Settings → Shortcuts.": "Crée une app Mac avec l’icône du jeu dans le dossier choisi dans Highball → Réglages → Raccourcis.",
         "Keep the %@ fix you applied under Game settings": "Conserver le correctif %@ appliqué dans Réglages du jeu",
         "Leave the optional %@ fix alone; it is under Game settings for when the notes say your Mac needs it": "Laisser le correctif facultatif %@ désactivé ; il se trouve dans Réglages du jeu si les notes indiquent que votre Mac en a besoin",
         "About this game": "À propos de ce jeu",

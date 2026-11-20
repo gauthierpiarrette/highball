@@ -493,8 +493,8 @@ struct LibraryTile: View {
             if let appid = item.steamAppID, let running = state.session(forAppID: appid) {
                 Button(L("Stop")) { state.stopSession(running) }
             } else if playable { Button(L("Play")) { state.play(item) } }
-            if MacAppStub.existing(for: item.title) != nil {
-                Button(L("Remove the Mac app")) { state.removeMacApp(title: item.title) }
+            if state.hasMacApp(libraryID: item.id) {
+                Button(L("Remove the Mac app")) { state.removeMacApp(libraryID: item.id) }
             } else if playable, item.installed, PlayLink.target(for: item) != nil {
                 Button(L("Make a Mac app…")) { state.makeMacApp(for: item) }
             }

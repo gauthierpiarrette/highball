@@ -4,8 +4,8 @@ import HighballKit
 import Observation
 import os
 
-/// The three Settings tabs, so a deep link can select one.
-enum SettingsTab: Hashable { case environments, engine, troubleshooting }
+/// The Settings tabs, so a deep link can select one.
+enum SettingsTab: Hashable { case environments, engine, shortcuts, troubleshooting }
 
 /// A cloud-save conflict: this Mac's saves and the cloud's both changed since the last sync, so
 /// nothing moved and the player picks which copy wins (GOGSaves, EpicSaves).
@@ -2303,14 +2303,43 @@ final class AppState {
         }
     }
 
-    /// Writes the game's Mac app into ~/Applications/Highball and reveals it.
+    private static let shortcutFolderKey = "shortcutFolder"
+    var shortcutFolderPath = UserDefaults.standard.string(forKey: AppState.shortcutFolderKey) {
+        didSet { UserDefaults.standard.set(shortcutFolderPath, forKey: Self.shortcutFolderKey) }
+    }
+    var shortcutFolder: URL {
+        shortcutFolderPath.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? MacAppStub.folder()
+    }
+    private var shortcutRevision = 0
+
+    func chooseShortcutFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
+        panel.directoryURL = shortcutFolder
+        panel.prompt = L("Use this folder")
+        panel.message = L("Choose where Highball creates new Mac shortcuts.")
+        if panel.runModal() == .OK, let url = panel.url { shortcutFolderPath = url.path }
+    }
+
+    func hasMacApp(libraryID: String) -> Bool {
+        _ = shortcutRevision
+        return MacAppStub.existing(libraryID: libraryID, in: shortcutFolder) != nil
+    }
+
     func makeMacApp(for item: LibraryItem) {
         guard let target = PlayLink.target(for: item) else { return }
+        writeMacApp(title: item.title, target: target,
+                    cover: coverStore.coverURL(for: item.id) ?? item.artworkTall, icon: programIcon(for: item))
+    }
+
+    private func writeMacApp(title: String, target: PlayLink.Target, cover: URL?, icon: URL? = nil) {
         let url = PlayLink.url(for: target, token: PlayLink.token(in: paths))
-        let cover = coverStore.coverURL(for: item.id) ?? item.artworkTall
+        let application = Bundle.main.bundleURL
         do {
-            let app = try MacAppStub.write(title: item.title, libraryID: item.id, url: url, cover: cover, icon: programIcon(for: item))
-            appendLog("made \(app.lastPathComponent) in ~/Applications/Highball")
+            let app = try MacAppStub.write(title: title, libraryID: target.libraryID, url: url, cover: cover, icon: icon,
+                                           in: shortcutFolder, application: application.pathExtension == "app" ? application : nil)
+            shortcutRevision += 1
+            appendLog("made shortcut at \(app.path)")
             NSWorkspace.shared.activateFileViewerSelecting([app])
         } catch { fail(error) }
     }
@@ -2472,20 +2501,14 @@ final class AppState {
     /// A Mac app for a launcher (Steam, Epic, …) that opens it, installing it first if needed
     /// (issue #53). Highball's own icon stands in for a cover.
     func makeMacApp(forLauncher id: String, short: String) {
-        let url = PlayLink.url(for: .launcher(id: id), token: PlayLink.token(in: paths))
         let icon = Bundle.main.url(forResource: "AppIcon", withExtension: "png")
-        do {
-            let app = try MacAppStub.write(title: short, libraryID: "launcher:\(id)", url: url, cover: icon)
-            appendLog("made \(app.lastPathComponent) in ~/Applications/Highball")
-            NSWorkspace.shared.activateFileViewerSelecting([app])
-        } catch { fail(error) }
+        writeMacApp(title: short, target: .launcher(id: id), cover: icon)
     }
 
-    /// Trashes the Mac app for a game or a launcher (issue #97).
-    func removeMacApp(title: String) {
+    func removeMacApp(libraryID: String) {
         do {
-            try MacAppStub.remove(for: title)
-            appendLog("removed the Mac app for \(title) from ~/Applications/Highball")
+            try MacAppStub.remove(libraryID: libraryID, in: shortcutFolder)
+            shortcutRevision += 1
         } catch { fail(error) }
     }
 

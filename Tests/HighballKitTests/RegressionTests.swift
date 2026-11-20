@@ -1424,7 +1424,7 @@ extension RegressionTests {
         XCTAssertEqual(MacAppStub.appName(for: "Half-Life: Alyx"), "Half-Life Alyx")
         XCTAssertEqual(MacAppStub.appName(for: "  "), "Highball game")
         XCTAssertEqual(MacAppStub.bundleID(for: "steam:620"), "app.highball.stub.steam-620")
-        XCTAssertTrue(MacAppStub.launchScript(url: u).contains("/usr/bin/open -g \"highball://play/steam/620?t=abc\""), "stubs open the link without bringing Highball forward (issue #53)")
+        XCTAssertTrue(MacAppStub.launchScript(url: u).contains("/usr/bin/open -g 'highball://play/steam/620?t=abc'"), "stubs open the link without bringing Highball forward (issue #53)")
         XCTAssertTrue(MacAppStub.infoPlist(appName: "Portal 2", bundleID: "x").contains("<key>LSUIElement</key><true/>"), "no Dock icon of its own, no window")
     }
 
