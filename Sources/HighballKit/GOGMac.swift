@@ -121,8 +121,7 @@ extension GOGStore {
             let folders = (try? fm.contentsOfDirectory(at: base, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
             return folders.compactMap { folder in
                 guard !searched.contains(folder.standardizedFileURL.path),
-                      (try? folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
-                      !fm.fileExists(atPath: folder.appending(path: ".gogdl-resume").path) else { return nil }
+                      (try? folder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
                 guard var game = macInstalledGame(in: folder) else { return nil }
                 game.trashTarget = macTrashTarget(for: game, searched: bases)
                 return game
@@ -131,8 +130,9 @@ extension GOGStore {
         .filter { seen.insert($0.id).inserted }
     }
 
-    static func macInstalledGame(in folder: URL) -> MacInstalledGame? {
+    public static func macInstalledGame(in folder: URL) -> MacInstalledGame? {
         let fm = FileManager.default
+        guard !fm.fileExists(atPath: folder.appending(path: ".gogdl-resume").path) else { return nil }
         let top = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         let apps = folder.pathExtension == "app" ? [folder]
             : top.filter { $0.pathExtension == "app" }.sorted { $0.lastPathComponent < $1.lastPathComponent }

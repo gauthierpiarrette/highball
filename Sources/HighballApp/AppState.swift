@@ -2271,6 +2271,12 @@ final class AppState {
     func open(url: URL) {
         if url.isFileURL { openFile(url); return }
         guard let request = PlayLink.parse(url) else { return }
+        if let item = playLinkItem(request), playLinkInstallIsPresent(item) {
+            dispatchPlayLink(request, item: item)
+            return
+        }
+        // A new link supersedes an older request waiting for the catalog.
+        deferredPlayLink = nil
         refresh()
         if case let .launcher(id) = request.target {
             // A launcher stub (issue #53). Only a link carrying this install's token opens it:
@@ -2284,14 +2290,72 @@ final class AppState {
         resolvePlayLink(request)
     }
 
+    private func playLinkItem(_ request: PlayLink.Request) -> LibraryItem? {
+        libraryItems.first(where: { $0.id == request.target.libraryID })
+            ?? LibraryIndex.coveredPinItem(forLink: request.target, bottles: bottles, gogInstalledByBottle: gogInstalledByBottle)
+    }
+
+    private func playLinkInstallIsPresent(_ item: LibraryItem) -> Bool {
+        guard item.installedAnywhere else { return false }
+        if prefersMacBuild(item) {
+            guard let folder = macFolder(for: item), FileManager.default.fileExists(atPath: folder.path) else { return false }
+            switch item.source {
+            case .steam:
+                return macSteamGames.first { $0.appid == item.steamAppID }.map(SteamLibrary.installRecordIsReady) ?? false
+            case .epic:
+                guard let appName = item.epicAppName, let path = epicMacInstalls[appName] else { return false }
+                return epicStore.installRecordMatches(appName, path: path, mac: true)
+            case .gog:
+                guard let game = item.gogID.flatMap({ gogMacInstalled[$0] }) else { return false }
+                return GOGStore.macInstalledGame(in: game.folder)?.id == game.id
+            default: return false
+            }
+        }
+        guard item.installed else { return false }
+        guard let name = item.bottleName, let bottle = bottles.first(where: { $0.name == name }),
+              FileManager.default.fileExists(atPath: bottle.settingsURL.path) else { return false }
+        switch item.source {
+        case .pin:
+            guard let saved = try? Bottle.load(bottle.url),
+                  let pin = saved.settings.pins.first(where: { $0.id == item.pinID }),
+                  saved.settings.engineID == bottle.settings.engineID,
+                  pin == bottle.settings.pins.first(where: { $0.id == item.pinID }) else { return false }
+            return FileManager.default.fileExists(atPath: pin.executableURL(driveC: saved.driveC).path)
+        case .steam:
+            guard let game = gamesByBottle[name]?.first(where: { $0.appid == item.steamAppID }),
+                  SteamLibrary.installRecordIsReady(game) else { return false }
+        case .epic:
+            guard let appName = item.epicAppName, let path = epicInstalls[appName],
+                  epicStore.installRecordMatches(appName, path: path, mac: false) else { return false }
+        case .gog:
+            guard let game = gogInstalled(item, in: bottle),
+                  GOGStore.installedGame(in: game.folder)?.id == game.id else { return false }
+        case .battlenet:
+            guard let game = battleNetGame(for: item), BattleNetLibrary.games(in: bottle).contains(where: {
+                $0.productCode == game.productCode && $0.folder == game.folder && $0.launcher == game.launcher
+            }) else { return false }
+        }
+        return programFolder(for: item) != nil
+    }
+
+    private func dispatchPlayLink(_ request: PlayLink.Request, item: LibraryItem) {
+        deferredPlayLink = nil
+        if request.token == PlayLink.token(in: paths) { play(item) } else { pendingPlayLink = item }
+    }
+
     private func resolvePlayLink(_ request: PlayLink.Request) {
-        // A program its GOG tile now stands for has no tile of its own: a Mac app made for it before
-        // still plays it, as the GOG game (launch(pin:)), and does not say it is not in the library.
-        if let item = libraryItems.first(where: { $0.id == request.target.libraryID })
-            ?? LibraryIndex.coveredPinItem(forLink: request.target, bottles: bottles, gogInstalledByBottle: gogInstalledByBottle) {
-            deferredPlayLink = nil
-            if request.token == PlayLink.token(in: paths) { play(item) } else { pendingPlayLink = item }
-            return
+        // A covered pin can still be launched through an older shortcut.
+        if let item = playLinkItem(request) {
+            if playLinkInstallIsPresent(item) {
+                dispatchPlayLink(request, item: item)
+                return
+            }
+            // Epic's old install records may still be in memory while its catalog reloads.
+            if item.source != .epic || !epicFetchInFlight {
+                deferredPlayLink = nil
+                fail(HighballError.failed(L("That game is not installed in this Highball's library.")))
+                return
+            }
         }
         // Not there yet. Epic's owned list arrives after refresh() on a cold launch; wait for the
         // next rebuildLibrary. Give up after 20 s so a bad link does not linger forever.
