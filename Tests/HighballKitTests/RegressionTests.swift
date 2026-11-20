@@ -751,6 +751,7 @@ extension RegressionTests {
     // The Steam tile must recognise a running client by its command line, with either path
     // separator, and not mistake helpers for it (issue #33).
     func testSteamExecutableIsRecognisedByCommandLine() {
+        XCTAssertTrue(WineRunner.isSteamExecutable("Steam.exe"))
         XCTAssertTrue(WineRunner.isSteamExecutable(#"C:\Program Files (x86)\Steam\steam.exe"#))
         XCTAssertTrue(WineRunner.isSteamExecutable("/x/drive_c/Program Files (x86)/Steam/Steam.exe"))
         XCTAssertFalse(WineRunner.isSteamExecutable(#"C:\Program Files (x86)\Steam\bin\cef\cef.win64\steamwebhelper.exe"#))

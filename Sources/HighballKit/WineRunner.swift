@@ -222,6 +222,9 @@ public struct WineRunner: Sendable {
         let inherited = ProcessInfo.processInfo.environment.filter {
             !$0.key.hasPrefix("LSFGM_") && $0.key != "DISABLE_LSFGM"
         }
+        if let program = args.first, Self.isSteamExecutable(program) {
+            env[SteamRestart.environmentIDKey] = SteamRestart.environmentID(env)
+        }
         process.environment = inherited.merging(env) { $1 }
         // drive_c only exists after the first wineboot — fall back to the bottle root on fresh prefixes.
         process.currentDirectoryURL = workingDirectory
@@ -543,7 +546,7 @@ public struct WineRunner: Sendable {
 
     /// Pure: does a command line's program name end in steam.exe (Windows or Unix separators).
     public static func isSteamExecutable(_ argv0: String) -> Bool {
-        argv0.replacingOccurrences(of: "\\", with: "/").lowercased().hasSuffix("/steam.exe")
+        argv0.replacingOccurrences(of: "\\", with: "/").split(separator: "/").last?.lowercased() == "steam.exe"
     }
 
     /// What a `run <bottle> Steam [args]` should do. A running client stays: a second

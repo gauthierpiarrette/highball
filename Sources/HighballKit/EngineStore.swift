@@ -674,6 +674,9 @@ public struct InstalledEngine: Sendable {
     /// Which of `requiredFiles` are absent, relative to the engine's root.
     public var missingFiles: [String] {
         var missing = Self.requiredFiles(for: manifest).filter { !FileManager.default.fileExists(atPath: root.appending(path: $0).path) }
+        if let helper = manifest.components["x87sidecar"], !helper.isOptional, x87Sidecar == nil {
+            missing.append("x87sidecar/x87sidecar")
+        }
         if manifest.isNativeARM64, !usesSignedLoader { missing.append(Self.signedLoaderName) }
         return missing
     }

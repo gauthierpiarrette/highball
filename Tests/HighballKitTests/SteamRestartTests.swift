@@ -138,6 +138,24 @@ final class SteamRestartTests: XCTestCase {
         XCTAssertNil(SteamRestart.reason(live: wanted, wanted: wanted, wantedRenderer: "dxmt"))
     }
 
+    func testSteamComparesTheEnvironmentHighballSuppliedAtLaunch() {
+        let original = ["SETTING": "original", "SECOND": "value"]
+        var live = original
+        live[SteamRestart.environmentIDKey] = SteamRestart.environmentID(original)
+        live["STEAM_RUNTIME_ONLY"] = "extra"
+
+        func reason(_ wanted: [String: String]) -> String? {
+            SteamRestart.clientReason(live: live, wanted: wanted, wantedRenderer: "dxvk", custom: [])
+        }
+        XCTAssertNil(reason(["SECOND": "value", "SETTING": "original"]))
+        XCTAssertNotNil(reason(original.merging(["NEW_SETTING": ""]) { $1 }))
+        XCTAssertNotNil(reason(["SETTING": "changed", "SECOND": "value"]))
+        // The deleted key no longer appears in any settings or recipe.
+        XCTAssertNotNil(reason(["SECOND": "value"]))
+        live[SteamRestart.environmentIDKey] = nil
+        XCTAssertNotNil(reason(original))
+    }
+
     /// The audio buffer library loads when a process starts and the game inherits it from the
     /// client, so a client running without it is restarted for a launch that wants it (highball#127).
     func testAClientWithoutTheAudioLibraryIsRestartedForALaunchThatWantsIt() {
