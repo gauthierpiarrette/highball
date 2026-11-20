@@ -164,7 +164,11 @@ struct LibraryView: View {
 
     @ViewBuilder private var emptyState: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if state.bottles.isEmpty {
+            if state.libraryItems.isEmpty && state.libraryLoading {
+                ProgressView(L("Finding your games…"))
+                    .frame(maxWidth: .infinity, minHeight: 160)
+                    .foregroundStyle(.secondary)
+            } else if state.bottles.isEmpty {
                 if state.busy {
                     Text(L("Highball is preparing your Windows environment. Your games will appear here."))
                         .foregroundStyle(.secondary)
