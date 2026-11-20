@@ -186,6 +186,21 @@ public enum LibraryIndex {
         return (candidates.filter { passes($0.arguments) }.max { $0.arguments.count < $1.arguments.count } ?? candidates.first)?.task
     }
 
+    /// The tile of the same program under a newer id: a program's id carries its environment's
+    /// name, so moving it to another environment (highball#753) or renaming the environment gives it
+    /// a new one, while its uuid stays. Nil for anything but a program.
+    public static func pinItem(withSameProgramAs item: LibraryItem, in items: [LibraryItem]) -> LibraryItem? {
+        guard item.source == .pin, let uuid = item.pinID else { return nil }
+        return items.first { $0.source == .pin && $0.pinID == uuid }
+    }
+
+    /// The program a play link names, found by its uuid when the link carries an earlier name of
+    /// its environment: a Mac app made for it before a move or a rename keeps working (highball#753).
+    public static func pinItem(forLink target: PlayLink.Target, in items: [LibraryItem]) -> LibraryItem? {
+        guard case let .pin(_, uuid) = target else { return nil }
+        return items.first { $0.source == .pin && $0.pinID == uuid }
+    }
+
     /// The program a play link names when the library leaves its tile out for its GOG tile
     /// (gogCoveredPins), so a Mac app made for it before keeps working: Play still runs that
     /// program, as the GOG game (AppState.launch(pin:)), whatever the GOG tile plays. Found by its
@@ -611,6 +626,32 @@ public struct LibraryStore: Sendable {
         guard let data = try? Data(contentsOf: fileURL),
               let shape = try? JSONDecoder.highball.decode(FileShape.self, from: data) else { return FileShape() }
         return shape
+    }
+
+    /// Moves what this file keeps for one library id to another: when it was last played (with
+    /// `bottle` as where), the graphics mode, the launch arguments and the display. A program that
+    /// moves to another environment gets a new id, and these were the player's choices for the
+    /// program, not for the environment (highball#753). The hidden mark needs no move, it is found
+    /// by the program's own uuid (PinID). Anything the new id already has stays.
+    public func rekey(from old: String, to new: String, bottle: String?) {
+        guard old != new else { return }
+        var shape = loadShape()
+        if let record = shape.items.removeValue(forKey: old), shape.items[new] == nil {
+            shape.items[new] = PlayRecord(lastPlayedAt: record.lastPlayedAt, bottle: bottle)
+        }
+        if var all = shape.overrides, let value = all.removeValue(forKey: old) {
+            if all[new] == nil { all[new] = value }
+            shape.overrides = all
+        }
+        if var all = shape.launchArgs, let value = all.removeValue(forKey: old) {
+            if all[new] == nil { all[new] = value }
+            shape.launchArgs = all
+        }
+        if var all = shape.displays, let value = all.removeValue(forKey: old) {
+            if all[new] == nil { all[new] = value }
+            shape.displays = all
+        }
+        save(shape)
     }
 
     public func recordPlay(id: String, bottle: String?, date: Date = Date()) {
