@@ -347,6 +347,30 @@ final class BottleDeleteTests: XCTestCase {
         XCTAssertTrue(try store.damaged().isEmpty)
     }
 
+    /// A player can move bottles/ to another disk and leave a symlink (highball#750). Listing used to fail
+    /// outright ("couldn't be opened"), so the app showed no environments. Entries stay under bottles/,
+    /// and deleting one removes the folder on the other disk and keeps the link.
+    func testABottlesFolderThatIsASymlinkIsListedAndDeletable() throws {
+        let elsewhere = home.appending(path: "elsewhere")
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        try FileManager.default.removeItem(at: paths.bottles)
+        try FileManager.default.createSymbolicLink(atPath: paths.bottles.path, withDestinationPath: elsewhere.path)
+        try makeBottle("play")
+        try makeBottle("Games")
+
+        let listed = try store.list()
+        XCTAssertEqual(listed.map(\.name), ["Games", "play"])
+        XCTAssertTrue(listed.allSatisfy { $0.url.path.hasPrefix(paths.bottles.path) }, "entries stay under bottles/")
+        XCTAssertTrue(try store.damaged().isEmpty)
+
+        XCTAssertNoThrow(try store.delete("play"))
+        XCTAssertEqual(try store.list().map(\.name), ["Games"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: elsewhere.appending(path: "play").path))
+        var st = stat()
+        XCTAssertEqual(lstat(paths.bottles.path, &st), 0)
+        XCTAssertEqual(st.st_mode & S_IFMT, S_IFLNK, "the link itself stays")
+    }
+
     /// A dangling symlink used to slip past create()'s fileExists guard, which follows links, so
     /// creation failed later with a raw Foundation error on a name nothing would show.
     func testCreateRefusesANameHeldByADanglingSymlink() throws {
