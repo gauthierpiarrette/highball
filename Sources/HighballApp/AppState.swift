@@ -37,6 +37,15 @@ final class AppState {
     /// before opening the window; the TabView binds its selection to it.
     var settingsTab: SettingsTab = .environments
     var gamesByBottle: [String: [SteamGame]] = [:]
+    /// The library can look empty while its first store scans are still running. Keep the
+    /// connect/install empty state out of view until those scans have had a chance to populate it.
+    private(set) var steamOwnedLibraryLoaded = false
+    private(set) var epicLibraryLoaded = false
+    private(set) var gogLibraryLoaded = false
+    private(set) var gogMacLibraryLoaded = false
+    var libraryLoading: Bool {
+        !steamOwnedLibraryLoaded || !epicLibraryLoaded || !gogLibraryLoaded || !gogMacLibraryLoaded || epicLoading || gogLoading
+    }
     /// What Battle.net installed in each bottle, from its own records (BattleNetLibrary, highball#417).
     var battleNetByBottle: [String: [BattleNetGame]] = [:]
     /// The Steam account's games per bottle, installed or not (SteamOwnedLibrary, highball#199).
@@ -901,6 +910,7 @@ final class AppState {
             }
             await MainActor.run { [accountsByBottle, early, signedIn] in
                 guard let self else { return }
+                self.steamOwnedLibraryLoaded = true
                 if accountsByBottle != self.steamAccountsByBottle {
                     self.steamAccountsByBottle = accountsByBottle
                     var seen = Set<UInt64>()
@@ -3553,7 +3563,12 @@ final class AppState {
 
     func epicRefresh() {
         epicSignedIn = epicStore.isAuthenticated
-        guard epicSignedIn else { epicOwned = []; epicInstalls = [:]; epicMacInstalls = [:]; epicInstallRecords = [:]; epicMacArch = [:]; return }
+        guard epicSignedIn else {
+            epicOwned = []; epicInstalls = [:]; epicMacInstalls = [:]; epicInstallRecords = [:]; epicMacArch = [:]
+            epicLibraryLoaded = true
+            return
+        }
+        if !epicOwned.isEmpty { epicLibraryLoaded = true }
         guard !epicFetchInFlight else { return }
         epicFetchInFlight = true
         epicLoading = epicOwned.isEmpty
@@ -3569,6 +3584,7 @@ final class AppState {
                 if let installed, let archs { _ = self.applyEpicInstalls(installed, archs: archs) }
                 self.epicLoading = false
                 self.epicFetchInFlight = false
+                self.epicLibraryLoaded = true
                 self.rebuildLibrary()   // Epic results arrive after refresh(); fold them in
                 if owned != nil { self.saveLibraryCache() }
                 self.offerKeptEpicSaves()
@@ -4442,6 +4458,7 @@ final class AppState {
         gogAccountName = gogSignedIn ? gogStore.username : nil
         gogSettings = GOGSettings.load(gogStore)
         refreshGOGInstalls()
+        if !gogSignedIn || !gogGames.isEmpty { gogLibraryLoaded = true }
         guard !gogFetchInFlight else { return }
         gogFetchInFlight = true
         gogLoading = gogSignedIn && gogGames.isEmpty
@@ -4465,6 +4482,7 @@ final class AppState {
                 guard let self else { return }
                 self.gogFetchInFlight = false
                 self.gogLoading = false
+                self.gogLibraryLoaded = true
                 guard found != self.gogGames else { return }
                 self.gogGames = found
                 self.rebuildLibrary()
@@ -4502,7 +4520,9 @@ final class AppState {
         let mac = await Task.detached { Dictionary(GOGStore.macInstalledGames().map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }.value
         // Scans overlap (the install watcher fires many times during a download): an older one
         // landing last must not bring back a game moved to the Trash since.
-        guard generation == macScanGeneration, mac != gogMacInstalled else { return mac }
+        guard generation == macScanGeneration else { return mac }
+        gogMacLibraryLoaded = true
+        guard mac != gogMacInstalled else { return mac }
         gogMacInstalled = mac
         rebuildLibrary()
         return mac
