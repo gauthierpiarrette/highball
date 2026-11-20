@@ -1229,54 +1229,88 @@ final class AppState {
 
     private var prunedLogsThisRun = false
 
-    /// Re-reads the launchers' install records when they change (a download starting or
-    /// finishing in an open Steam window), so the library follows without a relaunch.
+    private enum InstallSource: CaseIterable { case steam, macSteam, battleNet, epic, gog, macGOG }
+
     @ObservationIgnored private var installWatcher: DirectoryWatcher?
+    @ObservationIgnored private var installSources: [String: Set<InstallSource>] = [:]
+    @ObservationIgnored private var volumeObservers: [NSObjectProtocol] = []
 
-    /// The directories whose entries change when a game is installed or removed: the steamapps
-    /// of each Steam library folder (appmanifest files), the folder Epic installs land in, and the
-    /// folders GOG installs land in (the first of which is that same Games folder).
-    private func installDirectories(of bottle: Bottle) -> [URL] {
-        GOGStore.installRoots(driveC: bottle.driveC) + SteamLibrary.steamappsDirectories(of: bottle)
+    private func watchInstallDirectories() {
+        if installWatcher == nil {
+            installWatcher = DirectoryWatcher { [weak self] paths in
+                guard let self else { return }
+                let sources = Set(paths.flatMap { self.installSources[$0] ?? [] })
+                self.refreshInstalledGames(sources)
+            }
+            let workspace = NSWorkspace.shared.notificationCenter
+            volumeObservers = [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification].map { name in
+                workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.refreshInstalledGames() }
+                }
+            }
+        }
+        var sources: [String: Set<InstallSource>] = [:]
+        func watch(_ paths: [URL], for source: InstallSource) {
+            for path in paths { sources[path.resolvingSymlinksInPath().path, default: []].insert(source) }
+        }
+        for bottle in bottles {
+            watch(SteamLibrary.steamappsDirectories(of: bottle), for: .steam)
+            let root = bottle.driveC.appending(path: "Program Files (x86)/Steam", directoryHint: .isDirectory)
+            watch([root, root.appending(path: "config"), root.appending(path: "steamapps")], for: .steam)
+            watch(GOGStore.installRoots(driveC: bottle.driveC), for: .gog)
+            watch([BattleNetLibrary.agentDirectory(of: bottle)], for: .battleNet)
+        }
+        watch(MacSteam.steamappsDirectories() + [MacSteam.root], for: .macSteam)
+        watch([epicStore.configDir], for: .epic)
+        watch(GOGStore.macSearchFolders, for: .macGOG)
+        installSources = sources
+        installWatcher?.watch(sources.keys.map { URL(fileURLWithPath: $0, isDirectory: true) })
     }
 
-    /// The cheap part of `refresh`: installed games only. Runs on every install-record change,
-    /// so it must not spawn per call beyond legendary's install list and one off-main scan for
-    /// GOG Mac builds (of which only the newest result counts), and never touches the
-    /// directories it watches.
-    func refreshInstalledGames() {
-        refreshSteamInstalls()
-        refreshBattleNetInstalls()
-        let mac = MacSteam.installedGames()
-        if mac != macSteamGames { macSteamGames = mac; rebuildLibrary() }
-        refreshEpicInstalls()
-        refreshGOGInstalls()
+    private func refreshInstalledGames(_ sources: Set<InstallSource> = Set(InstallSource.allCases)) {
+        guard !sources.isEmpty else { return }
+        watchInstallDirectories()
+        let scanMacGOG = sources.contains(.macGOG)
+        let scanEpic = sources.contains(.epic) && epicSignedIn && !epicFetchInFlight
+        guard scanMacGOG || scanEpic else { publishInstallChanges(sources); return }
+        if scanEpic { epicFetchInFlight = true }
+        Task {
+            async let macGOG = scanMacGOG ? readGOGMacInstalls() : nil
+            async let epic = scanEpic ? Self.readEpicInstalls(epicStore) : nil
+            let (macScan, epicScan) = await (macGOG, epic)
+            if scanEpic { epicFetchInFlight = false }
+            let macChanged = macScan.map { applyGOGMacInstalls($0.games, generation: $0.generation) } ?? false
+            let epicChanged = epicScan.map { applyEpicInstalls($0.games, archs: $0.archs) } ?? false
+            publishInstallChanges(sources, changed: macChanged || epicChanged)
+            if epicScan != nil { offerKeptEpicSaves() }
+        }
     }
 
-    /// The Windows Steam part of `refreshInstalledGames`, without legendary, so the client watch
-    /// can run it every few seconds of a long download for the price of a few directory reads.
+    private func publishInstallChanges(_ sources: Set<InstallSource>, changed: Bool = false) {
+        var changed = changed
+        if sources.contains(.steam) { changed = readSteamInstalls() || changed }
+        if sources.contains(.macSteam) {
+            let mac = MacSteam.installedGames()
+            if mac != macSteamGames { macSteamGames = mac; changed = true }
+        }
+        if sources.contains(.battleNet) { changed = readBattleNetInstalls() || changed }
+        if sources.contains(.gog) { changed = readGOGInstalls() || changed }
+        if changed { forgetProgramExecutables(); rebuildLibrary() }
+        if sources.contains(.gog) { finishGOGInstallRefresh() }
+    }
+
     func refreshSteamInstalls() {
-        // Re-arm first: a steamapps that did not exist at the last full refresh (Steam was
-        // installed after launch, or a library folder was added) is only watched from here on,
-        // and a replaced one is reopened.
-        installWatcher?.watch(bottles.flatMap(installDirectories) + MacSteam.steamappsDirectories())
+        refreshInstalledGames([.steam])
+    }
+
+    private func readSteamInstalls() -> Bool {
         let games = Dictionary(bottles.map { ($0.name, SteamLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
-        if games != gamesByBottle { gamesByBottle = games; forgetProgramExecutables(); rebuildLibrary() }
+        guard games != gamesByBottle else { return false }
+        gamesByBottle = games
+        return true
     }
 
-    /// Re-reads what Battle.net installed in each bottle. Its own watcher calls this when the update
-    /// agent rewrites its records, which it does often during a download, so it reads two small
-    /// files per bottle and nothing else.
-    @ObservationIgnored private var battleNetWatcher: DirectoryWatcher?
-
-    func refreshBattleNetInstalls() {
-        if readBattleNetInstalls() { forgetProgramExecutables(); rebuildLibrary() }
-    }
-
-    /// The reading part, for `refresh` too, which rebuilds the library itself. True on a change.
     @discardableResult private func readBattleNetInstalls() -> Bool {
-        if battleNetWatcher == nil { battleNetWatcher = DirectoryWatcher { [weak self] in self?.refreshBattleNetInstalls() } }
-        battleNetWatcher?.watch(bottles.map(BattleNetLibrary.agentDirectory(of:)))
         let games = Dictionary(bottles.map { ($0.name, BattleNetLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
         guard games != battleNetByBottle else { return false }
         battleNetByBottle = games
@@ -1289,24 +1323,11 @@ final class AppState {
         return battleNetByBottle[name]?.first { $0.productCode == code }
     }
 
-    private func refreshEpicInstalls() {
-        guard epicSignedIn, !epicFetchInFlight else { return }
-        epicFetchInFlight = true
-        Task.detached { [store = epicStore] in
-            guard let installed = try? store.installedGames() else {
-                await MainActor.run { self.epicFetchInFlight = false }
-                return
-            }
-            let archs = Self.macArchs(installed)
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.epicFetchInFlight = false
-                defer { self.offerKeptEpicSaves() }
-                guard self.applyEpicInstalls(installed, archs: archs) else { return }
-                self.forgetProgramExecutables()
-                self.rebuildLibrary()
-            }
-        }
+    nonisolated private static func readEpicInstalls(_ store: EpicStore) async -> (games: [EpicStore.InstalledGame], archs: [String: MacBinaryArch])? {
+        await Task.detached {
+            guard let games = try? store.installedGames() else { return nil }
+            return (games, Self.macArchs(games))
+        }.value
     }
 
     func refresh() {
@@ -1337,8 +1358,7 @@ final class AppState {
         if selectedBottle == nil { selectedBottle = bottles.first?.name }
         // Never trap on duplicate names (a Finder-duplicated bottle crashed the app at launch — issue #13).
         gamesByBottle = Dictionary(bottles.map { ($0.name, SteamLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
-        if installWatcher == nil { installWatcher = DirectoryWatcher { [weak self] in self?.refreshInstalledGames() } }
-        installWatcher?.watch(bottles.flatMap(installDirectories) + MacSteam.steamappsDirectories())
+        watchInstallDirectories()
         macSteamGames = MacSteam.installedGames()
         readBattleNetInstalls()
         startSteamClientWatch()
@@ -4404,7 +4424,13 @@ final class AppState {
         gogSignedIn = gogStore.isAuthenticated
         gogAccountName = gogSignedIn ? gogStore.username : nil
         gogSettings = GOGSettings.load(gogStore)
-        refreshGOGInstalls()
+        if readGOGInstalls() { forgetProgramExecutables(); rebuildLibrary() }
+        Task { await refreshGOGMacInstalls() }
+        offerKeptGOGSaves()
+        refreshGOGCatalog()
+    }
+
+    private func refreshGOGCatalog() {
         guard !gogFetchInFlight else { return }
         gogFetchInFlight = true
         gogLoading = gogSignedIn && gogGames.isEmpty
@@ -4436,20 +4462,25 @@ final class AppState {
         }
     }
 
-    /// The disk half of `gogRefresh`: goggame-<id>.info files under each environment's install
-    /// folders. Runs on every install-record change, like Steam's.
     private func refreshGOGInstalls() {
-        defer { offerKeptGOGSaves() }
+        if readGOGInstalls() { forgetProgramExecutables(); rebuildLibrary() }
+        Task { await refreshGOGMacInstalls() }
+        finishGOGInstallRefresh()
+    }
+
+    private func readGOGInstalls() -> Bool {
         let found = Dictionary(bottles.map { ($0.name, GOGStore.installedGames(driveC: $0.driveC)) }, uniquingKeysWith: { a, _ in a })
         let store = gogStore
         for game in found.values.joined() { store.adoptManifest(for: game) }
-        Task { await refreshGOGMacInstalls() }
-        guard found != gogInstalledByBottle else { return }
-        let newIDs = Set(found.values.joined().map(\.id)).subtracting(gogGames.map(\.id))
+        guard found != gogInstalledByBottle else { return false }
         gogInstalledByBottle = found
-        forgetProgramExecutables()
-        rebuildLibrary()
-        if !newIDs.isEmpty, !gogFetchInFlight { gogRefresh() }
+        return true
+    }
+
+    private func finishGOGInstallRefresh() {
+        offerKeptGOGSaves()
+        let newIDs = Set(gogInstalledByBottle.values.joined().map(\.id)).subtracting(gogGames.map(\.id))
+        if !newIDs.isEmpty { refreshGOGCatalog() }
     }
 
     @ObservationIgnored private var macScanGeneration = 0
@@ -4460,15 +4491,23 @@ final class AppState {
     /// not applied: an install reads its own game from it.
     @discardableResult
     private func refreshGOGMacInstalls() async -> [String: GOGStore.MacInstalledGame] {
+        let scan = await readGOGMacInstalls()
+        if applyGOGMacInstalls(scan.games, generation: scan.generation) { rebuildLibrary() }
+        return scan.games
+    }
+
+    private func readGOGMacInstalls() async -> (games: [String: GOGStore.MacInstalledGame], generation: Int) {
         macScanGeneration += 1
         let generation = macScanGeneration
-        let mac = await Task.detached { Dictionary(GOGStore.macInstalledGames().map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }.value
-        // Scans overlap (the install watcher fires many times during a download): an older one
-        // landing last must not bring back a game moved to the Trash since.
-        guard generation == macScanGeneration, mac != gogMacInstalled else { return mac }
-        gogMacInstalled = mac
-        rebuildLibrary()
-        return mac
+        let games = await Task.detached { Dictionary(GOGStore.macInstalledGames().map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }.value
+        return (games, generation)
+    }
+
+    private func applyGOGMacInstalls(_ games: [String: GOGStore.MacInstalledGame], generation: Int) -> Bool {
+        // An older scan landing last must not bring back a game moved to the Trash since.
+        guard generation == macScanGeneration, games != gogMacInstalled else { return false }
+        gogMacInstalled = games
+        return true
     }
 
     /// The GOG tile a program added by hand plays as (LibraryIndex.gogCoveredPins), if any, with
@@ -5622,7 +5661,7 @@ final class AppState {
             // Recorded once the folder is gone, so this install is never offered its own saves.
             saves.keep(kept, of: game, otherInstalls: others)
             appendLog("\(title): removed from \(bottle.name)")
-            refreshInstalledGames()   // the tile leaves now, not at the next folder watch
+            refreshInstalledGames([.gog])   // update the tile without waiting for the folder watch
         }
     }
 
