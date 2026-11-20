@@ -77,22 +77,38 @@ public enum ProcessTable {
 
     /// Process ids that belong to the prefix, never our own.
     public static func processes(ofPrefix prefix: URL) -> [pid_t] {
-        let root = canonical(prefix.path)
-        let server = serverDirectory(forPrefix: prefix).map { canonical($0.path) }
+        matchingProcesses(in: [prefix]) { _ in true }[prefix]?.map(\.pid) ?? []
+    }
+
+    /// Match selected processes to all prefixes from one system enumeration. Read each command
+    /// line once and resolve its working directory only when it has no explicit WINEPREFIX.
+    static func matchingProcesses(in prefixes: [URL], including: (String?) -> Bool)
+        -> [URL: [(pid: pid_t, environment: [String: String])]] {
+        guard !prefixes.isEmpty else { return [:] }
+        let roots = Set(prefixes).map { (url: $0, path: canonical($0.path),
+                                    server: serverDirectory(forPrefix: $0).map { canonical($0.path) }) }
         let me = getpid()
-        var resolved: [String: String] = [:]   // a few prefixes recur across many processes
-        return allPIDs().filter { pid in
-            // Only our own processes have a readable working directory; the rest are skipped here.
-            guard pid != me, let cwd = workingDirectory(of: pid) else { return false }
-            let declared = commandLineAndEnvironment(of: pid)?.environment["WINEPREFIX"].flatMap { path -> String? in
+        var resolved: [String: String] = [:]
+        var matches: [URL: [(pid: pid_t, environment: [String: String])]] = [:]
+        for pid in allPIDs() where pid != me {
+            guard let cwd = workingDirectory(of: pid) else { continue }
+            let info = commandLineAndEnvironment(of: pid)
+            guard including(info?.arguments.first) else { continue }
+            let environment = info?.environment ?? [:]
+            let declared = environment["WINEPREFIX"].flatMap { path -> String? in
                 guard !path.isEmpty else { return nil }
                 if let hit = resolved[path] { return hit }
-                let canon = canonical(path)
-                resolved[path] = canon
-                return canon
+                let pathOnDisk = canonical(path)
+                resolved[path] = pathOnDisk
+                return pathOnDisk
             }
-            return belongs(environmentPrefix: declared, workingDirectory: canonical(cwd), toPrefix: root, serverDirectory: server)
+            let fallback = declared == nil ? canonical(cwd) : nil
+            for root in roots where belongs(environmentPrefix: declared, workingDirectory: fallback,
+                                            toPrefix: root.path, serverDirectory: root.server) {
+                matches[root.url, default: []].append((pid, environment))
+            }
         }
+        return matches
     }
 
     /// Command line and environment of a process we own, from `KERN_PROCARGS2`. Nil when the
