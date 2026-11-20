@@ -10,6 +10,14 @@ func L(_ en: String) -> String {
 enum L10n {
     static let fr: [String: String] = [
         "Game settings": "Réglages du jeu",
+        "Copy saves": "Copier les sauvegardes",
+        "Copy save folder…": "Copier le dossier de sauvegarde…",
+        "Choose the folder that contains %@’s saves. Quit the game before copying.": "Choisissez le dossier qui contient les sauvegardes de %@. Quittez le jeu avant la copie.",
+        "Choose the game's local save folder and make a separate copy. Quit the game first.": "Choisissez le dossier de sauvegarde local du jeu pour en faire une copie. Quittez d’abord le jeu.",
+        "Choose the game's save folder, not an entire drive or Windows user folder.": "Choisissez le dossier de sauvegarde du jeu, et non un disque entier ou un dossier utilisateur Windows.",
+        "Copying saves for %@": "Copie des sauvegardes de %@",
+        "The selected folder has no files to copy.": "Le dossier choisi ne contient aucun fichier à copier.",
+        "Save copy created": "Copie des sauvegardes créée",
         "Keep the %@ fix you applied under Game settings": "Conserver le correctif %@ appliqué dans Réglages du jeu",
         "Leave the optional %@ fix alone; it is under Game settings for when the notes say your Mac needs it": "Laisser le correctif facultatif %@ désactivé ; il se trouve dans Réglages du jeu si les notes indiquent que votre Mac en a besoin",
         "About this game": "À propos de ce jeu",

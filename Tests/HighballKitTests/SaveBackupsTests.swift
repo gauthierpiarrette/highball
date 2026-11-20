@@ -25,4 +25,27 @@ final class SaveBackupsTests: XCTestCase {
         try backups.backUpLocal(folder, into: dir)
         XCTAssertFalse(FileManager.default.fileExists(atPath: pinned.path), "pruned like the others once unpinned")
     }
+    func testManualSaveCopyKeepsTheGameFilesAndLeavesTheOriginalAlone() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appending(path: "save-copy-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let source = root.appending(path: "prefix/drive_c/users/player/AppData/Roaming/DarkSoulsIII")
+        let profile = source.appending(path: "profile", directoryHint: .isDirectory)
+        try fm.createDirectory(at: profile, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        let slot = profile.appending(path: "DS30000.sl2")
+        try Data("first".utf8).write(to: slot)
+        let backups = SaveBackups(root: root.appending(path: "backups", directoryHint: .isDirectory))
+        let first = try XCTUnwrap(try backups.copyGameSaves(from: source, title: "Dark Souls III"))
+        XCTAssertTrue(SaveBackups.isKept(first))
+        XCTAssertEqual(try Data(contentsOf: first.appending(path: "profile/DS30000.sl2")), Data("first".utf8))
+        try Data("second".utf8).write(to: slot)
+        let second = try XCTUnwrap(try backups.copyGameSaves(from: source, title: "Dark Souls III"))
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(try Data(contentsOf: second.appending(path: "profile/DS30000.sl2")), Data("second".utf8))
+        XCTAssertEqual(try Data(contentsOf: slot), Data("second".utf8))
+        try fm.createSymbolicLink(at: source.appending(path: "outside"), withDestinationURL: root)
+        XCTAssertThrowsError(try backups.copyGameSaves(from: source, title: "Dark Souls III"))
+        XCTAssertEqual(backups.backups(in: first.deletingLastPathComponent()).count, 2)
+        XCTAssertThrowsError(try backups.copyGameSaves(from: root, title: "Too broad"))
+    }
 }

@@ -1141,6 +1141,14 @@ struct GameDetailView: View {
                                     .help(L("A real app in ~/Applications/Highball with the game's own icon, for the Dock, Spotlight or Launchpad. It starts the game without opening Highball first."))
                             }
                         }
+                        if item.installed {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(L("Saves")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
+                                Button(L("Copy save folder…")) { state.copyGameSaves(for: item, in: bottle) }
+                                    .controlSize(.small).disabled(state.busy || running != nil)
+                                    .help(L("Choose the game's local save folder and make a separate copy. Quit the game first."))
+                            }
+                        }
                         if let log = state.lastLaunchLog(for: item) {
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
                                 Text(L("Log")).font(.caption).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
