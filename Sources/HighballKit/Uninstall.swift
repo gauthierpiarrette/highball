@@ -59,19 +59,19 @@ public enum Uninstall {
     /// What is said under the question, which is "Remove <game>?" and is not repeated here: it
     /// says who does the removing and how much space comes back when that is known, because
     /// "are you sure" without a figure is a question nobody can answer.
-    public static func confirmation(route: Route, sizeOnDisk: Int64) -> String {
-        let size = sizeOnDisk > 0 ? " That frees \(ByteCountFormatter.string(fromByteCount: sizeOnDisk, countStyle: .file))." : ""
+    public static func confirmation(route: Route, sizeOnDisk: Int64, language: L10n.Language = .en) -> String {
+        let size = sizeOnDisk > 0 ? String(format: L10n.translate(" That frees %@.", language: language), ByteCountFormatter.string(fromByteCount: sizeOnDisk, countStyle: .file)) : ""
         switch route {
         case .steam:
-            return "Steam does the uninstalling and asks you to confirm in its own window, so its library stays right.\(size)"
+            return String(format: L10n.translate("Steam does the uninstalling and asks you to confirm in its own window, so its library stays right.%@", language: language), size)
         case .epic:
-            return "The Epic tools do the uninstalling, so their library stays right. Keep save data first copies the game's save folder, and the files the game wrote in its folder, to Highball's save-backups, and offers to put them back if you install the game again. Delete save data too copies nothing and also deletes the game's save folder when it is inside this environment. Saves in Epic's cloud stay there either way.\(size)"
+            return String(format: L10n.translate("The Epic tools do the uninstalling, so their library stays right. Keep save data first copies the game's save folder, and the files the game wrote in its folder, to Highball's save-backups, and offers to put them back if you install the game again. Delete save data too copies nothing and also deletes the game's save folder when it is inside this environment. Saves in Epic's cloud stay there either way.%@", language: language), size)
         case .gog:
-            return "Highball deletes the game's folder from this environment. Keep save data first copies your saves from it, and every file the game changed there since you first played it, to Highball's save-backups, and offers to put them back if you install the game again. Delete save data too copies nothing and also deletes the game's save folders elsewhere in this environment. Saves in GOG's cloud stay there either way, and the game stays in your GOG library to install again.\(size)"
+            return String(format: L10n.translate("Highball deletes the game's folder from this environment. Keep save data first copies your saves from it, and every file the game changed there since you first played it, to Highball's save-backups, and offers to put them back if you install the game again. Delete save data too copies nothing and also deletes the game's save folders elsewhere in this environment. Saves in GOG's cloud stay there either way, and the game stays in your GOG library to install again.%@", language: language), size)
         case .windowsUninstaller:
-            return "Highball opens Windows' Add or Remove Programs in this environment, where you pick it from the list. A game with no uninstaller of its own will not be in that list, and then the only way to remove it is to delete the environment."
+            return L10n.translate("Highball opens Windows' Add or Remove Programs in this environment, where you pick it from the list. A game with no uninstaller of its own will not be in that list, and then the only way to remove it is to delete the environment.", language: language)
         case let .none(reason):
-            return reason
+            return L10n.translate(reason, language: language)
         }
     }
 

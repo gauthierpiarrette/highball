@@ -7,6 +7,14 @@ dist/
 site/
 private/
 
+# Generated localization reports and local validation snapshots.
+/docs/localization-audit.json
+/docs/localization-review.json
+/docs/Validation.md
+/docs/validation-results.txt
+/docs/modified-files.txt
+/docs/verification-latest.txt
+
 # Stray single-file compile artifacts (e.g. from `swiftc File.swift` in the repo root)
 *.o
 *.d

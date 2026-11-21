@@ -33,11 +33,11 @@ public enum ActivityText {
         var parts: [String] = []
         if let total, total > 0 {
             if total >= 1 << 30 {
-                parts.append("\(gigabytes(received)) of \(gigabytes(total)) GB")
+                parts.append(L10n.format("%@ of %@ GB", String(describing: gigabytes(received)), String(describing: gigabytes(total))))
             } else if total < 1_048_576 {
-                parts.append("\(received / 1024) of \(total / 1024) KB")
+                parts.append(L10n.format("%@ of %@ KB", String(describing: received / 1024), String(describing: total / 1024)))
             } else {
-                parts.append("\(megabytes(received)) of \(megabytes(total)) MB")
+                parts.append(L10n.format("%@ of %@ MB", String(describing: megabytes(received)), String(describing: megabytes(total))))
             }
         } else if received < 1_048_576 {
             parts.append("\(received / 1024) KB")
