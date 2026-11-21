@@ -108,6 +108,11 @@ Run every command from the `highball` repo root. Recipe and database paths resol
 to the current directory, with `highball-db` as a sibling folder.
 </details>
 
+Starting games from a frontend such as ES-DE? The app carries the CLI at
+`/Applications/Highball.app/Contents/Helpers/highball`. `highball library` lists every game
+with its id, and `highball play steam:2420510 --wait` starts one the way its Play button does
+and returns once the game has quit.
+
 Played something? `highball report` files the result to the open database (community reports
 already cover M4, M5 and macOS 15). The in-app **Report a Problem** button is for bugs in
 Highball itself. Questions and quick help: the [Highball Discord](https://discord.gg/WnyYpXuf67).
