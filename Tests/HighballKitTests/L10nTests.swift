@@ -59,8 +59,8 @@ final class L10nTests: EnglishCopyTestCase {
         use("zh-Hans")
         let title = "Starting %@ 100% 游戏 /tmp/A.exe"
         XCTAssertEqual(L10n.format("Starting %@", title), "正在启动 " + title)
-        XCTAssertEqual(String(format: L10n.translate("Run %@ in %@?"), "Game", "Environment"),
-                       "要在“Environment”中运行 Game 吗？")
+        XCTAssertEqual(String(format: L10n.translate("Try %@ for %@ next time?"), "DXMT", "Game"),
+                       "下次运行 Game 时尝试使用 DXMT？")
         XCTAssertEqual(String(format: L10n.translate("%@%% of players"), "12"), "12% 的玩家")
         XCTAssertEqual(String(format: L10n.translate("Setting up %@: %@ (%d of %d)"), "Game", "VC++", 2, 3),
                        "正在配置 Game：VC++（第 2 项，共 3 项）")

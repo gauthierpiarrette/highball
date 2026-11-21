@@ -177,6 +177,19 @@ final class RendererAvailabilityTests: EnglishCopyTestCase {
         XCTAssertNil(try stale.environment(engine: e)["ROSETTA_X87_PATH"], "only the switch sets it")
     }
 
+    /// A recipe names a file of the environment's own engine with ${frameworks} or ${renderers}, as an engine
+    /// manifest's baseEnv does (Diablo II: Resurrected's CX_APPLEGPTK_LIBD3DSHARED_PATH, highball#371).
+    func testARecipeVariableCanNameAFileOfTheEnvironmentsEngine() throws {
+        let e = try engine(accepted: false)
+        var b = bottle(renderer: .dxmt)
+        b.settings.environment = ["CX_APPLEGPTK_LIBD3DSHARED_PATH": "${frameworks}/renderer/d3dmetal/external/libd3dshared.dylib",
+                                  "HB_SOME_RENDERER_FILE": "${renderers}/dxmt/wine"]
+        let env = try b.environment(engine: e)
+        XCTAssertEqual(env["CX_APPLEGPTK_LIBD3DSHARED_PATH"], e.frameworksDir.path + "/renderer/d3dmetal/external/libd3dshared.dylib")
+        XCTAssertEqual(env["HB_SOME_RENDERER_FILE"], e.renderersDir.path + "/dxmt/wine")
+        XCTAssertFalse(env.values.contains { $0.contains("${frameworks}") || $0.contains("${renderers}") })
+    }
+
     func testEnvironmentFollowsTheDegradedRendererInsteadOfThrowing() throws {
         let e = try engine(accepted: false)
         let env = try bottle(renderer: .d3dmetal).environment(engine: e)

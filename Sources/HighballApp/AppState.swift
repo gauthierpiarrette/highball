@@ -2288,6 +2288,7 @@ final class AppState {
         // A program its GOG tile now stands for has no tile of its own: a Mac app made for it before
         // still plays it, as the GOG game (launch(pin:)), and does not say it is not in the library.
         if let item = libraryItems.first(where: { $0.id == request.target.libraryID })
+            ?? LibraryIndex.pinItem(forLink: request.target, in: libraryItems)
             ?? LibraryIndex.coveredPinItem(forLink: request.target, bottles: bottles, gogInstalledByBottle: gogInstalledByBottle) {
             deferredPlayLink = nil
             if request.token == PlayLink.token(in: paths) { play(item) } else { pendingPlayLink = item }
@@ -3586,6 +3587,42 @@ final class AppState {
     /// environment's engine and settings while its other games stay put (highball#566: a player
     /// testing one game on Wine 11 had to edit Legendary's files by hand). The game's home is its
     /// folder, so moving the folder is the whole move.
+    /// The program a library item stands for, read off its environment's saved list.
+    func pin(for item: LibraryItem) -> Pin? {
+        guard item.source == .pin, let id = item.pinID else { return nil }
+        return bottles.first { $0.name == item.bottleName }?.settings.pins.first { $0.id == id }
+    }
+
+    /// A program added by hand that lives outside its environment moves to another one: its entry
+    /// leaves this environment's list for the other's under the same uuid, so its name, cover and
+    /// hidden mark follow (PinID), and LibraryStore.rekey takes its last play, mode, arguments and
+    /// display along. It then plays with that environment's engine and settings. Moving meant
+    /// editing both bottle.json files by hand (highball#753).
+    func moveProgram(_ item: LibraryItem, to dest: Bottle) {
+        guard let pin = pin(for: item), pin.isOutsideEnvironment,
+              var source = bottles.first(where: { $0.name == item.bottleName }),
+              var target = bottles.first(where: { $0.name == dest.name }), target.name != source.name else { return }
+        if runningSessions.contains(where: { $0.libraryID == item.id }) {
+            fail(HighballError.failed(String(format: L("%@ is running. Quit it first, then move it."), item.title)))
+            return
+        }
+        target.settings.pins.removeAll { $0.id == pin.id }
+        target.settings.pins.append(pin)
+        source.settings.pins.removeAll { $0.id == pin.id }
+        do {
+            try bottleStore.update(target)
+            try bottleStore.update(source)
+        } catch { fail(error, bottle: source); refresh(); return }
+        let store = libraryStore
+        store.rekey(from: item.id, to: "pin:\(target.name):\(pin.id.uuidString)", bottle: target.name)
+        libraryPlays = store.load()
+        libraryOverrides = store.rendererOverrides()
+        libraryLaunchArgs = store.launchArguments()
+        libraryDisplays = store.displayChoices()
+        appendLog("moved the program \(pin.name) from '\(source.name)' to '\(target.name)'")
+        refresh()
+    }
+
     func moveEpicGame(_ item: LibraryItem, to dest: Bottle) {
         guard let appName = item.epicAppName, let path = epicInstalls[appName] else { return }
         if runningSessions.contains(where: { $0.libraryID == item.id }) {

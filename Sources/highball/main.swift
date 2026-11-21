@@ -997,7 +997,8 @@ struct Play: AsyncParsableCommand {
             pin:<environment>:<uuid> or battlenet:<product code>, and launcher:<id> opens a launcher. Highball starts it with \
             the game's own settings and stays in the background, the way a game's Mac app does. \
             With --wait the command returns once the game has quit, for frontends such as ES-DE, \
-            and Highball and Steam keep running. It follows the games Highball runs in its \
+            and Highball and Steam keep running. A game that isn't installed fails the command at once, \
+            with or without --wait, after Highball shows what it can do with it. It follows the games Highball runs in its \
             environments, so a game Steam for Mac starts ends the wait only at --start-timeout.
             """)
     @Argument(help: "The game's library id.") var id: String
@@ -1034,11 +1035,12 @@ struct Play: AsyncParsableCommand {
         try open.run()
         open.waitUntilExit()
         guard open.terminationStatus == 0 else { fail("macOS could not open the Highball app (open exited with \(open.terminationStatus))") }
+        // A game that isn't installed never starts: the app asks about it in its window, and the
+        // wait used to run to --start-timeout. The question is up, so stop here, with or without
+        // --wait, so a script sees the failure in the exit status (highball#432).
+        if notInstalled { fail("\(id) is not installed, so it won't start. Highball shows what it can do with it in its window.") }
         guard wait else { return }
         if case .launcher = target { return }   // a launcher is not a game the app follows
-        // A game that isn't installed never starts: the app asks about it in its window, and the
-        // wait used to run to --start-timeout (highball#432). The question is up, so stop here.
-        if notInstalled { fail("\(id) is not installed, so it won't start. Highball shows what it can do with it in its window.") }
 
         let started = Date()
         var phase = PlayWait.Phase.starting

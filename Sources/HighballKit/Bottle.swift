@@ -272,6 +272,11 @@ public struct Pin: Codable, Sendable, Identifiable, Hashable {
         self.name = name; self.path = path; self.arguments = arguments; self.environment = environment; self.renderer = renderer
     }
 
+    /// Whether the program lives on the Mac outside its environment (an absolute path, which Wine
+    /// reaches through its Z: drive). Only such a program can move to another environment, since one
+    /// inside has its files in this environment's drive (highball#753).
+    public var isOutsideEnvironment: Bool { path.hasPrefix("/") }
+
     /// This pin as one Play of it runs: the mode Play chose for the program (its page's Mode for
     /// this game, a Direct3D 12 take-over, a mode the engine lacks swapped for one it has) replaces
     /// the pin's own for that launch only. Play dropped it for programs, so a program set to Wine's
@@ -932,8 +937,16 @@ public struct Bottle: Sendable {
             env["ROSETTA_X87_PATH"] = sidecar.path
         }
         // A recipe's value can depend on this Mac (a video memory budget from its memory), and an engine's or a recipe's
-        // on this environment (a driver's shader cache kept inside it, and gone with it).
-        return env.mapValues { MacVariables.expand($0).replacingOccurrences(of: "${environment}", with: url.path) }
+        // on this environment (a driver's shader cache kept inside it, and gone with it). A recipe can also name a file
+        // of the environment's engine with ${frameworks} and ${renderers}, as a manifest's baseEnv does: Diablo II:
+        // Resurrected needs Wine to load D3DMetal's libd3dshared.dylib (highball#371), which sits in each engine's own
+        // folder.
+        let frameworks = engine.frameworksDir.path, renderers = engine.renderersDir.path
+        return env.mapValues {
+            MacVariables.expand($0).replacingOccurrences(of: "${environment}", with: url.path)
+                .replacingOccurrences(of: "${frameworks}", with: frameworks)
+                .replacingOccurrences(of: "${renderers}", with: renderers)
+        }
     }
 
     /// The renderer-specific bridge files that make the DLSS switch actionable in this engine.

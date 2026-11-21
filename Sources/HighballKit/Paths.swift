@@ -317,7 +317,7 @@ public enum BugReport {
     /// started by a launcher client that Highball did not spawn.
     static func logDirectories(_ paths: HighballPaths) -> [URL] {
         var dirs = [paths.logs]
-        let bottles = (try? FileManager.default.contentsOfDirectory(at: paths.bottles, includingPropertiesForKeys: nil)) ?? []
+        let bottles = (try? BottleStore.entries(of: paths.bottles)) ?? []
         dirs += bottles.map { $0.appending(path: "drive_c/highball/logs") }
         return dirs.filter { FileManager.default.fileExists(atPath: $0.path) }
     }
