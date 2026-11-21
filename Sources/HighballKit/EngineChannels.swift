@@ -23,10 +23,12 @@ public enum EngineChannels {
         }
     }
 
-    /// The same rule for one engine, counting the player's opt-ins: a preview engine they took for a game.
+    /// The same rule for one engine, counting the player's opt-ins: a preview engine they took for a game, and the
+    /// later revisions of its line. A player who took r4 for Forza Horizon 6 never saw r5, which carried the sound fix
+    /// the game needed: the environment's Engine picker listed r4 alone and so stayed hidden (highball#672).
     public static func visible(_ manifest: EngineManifest, beta: Bool, preview: Bool, optedIn: Set<String>) -> Bool {
         visible(channel: manifest.channel, beta: beta, preview: preview)
-            || (manifest.channel == Self.preview && optedIn.contains(manifest.id))
+            || (manifest.channel == Self.preview && optedIn.contains { EngineManifest.isAtOrAfter(current: manifest.id, wanted: $0) })
     }
 
     /// Whether a recipe's engine pin names a bundled engine this install may not see. Such a recipe

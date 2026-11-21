@@ -46,7 +46,7 @@ final class EngineChannelsTests: XCTestCase {
 
     func testAPreviewEngineTakenForAGameIsSeenAndNoOtherIs() throws {
         let line = try manifest(id: "arm64-line-r1", channel: "preview")
-        let other = try manifest(id: "arm64-line-r2", channel: "preview")
+        let other = try manifest(id: "arm64-other-r2", channel: "preview")
         let betaLine = try manifest(id: "x64-beta-r1", channel: "beta")
         XCTAssertTrue(EngineChannels.visible(line, beta: false, preview: false, optedIn: ["arm64-line-r1"]))
         XCTAssertFalse(EngineChannels.visible(other, beta: false, preview: false, optedIn: ["arm64-line-r1"]))
@@ -54,6 +54,19 @@ final class EngineChannelsTests: XCTestCase {
         XCTAssertFalse(EngineChannels.visible(betaLine, beta: false, preview: false, optedIn: ["x64-beta-r1"]))
         XCTAssertFalse(EngineChannels.hidesPin("arm64-line-r1", bundled: [line], beta: false, preview: false, optedIn: ["arm64-line-r1"]))
         XCTAssertTrue(EngineChannels.hidesPin("arm64-line-r1", bundled: [line], beta: false, preview: false, optedIn: []))
+    }
+
+    func testAPreviewOptInAlsoShowsTheLaterRevisionsOfItsLine() throws {
+        let r3 = try manifest(id: "arm64-line-r3", channel: "preview")
+        let r4 = try manifest(id: "arm64-line-r4", channel: "preview")
+        let r5 = try manifest(id: "arm64-line-r5", channel: "preview")
+        let other = try manifest(id: "arm64-other-r5", channel: "preview")
+        let opted: Set<String> = ["arm64-line-r4"]
+        XCTAssertTrue(EngineChannels.visible(r5, beta: false, preview: false, optedIn: opted), "the revision after the one taken")
+        XCTAssertTrue(EngineChannels.visible(r4, beta: false, preview: false, optedIn: opted))
+        XCTAssertFalse(EngineChannels.visible(r3, beta: false, preview: false, optedIn: opted), "not the ones before it")
+        XCTAssertFalse(EngineChannels.visible(other, beta: false, preview: false, optedIn: opted), "not another line")
+        XCTAssertFalse(EngineChannels.hidesPin("arm64-line-r5", bundled: [r4, r5], beta: false, preview: false, optedIn: opted))
     }
 
     func testPlayOffersAHiddenPreviewPinAndNothingElse() throws {
