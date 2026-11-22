@@ -149,7 +149,7 @@ extension WineRunner {
         ProcessTable.matchingProcesses(in: prefixes) { $0.map(isSteamExecutable) == true }
     }
 
-    /// Find running Steam clients in a single pass, even with several environments.
+    /// Match Steam clients by command line. Static so the app can poll every bottle without resolving engines.
     public static func runningSteamPrefixes(in prefixes: [URL]) -> Set<URL> {
         Set(steamClients(in: prefixes).keys)
     }
@@ -158,7 +158,8 @@ extension WineRunner {
         runningSteamPrefixes(in: [prefix]).contains(prefix)
     }
 
-    /// The running client's environment, or nil when no client can be read.
+    /// The environment of the bottle's running Steam client, nil when none runs (or the
+    /// kernel would not show it, which it does for Wine's processes).
     public func runningSteamEnvironment() -> [String: String]? {
         Self.steamClients(in: [bottle.url])[bottle.url]?.first?.environment
     }
