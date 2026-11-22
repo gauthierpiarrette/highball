@@ -145,24 +145,23 @@ public enum SteamRestart {
 }
 
 extension WineRunner {
-    /// Whether a Steam client runs in the prefix, by its command line. Static so the app can
-    /// poll every bottle without resolving engines.
+    private static func steamClients(in prefixes: [URL]) -> [URL: [(pid: pid_t, environment: [String: String])]] {
+        ProcessTable.matchingProcesses(in: prefixes) { $0.map(isSteamExecutable) == true }
+    }
+
+    /// Match Steam clients by command line. Static so the app can poll every bottle without resolving engines.
+    public static func runningSteamPrefixes(in prefixes: [URL]) -> Set<URL> {
+        Set(steamClients(in: prefixes).keys)
+    }
+
     public static func steamIsRunning(inPrefix prefix: URL) -> Bool {
-        ProcessTable.processes(ofPrefix: prefix).contains { pid in
-            guard let first = ProcessTable.commandLineAndEnvironment(of: pid)?.arguments.first else { return false }
-            return isSteamExecutable(first)
-        }
+        runningSteamPrefixes(in: [prefix]).contains(prefix)
     }
 
     /// The environment of the bottle's running Steam client, nil when none runs (or the
     /// kernel would not show it, which it does for Wine's processes).
     public func runningSteamEnvironment() -> [String: String]? {
-        for pid in ProcessTable.processes(ofPrefix: bottle.url) {
-            guard let info = ProcessTable.commandLineAndEnvironment(of: pid),
-                  let first = info.arguments.first, Self.isSteamExecutable(first) else { continue }
-            return info.environment
-        }
-        return nil
+        Self.steamClients(in: [bottle.url])[bottle.url]?.first?.environment
     }
 
     /// Whether a Steam game is running in the bottle: a prefix process working inside a

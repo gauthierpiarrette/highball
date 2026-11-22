@@ -703,6 +703,42 @@ extension RegressionTests {
                        "server-\(String(UInt64(st.st_dev), radix: 16))-\(String(st.st_ino, radix: 16))")
     }
 
+    func testRunningSteamPrefixesDistinguishesTwoClients() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "hb-clients-\(UUID().uuidString)")
+        let first = root.appending(path: "first"), second = root.appending(path: "second")
+        for prefix in [first, second] {
+            try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
+        }
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // A platform binary hides WINEPREFIX. Re-sign the sleeper so the poll sees it as it sees Wine.
+        let sleeper = root.appending(path: "steam.exe")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/bin/sleep"), to: sleeper)
+        try Shell.run("/usr/bin/codesign", ["--force", "--sign", "-", sleeper.path])
+        func startClient(prefix: URL, workingIn directory: URL) throws -> Process {
+            let client = Process()
+            client.executableURL = sleeper
+            client.arguments = ["60"]
+            client.environment = ["WINEPREFIX": prefix.path]
+            client.currentDirectoryURL = directory
+            try client.run()
+            return client
+        }
+
+        let a = try startClient(prefix: first, workingIn: second)
+        defer { if a.isRunning { a.terminate() }; a.waitUntilExit() }
+        let prefixes = [first, second]
+        XCTAssertEqual(WineRunner.runningSteamPrefixes(in: prefixes), [first])
+
+        let b = try startClient(prefix: second, workingIn: first)
+        defer { if b.isRunning { b.terminate() }; b.waitUntilExit() }
+        XCTAssertEqual(WineRunner.runningSteamPrefixes(in: prefixes), Set(prefixes))
+
+        a.terminate()
+        a.waitUntilExit()
+        XCTAssertEqual(WineRunner.runningSteamPrefixes(in: prefixes), [second])
+    }
+
     // Wine fixes the sync mode when a prefix's wineserver starts, and a client started with a
     // different one dies at msync_init before doing anything (issue #32: `bottle set winver`
     // reported ok while a Steam window, cold-started with sync off, was open). A launch now reads
