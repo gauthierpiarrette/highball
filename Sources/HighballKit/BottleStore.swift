@@ -6,7 +6,7 @@ public struct BottleStore: Sendable {
 
     public func list() throws -> [Bottle] {
         guard FileManager.default.fileExists(atPath: paths.bottles.path) else { return [] }
-        return try FileManager.default.contentsOfDirectory(at: paths.bottles, includingPropertiesForKeys: nil)
+        return try Self.entries(of: paths.bottles)
             .compactMap { url -> Bottle? in
                 guard var b = try? Bottle.load(url) else { return nil }
                 // The folder is the bottle's identity (get/delete resolve by folder). A copied
@@ -24,6 +24,14 @@ public struct BottleStore: Sendable {
                 return b
             }
             .sorted { $0.name < $1.name }
+    }
+
+    /// The entries of `bottles/`, each as a URL under `bottles/` itself. A player can make the folder a
+    /// symlink to another disk (highball#750), and contentsOfDirectory(at:) refuses a symlinked folder
+    /// ("couldn't be opened", measured on macOS 27) where the path call follows it. The URLs stay under
+    /// the link, so they match what bottleURL builds and its containment check.
+    static func entries(of dir: URL) throws -> [URL] {
+        try FileManager.default.contentsOfDirectory(atPath: dir.path).map { dir.appending(path: $0) }
     }
 
     public func get(_ name: String) throws -> Bottle {
@@ -399,7 +407,7 @@ public struct BottleStore: Sendable {
     /// can never be invisible again — being invisible is what stranded the reporter of #38.
     public func damaged() throws -> [DamagedBottle] {
         guard FileManager.default.fileExists(atPath: paths.bottles.path) else { return [] }
-        return try FileManager.default.contentsOfDirectory(at: paths.bottles, includingPropertiesForKeys: nil)
+        return try Self.entries(of: paths.bottles)
             .compactMap { url -> DamagedBottle? in
                 let name = url.lastPathComponent
                 if name.hasPrefix(".") { return nil }

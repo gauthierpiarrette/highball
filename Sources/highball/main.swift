@@ -997,7 +997,8 @@ struct Play: AsyncParsableCommand {
             pin:<environment>:<uuid> or battlenet:<product code>, and launcher:<id> opens a launcher. Highball starts it with \
             the game's own settings and stays in the background, the way a game's Mac app does. \
             With --wait the command returns once the game has quit, for frontends such as ES-DE, \
-            and Highball and Steam keep running. It follows the games Highball runs in its \
+            and Highball and Steam keep running. A game that isn't installed fails the command at once, \
+            with or without --wait, after Highball shows what it can do with it. It follows the games Highball runs in its \
             environments, so a game Steam for Mac starts ends the wait only at --start-timeout.
             """)
     @Argument(help: "The game's library id.") var id: String
@@ -1010,6 +1011,7 @@ struct Play: AsyncParsableCommand {
         }
         let paths = HighballPaths()
         // A typo fails here and now, not as an alert in the app and a wait that never ends.
+        var notInstalled = false
         switch target {
         case .launcher:
             break
@@ -1019,9 +1021,10 @@ struct Play: AsyncParsableCommand {
                 fail("\(id) is not an installed Epic game in this Highball. `highball library --installed` lists what can be played.")
             }
         case .steam, .gog, .pin, .battlenet:
-            guard currentLibrary(paths: paths, epic: false).contains(where: { $0.id == target.libraryID }) else {
+            guard let item = currentLibrary(paths: paths, epic: false).first(where: { $0.id == target.libraryID }) else {
                 fail("\(id) is not in this Highball's library. `highball library` lists the ids.")
             }
+            notInstalled = !item.installed && !item.installedOnMac
         }
         // The link the game's Mac app opens, with this install's token, so the app starts it
         // without asking; -g keeps Highball behind the game (MacAppStub.launchScript).
@@ -1032,6 +1035,10 @@ struct Play: AsyncParsableCommand {
         try open.run()
         open.waitUntilExit()
         guard open.terminationStatus == 0 else { fail("macOS could not open the Highball app (open exited with \(open.terminationStatus))") }
+        // A game that isn't installed never starts: the app asks about it in its window, and the
+        // wait used to run to --start-timeout. The question is up, so stop here, with or without
+        // --wait, so a script sees the failure in the exit status (highball#432).
+        if notInstalled { fail("\(id) is not installed, so it won't start. Highball shows what it can do with it in its window.") }
         guard wait else { return }
         if case .launcher = target { return }   // a launcher is not a game the app follows
 

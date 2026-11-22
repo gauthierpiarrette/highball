@@ -20,6 +20,10 @@ public final class DirectoryWatcher {
         self.onChange = onChange
     }
 
+    public convenience init(quiet: TimeInterval = 2, onChange: @escaping () -> Void) {
+        self.init(quiet: quiet) { _ in onChange() }
+    }
+
     deinit { for source in sources.values { source.cancel() } }
 
     /// The requested directories that existed at the last `watch`.

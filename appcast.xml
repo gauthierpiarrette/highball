@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.10.28</title>
+      <description><![CDATA[The default engine gets the microphone and audio fixes, new Wine 11 engines fix Steam on Macs with Intel Homebrew, and GOG uninstalls keep what you added.]]></description>
+      <pubDate>Sat, 14 Nov 2026 13:56:25 +0100</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:channel>beta</sparkle:channel>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.10.28/Highball-0.10.28.zip" sparkle:version="0.10.28" sparkle:shortVersionString="0.10.28" sparkle:edSignature="srBRXqukZzxLCEcWpnZPauO9so95UCcE8mDoGGQcefuPBBC9EhoNR8jAl1CXzlNi2QMest3EALjYFMgXBIB0CA==" length="9579316" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.10.27</title>
       <description><![CDATA[Surround sound on the arm64 engine (r5), GOG and Epic Mac builds, Detroit: Become Human, clearer store failures]]></description>
       <pubDate>Wed, 11 Nov 2026 00:11:16 +0100</pubDate>

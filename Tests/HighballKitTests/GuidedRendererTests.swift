@@ -3,7 +3,7 @@ import XCTest
 
 /// Per-game graphics modes (the guided renderer trial, ux-plan item 1), the one resolution rule
 /// for a launch, the native-Vulkan flag (#44), and the same-Wine engine auto-update (item 9).
-final class GuidedRendererTests: XCTestCase {
+final class GuidedRendererTests: EnglishCopyTestCase {
     private var home: URL!
     override func setUpWithError() throws {
         home = FileManager.default.temporaryDirectory.appending(path: "hb-guided-\(UUID().uuidString)")

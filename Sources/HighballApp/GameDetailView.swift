@@ -42,7 +42,14 @@ struct GameDetailView: View {
         state.setLaunchArguments(argsText, for: item)
     }
     /// The live row: after an install, a delete or a rename, the passed-in copy goes stale.
-    private var item: LibraryItem { state.libraryItems.first { $0.id == passedItem.id } ?? passedItem }
+    /// The page's item as the library has it now. A program's id carries its environment's name, so
+    /// after a move or a rename the page finds it by its own uuid (highball#753), or it showed the
+    /// environment the program had left.
+    private var item: LibraryItem {
+        state.libraryItems.first { $0.id == passedItem.id }
+            ?? LibraryIndex.pinItem(withSameProgramAs: passedItem, in: state.libraryItems)
+            ?? passedItem
+    }
     @State private var showWhy = false
     @State private var showAdvanced = false
 
@@ -1016,7 +1023,7 @@ struct GameDetailView: View {
                                         Text(L("Disconnected display")).tag(stored)
                                     }
                                 }.labelsHidden().frame(maxWidth: 360)
-                                Text(L("Highball moves the game's window here after it opens. Works best for windowed and borderless games. Needs Accessibility permission for Highball."))
+                                Text(L("Highball moves the game's window here after it opens, for windowed and borderless games. A fullscreen game usually opens on the Mac's main display, which you choose in System Settings, Displays. Needs Accessibility permission for Highball."))
                                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             }
                         }
@@ -1109,6 +1116,17 @@ struct GameDetailView: View {
                                 }
                                 .controlSize(.small).fixedSize().disabled(state.busy || running != nil)
                                 .help(L("Moves this game's folder into another environment, where it plays with that environment's engine and settings. Its other games stay where they are. Saves the game keeps in the environment's user folders stay behind, unless Epic keeps them in the cloud."))
+                            }
+                            // A program added by hand that lives outside the environment moves
+                            // alone, its files stay where they are (highball#753).
+                            if item.source == .pin, state.pin(for: item)?.isOutsideEnvironment == true, state.bottles.count > 1 {
+                                Menu(L("Move to…")) {
+                                    ForEach(state.bottles.filter { $0.name != bottle.name }, id: \.name) { other in
+                                        Button(other.name) { state.moveProgram(item, to: other) }
+                                    }
+                                }
+                                .controlSize(.small).fixedSize().disabled(state.busy || running != nil)
+                                .help(L("Moves this program to another environment, where it plays with that environment's engine and settings. Its files stay where they are on your Mac."))
                             }
                         }
                         // Another copy plays from its own environment; once played there, the

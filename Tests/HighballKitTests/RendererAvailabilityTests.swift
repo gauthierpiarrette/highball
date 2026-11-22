@@ -6,7 +6,7 @@ import XCTest
 /// installed?)", the message was wrong, and nothing offered a way out short of a new bottle.
 /// A renderer the engine cannot run must be reported for what it is, a bottle-level setting
 /// must degrade to a mode that runs, and a recipe must not install such a setting.
-final class RendererAvailabilityTests: XCTestCase {
+final class RendererAvailabilityTests: EnglishCopyTestCase {
     private var root: URL!
 
     override func setUpWithError() throws {
@@ -175,6 +175,19 @@ final class RendererAvailabilityTests: XCTestCase {
         var stale = bottle(renderer: .dxmt)
         stale.settings.environment = ["ROSETTA_X87_PATH": "/somewhere/else"]
         XCTAssertNil(try stale.environment(engine: e)["ROSETTA_X87_PATH"], "only the switch sets it")
+    }
+
+    /// A recipe names a file of the environment's own engine with ${frameworks} or ${renderers}, as an engine
+    /// manifest's baseEnv does (Diablo II: Resurrected's CX_APPLEGPTK_LIBD3DSHARED_PATH, highball#371).
+    func testARecipeVariableCanNameAFileOfTheEnvironmentsEngine() throws {
+        let e = try engine(accepted: false)
+        var b = bottle(renderer: .dxmt)
+        b.settings.environment = ["CX_APPLEGPTK_LIBD3DSHARED_PATH": "${frameworks}/renderer/d3dmetal/external/libd3dshared.dylib",
+                                  "HB_SOME_RENDERER_FILE": "${renderers}/dxmt/wine"]
+        let env = try b.environment(engine: e)
+        XCTAssertEqual(env["CX_APPLEGPTK_LIBD3DSHARED_PATH"], e.frameworksDir.path + "/renderer/d3dmetal/external/libd3dshared.dylib")
+        XCTAssertEqual(env["HB_SOME_RENDERER_FILE"], e.renderersDir.path + "/dxmt/wine")
+        XCTAssertFalse(env.values.contains { $0.contains("${frameworks}") || $0.contains("${renderers}") })
     }
 
     func testEnvironmentFollowsTheDegradedRendererInsteadOfThrowing() throws {

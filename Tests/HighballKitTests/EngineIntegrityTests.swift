@@ -5,7 +5,7 @@ import XCTest
 /// and every install then died with "exit=53" and Wine's own DLLs "not found". The app offered
 /// "try again with a fresh copy" — a download that was never the problem — and both reports took
 /// a round of questions to answer by hand.
-final class EngineIntegrityTests: XCTestCase {
+final class EngineIntegrityTests: EnglishCopyTestCase {
     /// The log from #153, as it arrived.
     private let output = """
     0024:err:environ:init_peb starting L"Z:\\\\Users\\\\yanhee\\\\SteamSetup.exe" in experimental wow64 mode

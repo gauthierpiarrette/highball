@@ -413,12 +413,8 @@ private func homeMoveAskMessage(to target: URL, from source: URL) -> String {
 // in reasonable time", CI and the nightly E2E on 2026-09-08) while Xcode 26 took it fine.
 private extension View {
     @MainActor func runDroppedDialog(_ state: AppState, target: Bottle?) -> some View {
-        self.confirmationDialog(String(format: L("Run %@ in %@?"), state.pendingRun?.lastPathComponent ?? "", target?.name ?? ""),
-                            isPresented: .init(get: { state.pendingRun != nil }, set: { if !$0 { state.pendingRun = nil; state.pendingRunBottle = nil } }),
-                            titleVisibility: .visible) {
-            Button(L("Run")) { if let u = state.pendingRun, let b = target { state.runDropped(u, in: b, andPin: false) }; state.pendingRun = nil }
-            Button(L("Run and add to Programs")) { if let u = state.pendingRun, let b = target { state.runDropped(u, in: b, andPin: true) }; state.pendingRun = nil }
-            Button(L("Cancel"), role: .cancel) { state.pendingRun = nil }
+        self.sheet(isPresented: .init(get: { state.pendingRun != nil }, set: { if !$0 { state.pendingRun = nil; state.pendingRunBottle = nil } })) {
+            RunProgramSheet(initial: target?.name)
         }
     }
     @MainActor func d3dMetalAsk(_ state: AppState) -> some View {
@@ -591,7 +587,7 @@ private extension View {
             }
             Button(L("Cancel"), role: .cancel) { state.pendingUninstall = nil }
         } message: { pending in
-            Text(Uninstall.confirmation(route: pending.route, sizeOnDisk: pending.item.sizeOnDisk))
+            Text(Uninstall.confirmation(route: pending.route, sizeOnDisk: pending.item.sizeOnDisk, language: L10n.currentLanguage))
         }
     }
 
@@ -772,7 +768,7 @@ private extension View {
                     NSWorkspace.shared.open(BugReport.url(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"))
                 }
             }
-            Button("OK", role: .cancel) { state.errorMessage = nil }
+            Button(L("OK"), role: .cancel) { state.errorMessage = nil }
         } message: {
             // The meaning, in words; exit codes, paths and raw output live behind Details.
             Text(state.errorIsPartialSuccess ? (state.errorMessage ?? "") : (state.errorRecovery?.meaning ?? ""))
@@ -855,6 +851,51 @@ struct CreateBottleSheet: View {
     }
 
     private var nameProblem: String? { BottleStore.nameProblem(name) }
+}
+
+/// What runs a Windows program opened from the Finder, the File menu or a drop, and where: the
+/// environment it was dropped on or the default one first, any other one picked here. A program
+/// double clicked in the Finder always went to the default environment, and the only way to run it
+/// elsewhere was to drag it onto that environment's page (highball#754).
+struct RunProgramSheet: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.dismiss) private var dismiss
+    @State private var bottleName: String
+
+    init(initial: String?) { _bottleName = State(initialValue: initial ?? "") }
+
+    var body: some View {
+        let target = state.bottles.first { $0.name == bottleName } ?? state.defaultBottle
+        VStack(alignment: .leading, spacing: 14) {
+            Text(String(format: L("Run %@?"), state.pendingRun?.lastPathComponent ?? "")).font(.title3.bold())
+            if state.bottles.count > 1 {
+                Picker(L("Environment"), selection: Binding(get: { target?.name ?? "" }, set: { bottleName = $0 })) {
+                    ForEach(state.bottles, id: \.name) { Text(verbatim: $0.name).tag($0.name) }
+                }
+                .frame(width: 360)
+            } else if let target {
+                Text(String(format: L("In the environment '%@'."), target.name)).foregroundStyle(.secondary)
+            }
+            HStack {
+                Spacer()
+                Button(L("Cancel")) { close() }.keyboardShortcut(.cancelAction)
+                Button(L("Run and add to Programs")) { run(in: target, andPin: true) }
+                Button(L("Run")) { run(in: target, andPin: false) }.keyboardShortcut(.defaultAction)
+            }
+            .disabled(target == nil)
+        }
+        .padding(24)
+    }
+
+    private func run(in bottle: Bottle?, andPin: Bool) {
+        if let url = state.pendingRun, let bottle { state.runDropped(url, in: bottle, andPin: andPin) }
+        close()
+    }
+
+    private func close() {
+        state.pendingRun = nil; state.pendingRunBottle = nil
+        dismiss()
+    }
 }
 
 struct LogSheet: View {
