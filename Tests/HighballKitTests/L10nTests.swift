@@ -47,6 +47,8 @@ final class L10nTests: EnglishCopyTestCase {
         XCTAssertEqual(L10n.translate("Cancel", language: .en), "Cancel")
         XCTAssertEqual(L10n.translate("Cancel", language: .fr), "Annuler")
         XCTAssertEqual(L10n.translate("Cancel", language: .zhHans), "取消")
+        XCTAssertEqual(L10n.translate("Finding your games…", language: .fr), "Recherche de vos jeux…")
+        XCTAssertEqual(L10n.translate("Finding your games…", language: .zhHans), "Finding your games…")
         XCTAssertEqual(L10n.translate("Disconnect Epic", language: .en), "Disconnect Epic")
         XCTAssertEqual(L10n.translate("Disconnect Epic", language: .fr), "Déconnecter Epic")
         XCTAssertEqual(L10n.translate("Disconnect Epic", language: .zhHans), "断开 Epic 连接")
