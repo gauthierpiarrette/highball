@@ -976,9 +976,11 @@ struct LibraryCommand: AsyncParsableCommand {
     func run() async throws {
         let paths = HighballPaths()
         let names = NameStore(paths: paths).names()
+        let hiddenIDs = LibraryStore(paths: paths).hiddenIDs()
         let entries = currentLibrary(paths: paths, epic: true)
             .filter { !installed || $0.installedAnywhere }
-            .map { LibraryListing.entry($0, title: NameStore.name(for: $0.id, in: names) ?? $0.title) }
+            .map { LibraryListing.entry($0, title: NameStore.name(for: $0.id, in: names) ?? $0.title,
+                                        hidden: LibraryStore.isHidden($0.id, in: hiddenIDs)) }
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         if json {
             let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -999,9 +1001,9 @@ struct Play: AsyncParsableCommand {
             With --wait the command returns once the game has quit, for frontends such as ES-DE, \
             and Highball and Steam keep running. A game that isn't installed fails the command at once, \
             with or without --wait, after Highball shows what it can do with it. It follows the games Highball runs in its \
-            environments, so a game Steam for Mac starts ends the wait only at --start-timeout.
+            environments and the Mac builds it starts, Steam for Mac's included.
             """)
-    @Argument(help: "The game's library id.") var id: String
+    @Argument(help: "The game's library id, as `highball library` lists it (for example steam:620).") var id: String
     @Flag(help: "Return only once the game has quit.") var wait = false
     @Option(help: "With --wait, how many seconds the game has to start before the command gives up.") var startTimeout: Int = 600
 

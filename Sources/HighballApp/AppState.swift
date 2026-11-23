@@ -511,7 +511,31 @@ final class AppState {
         if item.source == .epic { epicPlayMac(item); return }
         guard let appid = item.steamAppID else { return }
         recordPlay(item)
-        _ = openInSteamForMac(URL(string: "steam://run/\(appid)")!)
+        if openInSteamForMac(URL(string: "steam://run/\(appid)")!),
+           let game = macSteamGames.first(where: { $0.appid == appid }), !game.installdir.isEmpty {
+            watchMacSteamGame(item.id, markers: SessionWatch.markers(installdir: game.installdir))
+        }
+    }
+
+    /// Follows a game Steam for Mac started for Highball by its process, whose path runs through
+    /// its steamapps/common folder: up to ten minutes for it to appear (Steam may update it first),
+    /// then until it quits. Only `highball play --wait` reads it (writeRunningGames).
+    private func watchMacSteamGame(_ id: String, markers: [String]) {
+        Task { [weak self] in
+            var seen = false
+            for _ in 0..<300 {
+                try? await Task.sleep(for: .seconds(2))
+                let alive = SessionWatch.isAlive(markers: markers, ps: await Self.processList())
+                guard let self else { return }
+                if alive, !seen { seen = true; self.macSteamRunning.insert(id) }
+                if seen, !alive { self.macSteamRunning.remove(id); return }
+            }
+            while seen {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self else { return }
+                if !SessionWatch.isAlive(markers: markers, ps: await Self.processList()) { self.macSteamRunning.remove(id); return }
+            }
+        }
     }
 
     /// Hands the game to Steam for Mac, whose own dialog asks where to put it; without it, the
@@ -2769,10 +2793,23 @@ final class AppState {
     /// nothing here blocks the app while a game runs. Kept in the home as well (RunningGames), so
     /// `highball play --wait` returns when its game quits (highball#432).
     var runningSessions: [GameSession] = [] {
-        didSet {
-            let ids = runningSessions.compactMap(\.libraryID)
-            if ids != oldValue.compactMap(\.libraryID) { RunningGames.write(ids, paths: paths) }
-        }
+        didSet { writeRunningGames() }
+    }
+    /// Steam for Mac games started from Highball and running now, by library id, seen by their
+    /// process (watchMacSteamGame). Steam for Mac starts them, so there is no process of ours.
+    var macSteamRunning: Set<String> = [] {
+        didSet { writeRunningGames() }
+    }
+    @ObservationIgnored private var runningGamesWritten: Set<String>?
+    /// What RunningGames holds for `highball play --wait`: the sessions in environments, the Mac
+    /// builds Highball started (Epic and GOG ones by their process, Steam for Mac ones by watching).
+    /// Before, only sessions counted, so a wait on a Mac game ended at --start-timeout
+    /// (highball#432, Terraforming Mars through Steam for Mac).
+    private func writeRunningGames() {
+        let ids = Set(runningSessions.compactMap(\.libraryID)).union(macGameProcesses.keys).union(macSteamRunning)
+        guard ids != runningGamesWritten else { return }
+        runningGamesWritten = ids
+        RunningGames.write(ids.sorted(), paths: paths)
     }
     /// The last session that ended, for the post-play prompt to come.
     var lastEndedSession: SessionRecord?
@@ -4689,7 +4726,9 @@ final class AppState {
 
     /// Mac builds running now, by library id: their process, for the achievement card's
     /// placement and so Play cannot start a second copy.
-    var macGameProcesses: [String: Process] = [:]
+    var macGameProcesses: [String: Process] = [:] {
+        didSet { writeRunningGames() }
+    }
 
     /// Whether a game runs now, either build: changing or removing a build then would pull its
     /// files from under it.

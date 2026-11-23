@@ -455,21 +455,25 @@ public enum LibraryListing {
         public let title: String
         public let source: String
         public let environment: String?
-        public let installed: Bool
+        /// Installed in a Highball environment. Named for what it is beside installedOnMac: a plain
+        /// "installed" read as "installed anywhere" (highball#432).
+        public let installedOnWindows: Bool
         public let installedOnMac: Bool
+        /// Hidden from the library by the player, so a frontend can leave it out too (highball#432).
+        public let hidden: Bool
     }
 
     /// `title` is the name shown in the app: a custom one (NameStore) or the store's.
-    public static func entry(_ item: LibraryItem, title: String) -> Entry {
+    public static func entry(_ item: LibraryItem, title: String, hidden: Bool = false) -> Entry {
         Entry(id: item.id, title: title, source: item.source.rawValue, environment: item.bottleName,
-              installed: item.installed, installedOnMac: item.installedOnMac)
+              installedOnWindows: item.installed, installedOnMac: item.installedOnMac, hidden: hidden)
     }
 
     public static func line(_ entry: Entry) -> String {
         func field(_ text: String) -> String {
             text.replacingOccurrences(of: "[\t\r\n]+", with: " ", options: .regularExpression)
         }
-        let state = entry.installed ? "installed" : entry.installedOnMac ? "installed on Mac" : "not installed"
+        let state = entry.installedOnWindows ? "installed" : entry.installedOnMac ? "installed on Mac" : "not installed"
         return [entry.id, field(entry.title), field(entry.environment ?? "-"), state].joined(separator: "\t")
     }
 }
