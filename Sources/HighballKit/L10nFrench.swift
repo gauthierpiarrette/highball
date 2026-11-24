@@ -12,6 +12,7 @@ extension L10n {
         "Release date": "Date de sortie",
         "Game information and screenshots from Steam.": "Informations et captures d’écran fournies par Steam.",
         "Loading game information…": "Chargement des informations du jeu…",
+        "Finding your games…": "Recherche de vos jeux…",
         "Previous image": "Image précédente",
         "Next image": "Image suivante",
         "Game artwork": "Visuel du jeu",
