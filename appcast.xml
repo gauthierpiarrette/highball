@@ -5,6 +5,14 @@
     <link>https://github.com/gauthierpiarrette/highball</link>
     <description>Run Windows games on Apple Silicon.</description>
     <item>
+      <title>Highball 0.10.29</title>
+      <description><![CDATA[Diablo II: Resurrected plays, programs move between environments, Simplified Chinese, and new fixes for Tale of Wuxia, Assassin's Creed, RollerCoaster Tycoon 3 and Fort Solis]]></description>
+      <pubDate>Tue, 24 Nov 2026 01:30:33 +0100</pubDate>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <sparkle:phasedRolloutInterval>86400</sparkle:phasedRolloutInterval>
+      <enclosure url="https://github.com/gauthierpiarrette/highball/releases/download/v0.10.29/Highball-0.10.29.zip" sparkle:version="0.10.29" sparkle:shortVersionString="0.10.29" sparkle:edSignature="WMFs0AEtnFx2tEkZW5VY9rYGcNNFrkHcPdCDtShE5T54FTY8BEn0qjtHjGh4eDF4MU19Jnic1OwkNyvH/NZhCw==" length="9803924" type="application/octet-stream"/>
+    </item>
+    <item>
       <title>Highball 0.10.28</title>
       <description><![CDATA[The default engine gets the microphone and audio fixes, new Wine 11 engines fix Steam on Macs with Intel Homebrew, and GOG uninstalls keep what you added.]]></description>
       <pubDate>Sat, 14 Nov 2026 13:56:25 +0100</pubDate>
