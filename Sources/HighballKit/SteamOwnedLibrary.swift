@@ -57,6 +57,16 @@ public enum SteamOwnedLibrary {
         return "\(count)|\(date)"
     }
 
+    /// The apps a package other than Steam's package 0 licenses, or nil when packageinfo.vdf has
+    /// none to read. Package 0 is the license every account gets, and Steam makes a librarycache
+    /// folder for its old demos too (Europa Universalis III Demo, Portal: First Slice, highball#791)
+    /// while its own library leaves them out; a demo the player added comes with its own package.
+    static func demosThePlayerAdded(steamRoot: URL) -> Set<Int>? {
+        let packages = SteamPackageInfo.read(steamRoot: steamRoot)
+        guard !packages.isEmpty else { return nil }
+        return packages.filter { $0.id != 0 }.reduce(into: Set<Int>()) { $0.formUnion($1.appIDs) }
+    }
+
     static func games(steamRoot: URL) -> [OwnedSteamGame] {
         let cache = steamRoot.appending(path: "appcache/librarycache")
         let owned = Set(((try? FileManager.default.contentsOfDirectory(atPath: cache.path)) ?? []).compactMap(Int.init))
@@ -65,9 +75,11 @@ public enum SteamOwnedLibrary {
         // A demo of a game the account owns is left out: the game stands for it (highball#432,
         // Fireside Feelings and its demo both listed).
         let ownedGames = Set(owned.filter { apps[$0]?.type?.lowercased() == "game" })
+        let addedDemos = demosThePlayerAdded(steamRoot: steamRoot)
         return owned.compactMap { appid in
             guard let app = apps[appid], ["game", "demo"].contains(app.type?.lowercased() ?? ""), let name = app.name else { return nil }
             if app.type?.lowercased() == "demo", let parent = app.parent, ownedGames.contains(parent) { return nil }
+            if app.type?.lowercased() == "demo", let addedDemos, !addedDemos.contains(appid) { return nil }
             let folder = cache.appending(path: String(appid))
             let art = artwork(in: folder)
             return OwnedSteamGame(appid: appid, name: name, localCapsule: art["library_600x900.jpg"],

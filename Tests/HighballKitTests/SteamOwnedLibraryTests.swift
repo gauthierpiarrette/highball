@@ -157,6 +157,41 @@ final class SteamOwnedLibraryTests: XCTestCase {
         XCTAssertEqual(SteamOwnedLibrary.games(steamRoot: root).map(\.appid), [2990600, 3460730])
     }
 
+    /// A packageinfo.vdf v40 naming each package's apps.
+    private func packageInfo(_ packages: [(id: Int, apps: [Int])]) -> Data {
+        var bytes = SteamBinary.u32(0x0656_5528) + SteamBinary.u32(1)
+        for p in packages {
+            let body: [(String, SteamBinary.Value)] = [
+                ("packageid", .int(Int32(p.id))),
+                ("appids", .object(p.apps.enumerated().map { (String($0.offset), .int(Int32($0.element))) }))]
+            bytes += SteamBinary.u32(UInt32(p.id)) + [UInt8](repeating: 0, count: 20 + 4 + 8) + SteamBinary.object([(String(p.id), .object(body))])
+        }
+        return Data(bytes + SteamBinary.u32(0xFFFF_FFFF))
+    }
+
+    func testADemoOnlySteamsOwnPackageLicensesIsLeftOut() throws {
+        // Package 0 is every account's: Steam keeps librarycache folders for its old demos and
+        // leaves them out of its own library (highball#791). A demo the player added has a
+        // package of its own and stays, and package 0's games are not affected.
+        let root = try steamRoot(owned: [22150, 410, 570, 3460730, 570940], appinfo: appinfo([
+            App(appid: 22150, name: "Europa Universalis III Demo", type: "Demo"),
+            App(appid: 410, name: "Portal: First Slice", type: "Demo"),
+            App(appid: 570, name: "Dota 2", type: "Game"),
+            App(appid: 3460730, name: "SlashZero Demo", type: "Demo"),
+            App(appid: 570940, name: "DSR", type: "Game")]))
+        try packageInfo([(0, [22150, 410, 570]), (1491674, [3460730]), (210000, [570940])])
+            .write(to: root.appending(path: "appcache/packageinfo.vdf"))
+        XCTAssertEqual(SteamOwnedLibrary.games(steamRoot: root).map(\.appid), [570, 570940, 3460730])
+    }
+
+    func testDemosStayWhenPackageinfoCannotBeRead() throws {
+        // No packageinfo.vdf to tell them apart: every demo stays, as before.
+        let root = try steamRoot(owned: [22150, 3460730], appinfo: appinfo([
+            App(appid: 22150, name: "Europa Universalis III Demo", type: "Demo"),
+            App(appid: 3460730, name: "SlashZero Demo", type: "Demo")]))
+        XCTAssertEqual(SteamOwnedLibrary.games(steamRoot: root).map(\.appid), [22150, 3460730])
+    }
+
     func testPrefersTheClientsCachedArtwork() throws {
         let root = try steamRoot(owned: [2062430, 570940], appinfo: appinfo([
             App(appid: 2062430, name: "BALL x PIT", type: "game"), App(appid: 570940, name: "DSR", type: "game")]))

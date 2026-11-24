@@ -99,7 +99,8 @@ final class SteamDownloadSizeTests: XCTestCase {
 
 /// Steam's binary formats as the size estimate reads them, built byte by byte: KeyValues objects
 /// with inline keys (type, name, value; 0x08 ends an object), little-endian integers.
-private enum SteamBinary {
+/// Valve binary KeyValues for test fixtures (packageinfo.vdf, appinfo rows).
+enum SteamBinary {
     static func u32(_ v: UInt32) -> [UInt8] { withUnsafeBytes(of: v.littleEndian, Array.init) }
     static func cString(_ s: String) -> [UInt8] { Array(s.utf8) + [0] }
     indirect enum Value { case string(String), int(Int32), object([(String, Value)]) }
