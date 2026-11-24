@@ -183,20 +183,39 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
         case available
         case needsLicence(String)
         case notShipped
+        /// The engine has it, but this Mac's macOS is older than the mode needs.
+        case needsMacOS(Int)
     }
 
-    public func availability(in engine: InstalledEngine) -> Availability {
+    /// The macOS major version a mode needs, where it needs more than Highball itself (macOS 14).
+    /// Every DXMT build Highball has shipped, from the Wine 10 r19 engine to Wine 11 r35, carries a
+    /// built-in shader library compiled for macOS 15 (Metal language 3.2) next to its macOS 14 one,
+    /// and on macOS 14 Metal refuses those shaders ("language version 3.2 which is incompatible with
+    /// this OS", cs_clear_buffer_uint), so games drew nothing but the cursor (highball#584, Palia on
+    /// an M2 Pro). Below it DXMT counts as unavailable, so a new environment starts on DXVK, a
+    /// setting falls back with a note, and Play says why.
+    public static let minimumMacOS: [Renderer: Int] = [.dxmt: 15]
+
+    /// This Mac's macOS major version.
+    public static var hostMacOSMajor: Int { ProcessInfo.processInfo.operatingSystemVersion.majorVersion }
+
+    public func availability(in engine: InstalledEngine, macOSMajor: Int = Renderer.hostMacOSMajor) -> Availability {
         if self == .wined3d { return .available }
-        if engine.rendererDir(rawValue) != nil { return .available }
+        if engine.rendererDir(rawValue) != nil {
+            if let floor = Self.minimumMacOS[self], macOSMajor < floor { return .needsMacOS(floor) }
+            return .available
+        }
         if let gate = EngineManifest.gatedRenderers[rawValue], engine.ships(rawValue) { return .needsLicence(gate) }
         return .notShipped
     }
 
     /// One sentence for a person: what stops this renderer in `engine` and what to do. Nil when it runs.
-    public func unavailableReason(in engine: InstalledEngine) -> String? {
+    public func unavailableReason(in engine: InstalledEngine, macOSMajor: Int = Renderer.hostMacOSMajor) -> String? {
         let name = Self.displayName(self)
-        switch availability(in: engine) {
+        switch availability(in: engine, macOSMajor: macOSMajor) {
         case .available: return nil
+        case let .needsMacOS(floor):
+            return "\(name) needs macOS \(floor) or later, and this Mac runs macOS \(macOSMajor). Update macOS, or choose another graphics mode."
         case .needsLicence:
             return "\(name) is in engine \(engine.id), but Apple's licence has not been accepted for that engine. Accept it in the environment's settings (Graphics → Review licence…), or choose another graphics mode."
         case .notShipped:
@@ -209,15 +228,15 @@ public enum Renderer: String, Codable, CaseIterable, Sendable {
     public static let fallbackOrder: [Renderer] = [.dxmt, .dxvk, .wined3d]
 
     /// The best renderer `engine` can run in place of `wanted`. Never `wanted` itself.
-    public static func fallback(for wanted: Renderer, in engine: InstalledEngine) -> Renderer {
-        fallbackOrder.first { $0 != wanted && $0.availability(in: engine) == .available } ?? .wined3d
+    public static func fallback(for wanted: Renderer, in engine: InstalledEngine, macOSMajor: Int = Renderer.hostMacOSMajor) -> Renderer {
+        fallbackOrder.first { $0 != wanted && $0.availability(in: engine, macOSMajor: macOSMajor) == .available } ?? .wined3d
     }
 
     /// The mode a new environment starts on: the first in `fallbackOrder` this engine can run.
     /// DXMT on every Intel engine, as before; DXVK on an engine without DXMT (the arm64 line),
     /// rather than a DXMT setting that would degrade at every launch.
-    public static func defaultMode(for engine: InstalledEngine) -> Renderer {
-        fallbackOrder.first { $0.availability(in: engine) == .available } ?? .wined3d
+    public static func defaultMode(for engine: InstalledEngine, macOSMajor: Int = Renderer.hostMacOSMajor) -> Renderer {
+        fallbackOrder.first { $0.availability(in: engine, macOSMajor: macOSMajor) == .available } ?? .wined3d
     }
 
     public static func displayName(_ r: Renderer) -> String {

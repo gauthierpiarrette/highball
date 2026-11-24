@@ -46,6 +46,7 @@ struct Engine: AsyncParsableCommand {
                     switch r.availability(in: e) {
                     case .available: return r.rawValue
                     case .needsLicence: return "\(r.rawValue) (licence not accepted)"
+                    case let .needsMacOS(v): return "\(r.rawValue) (needs macOS \(v))"
                     case .notShipped: return nil
                     }
                 }.joined(separator: ",")

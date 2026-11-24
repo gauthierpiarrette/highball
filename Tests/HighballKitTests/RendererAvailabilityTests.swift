@@ -55,6 +55,23 @@ final class RendererAvailabilityTests: EnglishCopyTestCase {
         XCTAssertEqual(Renderer.defaultMode(for: try engine(ships: [], accepted: false)), .wined3d)
     }
 
+    /// DXMT's built-in shaders need macOS 15 (highball#584: Palia drew only its cursor on macOS 14.8
+    /// on an M2 Pro). Below it DXMT is unavailable, so nothing picks it on its own.
+    func testDXMTNeedsMacOS15() throws {
+        let e = try engine(accepted: false)
+        XCTAssertEqual(Renderer.dxmt.availability(in: e, macOSMajor: 14), .needsMacOS(15))
+        XCTAssertEqual(Renderer.dxmt.availability(in: e, macOSMajor: 15), .available)
+        XCTAssertEqual(Renderer.dxvk.availability(in: e, macOSMajor: 14), .available, "DXVK has no such floor")
+        XCTAssertEqual(Renderer.defaultMode(for: e, macOSMajor: 14), .dxvk, "a new environment on macOS 14 starts on DXVK")
+        XCTAssertEqual(Renderer.defaultMode(for: e, macOSMajor: 27), .dxmt)
+        XCTAssertEqual(Renderer.fallback(for: .dxmt, in: e, macOSMajor: 14), .dxvk)
+        let why = try XCTUnwrap(Renderer.dxmt.unavailableReason(in: e, macOSMajor: 14))
+        XCTAssertTrue(why.contains("macOS 15"), why)
+        XCTAssertNil(Renderer.dxmt.unavailableReason(in: e, macOSMajor: 26))
+        // An engine without DXMT says so, whatever the macOS.
+        XCTAssertEqual(Renderer.dxmt.availability(in: try engine(ships: ["dxvk"], accepted: false), macOSMajor: 14), .notShipped)
+    }
+
     // MARK: Direct3D 12-only programs (highball#139)
 
     func testADirect3D12OnlyProgramGetsAModeThatHasIt() throws {

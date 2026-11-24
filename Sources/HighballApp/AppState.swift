@@ -747,7 +747,7 @@ final class AppState {
             case .needsLicence:
                 pendingD3DMetal = (item, bottle, engine)
                 return
-            case .notShipped:
+            case .notShipped, .needsMacOS:
                 // The mode the game's recipe names comes first: the per-game mode a player chose on another route
                 // follows the game to an engine that lacks it (D3DMetal, on the native arm64 line).
                 let named = fixRecipe(for: item)?.renderer.flatMap { $0.availability(in: engine) == .available ? $0 : nil }
