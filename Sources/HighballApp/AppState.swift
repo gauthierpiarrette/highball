@@ -1252,7 +1252,8 @@ final class AppState {
     static func relaunch() {
         let bundle = Bundle.main.bundleURL.path
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "sleep 1; /usr/bin/open -n \"\(bundle)\""]
+        // The path goes in as $0, not into the script: a folder named with $ or " would break it.
+        p.arguments = ["-c", "sleep 1; /usr/bin/open -n \"$0\"", bundle]
         try? p.run()
         NSApp.terminate(nil)
     }

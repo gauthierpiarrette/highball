@@ -23,6 +23,29 @@ final class PlayLinkTests: XCTestCase {
     /// A stub must not drag Highball in front of the game it starts (issue #53).
     func testStubOpensTheLinkInTheBackground() {
         let script = MacAppStub.launchScript(url: URL(string: "highball://play/steam/620?t=x")!)
-        XCTAssertTrue(script.contains("/usr/bin/open -g \"highball://play/steam/620?t=x\""))
+        XCTAssertTrue(script.contains("/usr/bin/open -g 'highball://play/steam/620?t=x'"))
+    }
+
+    /// sh hands the stub's link to open exactly as Highball wrote it: an environment's name may
+    /// hold `$` and `'`, which a play link keeps unescaped.
+    func testStubPassesTheLinkVerbatim() throws {
+        let target = PlayLink.Target.pin(bottle: "Cash$$ $(echo x) Tom's", id: UUID())
+        let url = PlayLink.url(for: target, token: "tok")
+        let script = MacAppStub.launchScript(url: url).replacingOccurrences(of: "exec /usr/bin/open -g ", with: "printf %s ")
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh"); p.arguments = ["-c", script]
+        let out = Pipe(); p.standardOutput = out
+        try p.run(); p.waitUntilExit()
+        XCTAssertEqual(String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self), url.absoluteString)
+        XCTAssertEqual(PlayLink.parse(url)?.target, target)
+    }
+
+    /// A title is text in the stub's Info.plist: "Mount & Blade II" made a plist macOS rejects.
+    func testStubInfoPlistReadsWithMarkupInTheTitle() throws {
+        let name = MacAppStub.appName(for: "Mount & Blade <II> \"Bannerlord\"")
+        let data = Data(MacAppStub.infoPlist(appName: name, bundleID: "app.highball.stub.x").utf8)
+        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        XCTAssertEqual(plist["CFBundleName"] as? String, name)
+        XCTAssertEqual(plist["CFBundleDisplayName"] as? String, name)
+        XCTAssertEqual(plist["CFBundleExecutable"] as? String, "launch")
     }
 }
