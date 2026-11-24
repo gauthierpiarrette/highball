@@ -309,6 +309,20 @@ final class BundledEngineTests: XCTestCase {
         XCTAssertFalse(EngineManifest.satisfies(current: r35, wanted: try one("x64-crossover26.3-r18")), "r35 lacks D3DMetal 4")
     }
 
+    /// Under D3DMetal on macOS 27 Steam's browser draws in its own process, since its separate GPU
+    /// process dies on setDisplaySyncEnabled. No other mode gets the flag: under DXVK it makes Steam's
+    /// window flicker (highball#743).
+    func testCurrentWine11EnginesGiveSteamsBrowserInProcessGPUUnderD3DMetalOnly() throws {
+        let all = try manifests()
+        for id in ["x64-crossover26.3-r34", "x64-crossover26.3-r35"] {
+            let m = try XCTUnwrap(all.first { $0.id == id })
+            for mode in Renderer.allCases {
+                XCTAssertEqual(m.appDefaults(for: mode)["steamwebhelper.exe"]?["CommandLineAppend"],
+                               mode == .d3dmetal ? "--in-process-gpu" : nil, "\(id) \(mode.rawValue)")
+            }
+        }
+    }
+
     /// Frame generation left Highball on 2026-09-27 at its author's request (itsOwen's lsfg-metal,
     /// highball#171): no engine may ship the component any more. The revisions since are their
     /// bases (r5 on the main line, r6 on the GPTK 4 line) with DXMT swapped and one file added.

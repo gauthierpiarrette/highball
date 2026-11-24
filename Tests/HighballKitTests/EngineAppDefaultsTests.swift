@@ -52,6 +52,35 @@ final class EngineAppDefaultsTests: XCTestCase {
         XCTAssertEqual(store.adoptKnownFacts(known: [known]), [], "a second pass changes nothing")
     }
 
+    func testAModesDefaultsReplaceTheEnginesOfTheSameName() throws {
+        let manifestURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "spike/engine-manifest.json")
+        var m = try EngineManifest.load(from: manifestURL)
+        m.appDefaults = ["steamwebhelper.exe": ["CommandLineAppend": "--a", "Other": "x"]]
+        m.rendererAppDefaults = ["d3dmetal": ["steamwebhelper.exe": ["CommandLineAppend": "--a --b"]]]
+        XCTAssertEqual(m.appDefaults(for: .d3dmetal), ["steamwebhelper.exe": ["CommandLineAppend": "--a --b", "Other": "x"]])
+        XCTAssertEqual(m.appDefaults(for: .dxvk), m.appDefaults)
+        XCTAssertNotEqual(WineRunner.appDefaultsMarker(engineID: "e", defaults: m.appDefaults(for: .d3dmetal)),
+                          WineRunner.appDefaultsMarker(engineID: "e", defaults: m.appDefaults(for: .dxvk)), "a mode change rewrites")
+    }
+
+    func testInstalledEnginesAdoptTheModeDefaults() throws {
+        let home = FileManager.default.temporaryDirectory.appending(path: "hb-modedefaults-home-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let paths = HighballPaths(home: home), store = EngineStore(paths: paths)
+        let manifestURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "spike/engine-manifest.json")
+        var installed = try EngineManifest.load(from: manifestURL)
+        installed.id = "x64-crossover26.3-r35"; installed.appDefaults = nil; installed.rendererAppDefaults = nil
+        try FileManager.default.createDirectory(at: paths.engine(installed.id), withIntermediateDirectories: true)
+        try installed.save(to: paths.engine(installed.id).appending(path: "manifest.json"))
+        var known = installed; known.rendererAppDefaults = ["d3dmetal": ["steamwebhelper.exe": ["CommandLineAppend": "--in-process-gpu"]]]
+        XCTAssertEqual(store.adoptKnownFacts(known: [known]), [installed.id])
+        XCTAssertEqual(try store.engine(installed.id).manifest.rendererAppDefaults, known.rendererAppDefaults)
+    }
+
     func testSettingsKeepTheSyncMarker() throws {
         var s = BottleSettings(name: "t", engineID: "e")
         s.engineAppDefaultsSynced = "e:steamwebhelper.exe{CommandLineAppend=--disable-gpu}"

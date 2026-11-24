@@ -289,6 +289,7 @@ public struct EngineStore: Sendable {
             var changed = false
             if m.direct3D9 == nil, let d9 = fact.direct3D9 { m.direct3D9 = d9; changed = true }
             if m.appDefaults == nil, let defaults = fact.appDefaults { m.appDefaults = defaults; changed = true }
+            if m.rendererAppDefaults == nil, let defaults = fact.rendererAppDefaults { m.rendererAppDefaults = defaults; changed = true }
             guard changed else { continue }
             if (try? m.save(to: engine.root.appending(path: "manifest.json"))) != nil { updated.append(engine.id) }
         }
