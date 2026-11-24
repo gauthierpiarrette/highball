@@ -107,8 +107,8 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
     public var appDefaults: [String: [String: String]]?
     /// `appDefaults` for launches in one renderer mode, keyed by the mode's raw value. A value here
     /// replaces the engine's value of the same name for that mode. First use: Steam's browser gets
-    /// --in-process-gpu under D3DMetal only, where its separate GPU process dies on macOS 27; under
-    /// DXVK the flag makes Steam's window flicker (highball#743).
+    /// --in-process-gpu under D3DMetal and DXMT, whose overlay stays hidden on macOS 27 without it;
+    /// under DXVK the flag makes Steam's window flicker (highball#743).
     public var rendererAppDefaults: [String: [String: [String: String]]]?
     public var components: [String: Component]
     public var baseEnv: [String: String]?

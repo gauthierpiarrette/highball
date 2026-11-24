@@ -177,6 +177,11 @@
       "steamwebhelper.exe": {
         "CommandLineAppend": "--in-process-gpu"
       }
+    },
+    "dxmt": {
+      "steamwebhelper.exe": {
+        "CommandLineAppend": "--in-process-gpu"
+      }
     }
   },
   "requires": [
