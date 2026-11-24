@@ -232,3 +232,62 @@ final class EngineArchTests: XCTestCase {
         XCTAssertEqual(try bottle.environment(engine: intel, renderer: .wined3d)["MVK_CONFIG_LOG_LEVEL"], "3", "a player's own level wins")
     }
 }
+
+/// A download replaces the file at `downloads/<the URL's file name>`; a URL without one named the
+/// downloads folder or Highball's home, and the download would have deleted it.
+final class DownloadFileNameTests: XCTestCase {
+    private func store() -> (EngineStore, HighballPaths) {
+        let home = FileManager.default.temporaryDirectory.appending(path: "dl-name-\(UUID().uuidString)", directoryHint: .isDirectory)
+        addTeardownBlock { try? FileManager.default.removeItem(at: home) }
+        let paths = HighballPaths(home: home)
+        return (EngineStore(paths: paths), paths)
+    }
+
+    func testADownloadLandsInTheDownloadsFolderUnderItsFileName() throws {
+        let (store, paths) = store()
+        let file = try store.downloadFile(for: URL(string: "https://aka.ms/vs/17/release/VC_redist.x64.exe")!)
+        XCTAssertEqual(file.deletingLastPathComponent().standardizedFileURL.path, paths.downloads.standardizedFileURL.path)
+        XCTAssertEqual(file.lastPathComponent, "VC_redist.x64.exe")
+        XCTAssertEqual(try store.downloadFile(for: URL(string: "https://host/get?file=a.exe")!).lastPathComponent, "get")
+    }
+
+    func testAURLWithoutAFileNameIsRefused() {
+        let (store, _) = store()
+        for s in ["https://host", "https://host/", "https://host/a/.", "https://host/a/..", "https://host/a/../"] {
+            XCTAssertThrowsError(try store.downloadFile(for: URL(string: s)!), s)
+        }
+    }
+
+    /// The refusal comes before anything is fetched or removed: Highball's home and its downloads stay.
+    func testADownloadNamingHighballsHomeLeavesItAlone() async throws {
+        let (store, paths) = store()
+        try paths.ensure()
+        let keep = paths.downloads.appending(path: "keep.tar.xz")
+        try Data("x".utf8).write(to: keep)
+        let component = EngineManifest.Component(kind: "installer", url: URL(string: "https://example.invalid/a/..")!, sha256: String(repeating: "0", count: 64),
+                                                 size: nil, license: nil, optional: nil, acceptance: nil, extract: nil, note: nil, version: nil)
+        do {
+            _ = try await store.download(component, name: "x")
+            XCTFail("a URL naming Highball's home must not download")
+        } catch HighballError.invalid {}
+        XCTAssertTrue(FileManager.default.fileExists(atPath: keep.path))
+    }
+
+    /// A recipe's unverified installer replaced `downloads/<file name>` with what it fetched:
+    /// "https://host/a/.." made that Highball's home, and every environment went with it.
+    func testARecipeInstallerNamingHighballsHomeLeavesItAlone() async throws {
+        let (_, paths) = store()
+        try paths.ensure()
+        let bottleDir = paths.bottles.appending(path: "Games", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: bottleDir, withIntermediateDirectories: true)
+        let manifest = EngineManifest(id: "x64-test-r1", displayName: "test", arch: "x86_64", minMacOS: "14.0", components: [:])
+        var runner = RecipeRunner(paths: paths, engine: InstalledEngine(manifest: manifest, root: paths.engines.appending(path: manifest.id)),
+                                  bottle: Bottle(url: bottleDir, settings: BottleSettings(name: "Games", engineID: manifest.id)))
+        let json = #"{"id": "x", "kind": "tweak", "title": "X", "requires": [], "renderer": null, "steps": [{"type": "installer", "url": "https://example.invalid/a/..", "label": "x"}], "knownIssues": [], "lastVerified": null}"#
+        do {
+            _ = try await runner.apply(try JSONDecoder().decode(Recipe.self, from: Data(json.utf8)))
+            XCTFail("a URL naming Highball's home must not download")
+        } catch HighballError.invalid {}
+        XCTAssertTrue(FileManager.default.fileExists(atPath: bottleDir.path))
+    }
+}
