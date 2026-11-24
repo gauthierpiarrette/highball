@@ -50,6 +50,18 @@ final class PlayFromCommandLineTests: XCTestCase {
         XCTAssertEqual(LibraryListing.line(LibraryListing.entry(game, title: "Portal Deux")), "steam:620\tPortal Deux\tGames\tinstalled")
     }
 
+    /// The JSON names the Windows install for what it is and says what the player hid (highball#432).
+    func testTheJSONSaysWhereAGameIsInstalledAndWhetherItIsHidden() throws {
+        let pin = HighballKit.LibraryItem(source: .pin, id: "pin:EA:FBB214D7-6752-4D99-AADE-4913311A953D", title: "regedit", bottleName: "EA", installed: true)
+        let entry = LibraryListing.entry(pin, title: "regedit (EA)", hidden: true)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: JSONEncoder().encode(entry)) as? [String: Any])
+        XCTAssertEqual(json["installedOnWindows"] as? Bool, true)
+        XCTAssertEqual(json["installedOnMac"] as? Bool, false)
+        XCTAssertEqual(json["hidden"] as? Bool, true)
+        XCTAssertNil(json["installed"], "renamed before the command ships")
+        XCTAssertEqual(LibraryListing.entry(pin, title: "regedit").hidden, false)
+    }
+
     func testRunningGamesRoundTripAndAGoneAppReadsAsNothingKnown() throws {
         let home = FileManager.default.temporaryDirectory.appending(path: "hb-running-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: home) }
