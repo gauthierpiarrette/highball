@@ -528,15 +528,21 @@ final class AppState {
 
     /// Follows a game Steam for Mac started for Highball by its process, whose path runs through
     /// its steamapps/common folder: up to ten minutes for it to appear (Steam may update it first),
-    /// then until it quits. Only `highball play --wait` reads it (writeRunningGames).
+    /// then until it quits. `highball play --wait` reads it (writeRunningGames), and the strip
+    /// shows it starting, then running (macRuns).
     private func watchMacSteamGame(_ id: String, markers: [String]) {
+        macSteamStarting.insert(id)
         Task { [weak self] in
+            defer { self?.macSteamStarting.remove(id) }
             var seen = false
             for _ in 0..<300 {
                 try? await Task.sleep(for: .seconds(2))
                 let alive = SessionWatch.isAlive(markers: markers, ps: await Self.processList())
                 guard let self else { return }
-                if alive, !seen { seen = true; self.macSteamRunning.insert(id) }
+                if alive, !seen {
+                    seen = true; self.macLaunchedAt[id] = Date()
+                    self.macSteamStarting.remove(id); self.macSteamRunning.insert(id)
+                }
                 if seen, !alive { self.macSteamRunning.remove(id); return }
             }
             while seen {
@@ -2809,6 +2815,43 @@ final class AppState {
     /// process (watchMacSteamGame). Steam for Mac starts them, so there is no process of ours.
     var macSteamRunning: Set<String> = [] {
         didSet { writeRunningGames() }
+    }
+    /// Steam for Mac games Highball asked Steam to start whose process has not appeared yet.
+    var macSteamStarting: Set<String> = []
+
+    /// A Mac build Highball started, for the strip: starting (a Steam for Mac game Steam has not
+    /// started yet) or running, with a Quit for the running one. Windows builds have their
+    /// sessions; Mac builds had nothing on screen (highball#432).
+    struct MacRun: Identifiable, Equatable {
+        let id: String
+        let title: String
+        let started: Date?
+        let starting: Bool
+    }
+    var macRuns: [MacRun] {
+        let running = Set(macGameProcesses.keys).union(macSteamRunning)
+        return running.union(macSteamStarting).sorted().compactMap { id in
+            guard let item = libraryItems.first(where: { $0.id == id }) else { return nil }
+            return MacRun(id: id, title: displayTitle(item), started: macLaunchedAt[id], starting: !running.contains(id))
+        }
+    }
+
+    /// Asks a running Mac build to quit as Command Q would: every app from its folder, and the
+    /// process Highball started. A game may ask to save first, which is its own business. A
+    /// process that is not an app gets a terminate instead.
+    func quitMacGame(_ run: MacRun) {
+        guard let item = libraryItems.first(where: { $0.id == run.id }) else { return }
+        let started = macGameProcesses[run.id].flatMap { $0.isRunning ? $0 : nil }
+        let folder = macFolder(for: item)
+        appendLog("\(run.title): asking the Mac version to quit")
+        Task { [weak self] in
+            var pids = Set(await Task.detached { folder.map(MacGameWatch.processes(runningFrom:)) ?? [] }.value)
+            if let started { pids.insert(started.processIdentifier) }
+            let apps = pids.compactMap(NSRunningApplication.init(processIdentifier:)).filter { $0.activationPolicy == .regular }
+            for app in apps { app.terminate() }
+            if apps.isEmpty, let started { started.terminate() }
+            if apps.isEmpty, started == nil { self?.appendLog("\(run.title): no app of its Mac version was found running") }
+        }
     }
     @ObservationIgnored private var runningGamesWritten: Set<String>?
     /// What RunningGames holds for `highball play --wait`: the sessions in environments, the Mac
