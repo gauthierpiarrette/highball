@@ -62,6 +62,19 @@ final class WinetricksWineTests: XCTestCase {
         XCTAssertEqual(WinetricksWine.pathWithTools(engineBin), without, "a folder that is not there is not added")
     }
 
+    /// A CLI built from source is in no bundle: without HIGHBALL_TOOLS it used no tools folder at
+    /// all and every cabextract verb failed (db#941). It borrows the installed app's.
+    func testACLIOutsideTheAppBorrowsTheInstalledAppsTools() throws {
+        let tools = FileManager.default.temporaryDirectory.appending(path: "hb-apptools-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tools) }
+        unsetenv("HIGHBALL_TOOLS")
+        let engineBin = "/engines/e/engine/bin:/usr/bin:/bin"
+        let missing = tools.appending(path: "missing")
+        XCTAssertEqual(WinetricksWine.pathWithTools(engineBin, installedApps: [missing, tools]), "\(tools.path):\(engineBin)")
+        XCTAssertEqual(WinetricksWine.pathWithTools(engineBin, installedApps: [missing]), engineBin, "no app, no change")
+    }
+
     private func run(_ args: [String], env: [String: String]) throws -> String {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
