@@ -9,7 +9,7 @@ struct ActivityStrip: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        if state.busy || state.doneState != nil || state.postPlay != nil || state.funnelOffer || !state.runningSessions.isEmpty || !steamBottles.isEmpty {
+        if state.busy || state.doneState != nil || state.postPlay != nil || state.funnelOffer || !state.runningSessions.isEmpty || !state.macRuns.isEmpty || !steamBottles.isEmpty {
             VStack(spacing: 0) {
                 Divider()
                 VStack(spacing: 0) {
@@ -22,6 +22,9 @@ struct ActivityStrip: View {
                     if state.funnelOffer, state.postPlay == nil { funnelRow }
                     ForEach(state.runningSessions) { session in
                         sessionRow(session)
+                    }
+                    ForEach(state.macRuns) { run in
+                        macRow(run)
                     }
                     ForEach(steamBottles, id: \.name) { bottle in
                         steamRow(bottle)
@@ -156,6 +159,28 @@ struct ActivityStrip: View {
             Button(L("No thanks")) { state.declineFunnel() }.controlSize(.small).buttonStyle(.link)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+
+    /// A Mac build Highball started: starting while Steam for Mac gets it going, then running,
+    /// with Quit, which asks it to quit as Command Q would (highball#432).
+    private func macRow(_ run: AppState.MacRun) -> some View {
+        TimelineView(.periodic(from: .now, by: 15)) { ctx in
+            HStack(spacing: 10) {
+                if run.starting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Circle().fill(HB.good).frame(width: 8, height: 8).padding(.horizontal, 4)
+                }
+                Text(String(format: run.starting ? L("Starting %@") : L("%@ is running"), run.title)).font(.callout.weight(.medium)).lineLimit(1)
+                Spacer(minLength: 12)
+                if !run.starting {
+                    Text(run.started.flatMap { ActivityText.minutes(since: $0, now: ctx.date) }.map { String(format: L("%d min"), $0) } ?? L("just started"))
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Button(L("Quit")) { state.quitMacGame(run) }.controlSize(.small)
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
+        }
     }
 
     private func sessionRow(_ session: GameSession) -> some View {
