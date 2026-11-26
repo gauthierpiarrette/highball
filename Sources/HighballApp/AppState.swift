@@ -1273,11 +1273,21 @@ final class AppState {
     /// finishing in an open Steam window), so the library follows without a relaunch.
     @ObservationIgnored private var installWatcher: DirectoryWatcher?
 
-    /// The directories whose entries change when a game is installed or removed: the steamapps
-    /// of each Steam library folder (appmanifest files), the folder Epic installs land in, and the
-    /// folders GOG installs land in (the first of which is that same Games folder).
-    private func installDirectories(of bottle: Bottle) -> [URL] {
-        GOGStore.installRoots(driveC: bottle.driveC) + SteamLibrary.steamappsDirectories(of: bottle)
+    @ObservationIgnored private var installDirectories = InstallWatchDirectories(windowsSteam: [], other: [])
+
+    private func watchInstallDirectories() {
+        if installWatcher == nil {
+            installWatcher = DirectoryWatcher { [weak self] paths in
+                guard let self else { return }
+                if self.installDirectories.affectsOnlyWindowsSteam(paths) { self.refreshSteamInstalls() }
+                else { self.refreshInstalledGames() }
+            }
+        }
+        // Epic and GOG share drive_c/Games. A Mac Steam library can also point at a bottle's library.
+        installDirectories = InstallWatchDirectories(
+            windowsSteam: bottles.flatMap(SteamLibrary.steamappsDirectories(of:)),
+            other: bottles.flatMap { GOGStore.installRoots(driveC: $0.driveC) } + MacSteam.steamappsDirectories())
+        installWatcher?.watch(installDirectories.directories)
     }
 
     /// The cheap part of `refresh`: installed games only. Runs on every install-record change,
@@ -1296,10 +1306,7 @@ final class AppState {
     /// The Windows Steam part of `refreshInstalledGames`, without legendary, so the client watch
     /// can run it every few seconds of a long download for the price of a few directory reads.
     func refreshSteamInstalls() {
-        // Re-arm first: a steamapps that did not exist at the last full refresh (Steam was
-        // installed after launch, or a library folder was added) is only watched from here on,
-        // and a replaced one is reopened.
-        installWatcher?.watch(bottles.flatMap(installDirectories) + MacSteam.steamappsDirectories())
+        watchInstallDirectories()
         let games = Dictionary(bottles.map { ($0.name, SteamLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
         if games != gamesByBottle { gamesByBottle = games; forgetProgramExecutables(); rebuildLibrary() }
     }
@@ -1377,8 +1384,7 @@ final class AppState {
         if selectedBottle == nil { selectedBottle = bottles.first?.name }
         // Never trap on duplicate names (a Finder-duplicated bottle crashed the app at launch — issue #13).
         gamesByBottle = Dictionary(bottles.map { ($0.name, SteamLibrary.games(in: $0)) }, uniquingKeysWith: { a, _ in a })
-        if installWatcher == nil { installWatcher = DirectoryWatcher { [weak self] in self?.refreshInstalledGames() } }
-        installWatcher?.watch(bottles.flatMap(installDirectories) + MacSteam.steamappsDirectories())
+        watchInstallDirectories()
         macSteamGames = MacSteam.installedGames()
         readBattleNetInstalls()
         startSteamClientWatch()
