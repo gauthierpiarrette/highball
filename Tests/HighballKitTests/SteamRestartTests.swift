@@ -85,6 +85,23 @@ final class SteamRestartTests: XCTestCase {
         XCTAssertNil(SteamRestart.reason(live: dxvk, wanted: wanted, wantedRenderer: "dxvk"))
     }
 
+    func testDeletedCustomVariableNameSurvivesInTheClient() {
+        var live = dxvk
+        live["MY_GAME_SETTING"] = "1"
+        live["FPS_CAP"] = "60"
+        let marker = SteamRestart.customEnvironmentKeysMarker
+        live[marker] = SteamRestart.encodeCustomEnvironmentKeys(
+            ["MY_GAME_SETTING", "UNSET_SETTING", "MY_GAME_SETTING"], in: live
+        )
+        XCTAssertEqual(live[marker], #"["MY_GAME_SETTING"]"#)
+        XCTAssertEqual(SteamRestart.reason(live: live, wanted: dxvk, wantedRenderer: "dxvk"),
+                       "it runs with MY_GAME_SETTING=1 and the game does not set it")
+        live[marker] = "invalid"
+        XCTAssertNil(SteamRestart.reason(live: live, wanted: dxvk, wantedRenderer: "dxvk"))
+        live[marker] = nil
+        XCTAssertNil(SteamRestart.reason(live: live, wanted: dxvk, wantedRenderer: "dxvk"))
+    }
+
     // highball#172: winhttp=n,b put in the DLL overrides field while Steam ran. The field is not a
     // custom variable, so nothing compared it, -applaunch went to the old client, and the game
     // inherited overrides without it: the mod loader's winhttp.dll beside the exe never loaded.
