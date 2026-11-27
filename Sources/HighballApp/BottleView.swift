@@ -291,11 +291,12 @@ struct RendererBadge: View {
 // MARK: - Environment settings page
 
 private enum EnvironmentSettingsSection: CaseIterable {
-    case graphics, display, compatibility, components, advanced
+    case graphics, engine, display, compatibility, components, advanced
 
     var title: String {
         switch self {
         case .graphics: L("Graphics")
+        case .engine: L("Engine")
         case .display: L("Display")
         case .compatibility: L("Compatibility")
         case .components: L("Windows components")
@@ -311,7 +312,6 @@ struct EnvironmentSettingsPage: View {
     // Settings' TabView owns the window toolbar; its generated navigation arrow does not pop.
     var showsInlineBack = false
     @State private var selectedSection: EnvironmentSettingsSection = .graphics
-    @AppStorage(EngineStore.showOlderRevisionsKey) private var showOlderRevisions = false
     @State private var confirmDelete = false
     @State private var showFrameGenInfo = false
 
@@ -347,12 +347,13 @@ struct EnvironmentSettingsPage: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(bottle.name).font(.title2.bold())
                     // "Wine 10.0", as the engine prompts say it: the full build name and revision are
-                    // under Advanced, and at full length they crowded the title.
-                    Text(engine.map { GamePageCopy.shortEngineName($0.manifest) } ?? "")
+                    // in Engine settings, and at full length they crowded the title.
+                    Text(state.engines.first { $0.id == liveBottle.settings.engineID }
+                        .map { GamePageCopy.shortEngineName($0.manifest) } ?? liveBottle.settings.engineID)
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
-                Text(L("Changes save automatically")).font(.caption).foregroundStyle(.secondary)
+                Text(selectedSection == .engine ? L("Engine changes require review") : L("Changes save automatically")).font(.caption).foregroundStyle(.secondary)
                 // In the Settings window the page already has Back, which does the same thing.
                 if !showsInlineBack {
                     Button(L("Done")) { dismiss() }.keyboardShortcut(.defaultAction)
@@ -560,27 +561,11 @@ struct EnvironmentSettingsPage: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                if selectedSection == .engine {
+                    EnvironmentEngineSection(engineID: liveBottle.settings.engineID, bottleName: liveBottle.name)
+                }
                 if selectedSection == .advanced {
                     Section(L("Advanced")) {
-                        let offered = state.offeredEngines(for: state.bottles.first { $0.name == bottle.name } ?? bottle)
-                        if offered.count > 1 {
-                            Picker(L("Engine"), selection: Binding(
-                                get: { (state.bottles.first { $0.name == bottle.name } ?? bottle).settings.engineID },
-                                set: { newID in
-                                    let current = state.bottles.first { $0.name == bottle.name } ?? bottle
-                                    guard newID != current.settings.engineID else { return }
-                                    dismiss()   // show the switch confirmation from the main window
-                                    state.engineTransition = AppState.EngineTransition(bottleName: current.name, targetID: newID)
-                                })) {
-                                ForEach(offered, id: \.id) { e in
-                                    Text(verbatim: e.missing ? "\(e.label) (\(L("missing")))" : e.installed ? e.label : "\(e.label) (\(L("download")))").tag(e.id)
-                                }
-                            }
-                            .disabled(state.busy)
-                            Toggle(L("Show older engine revisions"), isOn: $showOlderRevisions)
-                            Text(L("Environments never change engine on their own. Switching re-runs the Windows setup when the Wine build differs; switching back is the same step. An engine marked download is fetched first."))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
                         TextField(L("DLL overrides"), text: binding(\.dllOverrides), prompt: Text(verbatim: "version=n,b;winmm=n,b"))
                             .font(.body.monospaced())
                         Text(L("Extra Wine DLL overrides for this environment, semicolon separated. Mods like Cyber Engine Tweaks need version=n,b."))

@@ -2201,16 +2201,20 @@ final class AppState {
         catch { fail(error) }
     }
 
-    /// The engines New environment offers besides the default one (EngineStore.newEnvironmentAlternatives):
-    /// none unless this install sees a line built for the other architecture.
-    var newEnvironmentEngines: [String] {
-        guard let fallback = defaultEngine else { return [] }
-        return EngineStore.newEnvironmentAlternatives(defaultArch: fallback.manifest.arch, installed: engines, known: Self.knownManifests)
+    /// Shared creation/switch catalog. Only the assigned engine may be added from a hidden
+    /// bundled line, so its architecture remains known without exposing other hidden engines.
+    func engineChoices(currentID: String? = nil, selectedID: String? = nil, allRevisions: Bool = false) -> [EngineChoice] {
+        let bundled = Self.bundledManifests
+        var known = Self.knownManifests
+        if let currentID, !known.contains(where: { $0.id == currentID }),
+           let current = bundled.first(where: { $0.id == currentID }) { known.append(current) }
+        return EngineStore.engineChoices(installed: engines, known: known, bundledIDs: Set(bundled.map(\.id)),
+                                         currentID: currentID, selectedID: selectedID, allRevisions: allRevisions)
     }
 
-    /// `engineID` is one of `newEnvironmentEngines`, nil for the default engine. One that is not
-    /// installed downloads first, with the licences accepted on installed engines.
-    func createBottle(name: String, recipeID: String?, engineID: String? = nil) {
+    /// An explicit selection applies to this environment only; nil uses the creation default.
+    /// An engine that is not installed downloads first, carrying accepted licences forward.
+    func createBottle(name: String, recipeID: String?, engineID: String? = nil, completed: @escaping () -> Void = {}) {
         guard let fallback = defaultEngine else {
             fail(HighballError.failed(L("No engine is installed yet. Reinstall Highball, or restart it to finish setup."))); return
         }
@@ -2221,6 +2225,10 @@ final class AppState {
         let download = chosen == nil ? engineID.flatMap { id in Self.knownManifests.first { $0.id == id } } : nil
         if let engineID, chosen == nil, download == nil {
             fail(HighballError.failed(String(format: L("Engine %@ is not offered by this version of Highball."), String(describing: engineID)))); return
+        }
+        let target = chosen?.manifest ?? download ?? fallback.manifest
+        guard target.runs(onMacOS: EngineManifest.currentMacOS) else {
+            fail(HighballError.failed(String(format: L("This engine requires macOS %@ or later."), target.minMacOS))); return
         }
         let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
         runBusy(String(format: L("Creating the %@ environment — first boot takes about 90 seconds"), name),
@@ -2243,7 +2251,7 @@ final class AppState {
                 let notes = try await runner.apply(recipe, resolve: { Self.recipe($0) }) { line in Task { @MainActor in self.appendLog(line) } }
                 for n in notes { await MainActor.run { self.appendLog("note: \(n)") } }
             }
-            await MainActor.run { self.selectedBottle = name }
+            await MainActor.run { self.selectedBottle = name; completed() }
         }
     }
 
@@ -3618,8 +3626,7 @@ final class AppState {
     /// was taken too and it describes the same engine.
     private func manifestForReinstall(_ id: String) -> EngineManifest? {
         if let m = try? EngineManifest.load(from: paths.engine(id).appending(path: "manifest.json")) { return m }
-        guard let url = Self.bundledManifest, let bundled = try? EngineManifest.load(from: url), bundled.id == id else { return nil }
-        return bundled
+        return Self.bundledManifests.first { $0.id == id }
     }
 
     func repairBottle(_ bottle: Bottle) {
@@ -5977,6 +5984,7 @@ final class AppState {
         return EngineStore.sameArch(current: arch, target: target.arch)
     }
 
+    /// The compact picker on game pages keeps its compatible-engine menu.
     func offeredEngines(for bottle: Bottle) -> [EngineStore.OfferedEngine] {
         EngineStore.offeredEngines(installed: engines, known: Self.knownManifests, current: bottle.settings.engineID,
                                    allRevisions: UserDefaults.standard.bool(forKey: EngineStore.showOlderRevisionsKey))
@@ -5990,6 +5998,10 @@ final class AppState {
            !canMove(bottle, to: target) {
             appendLog("\(bottle.name) stays on \(bottle.settings.engineID): \(id) is built for another architecture, and an environment does not move between the two")
             return
+        }
+        if let target = engines.first(where: { $0.id == id })?.manifest ?? Self.knownManifests.first(where: { $0.id == id }),
+           !target.runs(onMacOS: EngineManifest.currentMacOS) {
+            fail(HighballError.failed(String(format: L("This engine requires macOS %@ or later."), target.minMacOS))); return
         }
         if let installed = engines.first(where: { $0.id == id }) { moveBottle(bottle, to: installed, done: done); return }
         guard let manifest = Self.knownManifests.first(where: { $0.id == id }) else { return }

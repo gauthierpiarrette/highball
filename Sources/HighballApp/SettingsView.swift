@@ -243,7 +243,7 @@ struct EnginePane: View {
     var body: some View {
         @Bindable var state = state
         VStack(alignment: .leading, spacing: 14) {
-            Text(L("The engine is the Wine build and graphics layers Highball runs games with. Highball picks it; an update never moves an environment to a different Wine build on its own."))
+            Text(L("The engine is the Wine build and graphics layers Highball runs games with. Choose it when creating an environment, or in that environment’s Engine settings. An update never moves an environment to a different Wine build on its own."))
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let engine = state.defaultEngine {
                 GroupBox {

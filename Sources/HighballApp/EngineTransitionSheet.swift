@@ -35,6 +35,10 @@ struct EngineTransitionSheet: View {
                 Text(String(format: L("Switch '%@' to %@"), transition.bottleName, targetName))
                     .font(.title2.bold())
                 Text(verbatim: transition.targetID).font(.caption.monospaced()).foregroundStyle(.tertiary)
+                if let currentID = bottle?.settings.engineID {
+                    Text(String(format: L("From %@ to %@"), currentID, transition.targetID))
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             section(L("What moves"), programs.isEmpty

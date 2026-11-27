@@ -1,0 +1,174 @@
+<style>
+  #hb-engine-design { color-scheme: light dark; --hb-bg: light-dark(#f4f3f0,#1d1d1c); --hb-panel: light-dark(#fff,#272726); --hb-ink: light-dark(#252520,#eeeae1); --hb-dim: light-dark(#66655e,#b7b4ab); --hb-line: light-dark(#dddbd4,#45443f); --hb-accent: light-dark(#5c5032,#d5c5a0); --hb-selected: light-dark(#f0e9da,#39352b); font: 14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color: var(--hb-ink); }
+  #hb-engine-design * { box-sizing: border-box; }
+  #hb-engine-design [hidden] { display: none !important; }
+  #hb-engine-design .demo-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+  #hb-engine-design button, #hb-engine-design input { font: inherit; color: inherit; }
+  #hb-engine-design button { border: 1px solid var(--hb-line); background: var(--hb-panel); border-radius: 7px; padding: 7px 12px; }
+  #hb-engine-design button:disabled { opacity: .5; }
+  #hb-engine-design button[aria-pressed="true"], #hb-engine-design .primary { background: var(--hb-accent); color: var(--hb-bg); border-color: var(--hb-accent); }
+  #hb-engine-design .window { max-width: 650px; margin: auto; background: var(--hb-bg); border: 1px solid var(--hb-line); border-radius: 14px; padding: 26px; }
+  #hb-engine-design h2 { font-size: 21px; font-weight: 600; line-height: 1.3; margin: 2px 0 7px; }
+  #hb-engine-design h3 { font-size: 14px; font-weight: 600; margin: 0; }
+  #hb-engine-design p { margin: 0; }
+  #hb-engine-design .dim { color: var(--hb-dim); }
+  #hb-engine-design .small { font-size: 12px; }
+  #hb-engine-design .eyebrow { color: var(--hb-dim); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+  #hb-engine-design .stack { display: grid; gap: 18px; }
+  #hb-engine-design .header { margin-bottom: 23px; }
+  #hb-engine-design .field { display: grid; gap: 7px; }
+  #hb-engine-design input[type="text"] { width: 100%; border: 1px solid var(--hb-line); background: var(--hb-panel); border-radius: 7px; padding: 9px 11px; }
+  #hb-engine-design .summary { border: 1px solid var(--hb-line); border-radius: 10px; background: var(--hb-panel); padding: 16px; display: grid; gap: 9px; }
+  #hb-engine-design .between { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+  #hb-engine-design .id { font: 11px/1.5 ui-monospace,SFMono-Regular,monospace; color: var(--hb-dim); overflow-wrap: anywhere; }
+  #hb-engine-design .tag { border-radius: 4px; padding: 2px 6px; background: var(--hb-selected); font-size: 11px; font-weight: 500; }
+  #hb-engine-design .tags { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  #hb-engine-design .footer { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 25px; padding-top: 17px; border-top: 1px solid var(--hb-line); }
+  #hb-engine-design .row { display: flex; align-items: flex-start; gap: 11px; padding: 15px 12px; border: 1px solid var(--hb-line); border-radius: 9px; background: var(--hb-panel); }
+  #hb-engine-design .row:has(input:checked) { border-color: var(--hb-accent); background: var(--hb-selected); }
+  #hb-engine-design .row input { margin: 5px 0 0; accent-color: var(--hb-accent); }
+  #hb-engine-design .row-content { display: grid; gap: 3px; flex: 1; min-width: 0; }
+  #hb-engine-design .list { display: grid; gap: 8px; }
+  #hb-engine-design .notice { border-inline-start: 3px solid var(--hb-accent); padding-inline-start: 12px; }
+  #hb-engine-design .check { display: flex; gap: 8px; align-items: flex-start; }
+  #hb-engine-design .tabs { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 22px; padding-bottom: 10px; border-bottom: 1px solid var(--hb-line); }
+  #hb-engine-design .tabs strong { color: var(--hb-accent); }
+  #hb-engine-design .plan { margin: 0; padding-inline-start: 21px; display: grid; gap: 8px; }
+  #hb-engine-design #hb-feedback { margin-top: 16px; }
+  @media(max-width:480px) { #hb-engine-design .window { padding: 18px; } #hb-engine-design .tabs { gap: 10px; } }
+  @media(pointer:coarse) { #hb-engine-design button { min-height: 44px; } #hb-engine-design .row { min-height: 44px; } }
+</style>
+<div id="hb-engine-design" aria-label="Environment engine selection proposal">
+  <nav class="demo-nav" aria-label="Preview flow">
+    <button type="button" data-mode="create" aria-pressed="true">New environment</button>
+    <button type="button" data-mode="existing" aria-pressed="false">Existing environment</button>
+  </nav>
+  <section class="window" aria-label="Highball environment dialog">
+    <div id="hb-main">
+      <header class="header"><p class="eyebrow">Highball · environments</p><h2 id="hb-title">New environment</h2><p id="hb-subtitle" class="dim">An isolated Windows install for your games.</p></header>
+      <div id="hb-settings-tabs" class="tabs small" hidden aria-label="Settings section context"><span class="dim">Graphics</span><strong>Engine</strong><span class="dim">Display</span><span class="dim">Compatibility</span><span class="dim">Advanced</span></div>
+      <div class="stack">
+        <label id="hb-name-field" class="field">Name<input type="text" id="hb-name" value="play" autocomplete="off"></label>
+        <div class="field"><h3>Engine</h3><div class="summary">
+          <div class="between"><h3 id="hb-engine-name">Wine 10.0 (Sikarugir) r30</h3><button id="hb-change" type="button">Change…</button></div>
+          <p class="id" id="hb-engine-id">x64-sikarugir10.0_6-r30</p>
+          <div class="tags"><span id="hb-engine-mode">Rosetta</span><span id="hb-engine-status" class="tag">Installed</span><span id="hb-engine-default" class="tag">Default</span></div>
+        </div><p class="small dim" id="hb-engine-note">You can change engine builds later. Moving between Rosetta and native Apple silicon requires a new environment.</p></div>
+        <p id="hb-separate" class="notice small" hidden>This creates a separate environment. Games, saves, settings and Steam sign-in stay in the original environment.</p>
+        <label id="hb-steam-field" class="check"><input id="hb-steam" type="checkbox" checked><span>Install Steam <span class="dim">(recommended)</span></span></label>
+        <p id="hb-first-boot" class="small dim">First boot takes about 90 seconds. Installing Steam adds a download.</p>
+      </div>
+      <footer class="footer"><button id="hb-cancel" type="button">Cancel</button><button id="hb-create" class="primary" type="button">Create</button></footer>
+    </div>
+    <div id="hb-chooser" hidden>
+      <header class="header"><p class="eyebrow">Engine</p><h2>Choose an engine</h2><p id="hb-choose-note" class="dim">Choose what this environment will run with.</p></header>
+      <fieldset style="border:0;padding:0;margin:0"><legend class="small dim" style="margin-bottom:8px">Available engines</legend><div id="hb-choices" class="list"></div></fieldset>
+      <div id="hb-other" class="stack" style="margin-top:20px" hidden><div><h3>Requires a new environment</h3><p class="small dim">This environment uses Rosetta. Native engines need their own environment.</p></div><div class="summary"><h3>Wine 11.0 · native Apple silicon</h3><p class="small dim">Download · architecture fixed at creation</p><div><button id="hb-new-native" type="button">New environment…</button></div></div></div>
+      <footer class="footer"><button id="hb-choose-cancel" type="button">Cancel</button><button id="hb-choose-done" class="primary" type="button">Use engine</button></footer>
+    </div>
+    <div id="hb-review" hidden>
+      <header class="header"><p class="eyebrow">Engine · review</p><h2>Switch ‘play’?</h2><p id="hb-switch-target" class="dim"></p></header>
+      <div class="stack"><div><h3>What moves</h3><p>Every program in this environment, including Steam and Age of Empires IV.</p></div><div><h3>What stays</h3><p class="dim">Your installed programs, saves and Steam sign-in. The previous engine stays installed.</p></div><div class="summary"><h3>Steps</h3><ol class="plan" id="hb-steps"></ol></div><p class="small dim">The Windows setup may take a minute or two. Progress appears at the bottom of the Highball window.</p></div>
+      <footer class="footer"><button id="hb-review-cancel" type="button">Cancel</button><button id="hb-switch" type="button" class="primary">Switch</button></footer>
+    </div>
+    <p id="hb-feedback" class="small notice" role="status" hidden></p>
+  </section>
+</div>
+<script>
+(() => {
+  const root = document.getElementById('hb-engine-design');
+  const get = id => root.querySelector('#hb-' + id);
+  // Illustrative catalog. No app data or network requests are used.
+  const engines = [
+    { id:'x64-sikarugir10.0_6-r30', name:'Wine 10.0 (Sikarugir) r30', mode:'Rosetta', installed:true, standard:true },
+    { id:'custom-wine11-aoe4', name:'Wine 11.0 · Age of Empires IV', mode:'Rosetta', installed:true, custom:true },
+    { id:'x64-wine11-r1', name:'Wine 11.0', mode:'Rosetta', installed:false },
+    { id:'arm64-wine11-r1', name:'Wine 11.0 · native Apple silicon', mode:'Native Apple silicon', installed:false, native:true }
+  ];
+  let state = { mode:'create', selected:engines[0].id, draft:engines[0].id, current:engines[0].id, name:'play', separate:false, steam:true };
+  const engine = id => engines.find(e => e.id === id) || engines[0];
+  function save() {
+    if (window.openai?.setWidgetState) window.openai.setWidgetState({modelContent:{flow:state.mode, engine:state.selected},privateContent:{...state}}).catch(() => {});
+  }
+  function screen(which) {
+    for (const name of ['main','chooser','review']) get(name).hidden = name !== which;
+    get('feedback').hidden = true;
+  }
+  function render() {
+    const e = engine(state.selected), existing = state.mode === 'existing';
+    root.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === state.mode)));
+    get('title').textContent = existing ? 'play' : 'New environment';
+    get('subtitle').textContent = existing ? 'Environment settings' : 'An isolated Windows install for your games.';
+    get('settings-tabs').hidden = !existing;
+    for (const id of ['name-field','steam-field','first-boot','create']) get(id).hidden = existing;
+    get('cancel').textContent = existing ? 'Done' : 'Cancel';
+    get('engine-name').textContent = e.name;
+    get('engine-id').textContent = e.id;
+    get('engine-mode').textContent = e.mode;
+    get('engine-status').textContent = e.installed ? 'Installed' : 'Downloads before setup';
+    get('engine-default').hidden = !e.standard && !e.custom && !existing;
+    get('engine-default').textContent = existing ? 'Current' : e.custom ? 'Custom' : 'Default';
+    get('engine-note').textContent = existing ? 'Changing the engine affects every program in this environment. You’ll review the switch before anything changes.' : 'You can change engine builds later. Moving between Rosetta and native Apple silicon requires a new environment.';
+    get('separate').hidden = !state.separate;
+    get('name').value = state.name;
+    get('steam').checked = state.steam;
+    get('create').textContent = e.installed ? 'Create' : 'Download & create';
+    get('create').disabled = !state.name.trim();
+  }
+  function choose() {
+    state.draft = state.selected;
+    const existing = state.mode === 'existing';
+    get('choose-note').textContent = existing ? 'Changes apply to every program in ‘play’. You’ll review the switch next.' : 'Choose what this environment will run with.';
+    get('choices').replaceChildren();
+    for (const e of engines.filter(e => !existing || !e.native)) {
+      const label = document.createElement('label'); label.className = 'row';
+      const radio = document.createElement('input'); radio.type='radio'; radio.name='hb-engine-choice'; radio.value=e.id; radio.checked=e.id===state.draft;
+      const content = document.createElement('span'); content.className='row-content';
+      const title = document.createElement('strong'); title.textContent=e.name;
+      const id = document.createElement('span'); id.className='id'; id.textContent=e.id;
+      const meta = document.createElement('span'); meta.className='small dim'; meta.textContent=[e.mode,e.installed?'Installed':'Download',e.standard?'Default':null,e.custom?'Custom':null,existing&&e.id===state.current?'Current':null].filter(Boolean).join(' · ');
+      content.append(title,id,meta); label.append(radio,content); get('choices').append(label);
+      radio.addEventListener('change',() => { state.draft=e.id; updateChooseAction(); save(); });
+    }
+    get('other').hidden = !existing;
+    updateChooseAction(); screen('chooser');
+  }
+  function updateChooseAction() {
+    get('choose-done').textContent = state.mode==='existing' ? 'Review switch…' : 'Use engine';
+    get('choose-done').disabled = state.mode==='existing' && state.draft===state.current;
+  }
+  function review() {
+    const e = engine(state.draft);
+    get('switch-target').textContent = engine(state.current).name + ' → ' + e.name;
+    get('steps').replaceChildren();
+    const steps = [...(!e.installed?['Download '+e.name]:[]),'Stop programs in this environment','Switch engine and refresh the Windows setup','Ready to launch'];
+    for (const text of steps) { const li=document.createElement('li');li.textContent=text;get('steps').append(li); }
+    screen('review');
+  }
+  function feedback(text) { get('feedback').textContent=text;get('feedback').hidden=false; }
+  root.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click',()=>{
+    state.mode=button.dataset.mode;state.selected=state.mode==='existing'?state.current:engines[0].id;state.name='play';state.separate=false;screen('main');render();save();
+  }));
+  get('change').addEventListener('click',choose);
+  get('name').addEventListener('input',()=>{state.name=get('name').value;get('create').disabled=!state.name.trim();save();});
+  get('steam').addEventListener('change',()=>{state.steam=get('steam').checked;save();});
+  get('choose-cancel').addEventListener('click',()=>{state.draft=state.selected;screen('main');render();save();});
+  get('choose-done').addEventListener('click',()=>{
+    if(state.mode==='existing') review(); else {state.selected=state.draft;screen('main');render();} save();
+  });
+  get('new-native').addEventListener('click',()=>{state.mode='create';state.selected=engines[3].id;state.draft=state.selected;state.name='play-native';state.separate=true;screen('main');render();save();});
+  get('review-cancel').addEventListener('click',()=>{state.draft=state.current;screen('main');render();save();});
+  get('cancel').addEventListener('click',()=>{feedback('Preview closed. No environment was changed.');});
+  get('create').addEventListener('click',()=>{feedback('Creation preview: ‘'+state.name+'’ would use '+engine(state.selected).name+'. No environment was created.');});
+  get('switch').addEventListener('click',()=>{screen('main');render();feedback('Switch preview: every program in ‘play’ would move to '+engine(state.draft).name+'. No environment was changed.');});
+  function restore(saved) {
+    const value=saved?.privateContent;
+    if(value && ['create','existing'].includes(value.mode) && engines.some(e=>e.id===value.selected)) {
+      state={...state,...value};screen('main');
+    }
+    render();
+  }
+  restore(window.openai?.widgetState);
+  window.addEventListener('openai:set_globals',event=>{if(event.detail?.globals?.widgetState)restore(event.detail.globals.widgetState);});
+})();
+</script>

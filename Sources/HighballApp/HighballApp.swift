@@ -811,46 +811,99 @@ private extension View {
 struct CreateBottleSheet: View {
     @Environment(AppState.self) private var state
     @Environment(\.dismiss) private var dismiss
-    @State private var name = "play"
+    @State private var name: String
     @State private var installSteam = true
-    /// nil is the default engine; the picker shows only when the other architecture's line is offered.
     @State private var engineID: String?
+    @State private var showChooser = false
+    @State private var attempted = false
+    let sourceEnvironment: String?
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(L("New environment")).font(.title2.bold())
-            TextField(L("Name"), text: $name).textFieldStyle(.roundedBorder).frame(width: 260)
-            if let problem = nameProblem, !name.trimmingCharacters(in: .whitespaces).isEmpty {
-                Text(L(problem)).font(.caption).foregroundStyle(.orange).frame(maxWidth: 380, alignment: .leading)
-            }
-            let others = state.newEnvironmentEngines
-            if !others.isEmpty, let standard = state.defaultEngine {
-                Picker(L("Engine"), selection: $engineID) {
-                    Text(String(format: L("%@ (default)"), standard.id)).tag(String?.none)
-                    ForEach(others, id: \.self) { id in Text(id).tag(String?.some(id)) }
-                }
-                .frame(width: 380)
-                Text(L("An environment can't switch later between engines that run through Rosetta and engines that run natively on Apple silicon, so that choice is made here."))
-                    .font(.caption).foregroundStyle(.secondary).frame(maxWidth: 380, alignment: .leading)
-            }
-            Toggle(L("Install Steam in it (recommended)"), isOn: $installSteam)
-            Text(L("An environment is an isolated Windows install. First boot takes about 90 seconds; installing Steam adds a download and a slow one-time client update."))
-                .font(.callout).foregroundStyle(.secondary).frame(maxWidth: 380, alignment: .leading)
-            HStack {
-                Spacer()
-                Button(L("Cancel")) { dismiss() }
-                Button(state.busy ? L("Working…") : L("Create")) {
-                    dismiss()
-                    state.createBottle(name: name, recipeID: installSteam ? "steam" : nil, engineID: engineID)
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(nameProblem != nil || state.busy)
-            }
-        }
-        .padding(24)
+    init(engineID: String? = nil, suggestedName: String = "play", sourceEnvironment: String? = nil) {
+        _name = State(initialValue: suggestedName)
+        _engineID = State(initialValue: engineID)
+        self.sourceEnvironment = sourceEnvironment
     }
 
-    private var nameProblem: String? { BottleStore.nameProblem(name) }
+    var body: some View {
+        let id = engineID ?? state.defaultEngine?.id
+        let choices = state.engineChoices(selectedID: id)
+        let selected = choices.first { $0.id == id }
+        VStack(alignment: .leading, spacing: 16) {
+            Text(L("New environment")).font(.title2.bold())
+            TextField(L("Name"), text: $name).textFieldStyle(.roundedBorder).disabled(state.busy)
+            if let problem = nameProblem, !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                Text(L(problem)).font(.caption).foregroundStyle(.orange)
+            }
+            GroupBox(L("Engine")) {
+                VStack(alignment: .leading, spacing: 10) {
+                    EngineSummary(choice: selected, isDefault: id == state.defaultEngine?.id, isCurrent: false)
+                    if choices.contains(where: { $0.id != id && $0.selectable }) {
+                        Button(L("Change…")) { showChooser = true }
+                    } else {
+                        Text(L("No other engines are available for this Mac.")).font(.caption).foregroundStyle(.secondary)
+                        Button(L("Choose an engine…")) { showChooser = true }
+                    }
+                    if selected?.installed == false, selected?.missing == false {
+                        Text(L("Downloads before setup")).font(.caption).foregroundStyle(.secondary)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(6)
+            }
+            Text(L("You can change engine builds later. Moving between Rosetta and native Apple silicon requires a new environment."))
+                .font(.caption).foregroundStyle(.secondary)
+            if let sourceEnvironment {
+                Text(String(format: L("This creates a separate environment. Games, saves, settings and Steam sign-in stay in ‘%@’."), sourceEnvironment))
+                    .font(.callout).foregroundStyle(HB.amber)
+            }
+            Toggle(L("Install Steam in it (recommended)"), isOn: $installSteam).disabled(state.busy)
+            Text(L("An environment is an isolated Windows install. First boot takes about 90 seconds; installing Steam adds a download and a slow one-time client update."))
+                .font(.callout).foregroundStyle(.secondary)
+            if state.busy {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text(L(state.busyTitle)).font(.caption)
+                    Spacer()
+                    if let stop = state.busyStop { Button(stop.label) { state.stopBusy() } }
+                }
+            } else if attempted, state.errorMessage != nil {
+                Text(state.errorRecovery.map { L($0.meaning) } ?? L("Something went wrong"))
+                    .font(.callout).foregroundStyle(HB.bad)
+                if let retry = state.errorRetry {
+                    Button(L("Retry")) { state.errorMessage = nil; retry() }
+                }
+            }
+            HStack {
+                Spacer()
+                Button(state.busy ? L("Hide") : L("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(state.busy ? L("Working…") : selected?.installed == false ? L("Download & create") : L("Create")) {
+                    guard let id else { return }
+                    attempted = true
+                    state.errorMessage = nil
+                    state.createBottle(name: name, recipeID: installSteam ? "steam" : nil, engineID: id) { dismiss() }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(nameProblem != nil || state.busy || selected?.selectable != true)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(24)
+        .frame(width: 520)
+        .onAppear { if engineID == nil { engineID = state.defaultEngine?.id } }
+        .onChange(of: name) { _, _ in attempted = false }
+        .onChange(of: engineID) { _, _ in attempted = false }
+        .onChange(of: installSteam) { _, _ in attempted = false }
+        .sheet(isPresented: $showChooser) {
+            if let id { EngineChooser(selectionID: id) { engineID = $0 } }
+        }
+    }
+
+    private var nameProblem: String? {
+        if let problem = BottleStore.nameProblem(name) { return problem }
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        if state.bottles.contains(where: { $0.name == trimmed }) || state.damagedBottles.contains(where: { $0.name == trimmed }) {
+            return "An environment with this name already exists."
+        }
+        return nil
+    }
 }
 
 /// What runs a Windows program opened from the Finder, the File menu or a drop, and where: the
