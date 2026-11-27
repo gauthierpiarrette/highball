@@ -242,122 +242,140 @@ struct EnginePane: View {
 
     var body: some View {
         @Bindable var state = state
-        VStack(alignment: .leading, spacing: 14) {
-            Text(L("The engine is the Wine build and graphics layers Highball runs games with. Highball picks it; an update never moves an environment to a different Wine build on its own."))
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let engine = state.defaultEngine {
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(engine.displayName).font(.headline)
-                        Text(engine.id).font(.caption.monospaced()).foregroundStyle(.secondary)
-                        Text(String(format: L("Graphics layers: %@"), ["dxmt", "dxvk", "d3dmetal"].filter { engine.rendererDir($0) != nil }.map { GamePageCopy.plainName(Renderer(rawValue: $0) ?? .dxvk) }.joined(separator: ", ")))
-                            .font(.caption).foregroundStyle(.secondary)
-                        if engine.ships("d3dmetal"), engine.rendererDir("d3dmetal") == nil {
-                            Button(L("Read Apple's licence and turn on DirectX 12 support…")) {
-                                state.licenseEngine = engine; state.loadGPTKLicense(); showLicense = true
-                            }.buttonStyle(.link).font(.caption)
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            GroupBox {
-                VStack(alignment: .leading, spacing: 6) {
-                    Toggle(L("Get beta builds"), isOn: $betaUpdates)
-                        .onChange(of: betaUpdates) { _, on in
-                            // A fresh opt-in should find the current beta now, not at the next scheduled check.
-                            if on { (NSApp.delegate as? AppDelegate)?.updaterController.updater.checkForUpdatesInBackground() }
-                        }
-                    Text(L("Each release goes to beta a day or two before everyone else, less tested. Turning this off keeps the build you have until the next stable one is newer."))
-                        .font(.caption).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
-            GroupBox {
-                VStack(alignment: .leading, spacing: 6) {
-                    Toggle(L("Share game activity with Discord"), isOn: $state.discordSharingEnabled)
-                    Text(L("Let Discord show what you play and the game's Rich Presence while both apps are open. Off by default."))
-                        .font(.caption).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
-            GroupBox {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Toggle(L("Show achievement pop-ups"), isOn: $achievementPopups)
-                        Spacer()
-                        Button(L("Preview")) { state.previewAchievementPopup() }.controlSize(.small)
-                    }
-                    Text(L("When a GOG game unlocks an achievement, its badge shows in the corner of the screen for a few seconds, with a sound. The game keeps focus."))
-                        .font(.caption).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
-            GroupBox {
-                VStack(alignment: .leading, spacing: 6) {
-                    Toggle(L("Open GOG and Epic Mac games through Highball"), isOn: $openMacGamesThroughHighball)
-                    Text(L("A Mac game opened from Applications, the Dock or Spotlight is closed within its first seconds and started again through Highball, which brings GOG's achievements and cloud saves and Epic's sign-in. Only while Highball is open, and never while it is busy with another task."))
-                        .font(.caption).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
-            // Only where it means something: a Mac with Steam for Mac, or one where it was turned off.
-            if state.steamForMacInstalled || !state.includeMacSteam {
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Toggle(L("Show games from Steam for Mac"), isOn: Binding(get: { state.includeMacSteam },
-                                                                                 set: { state.setIncludeMacSteam($0) }))
-                        Text(L("Games Steam for Mac installed are listed next to your Windows games, and Play opens their Mac version. Off, the library lists only what Highball's environments hold, and Play uses the Windows version."))
-                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            if let update = state.engineUpdate {
-                GroupBox {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(L("A newer engine is available")).font(.headline)
-                            Text(update.id).font(.caption.monospaced()).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button(L("Update engine")) { state.updateEngine() }.disabled(state.busy)
-                    }
-                }
-            }
-            if state.engines.count > 1 {
-                Text(String(format: L("Installed engines: %@. An environment's engine is chosen on its own page."), state.engines.map(\.id).joined(separator: ", ")))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            let removable = state.removableEngines
-            if !removable.isEmpty {
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(L("Engines no environment uses")).font(.headline)
-                        ForEach(removable, id: \.id) { engine in
-                            HStack {
-                                Text(engine.id).font(.caption.monospaced())
-                                if let size = engineSizes[engine.id] { Text(size).font(.caption).foregroundStyle(.secondary) }
-                                Spacer()
-                                Button(L("Remove…"), role: .destructive) { pendingRemove = engine.id }
-                                    .controlSize(.small).disabled(state.busy)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(L("The engine is the Wine build and graphics layers Highball runs games with. Highball picks it; an update never moves an environment to a different Wine build on its own."))
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let engine = state.defaultEngine {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(engine.displayName).font(.headline)
+                            Text(engine.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Text(String(format: L("Graphics layers: %@"), ["dxmt", "dxvk", "d3dmetal"].filter { engine.rendererDir($0) != nil }.map { GamePageCopy.plainName(Renderer(rawValue: $0) ?? .dxvk) }.joined(separator: ", ")))
+                                .font(.caption).foregroundStyle(.secondary)
+                            if engine.ships("d3dmetal"), engine.rendererDir("d3dmetal") == nil {
+                                Button(L("Read Apple's licence and turn on DirectX 12 support…")) {
+                                    state.licenseEngine = engine; state.loadGPTKLicense(); showLicense = true
+                                }.buttonStyle(.link).font(.caption)
                             }
-                        }
-                        Text(L("Removing one frees its disk space. If a game asks for it again later, Highball downloads it then."))
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                CustomEngineImportSection()
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle(L("Get beta builds"), isOn: $betaUpdates)
+                            .onChange(of: betaUpdates) { _, on in
+                                // A fresh opt-in should find the current beta now, not at the next scheduled check.
+                                if on { (NSApp.delegate as? AppDelegate)?.updaterController.updater.checkForUpdatesInBackground() }
+                            }
+                        Text(L("Each release goes to beta a day or two before everyone else, less tested. Turning this off keeps the build you have until the next stable one is newer."))
                             .font(.caption).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .task(id: removable.map(\.id)) {
-                    let roots = removable.map { ($0.id, $0.root) }
-                    let sizes = await Task.detached {
-                        Dictionary(uniqueKeysWithValues: roots.map { ($0.0, ByteCountFormatter.string(fromByteCount: EngineStore.diskBytes(of: $0.1), countStyle: .file)) })
-                    }.value
-                    engineSizes = sizes
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle(L("Share game activity with Discord"), isOn: $state.discordSharingEnabled)
+                        Text(L("Let Discord show what you play and the game's Rich Presence while both apps are open. Off by default."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
                 }
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Toggle(L("Show achievement pop-ups"), isOn: $achievementPopups)
+                            Spacer()
+                            Button(L("Preview")) { state.previewAchievementPopup() }.controlSize(.small)
+                        }
+                        Text(L("When a GOG game unlocks an achievement, its badge shows in the corner of the screen for a few seconds, with a sound. The game keeps focus."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle(L("Open GOG and Epic Mac games through Highball"), isOn: $openMacGamesThroughHighball)
+                        Text(L("A Mac game opened from Applications, the Dock or Spotlight is closed within its first seconds and started again through Highball, which brings GOG's achievements and cloud saves and Epic's sign-in. Only while Highball is open, and never while it is busy with another task."))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                // Only where it means something: a Mac with Steam for Mac, or one where it was turned off.
+                if state.steamForMacInstalled || !state.includeMacSteam {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Toggle(L("Show games from Steam for Mac"), isOn: Binding(get: { state.includeMacSteam },
+                                                                                     set: { state.setIncludeMacSteam($0) }))
+                            Text(L("Games Steam for Mac installed are listed next to your Windows games, and Play opens their Mac version. Off, the library lists only what Highball's environments hold, and Play uses the Windows version."))
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                if let update = state.engineUpdate {
+                    GroupBox {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(L("A newer engine is available")).font(.headline)
+                                Text(update.id).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button(L("Update engine")) { state.updateEngine() }.disabled(state.busy)
+                        }
+                    }
+                }
+                if state.engines.count > 1 {
+                    Text(String(format: L("Installed engines: %@. An environment's engine is chosen on its own page."), state.engines.map(\.id).joined(separator: ", ")))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                let removable = state.removableEngines
+                if !removable.isEmpty {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(L("Engines no environment uses")).font(.headline)
+                            ForEach(removable, id: \.id) { engine in
+                                HStack {
+                                    Text(engine.id).font(.caption.monospaced())
+                                    if let size = engineSizes[engine.id] { Text(size).font(.caption).foregroundStyle(.secondary) }
+                                    Spacer()
+                                    Button(L("Remove…"), role: .destructive) { pendingRemove = engine.id }
+                                        .controlSize(.small).disabled(state.busy)
+                                }
+                            }
+                            Text(L("Removing one frees its disk space. If a game asks for it again later, Highball downloads it then."))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .task(id: removable.map(\.id)) {
+                        let roots = removable.map { ($0.id, $0.root) }
+                        let sizes = await Task.detached {
+                            Dictionary(uniqueKeysWithValues: roots.map { ($0.0, ByteCountFormatter.string(fromByteCount: EngineStore.diskBytes(of: $0.1), countStyle: .file)) })
+                        }.value
+                        engineSizes = sizes
+                    }
+                }
+                Spacer()
             }
-            Spacer()
+            .padding(20)
         }
-        .padding(20)
         .sheet(isPresented: $showLicense) { GPTKLicenseSheet() }
         .confirmationDialog(String(format: L("Remove engine %@? No environment uses it."), pendingRemove ?? ""),
                             isPresented: .init(get: { pendingRemove != nil }, set: { if !$0 { pendingRemove = nil } }),
                             titleVisibility: .visible) {
             Button(L("Remove"), role: .destructive) { if let id = pendingRemove { state.removeEngine(id) }; pendingRemove = nil }
             Button(L("Cancel"), role: .cancel) { pendingRemove = nil }
+        }
+    }
+}
+
+private struct CustomEngineImportSection: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                Button(L("Install custom engine…")) { state.installCustomEngine() }
+                    .disabled(state.busy)
+                Text(L("Choose an engine manifest JSON to test a custom build. Then select it in an environment's settings."))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }.frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

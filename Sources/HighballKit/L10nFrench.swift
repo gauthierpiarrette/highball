@@ -1,6 +1,20 @@
 // French dictionary preserved from official upstream.
 extension L10n {
     static let fr: [String: String] = [
+        "Install custom engine…": "Installer un moteur personnalisé…",
+        "Install custom engine": "Installer un moteur personnalisé",
+        "Choose an engine manifest JSON file.": "Choisissez un fichier JSON de manifeste de moteur.",
+        "Choose an engine manifest JSON to test a custom build. Then select it in an environment's settings.": "Choisissez un manifeste de moteur JSON pour tester une version personnalisée. Sélectionnez-la ensuite dans les réglages d’un environnement.",
+        "Installing custom engine %@": "Installation du moteur personnalisé %@",
+        "Custom engine installed. Select it in an environment's settings.": "Moteur personnalisé installé. Sélectionnez-le dans les réglages d’un environnement.",
+        "This file is not a valid engine manifest. Choose a JSON file in Highball's engine manifest format.": "Ce fichier n’est pas un manifeste de moteur valide. Choisissez un fichier JSON au format de manifeste de moteur de Highball.",
+        "The engine ID must start with a letter or number and contain only letters, numbers, periods, underscores or hyphens.": "L’identifiant du moteur doit commencer par une lettre ou un chiffre et ne contenir que des lettres, des chiffres, des points, des traits de soulignement ou des traits d’union.",
+        "This engine ID is reserved by Highball. Give each custom build a unique ID.": "Cet identifiant de moteur est réservé par Highball. Donnez un identifiant unique à chaque version personnalisée.",
+        "An engine with this ID is already installed. Give each custom build a unique ID.": "Un moteur portant cet identifiant est déjà installé. Donnez un identifiant unique à chaque version personnalisée.",
+        "This manifest does not describe a complete engine. It must include a Wine component.": "Ce manifeste ne décrit pas un moteur complet. Il doit inclure un composant Wine.",
+        "This engine architecture is not supported. Use x86_64 or arm64.": "Cette architecture de moteur n’est pas prise en charge. Utilisez x86_64 ou arm64.",
+        "The manifest contains an invalid component name.": "Le manifeste contient un nom de composant non valide.",
+        "Component extraction paths must be relative and stay inside the engine folder.": "Les chemins d’extraction des composants doivent être relatifs et rester dans le dossier du moteur.",
         "Game settings": "Réglages du jeu",
         "Keep the %@ fix you applied under Game settings": "Conserver le correctif %@ appliqué dans Réglages du jeu",
         "Leave the optional %@ fix alone; it is under Game settings for when the notes say your Mac needs it": "Laisser le correctif facultatif %@ désactivé ; il se trouve dans Réglages du jeu si les notes indiquent que votre Mac en a besoin",
