@@ -212,6 +212,25 @@ public struct Recipe: Codable, Sendable, Identifiable {
         return folder.appending(path: parts[1])
     }
 
+    /// A registry value named after a file in a Steam game's folder, such as a DllOverrides entry
+    /// that turns off one copy of a DLL by its full path (`C:\Program Files (x86)\Steam\steamapps\common\
+    /// <game>\12on7\d3d12` = ""), names the game's folder in another Steam library when its manifest
+    /// puts it there, as `target(of:)` does for files: Steam starts the game from that library's
+    /// Windows path (`D:\SteamLibrary`), and Wine matches an override against the path a program
+    /// loads. Every other name is left as the step wrote it.
+    public static func registryName(_ name: String, bottleURL: URL, steamGames: [SteamGame]) -> String {
+        let common = #"C:\Program Files (x86)\Steam\steamapps\common\"#
+        guard name.count > common.count, name.prefix(common.count).caseInsensitiveCompare(common) == .orderedSame else { return name }
+        let rest = name.dropFirst(common.count)
+        guard let slash = rest.firstIndex(of: "\\") else { return name }
+        let installdir = String(rest[..<slash])
+        guard installdir != "..", !rest.split(separator: "\\").contains(where: { $0 == ".." }),
+              let game = steamGames.first(where: { $0.installdir.caseInsensitiveCompare(installdir) == .orderedSame }),
+              let library = game.libraryRoot,
+              let windows = SteamLibrary.windowsLibraryPath(of: library, bottleURL: bottleURL) else { return name }
+        return windows + #"\steamapps\common\"# + rest
+    }
+
     /// True when applying the recipe changes what a launch inherits: the renderer, the sync
     /// mode or an environment variable. A Steam client that is already running keeps the
     /// environment it started with (issues #22/#25), so a Play that auto-applied such a recipe
@@ -549,9 +568,14 @@ public struct RecipeRunner: Sendable {
         // A route's mode is the environment's own, or the row's mode for the game's other route would replace it at
         // every launch (D3DMetal, which the native arm64 line does not have).
         if recipe.isPreviewRoute { bottle.settings.rendererExplicit = true }
-        // Read once, for the file and copy steps of a game installed in another Steam library.
+        // Read once, for the file and copy steps of a game installed in another Steam library, and the
+        // registry values named after a file in its folder.
         let steamGames = recipe.steps.contains {
-            switch $0 { case .file, .copy: return true; default: return false }
+            switch $0 {
+            case .file, .copy: return true
+            case let .registry(_, name, _, _): return name.lowercased().contains(#"\steamapps\common\"#)
+            default: return false
+            }
         } ? SteamLibrary.games(in: bottle) : []
         for (i, step) in recipe.steps.enumerated() {
             // The app parses these two lines into its progress display (#31): the step line
@@ -632,7 +656,9 @@ public struct RecipeRunner: Sendable {
                     log?("[\(recipe.id)] \(label) exited with \(result.exitStatus)\(WineRunner.exitCodeNote(for: result.exitStatus)) — treating as done")
                 }
             case let .registry(key, name, type, data):
-                try await runner.regAdd(key: key, name: name, type: type, data: data)
+                let named = Recipe.registryName(name, bottleURL: bottle.url, steamGames: steamGames)
+                if named != name { log?("[\(recipe.id)] \(named) names the game's folder in another Steam library") }
+                try await runner.regAdd(key: key, name: named, type: type, data: data)
             case let .winetricks(verbs, _):
                 guard let wt = engine.winetricks else { throw HighballError.missing("winetricks in engine \(engine.id)") }
                 // winetricks ends its verbs with `wineserver -w`, which waits for every Windows program in the

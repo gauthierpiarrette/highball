@@ -153,6 +153,17 @@ public enum SteamLibrary {
         return records.sorted().joined(separator: "\n")
     }
 
+    /// The Windows path Steam knows a library folder by (`D:\SteamLibrary`), from its
+    /// libraryfolders.vdf, or nil when the list does not name it.
+    static func windowsLibraryPath(of library: URL, bottleURL: URL) -> String? {
+        guard let root = steamRoot(driveC: bottleURL.appending(path: "drive_c", directoryHint: .isDirectory)) else { return nil }
+        let want = library.standardizedFileURL.path
+        let lists = ["steamapps/libraryfolders.vdf", "config/libraryfolders.vdf"]
+            .compactMap { try? String(contentsOf: root.appending(path: $0), encoding: .utf8) }
+        return lists.flatMap(libraryPaths(in:)).first { unixURL(windowsPath: $0, bottleURL: bottleURL)?.standardizedFileURL.path == want }
+            .map { $0.hasSuffix("\\") ? String($0.dropLast()) : $0 }
+    }
+
     /// The `"path"` values of a libraryfolders.vdf, their doubled backslashes made single.
     static func libraryPaths(in text: String) -> [String] {
         text.matches(of: #/"path"\s+"([^"]*)"/#).map { String($0.1).replacingOccurrences(of: "\\\\", with: "\\") }
