@@ -17,8 +17,11 @@ public enum MacAppStub {
         return cleaned.isEmpty ? "Highball game" : String(cleaned.prefix(60))
     }
 
-    public static func infoPlist(appName: String, bundleID: String) -> String {
-        """
+    public static func infoPlist(appName rawName: String, bundleID: String) -> String {
+        // A title is text, not markup: "Mount & Blade II" left a bare ampersand in the plist,
+        // which plutil rejects and macOS cannot read the app's name or executable from.
+        let appName = xmlEscaped(rawName)
+        return """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0"><dict>
@@ -39,8 +42,19 @@ public enum MacAppStub {
     /// The launcher: opens the play URL and exits. `open` hands the URL to Highball whether it
     /// is running or not; `-g` keeps Highball in the background so the game, not the library,
     /// is what comes to the front (issue #53).
+    /// The URL sits in single quotes: a play link keeps `$` unescaped, so in double quotes sh
+    /// expanded part of an environment's name ("Cash$$" opened a link naming sh's process id).
     public static func launchScript(url: URL) -> String {
-        "#!/bin/sh\nexec /usr/bin/open -g \"\(url.absoluteString)\"\n"
+        "#!/bin/sh\nexec /usr/bin/open -g \(shellQuoted(url.absoluteString))\n"
+    }
+
+    static func shellQuoted(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    static func xmlEscaped(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
     }
 
     public static func bundleID(for libraryID: String) -> String {
