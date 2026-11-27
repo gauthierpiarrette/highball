@@ -181,7 +181,7 @@ final class CustomEngineImportTests: XCTestCase {
         var m = original
         m.acceptedLicenses = ["custom-license"]
         m.components["gated"] = .init(kind: "renderer", url: URL(fileURLWithPath: "/nonexistent/gated.tar.gz"),
-                                       sha256: "unused", optional: true, acceptance: "custom-license")
+                                       sha256: String(repeating: "a", count: 64), optional: true, acceptance: "custom-license")
         let engine = try await store.install(m, existingEnginePolicy: .reject)
         XCTAssertEqual(engine.manifest.acceptedLicenses, [])
     }
@@ -194,5 +194,19 @@ final class CustomEngineImportTests: XCTestCase {
         let installed = try await store.install(repair)
         XCTAssertEqual(installed.displayName, "Repaired")
         XCTAssertTrue(installed.isComplete)
+    }
+
+    func testIncompleteReplacementLeavesTheExistingEngineUntouched() async throws {
+        let (store, original) = try fixture()
+        let installed = try await store.install(original)
+        let saved = try Data(contentsOf: installed.root.appending(path: "manifest.json"))
+        let (_, incomplete) = try fixture(complete: false)
+        do {
+            _ = try await store.install(incomplete)
+            XCTFail("an incomplete repair must not replace a working engine")
+        } catch { XCTAssertTrue(String(describing: error).contains("incomplete"), "\(error)") }
+        XCTAssertEqual(try Data(contentsOf: installed.root.appending(path: "manifest.json")), saved)
+        XCTAssertTrue(installed.isComplete)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.paths.engines.path), [original.id])
     }
 }

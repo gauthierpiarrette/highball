@@ -312,7 +312,7 @@ public struct EngineStore: Sendable {
         existingEnginePolicy: ExistingEnginePolicy = .replace,
         progress: DownloadProgress? = nil
     ) async throws -> InstalledEngine {
-        if existingEnginePolicy == .reject { try manifest.validateForCustomImport() }
+        try manifest.validate()
         let root = paths.engine(manifest.id)
         func checkDestination() throws {
             if existingEnginePolicy == .reject,
@@ -370,12 +370,9 @@ public struct EngineStore: Sendable {
         // unpacked short (a full disk, a file the archive lacks) used to install all the same and
         // fail every launch afterwards (highball#118). The archive was checksummed, so the fault
         // is local; the staging tree goes and the next attempt starts over.
-        if manifest.components["wine"] != nil {
-            let missing = InstalledEngine(manifest: saved, root: staging).missingFiles
-            if !missing.isEmpty {
-                try? FileManager.default.removeItem(at: staging)
-                throw HighballError.failed("The engine unpacked incomplete, \(missing.joined(separator: ", ")) missing. Check the free space on this disk and try again.")
-            }
+        let missing = InstalledEngine(manifest: saved, root: staging).missingFiles
+        if !missing.isEmpty {
+            throw HighballError.failed("The engine unpacked incomplete, \(missing.joined(separator: ", ")) missing. Check the free space on this disk and try again.")
         }
         try Task.checkCancellation()
         try checkDestination()

@@ -80,7 +80,8 @@ private final class ManifestSourceProtocol: URLProtocol, @unchecked Sendable {
     static let manifestJSON = Data("""
         {"id":"custom-url-engine-r1","displayName":"Custom URL engine","arch":"x86_64","minMacOS":"14.0",
          "components":{"wine":{"kind":"engine","url":"https://archives.example/wine.tar.gz",
-         "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}
+         "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+         "extract":{"subpath":"engine","into":"engine"}}}}
         """.utf8)
 
     override class func canInit(with request: URLRequest) -> Bool { true }

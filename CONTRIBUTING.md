@@ -23,3 +23,6 @@ that way: batch auto-installing or store automation is out of scope by policy, n
 
 **Engines**: manifest PRs bumping pinned SHA-256s, with a note on what you verified. Highball never
 hosts binaries and never carries Wine patches — that's a design rule, not a preference.
+Follow the [engine contract](docs/engine-manifest.md) and validate manifests against the
+repository's [v0 schema](schemas/engine-manifest-v0.schema.json). Publish a new engine ID when
+changing the assembly; the installer permits replacing an ID for repairs.
