@@ -367,16 +367,58 @@ struct EnginePane: View {
 
 private struct CustomEngineImportSection: View {
     @Environment(AppState.self) private var state
+    @State private var showURLImport = false
 
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 6) {
-                Button(L("Install custom engine…")) { state.installCustomEngine() }
-                    .disabled(state.busy)
-                Text(L("Choose an engine manifest JSON to test a custom build. Then select it in an environment's settings."))
+                Text(L("Custom engines")).font(.headline)
+                HStack {
+                    Button(L("Install from file…")) { state.chooseCustomEngineFile() }
+                    Button(L("Install from URL…")) { showURLImport = true }
+                }.disabled(state.busy)
+                Text(L("Install an engine manifest JSON from a file or URL. Then select it in an environment's settings."))
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }.frame(maxWidth: .infinity, alignment: .leading)
         }
+        .sheet(isPresented: $showURLImport) { CustomEngineURLSheet() }
+    }
+}
+
+private struct CustomEngineURLSheet: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.dismiss) private var dismiss
+    @State private var urlText = ""
+    @FocusState private var urlFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(L("Install engine from URL")).font(.title2.bold())
+            Text(L("Enter the URL of the engine manifest JSON, not an engine archive or a web page."))
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            TextField(L("Manifest URL"), text: $urlText, prompt: Text(verbatim: "https://example.com/engine.json"))
+                .textFieldStyle(.roundedBorder)
+                .focused($urlFocused)
+            if !urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               CustomEngineImport.manifestURL(from: urlText) == nil {
+                Text(L("Enter a valid HTTP or HTTPS URL for the engine manifest JSON."))
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            HStack {
+                Spacer()
+                Button(L("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L("Install")) {
+                    guard let url = CustomEngineImport.manifestURL(from: urlText) else { return }
+                    dismiss()
+                    state.installCustomEngine(from: url)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(state.busy || CustomEngineImport.manifestURL(from: urlText) == nil)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
+        .onAppear { urlFocused = true }
     }
 }
 

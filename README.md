@@ -92,8 +92,10 @@ Everything lives in `~/Library/Application Support/Highball/`. Nothing touches `
 Alt so Alt-based game bindings keep working. Turn it off per environment (Settings, then
 Environments) for Wine's default, where Command acts as Alt.
 
-To test a custom engine, open **Settings → Engine → Install custom engine…** and select its
-engine manifest JSON. This uses the same format as `highball engine install`, with remote
+To test a custom engine, open **Settings → Engine → Custom engines** and choose **Install
+from file…** to select a local manifest JSON, or **Install from URL…** to paste an HTTP or
+HTTPS URL pointing directly to a manifest JSON. This uses the same format as
+`highball engine install`, with remote
 archive URLs (including builds outside Highball's repositories) or absolute `file://` URLs
 for local archives. Each build needs a unique ID that is neither installed nor bundled with
 Highball. After installation, select it in the environment's engine settings; importing does

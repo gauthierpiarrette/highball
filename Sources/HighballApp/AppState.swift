@@ -1440,7 +1440,7 @@ final class AppState {
     }
 
     /// Installs a user-supplied manifest beside existing engines, without moving any bottles.
-    func installCustomEngine() {
+    func chooseCustomEngineFile() {
         guard !busy else { return }
         let panel = NSOpenPanel()
         panel.title = L("Install custom engine")
@@ -1450,27 +1450,23 @@ final class AppState {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url, !busy else { return }
+        installCustomEngine(from: url)
+    }
 
-        let manifest: EngineManifest
-        do {
-            do { manifest = try EngineManifest.load(from: url) }
-            catch let error as DecodingError {
-                appendLog("custom engine manifest: \(error)")
-                throw HighballError.failed("This file is not a valid engine manifest. Choose a JSON file in Highball's engine manifest format.")
-            }
-            try manifest.validateForCustomImport(reservedIDs: Set(Self.bundledManifests.map(\.id)))
-        } catch {
-            fail(error)
-            showMainWindowForEngineImportError()
-            return
-        }
+    /// File and URL imports share validation, licence handling, progress, cancellation and retry.
+    func installCustomEngine(from url: URL) {
+        guard !busy else { return }
         let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
-        runBusy(String(format: L("Installing custom engine %@"), manifest.id), expected: L("usually a few minutes"),
+        let reservedIDs = Set(Self.bundledManifests.map(\.id))
+        runBusy(L("Installing custom engine"), expected: L("usually a few minutes"),
                 done: DoneState(title: L("Custom engine installed. Select it in an environment's settings."), ctaTitle: nil, cta: nil),
                 stop: .cancelTask(label: L("Stop")),
                 cleanup: { [weak self] in
                     if self?.errorMessage != nil { self?.showMainWindowForEngineImportError() }
                 }) { [self] in
+            await MainActor.run { self.stage = L("Loading engine manifest") }
+            let manifest = try await CustomEngineImport.load(from: url, reservedIDs: reservedIDs)
+            await MainActor.run { self.busyTitle = String(format: L("Installing custom engine %@"), manifest.id) }
             let fresh = try await engineStore.install(manifest, accepted: accepted, existingEnginePolicy: .reject) { name, received, total in
                 Task { @MainActor in self.reportDownload(name, received: received, total: total) }
             }
