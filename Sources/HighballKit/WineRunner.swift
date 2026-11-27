@@ -334,7 +334,7 @@ public struct WineRunner: Sendable {
         let prefixVersion = Self.prefixWindowsVersion(prefix: bottle.url)
         await syncMacFontSubstitutes()
         await syncDllOverridesRegistry()
-        await syncEngineAppDefaults()
+        await syncEngineAppDefaults(renderer: renderer ?? bottle.settings.renderer)
         await syncKeyboardRegistry()
         var note = headerNote
         if linkedSteamView {
@@ -702,10 +702,17 @@ public struct WineRunner: Sendable {
     /// an engine change or a manifest update rewrites. Values an earlier engine wrote are left in
     /// place: they name that engine's own switches (patch 0006's CommandLineAppend), which other
     /// trees ignore. On failure the marker stays stale so the next launch retries.
-    public func syncEngineAppDefaults() async {
-        let defaults = engine.manifest.appDefaults ?? [:]
+    /// The values are the ones for the launch's mode (EngineManifest.appDefaults(for:)), so the
+    /// marker changes with the mode, and a value another mode sets is removed when this one doesn't.
+    public func syncEngineAppDefaults(renderer: Renderer) async {
+        let defaults = engine.manifest.appDefaults(for: renderer)
         let wanted = Self.appDefaultsMarker(engineID: engine.id, defaults: defaults)
         guard wanted != (bottle.settings.engineAppDefaultsSynced ?? "") else { return }
+        for (exe, values) in (engine.manifest.rendererAppDefaults ?? [:]).values.flatMap({ $0 }) {
+            for name in values.keys where defaults[exe]?[name] == nil {
+                _ = try? await run(["reg", "delete", #"HKCU\Software\Wine\AppDefaults\"# + exe, "/v", name, "/f"], renderer: .wined3d, label: "reg")
+            }
+        }
         var allAdded = true
         for exe in defaults.keys.sorted() {
             for name in defaults[exe]!.keys.sorted() {

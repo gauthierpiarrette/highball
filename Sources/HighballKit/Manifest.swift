@@ -105,6 +105,11 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
     /// black, while the Wine 10 engine's Steam never touches Direct3D 11, so the engine asks for
     /// CommandLineAppend = --disable-gpu (patch 0006), the software path (highball#202, 2026-09-26).
     public var appDefaults: [String: [String: String]]?
+    /// `appDefaults` for launches in one renderer mode, keyed by the mode's raw value. A value here
+    /// replaces the engine's value of the same name for that mode. First use: Steam's browser gets
+    /// --in-process-gpu under D3DMetal and DXMT, whose overlay stays hidden on macOS 27 without it;
+    /// under DXVK the flag makes Steam's window flicker (highball#743).
+    public var rendererAppDefaults: [String: [String: [String: String]]]?
     public var components: [String: Component]
     public var baseEnv: [String: String]?
     /// License ids that gate optional renderers (e.g. `apple-gptk-license-2023-08-17` → d3dmetal).
@@ -186,6 +191,16 @@ public struct EngineManifest: Codable, Sendable, Identifiable {
         guard let l = line(of: current), l == line(of: id),
               let c = revision(of: current), let w = revision(of: id) else { return false }
         return c >= w
+    }
+
+    /// The registry values a launch in `renderer` gets: `appDefaults` with that mode's
+    /// `rendererAppDefaults` on top.
+    public func appDefaults(for renderer: Renderer) -> [String: [String: String]] {
+        var defaults = appDefaults ?? [:]
+        for (exe, values) in rendererAppDefaults?[renderer.rawValue] ?? [:] {
+            defaults[exe, default: [:]].merge(values) { $1 }
+        }
+        return defaults
     }
 
     /// True when a bottle on `current` already has everything `wanted` would bring: the same
