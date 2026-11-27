@@ -193,23 +193,23 @@ final class EngineArchTests: XCTestCase {
     func testTheHelperIsFoundInTheEnvironmentThenTheAppThenApplications() throws {
         let app = tempRoot("App").appendingPathExtension("app"), installed = tempRoot("Installed").appendingPathExtension("app")
         let nowhere = URL(fileURLWithPath: "/nonexistent/Highball.app")
-        XCTAssertNil(WineLoaderHelper.locate(environment: [:], appBundle: app, applications: nowhere), "nothing on disk yet")
+        XCTAssertNil(WineLoaderHelper.locate(environment: [:], appBundle: app, applications: [nowhere]), "nothing on disk yet")
         try touch(WineLoaderHelper.binary(inAppBundle: installed))
-        XCTAssertEqual(WineLoaderHelper.locate(environment: [:], appBundle: app, applications: installed), WineLoaderHelper.binary(inAppBundle: installed))
+        XCTAssertEqual(WineLoaderHelper.locate(environment: [:], appBundle: app, applications: [installed]), WineLoaderHelper.binary(inAppBundle: installed))
         try touch(WineLoaderHelper.binary(inAppBundle: app))
-        XCTAssertEqual(WineLoaderHelper.locate(environment: [:], appBundle: app, applications: installed), WineLoaderHelper.binary(inAppBundle: app),
+        XCTAssertEqual(WineLoaderHelper.locate(environment: [:], appBundle: app, applications: [installed]), WineLoaderHelper.binary(inAppBundle: app),
                        "the running app's own helper wins over the one in Applications")
         let override = tempRoot("Override").appendingPathExtension("app")
         try touch(WineLoaderHelper.binary(inAppBundle: override))
         let bundlePath = override.appending(path: "Contents/Helpers/WineLoader.app").path
-        XCTAssertEqual(WineLoaderHelper.locate(environment: [WineLoaderHelper.environmentKey: bundlePath], appBundle: app, applications: installed),
+        XCTAssertEqual(WineLoaderHelper.locate(environment: [WineLoaderHelper.environmentKey: bundlePath], appBundle: app, applications: [installed]),
                        WineLoaderHelper.binary(inAppBundle: override), "the environment names the bundle")
-        XCTAssertEqual(WineLoaderHelper.locate(environment: [WineLoaderHelper.environmentKey: WineLoaderHelper.binary(inAppBundle: override).path], appBundle: app, applications: installed),
+        XCTAssertEqual(WineLoaderHelper.locate(environment: [WineLoaderHelper.environmentKey: WineLoaderHelper.binary(inAppBundle: override).path], appBundle: app, applications: [installed]),
                        WineLoaderHelper.binary(inAppBundle: override), "or the binary")
-        XCTAssertEqual(WineLoaderHelper.locate(environment: [WineLoaderHelper.environmentKey: "/nonexistent/wine"], appBundle: app, applications: installed),
+        XCTAssertEqual(WineLoaderHelper.locate(environment: [WineLoaderHelper.environmentKey: "/nonexistent/wine"], appBundle: app, applications: [installed]),
                        WineLoaderHelper.binary(inAppBundle: app), "a wrong override falls through")
         // The CLI on a Mac without the app: a non-bundle main executable has no helper of its own.
-        XCTAssertEqual(WineLoaderHelper.locate(environment: [:], appBundle: URL(fileURLWithPath: "/usr/local/bin/highball"), applications: installed),
+        XCTAssertEqual(WineLoaderHelper.locate(environment: [:], appBundle: URL(fileURLWithPath: "/usr/local/bin/highball"), applications: [installed]),
                        WineLoaderHelper.binary(inAppBundle: installed))
     }
 

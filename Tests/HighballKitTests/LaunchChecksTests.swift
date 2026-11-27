@@ -24,11 +24,12 @@ final class LaunchChecksTests: XCTestCase {
 
     /// highball#371: the log could not show whether DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN was set.
     func testTheHeaderShowsRendererAndControllerSwitchesOnly() {
+        // FEX's switches too, for the arm64 engine (highball-db#1481: FEX_HOSTFEATURES never showed).
         let env = ["DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN": "1", "SDL_JOYSTICK_MFI": "0", "HOME": "/Users/someone",
                    "STEAM_TOKEN": "secret", "MVK_CONFIG_USE_MTLHEAP": "0", "WINE_NO_DELAYED_FORK": "1",
-                   "D3DM_LONG": String(repeating: "x", count: 300)]
+                   "D3DM_LONG": String(repeating: "x", count: 300), "FEX_HOSTFEATURES": "disableavx"]
         XCTAssertEqual(WineRunner.headerSwitchLines(env),
-                       "# DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1\n# MVK_CONFIG_USE_MTLHEAP=0\n# SDL_JOYSTICK_MFI=0\n# WINE_NO_DELAYED_FORK=1\n")
+                       "# DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1\n# FEX_HOSTFEATURES=disableavx\n# MVK_CONFIG_USE_MTLHEAP=0\n# SDL_JOYSTICK_MFI=0\n# WINE_NO_DELAYED_FORK=1\n")
     }
 
     /// highball#420: an Epic game's launch printed its exchange code and account into a public issue.
