@@ -86,6 +86,33 @@ final class RecipeGameFolderTests: XCTestCase {
         XCTAssertEqual(Recipe.target(of: portal2, driveC: env.driveC, steamGames: games), env.driveC.appending(path: portal2))
     }
 
+    /// A DllOverrides entry that turns off a game's own copy of a DLL by its full path (Apollo
+    /// Justice's 12on7\d3d12.dll, highball#800) names the folder Steam starts the game from.
+    func testARegistryNameForAGameOnAnotherLibraryNamesItsFolderThere() throws {
+        let env = try environment()
+        let name = #"C:\Program Files (x86)\Steam\steamapps\common\Apollo Justice Ace Attorney Trilogy\12on7\d3d12"#
+        XCTAssertEqual(Recipe.registryName(name, bottleURL: env.bottle, steamGames: []), name, "not installed: as written")
+        try install(2187220, "Apollo Justice: Ace Attorney Trilogy", dir: "Apollo Justice Ace Attorney Trilogy", in: env.external)
+        let games = SteamLibrary.games(steamRoot: env.steam, bottleURL: env.bottle)
+        XCTAssertEqual(Recipe.registryName(name, bottleURL: env.bottle, steamGames: games),
+                       #"D:\SteamLibrary\steamapps\common\Apollo Justice Ace Attorney Trilogy\12on7\d3d12"#)
+        XCTAssertEqual(Recipe.registryName(name.lowercased(), bottleURL: env.bottle, steamGames: games),
+                       #"D:\SteamLibrary\steamapps\common\apollo justice ace attorney trilogy\12on7\d3d12"#, "Windows paths ignore case")
+        for other in ["mfplat", #"C:\Program Files (x86)\Steam\steamapps\common\Apollo Justice Ace Attorney Trilogy"#,
+                      #"C:\Program Files (x86)\Steam\steamapps\common\..\x\y"#,
+                      #"C:\Program Files (x86)\Steam\steamapps\common\Apollo Justice Ace Attorney Trilogy\..\..\x"#] {
+            XCTAssertEqual(Recipe.registryName(other, bottleURL: env.bottle, steamGames: games), other, other)
+        }
+    }
+
+    func testARegistryNameForAGameInTheEnvironmentsOwnLibraryStaysOnC() throws {
+        let env = try environment()
+        try install(2187220, "Apollo Justice: Ace Attorney Trilogy", dir: "Apollo Justice Ace Attorney Trilogy", in: env.steam)
+        let games = SteamLibrary.games(steamRoot: env.steam, bottleURL: env.bottle)
+        let name = #"C:\Program Files (x86)\Steam\steamapps\common\Apollo Justice Ace Attorney Trilogy\12on7\d3d12"#
+        XCTAssertEqual(Recipe.registryName(name, bottleURL: env.bottle, steamGames: games), name)
+    }
+
     func testOtherPathsAreUntouched() throws {
         let env = try environment()
         try install(620, "Portal 2", dir: "Portal 2", in: env.external)
