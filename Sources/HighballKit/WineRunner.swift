@@ -222,7 +222,14 @@ public struct WineRunner: Sendable {
         let inherited = ProcessInfo.processInfo.environment.filter {
             !$0.key.hasPrefix("LSFGM_") && $0.key != "DISABLE_LSFGM"
         }
-        process.environment = inherited.merging(env) { $1 }
+        var processEnvironment = inherited.merging(env) { $1 }
+        processEnvironment[SteamRestart.customEnvironmentKeysMarker] = nil
+        if let program = args.first, program.lowercased() == "steam.exe" || Self.isSteamExecutable(program) {
+            processEnvironment[SteamRestart.customEnvironmentKeysMarker] = SteamRestart.encodeCustomEnvironmentKeys(
+                bottle.settings.customEnvironmentKeys + Array(extraEnvironment.keys), in: env
+            )
+        }
+        process.environment = processEnvironment
         // drive_c only exists after the first wineboot — fall back to the bottle root on fresh prefixes.
         process.currentDirectoryURL = workingDirectory
             ?? (FileManager.default.fileExists(atPath: bottle.driveC.path) ? bottle.driveC : bottle.url)

@@ -8,6 +8,15 @@ import Foundation
 /// time, so a game launched from the library afterwards would run without msync, or under the
 /// wrong renderer, while its log header claims otherwise (UX plan 0.6, issue #54).
 public enum SteamRestart {
+    static let customEnvironmentKeysMarker = "HIGHBALL_STEAM_CUSTOM_ENV_KEYS"
+
+    static func encodeCustomEnvironmentKeys(_ keys: [String], in environment: [String: String]) -> String? {
+        let supplied = Set(keys.filter { $0 != customEnvironmentKeysMarker && environment[$0] != nil })
+        guard !supplied.isEmpty,
+              let data = try? JSONEncoder().encode(supplied.sorted()) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     /// Pure: why the running client (environment `live`) cannot serve a launch that needs
     /// `wanted`, in words for the log, or nil when it can. The renderer overlay path, the sync mode
     /// and the inherited per-process toggles matter; everything else in the environment is per-launch noise.
@@ -132,7 +141,10 @@ public enum SteamRestart {
         }
         // A set: a game's scoped variable arrives both in the bottle's list and in the launch's
         // extra names, and one difference is one reason.
-        for key in Set(custom).sorted() where key != "WINEDLLOVERRIDES" && !inherited.contains(where: { $0.0 == key }) && live[key] != wanted[key] {
+        let previous = live[customEnvironmentKeysMarker].flatMap {
+            try? JSONDecoder().decode([String].self, from: Data($0.utf8))
+        } ?? []
+        for key in Set(custom + previous).sorted() where key != customEnvironmentKeysMarker && key != "WINEDLLOVERRIDES" && !inherited.contains(where: { $0.0 == key }) && live[key] != wanted[key] {
             switch (live[key], wanted[key]) {
             case (nil, let want?): reasons.append("it runs without \(key)=\(want)")
             case (let have?, nil): reasons.append("it runs with \(key)=\(have) and the game does not set it")
