@@ -416,15 +416,32 @@ struct Run: AsyncParsableCommand {
         let out: (@Sendable (String) -> Void)? = verbose ? echo : nil
         // A Steam game launched from here gets what Play gives it: the variables its recipe
         // scoped to it (highball#198), found from the -applaunch id. Anything else gets none.
+        let pin = b.settings.pins.first { $0.name.lowercased() == program.lowercased() }
+        let launchArguments = (pin?.arguments ?? []) + arguments
+        let steamAppID: Int? = {
+            let target = pin?.path ?? program
+            guard target.lowercased() == "steam.exe" || WineRunner.isSteamExecutable(target),
+                  let i = launchArguments.firstIndex(of: "-applaunch"), i + 1 < launchArguments.count else { return nil }
+            return Int(launchArguments[i + 1])
+        }()
         let scoped: [String: String] = {
-            guard let i = arguments.firstIndex(of: "-applaunch"), i + 1 < arguments.count,
-                  let appid = Int(arguments[i + 1]) else { return [:] }
+            guard let appid = steamAppID else { return [:] }
             let db = GameDB(directories: GameDB.defaultDirectories())
             return b.settings.environment(forGame: db[appid]?.id)
         }()
         if !scoped.isEmpty { print("with the game's own variables: " + scoped.keys.sorted().joined(separator: ", ")) }
+        if steamAppID != nil {
+            var mode = renderer ?? pin?.renderer
+            if pin != nil, let requested = mode, requested.unavailableReason(in: eng) != nil { mode = nil }
+            let extra = (pin?.environment ?? [:]).merging(scoped) { _, new in new }
+            switch try await runner.restartSteamIfMismatched(renderer: mode, extraEnvironment: extra) {
+            case .restarted(let why): print("Restarted Steam: \(why)")
+            case .kept(let why, _): print("Kept the running Steam client because a game is open: \(why)")
+            case .noClient, .serves: break
+            }
+        }
         let result: LaunchResult
-        if let pin = b.settings.pins.first(where: { $0.name.lowercased() == program.lowercased() }) {
+        if let pin {
             var p = pin
             if let renderer { p.renderer = renderer }
             p.arguments += arguments
@@ -454,7 +471,7 @@ struct Run: AsyncParsableCommand {
                                             program: exe.path == named.path ? nil : program, onOutput: out)
         } else if FileManager.default.fileExists(atPath: program) {
             let exe = URL(fileURLWithPath: program)
-            result = try await runner.start(exe, arguments: arguments, renderer: renderer,
+            result = try await runner.start(exe, arguments: arguments, renderer: renderer, extraEnvironment: scoped,
                                             workingDirectory: exe.deletingLastPathComponent(), onOutput: out)
         } else {
             // Not a pin, not a Windows path, not a local file: let Wine resolve it (cmd, dxdiag,
@@ -462,7 +479,7 @@ struct Run: AsyncParsableCommand {
             if !b.settings.pins.isEmpty {
                 print("note: '\(program)' is not a pin of this bottle (pins: \(b.settings.pins.map(\.name).joined(separator: ", "))) — passing it to Wine as a program name")
             }
-            result = try await runner.run([program] + arguments, renderer: renderer, label: program, onOutput: out)
+            result = try await runner.run([program] + arguments, renderer: renderer, extraEnvironment: scoped, label: program, onOutput: out)
         }
         if let note = result.note { print("note: \(note)") }
         print("exit=\(result.exitStatus) after \(Int(result.duration))s — log: \(result.log.path)")
