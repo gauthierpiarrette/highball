@@ -766,7 +766,7 @@ public struct RecipeRunner: Sendable {
 
     private func downloadUnverified(_ url: URL) async throws -> URL {
         try paths.ensure()
-        let dest = paths.downloads.appending(path: url.lastPathComponent)
+        let dest = try store.downloadFile(for: url)
         // Same stall protection as engine downloads: URLSession.shared's 7-day resource timeout
         // let a dead CDN connection hang a recipe forever (GOG installer, 2026-08-25).
         let cfg = URLSessionConfiguration.ephemeral

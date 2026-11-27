@@ -391,7 +391,7 @@ public struct EngineStore: Sendable {
             }
             return component.url
         }
-        let dest = paths.downloads.appending(path: component.url.lastPathComponent)
+        let dest = try downloadFile(for: component.url)
         if FileManager.default.fileExists(atPath: dest.path), try sha256(of: dest) == component.sha256.lowercased() {
             return dest
         }
@@ -441,6 +441,18 @@ public struct EngineStore: Sendable {
         }
         progress?(name, expected > 0 ? expected : 1, expected > 0 ? expected : 1)
         return dest
+    }
+
+    /// Where a download from `url` lands: `downloads/<its file name>`. The file there is replaced
+    /// once the download finishes, so a URL whose path does not end in a file name is refused:
+    /// "https://host/" named the downloads folder itself and "https://host/a/.." named Highball's
+    /// home, and a recipe with either would have deleted it.
+    public func downloadFile(for url: URL) throws -> URL {
+        let name = url.lastPathComponent
+        guard !name.isEmpty, !["/", ".", ".."].contains(name), !name.contains("/") else {
+            throw HighballError.invalid("\(url.absoluteString) does not end in a file name to download")
+        }
+        return paths.downloads.appending(path: name, directoryHint: .notDirectory)
     }
 
     /// One attempt: append to `partial` from its current size when the server honours the range,
