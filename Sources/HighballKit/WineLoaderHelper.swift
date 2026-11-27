@@ -26,19 +26,19 @@ public enum WineLoaderHelper {
     }
 
     /// The helper's `wine` binary: named in the environment, then inside this app's own bundle,
-    /// then inside the installed Highball.app. nil when no copy is on this Mac, which is the CLI on
-    /// a Mac without the app.
+    /// then inside an installed Highball.app, wherever it is (InstalledHighball). nil when no copy
+    /// is on this Mac, which is the CLI on a Mac without the app.
     public static func locate(environment: [String: String] = ProcessInfo.processInfo.environment,
                               appBundle: URL? = Bundle.main.bundleURL,
-                              applications: URL = URL(fileURLWithPath: "/Applications/Highball.app")) -> URL? {
+                              applications: [URL]? = nil) -> URL? {
         var candidates: [URL] = []
         if let p = environment[environmentKey], !p.isEmpty {
             let url = URL(fileURLWithPath: p)
             candidates.append(url.pathExtension == "app" ? url.appending(path: "Contents/MacOS/wine") : url)
         }
         if let appBundle, appBundle.pathExtension == "app" { candidates.append(binary(inAppBundle: appBundle)) }
-        candidates.append(binary(inAppBundle: applications))
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
+        if let first = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) { return first }
+        return (applications ?? InstalledHighball.apps()).map(binary(inAppBundle:)).first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 
     /// Whether a symlink destination is the helper's binary.

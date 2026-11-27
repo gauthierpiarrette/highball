@@ -107,7 +107,7 @@ public struct WineRunner: Sendable {
     /// GitHub issue, and a bottle's env can hold personal paths or tokens. Without it a report
     /// cannot separate "the config was never delivered" from "the config was delivered and did
     /// not help", which is exactly where issue #21 stalled for two rounds.
-    static let headerSwitchPrefixes = ["DXMT_", "D3DM_", "SDL_", "MVK_", "HB_", "WINE_NO_DELAYED_FORK"]
+    static let headerSwitchPrefixes = ["DXMT_", "D3DM_", "SDL_", "MVK_", "HB_", "FEX_", "WINE_NO_DELAYED_FORK"]
     static let headerSwitchNames: Set<String> = ["GALLIUM_DRIVER", "LIBGL_ALWAYS_SOFTWARE", "MESA_LOADER_DRIVER_OVERRIDE"]
 
     /// The header lines for those switches, in name order, short values only.
