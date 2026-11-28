@@ -35,6 +35,11 @@ public typealias DownloadProgress = @Sendable (String, Int64, Int64?) -> Void
 ///
 /// Installed layout: `engines/<id>/{engine, frameworks, renderers/<name>/..., manifest.json}`
 public struct EngineStore: Sendable {
+    public enum ExistingEnginePolicy: Sendable {
+        case replace
+        case reject
+    }
+
     public let paths: HighballPaths
 
     public init(paths: HighballPaths = HighballPaths()) { self.paths = paths }
@@ -304,8 +309,20 @@ public struct EngineStore: Sendable {
         _ manifest: EngineManifest,
         accepted: Set<String> = [],
         includeOptional: Bool = true,
+        existingEnginePolicy: ExistingEnginePolicy = .replace,
         progress: DownloadProgress? = nil
     ) async throws -> InstalledEngine {
+        try manifest.validate()
+        let root = paths.engine(manifest.id)
+        func checkDestination() throws {
+            if existingEnginePolicy == .reject,
+               FileManager.default.fileExists(atPath: root.path)
+                || (try? FileManager.default.destinationOfSymbolicLink(atPath: root.path)) != nil {
+                throw HighballError.failed("An engine with this ID is already installed. Give each custom build a unique ID.")
+            }
+        }
+        try checkDestination()
+        try Task.checkCancellation()
         try paths.ensure()
         // An engine measured only on a newer macOS is neither offered nor installed on an older one (highball#85).
         // The engine picker and the updates filtered on it, but Play's engine ask could still install one: the arm64
@@ -318,10 +335,12 @@ public struct EngineStore: Sendable {
         if manifest.isNativeARM64, WineLoaderHelper.locate() == nil {
             throw HighballError.failed("The \(manifest.displayName) engine runs through Highball's signed Wine loader, which comes with Highball.app. Install Highball in Applications (or point \(WineLoaderHelper.environmentKey) at its WineLoader.app) and try again.")
         }
-        let root = paths.engine(manifest.id)
-        let staging = paths.engines.appending(path: ".\(manifest.id).partial", directoryHint: .isDirectory)
+        // Imports never share a staging directory with another install of the same ID.
+        let stagingName = existingEnginePolicy == .reject ? ".\(manifest.id).\(UUID().uuidString).partial" : ".\(manifest.id).partial"
+        let staging = paths.engines.appending(path: stagingName, directoryHint: .isDirectory)
         try? FileManager.default.removeItem(at: staging)
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
 
         for (name, component) in manifest.orderedComponents {
             // A Stop between components, or during unpack, ends the install here rather than
@@ -351,14 +370,13 @@ public struct EngineStore: Sendable {
         // unpacked short (a full disk, a file the archive lacks) used to install all the same and
         // fail every launch afterwards (highball#118). The archive was checksummed, so the fault
         // is local; the staging tree goes and the next attempt starts over.
-        if manifest.components["wine"] != nil {
-            let missing = InstalledEngine(manifest: saved, root: staging).missingFiles
-            if !missing.isEmpty {
-                try? FileManager.default.removeItem(at: staging)
-                throw HighballError.failed("The engine unpacked incomplete, \(missing.joined(separator: ", ")) missing. Check the free space on this disk and try again.")
-            }
+        let missing = InstalledEngine(manifest: saved, root: staging).missingFiles
+        if !missing.isEmpty {
+            throw HighballError.failed("The engine unpacked incomplete, \(missing.joined(separator: ", ")) missing. Check the free space on this disk and try again.")
         }
-        try? FileManager.default.removeItem(at: root)
+        try Task.checkCancellation()
+        try checkDestination()
+        if existingEnginePolicy == .replace { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.moveItem(at: staging, to: root)
         try stripQuarantine(root)
         return InstalledEngine(manifest: saved, root: root)

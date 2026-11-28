@@ -92,6 +92,16 @@ Everything lives in `~/Library/Application Support/Highball/`. Nothing touches `
 Alt so Alt-based game bindings keep working. Turn it off per environment (Settings, then
 Environments) for Wine's default, where Command acts as Alt.
 
+To test a custom engine, open **Settings → Engine → Custom engines** and choose **Install
+from file…** to select a local manifest JSON, or **Install from URL…** to paste an HTTP or
+HTTPS URL pointing directly to a manifest JSON. This uses the same format as
+`highball engine install`, with remote
+archive URLs (including builds outside Highball's repositories) or absolute `file://` URLs
+for local archives. Each build needs a unique ID that is neither installed nor bundled with
+Highball. After installation, select it in the environment's engine settings; importing does
+not switch any environments. Environments can only switch between engines of the same
+architecture. Keep local archives available if you want to reinstall the engine later.
+
 <details><summary>Prefer the terminal? The CLI does everything the app does.</summary>
 
 ```sh
@@ -134,16 +144,22 @@ archived in 2025. Highball is built to avoid the ways these tools tend to die:
   [CrossOver](https://www.codeweavers.com/crossover): it's the paid, supported option, and
   it funds most of Wine's Mac work.
 
-## Architecture in one paragraph
+## Architecture
 
-`highball` (CLI) and the app are thin views over **HighballKit**: an *engine* is a
-manifest-defined bundle (Wine + runtime dylibs + renderer overlays) laid out under
-`engines/<id>`; a *bottle* is a `WINEPREFIX` plus `bottle.json`; renderers (WineD3D /
+`highball` (CLI) and the app are thin views over **HighballKit**: an *engine* is an
+identified, architecture-specific Wine runtime assembled from checksum-pinned manifest
+components under `engines/<id>`; a *bottle* is a `WINEPREFIX` plus `bottle.json`; renderers (WineD3D /
 DXMT / D3DMetal / DXVK) are directory overlays selected per launch via
 `WINEDLLPATH_PREPEND`; *recipes* are declarative JSON steps (installer, registry,
 winetricks, sync, renderer, pin, copy, file, note) applied to a bottle. D3DMetal is gated behind
 explicit acceptance of Apple's Game Porting Toolkit license and is never redistributed in
 this repository.
+
+An engine includes a required Wine core and may bundle its supporting libraries and renderer
+overlays together or as separate components. Both app and CLI installs validate the same
+[engine contract](docs/engine-manifest.md), verify component checksums, and check essential
+Wine files before committing the install. The [v0 JSON Schema](schemas/engine-manifest-v0.schema.json)
+describes the format; descriptive metadata such as `layout` and `verified` is informational.
 
 ## Contributing
 

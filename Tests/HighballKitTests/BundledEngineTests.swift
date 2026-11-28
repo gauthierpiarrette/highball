@@ -22,9 +22,15 @@ final class BundledEngineTests: XCTestCase {
         let all = try manifests()
         XCTAssertEqual(Set(all.map(\.id)).count, all.count, "duplicate engine ids among the bundled manifests")
         for m in all {
+            XCTAssertNoThrow(try m.validate(), m.id)
             XCTAssertFalse(m.minMacOS.isEmpty, "\(m.id) has no minMacOS")
             XCTAssertTrue(m.runs(onMacOS: "99.0"), "\(m.id): a floor nothing satisfies")
         }
+    }
+
+    func testDefaultManifestMeetsTheEngineContract() throws {
+        let manifest = try EngineManifest.load(from: engines.deletingLastPathComponent().appending(path: "engine-manifest.json"))
+        XCTAssertNoThrow(try manifest.validate())
     }
 
     /// The arm64 line rests on what Apple added in macOS 26.5 (4 KB pages for a process, the x18 register, x86 memory

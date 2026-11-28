@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://highball.app/schemas/engine-manifest/v0",
+  "title": "Highball engine manifest v0",
+  "description": "A complete architecture-specific Wine runtime assembled from checksum-pinned components. Extra fields are permitted for v0 compatibility. Installation also validates URLs and version numbers and checks the staged engine files; this schema does not certify compatibility with games.",
+  "type": "object",
+  "required": ["id", "displayName", "arch", "minMacOS", "components"],
+  "properties": {
+    "$schema": {"type": "string", "description": "Optional editor annotation; the runtime does not fetch schemas."},
+    "id": {"$ref": "#/$defs/name"},
+    "displayName": {"type": "string", "pattern": "\\S"},
+    "arch": {"enum": ["x86_64", "arm64"]},
+    "minMacOS": {"type": "string", "pattern": "^[0-9]+(?:\\.[0-9]+){0,2}(?![\\s\\S])", "description": "One to three numeric components, each representable as a Swift Int."},
+    "requires": {"$ref": "#/$defs/strings"},
+    "notes": {"$ref": "#/$defs/strings"},
+    "channel": {"type": ["string", "null"], "description": "Catalog visibility: omitted for everyone, beta or preview for restricted channels. Explicit custom imports bypass channel visibility."},
+    "direct3D9": {"type": ["string", "null"], "description": "wined3d keeps Direct3D 9 with Wine in automatic renderer modes; omitted uses the normal overlay behavior."},
+    "baseEnv": {"$ref": "#/$defs/stringMap"},
+    "appDefaults": {"type": ["object", "null"], "additionalProperties": {"type": "object", "additionalProperties": {"type": "string"}}},
+    "rendererAppDefaults": {"type": ["object", "null"], "additionalProperties": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": {"type": "string"}}}},
+    "components": {
+      "type": "object",
+      "required": ["wine"],
+      "propertyNames": {"$ref": "#/$defs/name"},
+      "properties": {
+        "wine": {
+          "allOf": [
+            {"$ref": "#/$defs/component"},
+            {
+              "required": ["extract"],
+              "properties": {
+                "kind": {"const": "engine"},
+                "optional": {"enum": [false, null]},
+                "extract": {"type": "object", "properties": {"into": {"const": "engine"}}}
+              }
+            }
+          ]
+        }
+      },
+      "additionalProperties": {"$ref": "#/$defs/component"}
+    },
+    "licenses": {"type": ["object", "null"], "additionalProperties": {"$ref": "#/$defs/license"}},
+    "acceptedLicenses": {"$ref": "#/$defs/strings", "description": "Installed state only. Importing this field never grants acceptance."},
+    "verified": {"description": "Informational verification evidence; ignored by the runtime."},
+    "alternatives": {"description": "Informational alternative sources; not installed by the runtime."}
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?![\\s\\S])"},
+    "strings": {"type": ["array", "null"], "items": {"type": "string"}},
+    "stringMap": {"type": ["object", "null"], "additionalProperties": {"type": "string"}},
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Relative path, with no backslash, NUL or parent-directory segment.",
+      "not": {"anyOf": [{"pattern": "^/"}, {"pattern": "[\\\\\u0000]"}, {"pattern": "(^|/)\\.\\.(/|(?![\\s\\S]))"}]}
+    },
+    "extract": {
+      "type": ["object", "null"],
+      "required": ["into"],
+      "properties": {
+        "into": {"$ref": "#/$defs/path", "description": "Destination directory or single file relative to the engine root."},
+        "subpath": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}]},
+        "strip": {"anyOf": [{"$ref": "#/$defs/path"}, {"type": "null"}], "description": "Legacy source selector; subpath takes precedence when both are present."}
+      },
+      "additionalProperties": true
+    },
+    "component": {
+      "type": "object",
+      "required": ["kind", "url", "sha256"],
+      "properties": {
+        "kind": {"enum": ["engine", "frameworks", "runtime", "renderer", "patch", "tool"], "description": "Component classification; extraction is controlled by extract, not kind."},
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^(?:[Hh][Tt][Tt][Pp][Ss]?://[^/?#\\s]+|[Ff][Ii][Ll][Ee]://(?:[Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt])?/)",
+          "description": "HTTP/HTTPS with a host or an absolute local file URL (empty host or localhost). Other URL semantics are checked at installation."
+        },
+        "sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}(?![\\s\\S])"},
+        "size": {"type": ["integer", "null"], "minimum": 0},
+        "license": {"type": ["string", "null"]},
+        "optional": {"type": ["boolean", "null"], "description": "Defaults to false."},
+        "acceptance": {"type": ["string", "null"], "description": "License gate checked for optional components."},
+        "extract": {"$ref": "#/$defs/extract", "description": "If omitted or null, the source is copied as an executable plain file into tools/."},
+        "note": {"type": ["string", "null"]},
+        "version": {"type": ["string", "null"]},
+        "order": {"type": ["integer", "null"], "description": "Defaults to zero; required components first, then optional, then order and name."},
+        "refreshesPrefix": {"type": ["boolean", "null"]},
+        "layout": {"description": "Informational layout description; may contain globs and prose. Not a required-file inventory."},
+        "provides": {"description": "Informational capability description; ignored by the runtime."},
+        "env": {"description": "Legacy informational metadata; use top-level baseEnv for runtime environment values."},
+        "replacesTemplateRenderer": {"description": "Legacy informational metadata; ignored by the runtime."}
+      },
+      "additionalProperties": true
+    },
+    "license": {
+      "type": "object",
+      "properties": {
+        "applies": {"$ref": "#/$defs/strings"},
+        "text": {"type": ["string", "null"]},
+        "summary": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    }
+  }
+}

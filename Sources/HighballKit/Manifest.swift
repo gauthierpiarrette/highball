@@ -1,9 +1,11 @@
 import CryptoKit
 import Foundation
 
-/// An engine manifest describes every binary Gin downloads to assemble one engine.
-/// Gin ships manifests, never binaries. See `spike/engine-manifest.json` for the
-/// first real one.
+/// An identified, architecture-specific Wine runtime assembled from checksum-pinned
+/// components. The required Wine core lives in `engine/`; supporting libraries,
+/// renderer overlays, patches and tools can come from additional components.
+/// Decoding preserves readability of older installs; `validate()` checks installability.
+/// See `docs/engine-manifest.md` and `schemas/engine-manifest-v0.schema.json`.
 public struct EngineManifest: Codable, Sendable, Identifiable {
     public struct Extract: Codable, Sendable {
         /// Path inside the archive to take (e.g. `Template-1.0.11.app/Contents/Frameworks`).
