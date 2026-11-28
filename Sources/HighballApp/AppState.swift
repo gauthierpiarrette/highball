@@ -1439,6 +1439,48 @@ final class AppState {
         return m
     }
 
+    /// Installs a user-supplied manifest beside existing engines, without moving any bottles.
+    func chooseCustomEngineFile() {
+        guard !busy else { return }
+        let panel = NSOpenPanel()
+        panel.title = L("Install custom engine")
+        panel.message = L("Choose an engine manifest JSON file.")
+        panel.prompt = L("Install")
+        panel.allowedContentTypes = [.json]
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url, !busy else { return }
+        installCustomEngine(from: url)
+    }
+
+    /// File and URL imports share validation, licence handling, progress, cancellation and retry.
+    func installCustomEngine(from url: URL) {
+        guard !busy else { return }
+        let accepted = Set(engines.flatMap { $0.manifest.acceptedLicenses ?? [] })
+        let reservedIDs = Set(Self.bundledManifests.map(\.id))
+        runBusy(L("Installing custom engine"), expected: L("usually a few minutes"),
+                done: DoneState(title: L("Custom engine installed. Select it in an environment's settings."), ctaTitle: nil, cta: nil),
+                stop: .cancelTask(label: L("Stop")),
+                cleanup: { [weak self] in
+                    if self?.errorMessage != nil { self?.showMainWindowForEngineImportError() }
+                }) { [self] in
+            await MainActor.run { self.stage = L("Loading engine manifest") }
+            let manifest = try await CustomEngineImport.load(from: url, reservedIDs: reservedIDs)
+            await MainActor.run { self.busyTitle = String(format: L("Installing custom engine %@"), manifest.id) }
+            let fresh = try await engineStore.install(manifest, accepted: accepted, existingEnginePolicy: .reject) { name, received, total in
+                Task { @MainActor in self.reportDownload(name, received: received, total: total) }
+            }
+            await MainActor.run { self.appendLog("custom engine \(fresh.id) installed") }
+        }
+    }
+
+    /// Errors use the existing main-window alert, including Retry and Details. Bring it in
+    /// front of Settings so a failed import never leaves its error hidden behind this window.
+    private func showMainWindowForEngineImportError() {
+        MainWindow.ensureOpen()
+        NSApp.windows.first(where: MainWindow.isMain)?.makeKeyAndOrderFront(nil)
+    }
+
     /// Installs the bundled engine next to the current one. Bottles move to it only when the Wine
     /// build is unchanged (a component-only update, like r1's MoltenVK): nothing to re-run, nothing
     /// that can regress. When the Wine build differs, every bottle stays on its engine and the
