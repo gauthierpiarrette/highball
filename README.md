@@ -92,6 +92,13 @@ Everything lives in `~/Library/Application Support/Highball/`. Nothing touches `
 Alt so Alt-based game bindings keep working. Turn it off per environment (Settings, then
 Environments) for Wine's default, where Command acts as Alt.
 
+**New environment** shows the selected engine before creation. Choose **Change…** to pick
+an installed engine or a download, including custom builds installed through the CLI. For an
+existing environment, open **Environment settings → Engine → Change…** and review the switch
+before it starts. Changing the engine affects every program in that environment. Engines with
+a different architecture offer **New environment…**, which creates a separate environment
+without transferring games or saves.
+
 <details><summary>Prefer the terminal? The CLI does everything the app does.</summary>
 
 ```sh

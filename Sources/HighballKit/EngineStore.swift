@@ -191,7 +191,7 @@ public struct EngineStore: Sendable {
     /// gone) keeps every engine offered, as before.
     public static func sameArch(current: String?, target: String) -> Bool { current == nil || current == target }
 
-    /// The UserDefaults key behind Show older engine revisions in an environment's Advanced settings.
+    /// The UserDefaults key behind Show older engine revisions in the shared engine chooser.
     public static let showOlderRevisionsKey = "showOlderEngineRevisions"
 
     /// One row per engine the app can put a bottle on: every installed engine, then every
